@@ -29,7 +29,7 @@ def validate(rows):
         f, e = row['filters'], row.get('evex', {})
         if set(f) - FILTERS or f.get('evex_u', '1') != '1' or f.get('feature_knc', '0') != '0':
             raise ValueError('unknown EVEX filter')
-        if row.get('encoding') not in ('evex', 'vex') or row['meta_info']['isa_set'] not in {'AVX512F_512', 'AVX512F_256', 'AVX512F_128', 'AVX512F_SCALAR', 'AVX512F_128N', 'AVX512F_KOP'}:
+        if row.get('encoding') not in ('evex', 'vex') or row['meta_info']['isa_set'] not in {'AVX512F_512', 'AVX512F_256', 'AVX512F_128', 'AVX512F_SCALAR', 'AVX512F_128N', 'AVX512F_KOP', 'AVX512_VPCLMULQDQ_512'}:
             raise ValueError('outside AVX-512F import scope')
         if (row['encoding'] == 'vex') != (row['meta_info']['isa_set'] == 'AVX512F_KOP'):
             raise ValueError('AVX-512F mask operations use VEX; vector forms use EVEX')

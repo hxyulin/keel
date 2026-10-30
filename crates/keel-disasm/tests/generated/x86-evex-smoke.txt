@@ -1296,1129 +1296,1131 @@
 1048|AVX512F_128|{evex} vpbroadcastq xmm17{k2}{z},r10
 1049|AVX512F_256|{evex} vpbroadcastq ymm17{k2}{z},r10
 1050|AVX512F_512|{evex} vpbroadcastq zmm17{k2}{z},r10
-1051|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,xmm29,3
-1052|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,ymm29,3
-1053|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,zmm29,3
-1054|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
-1054|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
-1055|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
-1055|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1056|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
-1056|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1057|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,xmm29
-1058|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,ymm29
-1059|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,zmm29
-1060|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1060|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1061|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1061|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1062|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1062|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1063|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,xmm29
-1064|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,ymm29
-1065|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,zmm29
-1066|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1066|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1067|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1067|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1068|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1068|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1069|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,xmm29
-1070|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,ymm29
-1071|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,zmm29
-1072|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1072|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1073|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1073|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1074|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1074|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1075|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,xmm29
-1076|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,ymm29
-1077|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,zmm29
-1078|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1078|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1079|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1079|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1080|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1080|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1081|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,xmm29,3
-1082|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,ymm29,3
-1083|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,zmm29,3
-1084|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
-1084|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
-1085|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
-1085|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1086|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
-1086|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1087|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,xmm29,3
-1088|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,ymm29,3
-1089|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,zmm29,3
-1090|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
-1090|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
-1091|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
-1091|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1092|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
-1092|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1093|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,xmm29,3
-1094|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,ymm29,3
-1095|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,zmm29,3
-1096|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
-1096|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
-1097|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
-1097|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1098|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
-1098|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1099|AVX512F_128|{evex} vpcompressd xmm29{k2}{z},xmm17
-1100|AVX512F_256|{evex} vpcompressd ymm29{k2}{z},ymm17
-1101|AVX512F_512|{evex} vpcompressd zmm29{k2}{z},zmm17
-1102|AVX512F_128|{evex} vpcompressd xmmword ptr [r13+r14*4+508]{k2},xmm17
-1103|AVX512F_256|{evex} vpcompressd ymmword ptr [r13+r14*4+508]{k2},ymm17
-1104|AVX512F_512|{evex} vpcompressd zmmword ptr [r13+r14*4+508]{k2},zmm17
-1105|AVX512F_128|{evex} vpcompressq xmm29{k2}{z},xmm17
-1106|AVX512F_256|{evex} vpcompressq ymm29{k2}{z},ymm17
-1107|AVX512F_512|{evex} vpcompressq zmm29{k2}{z},zmm17
-1108|AVX512F_128|{evex} vpcompressq xmmword ptr [r13+r14*4+1016]{k2},xmm17
-1109|AVX512F_256|{evex} vpcompressq ymmword ptr [r13+r14*4+1016]{k2},ymm17
-1110|AVX512F_512|{evex} vpcompressq zmmword ptr [r13+r14*4+1016]{k2},zmm17
-1111|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,ymm29
-1112|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,zmm29
-1113|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1113|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1114|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1114|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1115|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,xmm29
-1116|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,ymm29
-1117|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,zmm29
-1118|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1118|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1119|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1119|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1120|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1120|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1121|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,xmm29
-1122|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,ymm29
-1123|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,zmm29
-1124|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1124|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1125|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1125|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1126|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1126|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1127|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,xmm29
-1128|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,ymm29
-1129|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,zmm29
-1130|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1130|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1131|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1131|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1132|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1132|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1133|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,xmm29
-1134|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,ymm29
-1135|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,zmm29
-1136|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1136|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1137|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1137|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1138|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1138|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1139|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,xmm29
-1140|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,ymm29
-1141|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,zmm29
-1142|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1142|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1143|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1143|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1144|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1144|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1145|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm29,3
-1146|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm29,3
-1147|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm29,3
-1148|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1148|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1149|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1149|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1150|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1150|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1151|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,xmm29
-1152|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,ymm29
-1153|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,zmm29
-1154|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1154|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1155|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1155|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1156|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1156|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1157|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm29,3
-1158|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm29,3
-1159|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm29,3
-1160|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1160|AVX512F_128|{evex} vpermilps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1161|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1161|AVX512F_256|{evex} vpermilps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1162|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1162|AVX512F_512|{evex} vpermilps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1163|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,ymm29
-1164|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,zmm29
-1165|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1165|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1166|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1166|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1167|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm29,3
-1168|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm29,3
-1169|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1169|AVX512F_256|{evex} vpermpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1170|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1170|AVX512F_512|{evex} vpermpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1171|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,ymm29
-1172|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,zmm29
-1173|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1173|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1174|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1174|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1175|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,ymm29
-1176|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,zmm29
-1177|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1177|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1178|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1178|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1179|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm29,3
-1180|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm29,3
-1181|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1181|AVX512F_256|{evex} vpermq ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1182|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1182|AVX512F_512|{evex} vpermq zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1183|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,xmm29
-1184|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,ymm29
-1185|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,zmm29
-1186|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1186|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1187|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1187|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1188|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1188|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1189|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,xmm29
-1190|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,ymm29
-1191|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,zmm29
-1192|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1192|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1193|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1193|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1194|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1194|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1195|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,xmm29
-1196|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,ymm29
-1197|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,zmm29
-1198|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1198|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1199|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1199|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1200|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1200|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1201|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,xmm29
-1202|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,ymm29
-1203|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,zmm29
-1204|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1204|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1205|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1205|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1206|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1206|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1207|AVX512F_128|{evex} vpexpandd xmm17{k2}{z},xmm29
-1208|AVX512F_256|{evex} vpexpandd ymm17{k2}{z},ymm29
-1209|AVX512F_512|{evex} vpexpandd zmm17{k2}{z},zmm29
-1210|AVX512F_128|{evex} vpexpandd xmm17{k2}{z},xmmword ptr [r13+r14*4+508]
-1211|AVX512F_256|{evex} vpexpandd ymm17{k2}{z},ymmword ptr [r13+r14*4+508]
-1212|AVX512F_512|{evex} vpexpandd zmm17{k2}{z},zmmword ptr [r13+r14*4+508]
-1213|AVX512F_128|{evex} vpexpandq xmm17{k2}{z},xmm29
-1214|AVX512F_256|{evex} vpexpandq ymm17{k2}{z},ymm29
-1215|AVX512F_512|{evex} vpexpandq zmm17{k2}{z},zmm29
-1216|AVX512F_128|{evex} vpexpandq xmm17{k2}{z},xmmword ptr [r13+r14*4+1016]
-1217|AVX512F_256|{evex} vpexpandq ymm17{k2}{z},ymmword ptr [r13+r14*4+1016]
-1218|AVX512F_512|{evex} vpexpandq zmm17{k2}{z},zmmword ptr [r13+r14*4+1016]
-1219|AVX512F_128|{evex} vpgatherdd xmm17{k2},dword ptr [r13+xmm23*4+508]
-1220|AVX512F_256|{evex} vpgatherdd ymm17{k2},dword ptr [r13+ymm23*4+508]
-1221|AVX512F_512|{evex} vpgatherdd zmm17{k2},dword ptr [r13+zmm23*4+508]
-1222|AVX512F_128|{evex} vpgatherdq xmm17{k2},qword ptr [r13+xmm23*4+1016]
-1223|AVX512F_256|{evex} vpgatherdq ymm17{k2},qword ptr [r13+xmm23*4+1016]
-1224|AVX512F_512|{evex} vpgatherdq zmm17{k2},qword ptr [r13+ymm23*4+1016]
-1225|AVX512F_128|{evex} vpgatherqd xmm17{k2},dword ptr [r13+xmm23*4+508]
-1226|AVX512F_256|{evex} vpgatherqd xmm17{k2},dword ptr [r13+ymm23*4+508]
-1227|AVX512F_512|{evex} vpgatherqd ymm17{k2},dword ptr [r13+zmm23*4+508]
-1228|AVX512F_128|{evex} vpgatherqq xmm17{k2},qword ptr [r13+xmm23*4+1016]
-1229|AVX512F_256|{evex} vpgatherqq ymm17{k2},qword ptr [r13+ymm23*4+1016]
-1230|AVX512F_512|{evex} vpgatherqq zmm17{k2},qword ptr [r13+zmm23*4+1016]
-1231|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,xmm29
-1232|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,ymm29
-1233|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,zmm29
-1234|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1234|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1235|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1235|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1236|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1236|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1237|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,xmm29
-1238|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,ymm29
-1239|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,zmm29
-1240|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1240|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1241|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1241|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1242|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1242|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1243|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,xmm29
-1244|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,ymm29
-1245|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,zmm29
-1246|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1246|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1247|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1247|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1248|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1248|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1249|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,xmm29
-1250|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,ymm29
-1251|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,zmm29
-1252|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1252|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1253|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1253|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1254|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1254|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1255|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,xmm29
-1256|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,ymm29
-1257|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,zmm29
-1258|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1258|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1259|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1259|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1260|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1260|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1261|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,xmm29
-1262|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,ymm29
-1263|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,zmm29
-1264|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1264|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1265|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1265|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1266|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1266|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1267|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,xmm29
-1268|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,ymm29
-1269|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,zmm29
-1270|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1270|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1271|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1271|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1272|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1272|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1273|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,xmm29
-1274|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,ymm29
-1275|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,zmm29
-1276|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1276|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1277|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1277|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1278|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1278|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1279|AVX512F_128|{evex} vpmovdb xmm29{k2}{z},xmm17
-1280|AVX512F_256|{evex} vpmovdb xmm29{k2}{z},ymm17
-1281|AVX512F_512|{evex} vpmovdb xmm29{k2}{z},zmm17
-1282|AVX512F_128|{evex} vpmovdb dword ptr [r13+r14*4+508]{k2},xmm17
-1283|AVX512F_256|{evex} vpmovdb qword ptr [r13+r14*4+1016]{k2},ymm17
-1284|AVX512F_512|{evex} vpmovdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1285|AVX512F_128|{evex} vpmovdw xmm29{k2}{z},xmm17
-1286|AVX512F_256|{evex} vpmovdw xmm29{k2}{z},ymm17
-1287|AVX512F_512|{evex} vpmovdw ymm29{k2}{z},zmm17
-1288|AVX512F_128|{evex} vpmovdw qword ptr [r13+r14*4+1016]{k2},xmm17
-1289|AVX512F_256|{evex} vpmovdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1290|AVX512F_512|{evex} vpmovdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1291|AVX512F_128|{evex} vpmovqb xmm29{k2}{z},xmm17
-1292|AVX512F_256|{evex} vpmovqb xmm29{k2}{z},ymm17
-1293|AVX512F_512|{evex} vpmovqb xmm29{k2}{z},zmm17
-1294|AVX512F_128|{evex} vpmovqb word ptr [r13+r14*4+254]{k2},xmm17
-1295|AVX512F_256|{evex} vpmovqb dword ptr [r13+r14*4+508]{k2},ymm17
-1296|AVX512F_512|{evex} vpmovqb qword ptr [r13+r14*4+1016]{k2},zmm17
-1297|AVX512F_128|{evex} vpmovqd xmm29{k2}{z},xmm17
-1298|AVX512F_256|{evex} vpmovqd xmm29{k2}{z},ymm17
-1299|AVX512F_512|{evex} vpmovqd ymm29{k2}{z},zmm17
-1300|AVX512F_128|{evex} vpmovqd qword ptr [r13+r14*4+1016]{k2},xmm17
-1301|AVX512F_256|{evex} vpmovqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1302|AVX512F_512|{evex} vpmovqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1303|AVX512F_128|{evex} vpmovqw xmm29{k2}{z},xmm17
-1304|AVX512F_256|{evex} vpmovqw xmm29{k2}{z},ymm17
-1305|AVX512F_512|{evex} vpmovqw xmm29{k2}{z},zmm17
-1306|AVX512F_128|{evex} vpmovqw dword ptr [r13+r14*4+508]{k2},xmm17
-1307|AVX512F_256|{evex} vpmovqw qword ptr [r13+r14*4+1016]{k2},ymm17
-1308|AVX512F_512|{evex} vpmovqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1309|AVX512F_128|{evex} vpmovsdb xmm29{k2}{z},xmm17
-1310|AVX512F_256|{evex} vpmovsdb xmm29{k2}{z},ymm17
-1311|AVX512F_512|{evex} vpmovsdb xmm29{k2}{z},zmm17
-1312|AVX512F_128|{evex} vpmovsdb dword ptr [r13+r14*4+508]{k2},xmm17
-1313|AVX512F_256|{evex} vpmovsdb qword ptr [r13+r14*4+1016]{k2},ymm17
-1314|AVX512F_512|{evex} vpmovsdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1315|AVX512F_128|{evex} vpmovsdw xmm29{k2}{z},xmm17
-1316|AVX512F_256|{evex} vpmovsdw xmm29{k2}{z},ymm17
-1317|AVX512F_512|{evex} vpmovsdw ymm29{k2}{z},zmm17
-1318|AVX512F_128|{evex} vpmovsdw qword ptr [r13+r14*4+1016]{k2},xmm17
-1319|AVX512F_256|{evex} vpmovsdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1320|AVX512F_512|{evex} vpmovsdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1321|AVX512F_128|{evex} vpmovsqb xmm29{k2}{z},xmm17
-1322|AVX512F_256|{evex} vpmovsqb xmm29{k2}{z},ymm17
-1323|AVX512F_512|{evex} vpmovsqb xmm29{k2}{z},zmm17
-1324|AVX512F_128|{evex} vpmovsqb word ptr [r13+r14*4+254]{k2},xmm17
-1325|AVX512F_256|{evex} vpmovsqb dword ptr [r13+r14*4+508]{k2},ymm17
-1326|AVX512F_512|{evex} vpmovsqb qword ptr [r13+r14*4+1016]{k2},zmm17
-1327|AVX512F_128|{evex} vpmovsqd xmm29{k2}{z},xmm17
-1328|AVX512F_256|{evex} vpmovsqd xmm29{k2}{z},ymm17
-1329|AVX512F_512|{evex} vpmovsqd ymm29{k2}{z},zmm17
-1330|AVX512F_128|{evex} vpmovsqd qword ptr [r13+r14*4+1016]{k2},xmm17
-1331|AVX512F_256|{evex} vpmovsqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1332|AVX512F_512|{evex} vpmovsqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1333|AVX512F_128|{evex} vpmovsqw xmm29{k2}{z},xmm17
-1334|AVX512F_256|{evex} vpmovsqw xmm29{k2}{z},ymm17
-1335|AVX512F_512|{evex} vpmovsqw xmm29{k2}{z},zmm17
-1336|AVX512F_128|{evex} vpmovsqw dword ptr [r13+r14*4+508]{k2},xmm17
-1337|AVX512F_256|{evex} vpmovsqw qword ptr [r13+r14*4+1016]{k2},ymm17
-1338|AVX512F_512|{evex} vpmovsqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1339|AVX512F_128|{evex} vpmovsxbd xmm17{k2}{z},xmm29
-1340|AVX512F_256|{evex} vpmovsxbd ymm17{k2}{z},xmm29
-1341|AVX512F_512|{evex} vpmovsxbd zmm17{k2}{z},xmm29
-1342|AVX512F_128|{evex} vpmovsxbd xmm17{k2}{z},dword ptr [r13+r14*4+508]
-1343|AVX512F_256|{evex} vpmovsxbd ymm17{k2}{z},qword ptr [r13+r14*4+1016]
-1344|AVX512F_512|{evex} vpmovsxbd zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1345|AVX512F_128|{evex} vpmovsxbq xmm17{k2}{z},xmm29
-1346|AVX512F_256|{evex} vpmovsxbq ymm17{k2}{z},xmm29
-1347|AVX512F_512|{evex} vpmovsxbq zmm17{k2}{z},xmm29
-1348|AVX512F_128|{evex} vpmovsxbq xmm17{k2}{z},word ptr [r13+r14*4+254]
-1349|AVX512F_256|{evex} vpmovsxbq ymm17{k2}{z},dword ptr [r13+r14*4+508]
-1350|AVX512F_512|{evex} vpmovsxbq zmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1351|AVX512F_128|{evex} vpmovsxdq xmm17{k2}{z},xmm29
-1352|AVX512F_256|{evex} vpmovsxdq ymm17{k2}{z},xmm29
-1353|AVX512F_512|{evex} vpmovsxdq zmm17{k2}{z},ymm29
-1354|AVX512F_128|{evex} vpmovsxdq xmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1355|AVX512F_256|{evex} vpmovsxdq ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1356|AVX512F_512|{evex} vpmovsxdq zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1357|AVX512F_128|{evex} vpmovsxwd xmm17{k2}{z},xmm29
-1358|AVX512F_256|{evex} vpmovsxwd ymm17{k2}{z},xmm29
-1359|AVX512F_512|{evex} vpmovsxwd zmm17{k2}{z},ymm29
-1360|AVX512F_128|{evex} vpmovsxwd xmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1361|AVX512F_256|{evex} vpmovsxwd ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1362|AVX512F_512|{evex} vpmovsxwd zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1363|AVX512F_128|{evex} vpmovsxwq xmm17{k2}{z},xmm29
-1364|AVX512F_256|{evex} vpmovsxwq ymm17{k2}{z},xmm29
-1365|AVX512F_512|{evex} vpmovsxwq zmm17{k2}{z},xmm29
-1366|AVX512F_128|{evex} vpmovsxwq xmm17{k2}{z},dword ptr [r13+r14*4+508]
-1367|AVX512F_256|{evex} vpmovsxwq ymm17{k2}{z},qword ptr [r13+r14*4+1016]
-1368|AVX512F_512|{evex} vpmovsxwq zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1369|AVX512F_128|{evex} vpmovusdb xmm29{k2}{z},xmm17
-1370|AVX512F_256|{evex} vpmovusdb xmm29{k2}{z},ymm17
-1371|AVX512F_512|{evex} vpmovusdb xmm29{k2}{z},zmm17
-1372|AVX512F_128|{evex} vpmovusdb dword ptr [r13+r14*4+508]{k2},xmm17
-1373|AVX512F_256|{evex} vpmovusdb qword ptr [r13+r14*4+1016]{k2},ymm17
-1374|AVX512F_512|{evex} vpmovusdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1375|AVX512F_128|{evex} vpmovusdw xmm29{k2}{z},xmm17
-1376|AVX512F_256|{evex} vpmovusdw xmm29{k2}{z},ymm17
-1377|AVX512F_512|{evex} vpmovusdw ymm29{k2}{z},zmm17
-1378|AVX512F_128|{evex} vpmovusdw qword ptr [r13+r14*4+1016]{k2},xmm17
-1379|AVX512F_256|{evex} vpmovusdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1380|AVX512F_512|{evex} vpmovusdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1381|AVX512F_128|{evex} vpmovusqb xmm29{k2}{z},xmm17
-1382|AVX512F_256|{evex} vpmovusqb xmm29{k2}{z},ymm17
-1383|AVX512F_512|{evex} vpmovusqb xmm29{k2}{z},zmm17
-1384|AVX512F_128|{evex} vpmovusqb word ptr [r13+r14*4+254]{k2},xmm17
-1385|AVX512F_256|{evex} vpmovusqb dword ptr [r13+r14*4+508]{k2},ymm17
-1386|AVX512F_512|{evex} vpmovusqb qword ptr [r13+r14*4+1016]{k2},zmm17
-1387|AVX512F_128|{evex} vpmovusqd xmm29{k2}{z},xmm17
-1388|AVX512F_256|{evex} vpmovusqd xmm29{k2}{z},ymm17
-1389|AVX512F_512|{evex} vpmovusqd ymm29{k2}{z},zmm17
-1390|AVX512F_128|{evex} vpmovusqd qword ptr [r13+r14*4+1016]{k2},xmm17
-1391|AVX512F_256|{evex} vpmovusqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
-1392|AVX512F_512|{evex} vpmovusqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
-1393|AVX512F_128|{evex} vpmovusqw xmm29{k2}{z},xmm17
-1394|AVX512F_256|{evex} vpmovusqw xmm29{k2}{z},ymm17
-1395|AVX512F_512|{evex} vpmovusqw xmm29{k2}{z},zmm17
-1396|AVX512F_128|{evex} vpmovusqw dword ptr [r13+r14*4+508]{k2},xmm17
-1397|AVX512F_256|{evex} vpmovusqw qword ptr [r13+r14*4+1016]{k2},ymm17
-1398|AVX512F_512|{evex} vpmovusqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
-1399|AVX512F_128|{evex} vpmovzxbd xmm17{k2}{z},xmm29
-1400|AVX512F_256|{evex} vpmovzxbd ymm17{k2}{z},xmm29
-1401|AVX512F_512|{evex} vpmovzxbd zmm17{k2}{z},xmm29
-1402|AVX512F_128|{evex} vpmovzxbd xmm17{k2}{z},dword ptr [r13+r14*4+508]
-1403|AVX512F_256|{evex} vpmovzxbd ymm17{k2}{z},qword ptr [r13+r14*4+1016]
-1404|AVX512F_512|{evex} vpmovzxbd zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1405|AVX512F_128|{evex} vpmovzxbq xmm17{k2}{z},xmm29
-1406|AVX512F_256|{evex} vpmovzxbq ymm17{k2}{z},xmm29
-1407|AVX512F_512|{evex} vpmovzxbq zmm17{k2}{z},xmm29
-1408|AVX512F_128|{evex} vpmovzxbq xmm17{k2}{z},word ptr [r13+r14*4+254]
-1409|AVX512F_256|{evex} vpmovzxbq ymm17{k2}{z},dword ptr [r13+r14*4+508]
-1410|AVX512F_512|{evex} vpmovzxbq zmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1411|AVX512F_128|{evex} vpmovzxdq xmm17{k2}{z},xmm29
-1412|AVX512F_256|{evex} vpmovzxdq ymm17{k2}{z},xmm29
-1413|AVX512F_512|{evex} vpmovzxdq zmm17{k2}{z},ymm29
-1414|AVX512F_128|{evex} vpmovzxdq xmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1415|AVX512F_256|{evex} vpmovzxdq ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1416|AVX512F_512|{evex} vpmovzxdq zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1417|AVX512F_128|{evex} vpmovzxwd xmm17{k2}{z},xmm29
-1418|AVX512F_256|{evex} vpmovzxwd ymm17{k2}{z},xmm29
-1419|AVX512F_512|{evex} vpmovzxwd zmm17{k2}{z},ymm29
-1420|AVX512F_128|{evex} vpmovzxwd xmm17{k2}{z},qword ptr [r13+r14*4+1016]
-1421|AVX512F_256|{evex} vpmovzxwd ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1422|AVX512F_512|{evex} vpmovzxwd zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1423|AVX512F_128|{evex} vpmovzxwq xmm17{k2}{z},xmm29
-1424|AVX512F_256|{evex} vpmovzxwq ymm17{k2}{z},xmm29
-1425|AVX512F_512|{evex} vpmovzxwq zmm17{k2}{z},xmm29
-1426|AVX512F_128|{evex} vpmovzxwq xmm17{k2}{z},dword ptr [r13+r14*4+508]
-1427|AVX512F_256|{evex} vpmovzxwq ymm17{k2}{z},qword ptr [r13+r14*4+1016]
-1428|AVX512F_512|{evex} vpmovzxwq zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1429|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,xmm29
-1430|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,ymm29
-1431|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,zmm29
-1432|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1432|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1433|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1433|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1434|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1434|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1435|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,xmm29
-1436|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,ymm29
-1437|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,zmm29
-1438|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1438|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1439|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1439|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1440|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1440|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1441|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,xmm29
-1442|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,ymm29
-1443|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,zmm29
-1444|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1444|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1445|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1445|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1446|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1446|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1447|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,xmm29
-1448|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,ymm29
-1449|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,zmm29
-1450|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1450|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1451|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1451|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1452|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1452|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1453|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,xmm29
-1454|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,ymm29
-1455|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,zmm29
-1456|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1456|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1457|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1457|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1458|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1458|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1459|AVX512F_128|{evex} vprold xmm22{k2}{z},xmm29,3
-1460|AVX512F_256|{evex} vprold ymm22{k2}{z},ymm29,3
-1461|AVX512F_512|{evex} vprold zmm22{k2}{z},zmm29,3
-1462|AVX512F_128|{evex} vprold xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1462|AVX512F_128|{evex} vprold xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1463|AVX512F_256|{evex} vprold ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1463|AVX512F_256|{evex} vprold ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1464|AVX512F_512|{evex} vprold zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1464|AVX512F_512|{evex} vprold zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1465|AVX512F_128|{evex} vprolq xmm22{k2}{z},xmm29,3
-1466|AVX512F_256|{evex} vprolq ymm22{k2}{z},ymm29,3
-1467|AVX512F_512|{evex} vprolq zmm22{k2}{z},zmm29,3
-1468|AVX512F_128|{evex} vprolq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1468|AVX512F_128|{evex} vprolq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1469|AVX512F_256|{evex} vprolq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1469|AVX512F_256|{evex} vprolq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1470|AVX512F_512|{evex} vprolq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1470|AVX512F_512|{evex} vprolq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1471|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,xmm29
-1472|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,ymm29
-1473|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,zmm29
-1474|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1474|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1475|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1475|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1476|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1476|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1477|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,xmm29
-1478|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,ymm29
-1479|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,zmm29
-1480|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1480|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1481|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1481|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1482|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1482|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1483|AVX512F_128|{evex} vprord xmm22{k2}{z},xmm29,3
-1484|AVX512F_256|{evex} vprord ymm22{k2}{z},ymm29,3
-1485|AVX512F_512|{evex} vprord zmm22{k2}{z},zmm29,3
-1486|AVX512F_128|{evex} vprord xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1486|AVX512F_128|{evex} vprord xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1487|AVX512F_256|{evex} vprord ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1487|AVX512F_256|{evex} vprord ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1488|AVX512F_512|{evex} vprord zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1488|AVX512F_512|{evex} vprord zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1489|AVX512F_128|{evex} vprorq xmm22{k2}{z},xmm29,3
-1490|AVX512F_256|{evex} vprorq ymm22{k2}{z},ymm29,3
-1491|AVX512F_512|{evex} vprorq zmm22{k2}{z},zmm29,3
-1492|AVX512F_128|{evex} vprorq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1492|AVX512F_128|{evex} vprorq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1493|AVX512F_256|{evex} vprorq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1493|AVX512F_256|{evex} vprorq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1494|AVX512F_512|{evex} vprorq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1494|AVX512F_512|{evex} vprorq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1495|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,xmm29
-1496|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,ymm29
-1497|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,zmm29
-1498|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1498|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1499|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1499|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1500|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1500|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1501|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,xmm29
-1502|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,ymm29
-1503|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,zmm29
-1504|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1504|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1505|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1505|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1506|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1506|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1507|AVX512F_128|{evex} vpscatterdd dword ptr [r13+xmm23*4+508]{k2},xmm17
-1508|AVX512F_256|{evex} vpscatterdd dword ptr [r13+ymm23*4+508]{k2},ymm17
-1509|AVX512F_512|{evex} vpscatterdd dword ptr [r13+zmm23*4+508]{k2},zmm17
-1510|AVX512F_128|{evex} vpscatterdq qword ptr [r13+xmm23*4+1016]{k2},xmm17
-1511|AVX512F_256|{evex} vpscatterdq qword ptr [r13+xmm23*4+1016]{k2},ymm17
-1512|AVX512F_512|{evex} vpscatterdq qword ptr [r13+ymm23*4+1016]{k2},zmm17
-1513|AVX512F_128|{evex} vpscatterqd dword ptr [r13+xmm23*4+508]{k2},xmm17
-1514|AVX512F_256|{evex} vpscatterqd dword ptr [r13+ymm23*4+508]{k2},xmm17
-1515|AVX512F_512|{evex} vpscatterqd dword ptr [r13+zmm23*4+508]{k2},ymm17
-1516|AVX512F_128|{evex} vpscatterqq qword ptr [r13+xmm23*4+1016]{k2},xmm17
-1517|AVX512F_256|{evex} vpscatterqq qword ptr [r13+ymm23*4+1016]{k2},ymm17
-1518|AVX512F_512|{evex} vpscatterqq qword ptr [r13+zmm23*4+1016]{k2},zmm17
-1519|AVX512F_128|{evex} vpshufd xmm17{k2}{z},xmm29,3
-1520|AVX512F_256|{evex} vpshufd ymm17{k2}{z},ymm29,3
-1521|AVX512F_512|{evex} vpshufd zmm17{k2}{z},zmm29,3
-1522|AVX512F_128|{evex} vpshufd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1522|AVX512F_128|{evex} vpshufd xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1523|AVX512F_256|{evex} vpshufd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1523|AVX512F_256|{evex} vpshufd ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1524|AVX512F_512|{evex} vpshufd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1524|AVX512F_512|{evex} vpshufd zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1525|AVX512F_128|{evex} vpslld xmm22{k2}{z},xmm29,3
-1526|AVX512F_256|{evex} vpslld ymm22{k2}{z},ymm29,3
-1527|AVX512F_512|{evex} vpslld zmm22{k2}{z},zmm29,3
-1528|AVX512F_128|{evex} vpslld xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1528|AVX512F_128|{evex} vpslld xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1529|AVX512F_256|{evex} vpslld ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1529|AVX512F_256|{evex} vpslld ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1530|AVX512F_512|{evex} vpslld zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1530|AVX512F_512|{evex} vpslld zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1531|AVX512F_128|{evex} vpslld xmm17{k2}{z},xmm22,xmm29
-1532|AVX512F_256|{evex} vpslld ymm17{k2}{z},ymm22,xmm29
-1533|AVX512F_512|{evex} vpslld zmm17{k2}{z},zmm22,xmm29
-1534|AVX512F_128|{evex} vpslld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1535|AVX512F_256|{evex} vpslld ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1536|AVX512F_512|{evex} vpslld zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1537|AVX512F_128|{evex} vpsllq xmm22{k2}{z},xmm29,3
-1538|AVX512F_256|{evex} vpsllq ymm22{k2}{z},ymm29,3
-1539|AVX512F_512|{evex} vpsllq zmm22{k2}{z},zmm29,3
-1540|AVX512F_128|{evex} vpsllq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1540|AVX512F_128|{evex} vpsllq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1541|AVX512F_256|{evex} vpsllq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1541|AVX512F_256|{evex} vpsllq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1542|AVX512F_512|{evex} vpsllq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1542|AVX512F_512|{evex} vpsllq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1543|AVX512F_128|{evex} vpsllq xmm17{k2}{z},xmm22,xmm29
-1544|AVX512F_256|{evex} vpsllq ymm17{k2}{z},ymm22,xmm29
-1545|AVX512F_512|{evex} vpsllq zmm17{k2}{z},zmm22,xmm29
-1546|AVX512F_128|{evex} vpsllq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1547|AVX512F_256|{evex} vpsllq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1548|AVX512F_512|{evex} vpsllq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1549|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,xmm29
-1550|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,ymm29
-1551|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,zmm29
-1552|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1552|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1553|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1553|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1554|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1554|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1555|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,xmm29
-1556|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,ymm29
-1557|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,zmm29
-1558|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1558|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1559|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1559|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1560|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1560|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1561|AVX512F_128|{evex} vpsrad xmm22{k2}{z},xmm29,3
-1562|AVX512F_256|{evex} vpsrad ymm22{k2}{z},ymm29,3
-1563|AVX512F_512|{evex} vpsrad zmm22{k2}{z},zmm29,3
-1564|AVX512F_128|{evex} vpsrad xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1564|AVX512F_128|{evex} vpsrad xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1565|AVX512F_256|{evex} vpsrad ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1565|AVX512F_256|{evex} vpsrad ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1566|AVX512F_512|{evex} vpsrad zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1566|AVX512F_512|{evex} vpsrad zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1567|AVX512F_128|{evex} vpsrad xmm17{k2}{z},xmm22,xmm29
-1568|AVX512F_256|{evex} vpsrad ymm17{k2}{z},ymm22,xmm29
-1569|AVX512F_512|{evex} vpsrad zmm17{k2}{z},zmm22,xmm29
-1570|AVX512F_128|{evex} vpsrad xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1571|AVX512F_256|{evex} vpsrad ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1572|AVX512F_512|{evex} vpsrad zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1573|AVX512F_128|{evex} vpsraq xmm22{k2}{z},xmm29,3
-1574|AVX512F_256|{evex} vpsraq ymm22{k2}{z},ymm29,3
-1575|AVX512F_512|{evex} vpsraq zmm22{k2}{z},zmm29,3
-1576|AVX512F_128|{evex} vpsraq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1576|AVX512F_128|{evex} vpsraq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1577|AVX512F_256|{evex} vpsraq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1577|AVX512F_256|{evex} vpsraq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1578|AVX512F_512|{evex} vpsraq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1578|AVX512F_512|{evex} vpsraq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1579|AVX512F_128|{evex} vpsraq xmm17{k2}{z},xmm22,xmm29
-1580|AVX512F_256|{evex} vpsraq ymm17{k2}{z},ymm22,xmm29
-1581|AVX512F_512|{evex} vpsraq zmm17{k2}{z},zmm22,xmm29
-1582|AVX512F_128|{evex} vpsraq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1583|AVX512F_256|{evex} vpsraq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1584|AVX512F_512|{evex} vpsraq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1585|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,xmm29
-1586|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,ymm29
-1587|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,zmm29
-1588|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1588|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1589|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1589|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1590|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1590|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1591|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,xmm29
-1592|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,ymm29
-1593|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,zmm29
-1594|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1594|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1595|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1595|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1596|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1596|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1597|AVX512F_128|{evex} vpsrld xmm22{k2}{z},xmm29,3
-1598|AVX512F_256|{evex} vpsrld ymm22{k2}{z},ymm29,3
-1599|AVX512F_512|{evex} vpsrld zmm22{k2}{z},zmm29,3
-1600|AVX512F_128|{evex} vpsrld xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1600|AVX512F_128|{evex} vpsrld xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1601|AVX512F_256|{evex} vpsrld ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1601|AVX512F_256|{evex} vpsrld ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1602|AVX512F_512|{evex} vpsrld zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1602|AVX512F_512|{evex} vpsrld zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1603|AVX512F_128|{evex} vpsrld xmm17{k2}{z},xmm22,xmm29
-1604|AVX512F_256|{evex} vpsrld ymm17{k2}{z},ymm22,xmm29
-1605|AVX512F_512|{evex} vpsrld zmm17{k2}{z},zmm22,xmm29
-1606|AVX512F_128|{evex} vpsrld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1607|AVX512F_256|{evex} vpsrld ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1608|AVX512F_512|{evex} vpsrld zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1609|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},xmm29,3
-1610|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},ymm29,3
-1611|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},zmm29,3
-1612|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1612|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1613|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1613|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1614|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1614|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1615|AVX512F_128|{evex} vpsrlq xmm17{k2}{z},xmm22,xmm29
-1616|AVX512F_256|{evex} vpsrlq ymm17{k2}{z},ymm22,xmm29
-1617|AVX512F_512|{evex} vpsrlq zmm17{k2}{z},zmm22,xmm29
-1618|AVX512F_128|{evex} vpsrlq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1619|AVX512F_256|{evex} vpsrlq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
-1620|AVX512F_512|{evex} vpsrlq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
-1621|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,xmm29
-1622|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,ymm29
-1623|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,zmm29
-1624|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1624|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1625|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1625|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1626|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1626|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1627|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,xmm29
-1628|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,ymm29
-1629|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,zmm29
-1630|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1630|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1631|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1631|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1632|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1632|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1633|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,xmm29
-1634|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,ymm29
-1635|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,zmm29
-1636|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1636|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1637|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1637|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1638|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1638|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1639|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,xmm29
-1640|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,ymm29
-1641|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,zmm29
-1642|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1642|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1643|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1643|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1644|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1644|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1645|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,xmm29,3
-1646|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,ymm29,3
-1647|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,zmm29,3
-1648|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
-1648|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
-1649|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1649|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1650|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1650|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1651|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,xmm29,3
-1652|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,ymm29,3
-1653|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,zmm29,3
-1654|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
-1654|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
-1655|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1655|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1656|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1656|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1657|AVX512F_128|{evex} vptestmd k4{k2},xmm22,xmm29
-1658|AVX512F_256|{evex} vptestmd k4{k2},ymm22,ymm29
-1659|AVX512F_512|{evex} vptestmd k4{k2},zmm22,zmm29
-1660|AVX512F_128|{evex} vptestmd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1660|AVX512F_128|{evex} vptestmd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1661|AVX512F_256|{evex} vptestmd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1661|AVX512F_256|{evex} vptestmd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1662|AVX512F_512|{evex} vptestmd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1662|AVX512F_512|{evex} vptestmd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1663|AVX512F_128|{evex} vptestmq k4{k2},xmm22,xmm29
-1664|AVX512F_256|{evex} vptestmq k4{k2},ymm22,ymm29
-1665|AVX512F_512|{evex} vptestmq k4{k2},zmm22,zmm29
-1666|AVX512F_128|{evex} vptestmq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1666|AVX512F_128|{evex} vptestmq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1667|AVX512F_256|{evex} vptestmq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1667|AVX512F_256|{evex} vptestmq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1668|AVX512F_512|{evex} vptestmq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1668|AVX512F_512|{evex} vptestmq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1669|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,xmm29
-1670|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,ymm29
-1671|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,zmm29
-1672|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1672|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1673|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1673|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1674|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1674|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1675|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,xmm29
-1676|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,ymm29
-1677|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,zmm29
-1678|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
-1678|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1679|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
-1679|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1680|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
-1680|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1681|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,xmm29
-1682|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,ymm29
-1683|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,zmm29
-1684|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1684|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1685|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1685|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1686|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1686|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1687|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,xmm29
-1688|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,ymm29
-1689|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,zmm29
-1690|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1690|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1691|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1691|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1692|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1692|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1693|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,xmm29
-1694|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,ymm29
-1695|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,zmm29
-1696|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1696|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1697|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1697|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1698|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1698|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1699|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,xmm29
-1700|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,ymm29
-1701|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,zmm29
-1702|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1702|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1703|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1703|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1704|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1704|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1705|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,xmm29
-1706|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,ymm29
-1707|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,zmm29
-1708|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1708|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1709|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1709|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1710|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1710|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1711|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,xmm29
-1712|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,ymm29
-1713|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,zmm29
-1714|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1714|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1715|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1715|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1716|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1716|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1717|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},xmm29
-1718|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},ymm29
-1719|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},zmm29
-1720|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1720|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
-1721|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1721|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
-1722|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1722|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
-1723|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},xmm29
-1724|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},ymm29
-1725|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},zmm29
-1726|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1726|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
-1727|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1727|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
-1728|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1728|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
-1729|AVX512F_SCALAR|{evex} vrcp14sd xmm17{k2}{z},xmm22,xmm29
-1730|AVX512F_SCALAR|{evex} vrcp14sd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
-1731|AVX512F_SCALAR|{evex} vrcp14ss xmm17{k2}{z},xmm22,xmm29
-1732|AVX512F_SCALAR|{evex} vrcp14ss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
-1733|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmm29,{sae},3
-1734|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},xmm29,3
-1735|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},ymm29,3
-1736|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmm29,3
-1737|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1737|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
-1738|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1738|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
-1739|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1739|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
-1740|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmm29,{sae},3
-1741|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},xmm29,3
-1742|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},ymm29,3
-1743|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmm29,3
-1744|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
-1744|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
-1745|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
-1745|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
-1746|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
-1746|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
-1747|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,xmm29,3
-1748|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,xmm29,{sae},3
-1749|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016],3
-1750|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,xmm29,3
-1751|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,xmm29,{sae},3
-1752|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508],3
-1753|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},xmm29
-1754|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},ymm29
-1755|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},zmm29
-1756|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1756|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
-1757|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1757|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
-1758|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1758|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
-1759|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},xmm29
-1760|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},ymm29
-1761|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},zmm29
-1762|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1762|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
-1763|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1763|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
-1764|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1764|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
-1765|AVX512F_SCALAR|{evex} vrsqrt14sd xmm17{k2}{z},xmm22,xmm29
-1766|AVX512F_SCALAR|{evex} vrsqrt14sd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
-1767|AVX512F_SCALAR|{evex} vrsqrt14ss xmm17{k2}{z},xmm22,xmm29
-1768|AVX512F_SCALAR|{evex} vrsqrt14ss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
-1769|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmm29,{rn-sae}
-1770|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,xmm29
-1771|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,ymm29
-1772|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmm29
-1773|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1773|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1774|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1774|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1775|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1775|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1776|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmm29,{rn-sae}
-1777|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,xmm29
-1778|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,ymm29
-1779|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmm29
-1780|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1780|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1781|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1781|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1782|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1782|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1783|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,xmm29
-1784|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1785|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
-1786|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,xmm29
-1787|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1788|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
-1789|AVX512F_128|{evex} vscatterdpd qword ptr [r13+xmm23*4+1016]{k2},xmm17
-1790|AVX512F_256|{evex} vscatterdpd qword ptr [r13+xmm23*4+1016]{k2},ymm17
-1791|AVX512F_512|{evex} vscatterdpd qword ptr [r13+ymm23*4+1016]{k2},zmm17
-1792|AVX512F_128|{evex} vscatterdps dword ptr [r13+xmm23*4+508]{k2},xmm17
-1793|AVX512F_256|{evex} vscatterdps dword ptr [r13+ymm23*4+508]{k2},ymm17
-1794|AVX512F_512|{evex} vscatterdps dword ptr [r13+zmm23*4+508]{k2},zmm17
-1795|AVX512F_128|{evex} vscatterqpd qword ptr [r13+xmm23*4+1016]{k2},xmm17
-1796|AVX512F_256|{evex} vscatterqpd qword ptr [r13+ymm23*4+1016]{k2},ymm17
-1797|AVX512F_512|{evex} vscatterqpd qword ptr [r13+zmm23*4+1016]{k2},zmm17
-1798|AVX512F_128|{evex} vscatterqps dword ptr [r13+xmm23*4+508]{k2},xmm17
-1799|AVX512F_256|{evex} vscatterqps dword ptr [r13+ymm23*4+508]{k2},xmm17
-1800|AVX512F_512|{evex} vscatterqps dword ptr [r13+zmm23*4+508]{k2},ymm17
-1801|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,ymm29,3
-1802|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,zmm29,3
-1803|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1803|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1804|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1804|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1805|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,ymm29,3
-1806|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,zmm29,3
-1807|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1807|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1808|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1808|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1809|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,ymm29,3
-1810|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,zmm29,3
-1811|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1811|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1812|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1812|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1813|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,ymm29,3
-1814|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,zmm29,3
-1815|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1815|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1816|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1816|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1817|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,xmm29,3
-1818|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,ymm29,3
-1819|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,zmm29,3
-1820|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
-1820|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
-1821|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1821|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
-1822|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1822|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
-1823|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,xmm29,3
-1824|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,ymm29,3
-1825|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,zmm29,3
-1826|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
-1826|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
-1827|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
-1827|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
-1828|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
-1828|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
-1829|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmm29,{rn-sae}
-1830|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},xmm29
-1831|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},ymm29
-1832|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmm29
-1833|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1833|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
-1834|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1834|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
-1835|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1835|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
-1836|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmm29,{rn-sae}
-1837|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},xmm29
-1838|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},ymm29
-1839|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmm29
-1840|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
-1840|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
-1841|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
-1841|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
-1842|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
-1842|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
-1843|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,xmm29
-1844|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1845|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
-1846|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,xmm29
-1847|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1848|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
-1849|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmm29,{rn-sae}
-1850|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,xmm29
-1851|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,ymm29
-1852|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmm29
-1853|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1853|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1854|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1854|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1855|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1855|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1856|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmm29,{rn-sae}
-1857|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,xmm29
-1858|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,ymm29
-1859|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmm29
-1860|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1860|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1861|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1861|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1862|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1862|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1863|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,xmm29
-1864|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1865|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
-1866|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,xmm29
-1867|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
-1868|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
-1869|AVX512F_SCALAR|{evex} vucomisd xmm17,xmm29
-1870|AVX512F_SCALAR|{evex} vucomisd xmm17,xmm29,{sae}
-1871|AVX512F_SCALAR|{evex} vucomisd xmm17,qword ptr [r13+r14*4+1016]
-1872|AVX512F_SCALAR|{evex} vucomiss xmm17,xmm29
-1873|AVX512F_SCALAR|{evex} vucomiss xmm17,xmm29,{sae}
-1874|AVX512F_SCALAR|{evex} vucomiss xmm17,dword ptr [r13+r14*4+508]
-1875|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,xmm29
-1876|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,ymm29
-1877|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,zmm29
-1878|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1878|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1879|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1879|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1880|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1880|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1881|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,xmm29
-1882|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,ymm29
-1883|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,zmm29
-1884|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1884|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1885|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1885|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1886|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1886|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
-1887|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,xmm29
-1888|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,ymm29
-1889|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,zmm29
-1890|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1890|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
-1891|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1891|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
-1892|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1892|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
-1893|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,xmm29
-1894|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,ymm29
-1895|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,zmm29
-1896|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
-1896|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
-1897|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
-1897|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
-1898|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
-1898|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1051|AVX512_VPCLMULQDQ_512|{evex} vpclmulqdq zmm17,zmm22,zmm29,3
+1052|AVX512_VPCLMULQDQ_512|{evex} vpclmulqdq zmm17,zmm22,zmmword ptr [r13+r14*4+8128],3
+1053|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,xmm29,3
+1054|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,ymm29,3
+1055|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,zmm29,3
+1056|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
+1056|AVX512F_128|{evex} vpcmpd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
+1057|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
+1057|AVX512F_256|{evex} vpcmpd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1058|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
+1058|AVX512F_512|{evex} vpcmpd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1059|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,xmm29
+1060|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,ymm29
+1061|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,zmm29
+1062|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1062|AVX512F_128|{evex} vpcmpeqd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1063|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1063|AVX512F_256|{evex} vpcmpeqd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1064|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1064|AVX512F_512|{evex} vpcmpeqd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1065|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,xmm29
+1066|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,ymm29
+1067|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,zmm29
+1068|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1068|AVX512F_128|{evex} vpcmpeqq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1069|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1069|AVX512F_256|{evex} vpcmpeqq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1070|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1070|AVX512F_512|{evex} vpcmpeqq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1071|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,xmm29
+1072|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,ymm29
+1073|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,zmm29
+1074|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1074|AVX512F_128|{evex} vpcmpgtd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1075|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1075|AVX512F_256|{evex} vpcmpgtd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1076|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1076|AVX512F_512|{evex} vpcmpgtd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1077|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,xmm29
+1078|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,ymm29
+1079|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,zmm29
+1080|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1080|AVX512F_128|{evex} vpcmpgtq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1081|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1081|AVX512F_256|{evex} vpcmpgtq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1082|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1082|AVX512F_512|{evex} vpcmpgtq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1083|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,xmm29,3
+1084|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,ymm29,3
+1085|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,zmm29,3
+1086|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
+1086|AVX512F_128|{evex} vpcmpq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
+1087|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
+1087|AVX512F_256|{evex} vpcmpq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1088|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
+1088|AVX512F_512|{evex} vpcmpq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1089|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,xmm29,3
+1090|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,ymm29,3
+1091|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,zmm29,3
+1092|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
+1092|AVX512F_128|{evex} vpcmpud k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
+1093|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
+1093|AVX512F_256|{evex} vpcmpud k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1094|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
+1094|AVX512F_512|{evex} vpcmpud k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1095|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,xmm29,3
+1096|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,ymm29,3
+1097|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,zmm29,3
+1098|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032],3
+1098|AVX512F_128|{evex} vpcmpuq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
+1099|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064],3
+1099|AVX512F_256|{evex} vpcmpuq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1100|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128],3
+1100|AVX512F_512|{evex} vpcmpuq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1101|AVX512F_128|{evex} vpcompressd xmm29{k2}{z},xmm17
+1102|AVX512F_256|{evex} vpcompressd ymm29{k2}{z},ymm17
+1103|AVX512F_512|{evex} vpcompressd zmm29{k2}{z},zmm17
+1104|AVX512F_128|{evex} vpcompressd xmmword ptr [r13+r14*4+508]{k2},xmm17
+1105|AVX512F_256|{evex} vpcompressd ymmword ptr [r13+r14*4+508]{k2},ymm17
+1106|AVX512F_512|{evex} vpcompressd zmmword ptr [r13+r14*4+508]{k2},zmm17
+1107|AVX512F_128|{evex} vpcompressq xmm29{k2}{z},xmm17
+1108|AVX512F_256|{evex} vpcompressq ymm29{k2}{z},ymm17
+1109|AVX512F_512|{evex} vpcompressq zmm29{k2}{z},zmm17
+1110|AVX512F_128|{evex} vpcompressq xmmword ptr [r13+r14*4+1016]{k2},xmm17
+1111|AVX512F_256|{evex} vpcompressq ymmword ptr [r13+r14*4+1016]{k2},ymm17
+1112|AVX512F_512|{evex} vpcompressq zmmword ptr [r13+r14*4+1016]{k2},zmm17
+1113|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,ymm29
+1114|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,zmm29
+1115|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1115|AVX512F_256|{evex} vpermd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1116|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1116|AVX512F_512|{evex} vpermd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1117|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,xmm29
+1118|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,ymm29
+1119|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,zmm29
+1120|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1120|AVX512F_128|{evex} vpermi2d xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1121|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1121|AVX512F_256|{evex} vpermi2d ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1122|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1122|AVX512F_512|{evex} vpermi2d zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1123|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,xmm29
+1124|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,ymm29
+1125|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,zmm29
+1126|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1126|AVX512F_128|{evex} vpermi2pd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1127|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1127|AVX512F_256|{evex} vpermi2pd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1128|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1128|AVX512F_512|{evex} vpermi2pd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1129|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,xmm29
+1130|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,ymm29
+1131|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,zmm29
+1132|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1132|AVX512F_128|{evex} vpermi2ps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1133|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1133|AVX512F_256|{evex} vpermi2ps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1134|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1134|AVX512F_512|{evex} vpermi2ps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1135|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,xmm29
+1136|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,ymm29
+1137|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,zmm29
+1138|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1138|AVX512F_128|{evex} vpermi2q xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1139|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1139|AVX512F_256|{evex} vpermi2q ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1140|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1140|AVX512F_512|{evex} vpermi2q zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1141|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,xmm29
+1142|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,ymm29
+1143|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,zmm29
+1144|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1144|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1145|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1145|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1146|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1146|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1147|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmm29,3
+1148|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymm29,3
+1149|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmm29,3
+1150|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1150|AVX512F_128|{evex} vpermilpd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1151|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1151|AVX512F_256|{evex} vpermilpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1152|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1152|AVX512F_512|{evex} vpermilpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1153|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,xmm29
+1154|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,ymm29
+1155|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,zmm29
+1156|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1156|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1157|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1157|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1158|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1158|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1159|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmm29,3
+1160|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymm29,3
+1161|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmm29,3
+1162|AVX512F_128|{evex} vpermilps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1162|AVX512F_128|{evex} vpermilps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1163|AVX512F_256|{evex} vpermilps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1163|AVX512F_256|{evex} vpermilps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1164|AVX512F_512|{evex} vpermilps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1164|AVX512F_512|{evex} vpermilps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1165|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,ymm29
+1166|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,zmm29
+1167|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1167|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1168|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1168|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1169|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymm29,3
+1170|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmm29,3
+1171|AVX512F_256|{evex} vpermpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1171|AVX512F_256|{evex} vpermpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1172|AVX512F_512|{evex} vpermpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1172|AVX512F_512|{evex} vpermpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1173|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,ymm29
+1174|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,zmm29
+1175|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1175|AVX512F_256|{evex} vpermps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1176|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1176|AVX512F_512|{evex} vpermps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1177|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,ymm29
+1178|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,zmm29
+1179|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1179|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1180|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1180|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1181|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymm29,3
+1182|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmm29,3
+1183|AVX512F_256|{evex} vpermq ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1183|AVX512F_256|{evex} vpermq ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1184|AVX512F_512|{evex} vpermq zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1184|AVX512F_512|{evex} vpermq zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1185|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,xmm29
+1186|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,ymm29
+1187|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,zmm29
+1188|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1188|AVX512F_128|{evex} vpermt2d xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1189|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1189|AVX512F_256|{evex} vpermt2d ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1190|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1190|AVX512F_512|{evex} vpermt2d zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1191|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,xmm29
+1192|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,ymm29
+1193|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,zmm29
+1194|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1194|AVX512F_128|{evex} vpermt2pd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1195|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1195|AVX512F_256|{evex} vpermt2pd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1196|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1196|AVX512F_512|{evex} vpermt2pd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1197|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,xmm29
+1198|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,ymm29
+1199|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,zmm29
+1200|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1200|AVX512F_128|{evex} vpermt2ps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1201|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1201|AVX512F_256|{evex} vpermt2ps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1202|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1202|AVX512F_512|{evex} vpermt2ps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1203|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,xmm29
+1204|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,ymm29
+1205|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,zmm29
+1206|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1206|AVX512F_128|{evex} vpermt2q xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1207|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1207|AVX512F_256|{evex} vpermt2q ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1208|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1208|AVX512F_512|{evex} vpermt2q zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1209|AVX512F_128|{evex} vpexpandd xmm17{k2}{z},xmm29
+1210|AVX512F_256|{evex} vpexpandd ymm17{k2}{z},ymm29
+1211|AVX512F_512|{evex} vpexpandd zmm17{k2}{z},zmm29
+1212|AVX512F_128|{evex} vpexpandd xmm17{k2}{z},xmmword ptr [r13+r14*4+508]
+1213|AVX512F_256|{evex} vpexpandd ymm17{k2}{z},ymmword ptr [r13+r14*4+508]
+1214|AVX512F_512|{evex} vpexpandd zmm17{k2}{z},zmmword ptr [r13+r14*4+508]
+1215|AVX512F_128|{evex} vpexpandq xmm17{k2}{z},xmm29
+1216|AVX512F_256|{evex} vpexpandq ymm17{k2}{z},ymm29
+1217|AVX512F_512|{evex} vpexpandq zmm17{k2}{z},zmm29
+1218|AVX512F_128|{evex} vpexpandq xmm17{k2}{z},xmmword ptr [r13+r14*4+1016]
+1219|AVX512F_256|{evex} vpexpandq ymm17{k2}{z},ymmword ptr [r13+r14*4+1016]
+1220|AVX512F_512|{evex} vpexpandq zmm17{k2}{z},zmmword ptr [r13+r14*4+1016]
+1221|AVX512F_128|{evex} vpgatherdd xmm17{k2},dword ptr [r13+xmm23*4+508]
+1222|AVX512F_256|{evex} vpgatherdd ymm17{k2},dword ptr [r13+ymm23*4+508]
+1223|AVX512F_512|{evex} vpgatherdd zmm17{k2},dword ptr [r13+zmm23*4+508]
+1224|AVX512F_128|{evex} vpgatherdq xmm17{k2},qword ptr [r13+xmm23*4+1016]
+1225|AVX512F_256|{evex} vpgatherdq ymm17{k2},qword ptr [r13+xmm23*4+1016]
+1226|AVX512F_512|{evex} vpgatherdq zmm17{k2},qword ptr [r13+ymm23*4+1016]
+1227|AVX512F_128|{evex} vpgatherqd xmm17{k2},dword ptr [r13+xmm23*4+508]
+1228|AVX512F_256|{evex} vpgatherqd xmm17{k2},dword ptr [r13+ymm23*4+508]
+1229|AVX512F_512|{evex} vpgatherqd ymm17{k2},dword ptr [r13+zmm23*4+508]
+1230|AVX512F_128|{evex} vpgatherqq xmm17{k2},qword ptr [r13+xmm23*4+1016]
+1231|AVX512F_256|{evex} vpgatherqq ymm17{k2},qword ptr [r13+ymm23*4+1016]
+1232|AVX512F_512|{evex} vpgatherqq zmm17{k2},qword ptr [r13+zmm23*4+1016]
+1233|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,xmm29
+1234|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,ymm29
+1235|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,zmm29
+1236|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1236|AVX512F_128|{evex} vpmaxsd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1237|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1237|AVX512F_256|{evex} vpmaxsd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1238|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1238|AVX512F_512|{evex} vpmaxsd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1239|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,xmm29
+1240|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,ymm29
+1241|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,zmm29
+1242|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1242|AVX512F_128|{evex} vpmaxsq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1243|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1243|AVX512F_256|{evex} vpmaxsq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1244|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1244|AVX512F_512|{evex} vpmaxsq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1245|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,xmm29
+1246|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,ymm29
+1247|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,zmm29
+1248|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1248|AVX512F_128|{evex} vpmaxud xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1249|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1249|AVX512F_256|{evex} vpmaxud ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1250|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1250|AVX512F_512|{evex} vpmaxud zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1251|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,xmm29
+1252|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,ymm29
+1253|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,zmm29
+1254|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1254|AVX512F_128|{evex} vpmaxuq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1255|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1255|AVX512F_256|{evex} vpmaxuq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1256|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1256|AVX512F_512|{evex} vpmaxuq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1257|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,xmm29
+1258|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,ymm29
+1259|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,zmm29
+1260|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1260|AVX512F_128|{evex} vpminsd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1261|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1261|AVX512F_256|{evex} vpminsd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1262|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1262|AVX512F_512|{evex} vpminsd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1263|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,xmm29
+1264|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,ymm29
+1265|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,zmm29
+1266|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1266|AVX512F_128|{evex} vpminsq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1267|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1267|AVX512F_256|{evex} vpminsq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1268|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1268|AVX512F_512|{evex} vpminsq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1269|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,xmm29
+1270|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,ymm29
+1271|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,zmm29
+1272|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1272|AVX512F_128|{evex} vpminud xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1273|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1273|AVX512F_256|{evex} vpminud ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1274|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1274|AVX512F_512|{evex} vpminud zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1275|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,xmm29
+1276|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,ymm29
+1277|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,zmm29
+1278|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1278|AVX512F_128|{evex} vpminuq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1279|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1279|AVX512F_256|{evex} vpminuq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1280|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1280|AVX512F_512|{evex} vpminuq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1281|AVX512F_128|{evex} vpmovdb xmm29{k2}{z},xmm17
+1282|AVX512F_256|{evex} vpmovdb xmm29{k2}{z},ymm17
+1283|AVX512F_512|{evex} vpmovdb xmm29{k2}{z},zmm17
+1284|AVX512F_128|{evex} vpmovdb dword ptr [r13+r14*4+508]{k2},xmm17
+1285|AVX512F_256|{evex} vpmovdb qword ptr [r13+r14*4+1016]{k2},ymm17
+1286|AVX512F_512|{evex} vpmovdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1287|AVX512F_128|{evex} vpmovdw xmm29{k2}{z},xmm17
+1288|AVX512F_256|{evex} vpmovdw xmm29{k2}{z},ymm17
+1289|AVX512F_512|{evex} vpmovdw ymm29{k2}{z},zmm17
+1290|AVX512F_128|{evex} vpmovdw qword ptr [r13+r14*4+1016]{k2},xmm17
+1291|AVX512F_256|{evex} vpmovdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1292|AVX512F_512|{evex} vpmovdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1293|AVX512F_128|{evex} vpmovqb xmm29{k2}{z},xmm17
+1294|AVX512F_256|{evex} vpmovqb xmm29{k2}{z},ymm17
+1295|AVX512F_512|{evex} vpmovqb xmm29{k2}{z},zmm17
+1296|AVX512F_128|{evex} vpmovqb word ptr [r13+r14*4+254]{k2},xmm17
+1297|AVX512F_256|{evex} vpmovqb dword ptr [r13+r14*4+508]{k2},ymm17
+1298|AVX512F_512|{evex} vpmovqb qword ptr [r13+r14*4+1016]{k2},zmm17
+1299|AVX512F_128|{evex} vpmovqd xmm29{k2}{z},xmm17
+1300|AVX512F_256|{evex} vpmovqd xmm29{k2}{z},ymm17
+1301|AVX512F_512|{evex} vpmovqd ymm29{k2}{z},zmm17
+1302|AVX512F_128|{evex} vpmovqd qword ptr [r13+r14*4+1016]{k2},xmm17
+1303|AVX512F_256|{evex} vpmovqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1304|AVX512F_512|{evex} vpmovqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1305|AVX512F_128|{evex} vpmovqw xmm29{k2}{z},xmm17
+1306|AVX512F_256|{evex} vpmovqw xmm29{k2}{z},ymm17
+1307|AVX512F_512|{evex} vpmovqw xmm29{k2}{z},zmm17
+1308|AVX512F_128|{evex} vpmovqw dword ptr [r13+r14*4+508]{k2},xmm17
+1309|AVX512F_256|{evex} vpmovqw qword ptr [r13+r14*4+1016]{k2},ymm17
+1310|AVX512F_512|{evex} vpmovqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1311|AVX512F_128|{evex} vpmovsdb xmm29{k2}{z},xmm17
+1312|AVX512F_256|{evex} vpmovsdb xmm29{k2}{z},ymm17
+1313|AVX512F_512|{evex} vpmovsdb xmm29{k2}{z},zmm17
+1314|AVX512F_128|{evex} vpmovsdb dword ptr [r13+r14*4+508]{k2},xmm17
+1315|AVX512F_256|{evex} vpmovsdb qword ptr [r13+r14*4+1016]{k2},ymm17
+1316|AVX512F_512|{evex} vpmovsdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1317|AVX512F_128|{evex} vpmovsdw xmm29{k2}{z},xmm17
+1318|AVX512F_256|{evex} vpmovsdw xmm29{k2}{z},ymm17
+1319|AVX512F_512|{evex} vpmovsdw ymm29{k2}{z},zmm17
+1320|AVX512F_128|{evex} vpmovsdw qword ptr [r13+r14*4+1016]{k2},xmm17
+1321|AVX512F_256|{evex} vpmovsdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1322|AVX512F_512|{evex} vpmovsdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1323|AVX512F_128|{evex} vpmovsqb xmm29{k2}{z},xmm17
+1324|AVX512F_256|{evex} vpmovsqb xmm29{k2}{z},ymm17
+1325|AVX512F_512|{evex} vpmovsqb xmm29{k2}{z},zmm17
+1326|AVX512F_128|{evex} vpmovsqb word ptr [r13+r14*4+254]{k2},xmm17
+1327|AVX512F_256|{evex} vpmovsqb dword ptr [r13+r14*4+508]{k2},ymm17
+1328|AVX512F_512|{evex} vpmovsqb qword ptr [r13+r14*4+1016]{k2},zmm17
+1329|AVX512F_128|{evex} vpmovsqd xmm29{k2}{z},xmm17
+1330|AVX512F_256|{evex} vpmovsqd xmm29{k2}{z},ymm17
+1331|AVX512F_512|{evex} vpmovsqd ymm29{k2}{z},zmm17
+1332|AVX512F_128|{evex} vpmovsqd qword ptr [r13+r14*4+1016]{k2},xmm17
+1333|AVX512F_256|{evex} vpmovsqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1334|AVX512F_512|{evex} vpmovsqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1335|AVX512F_128|{evex} vpmovsqw xmm29{k2}{z},xmm17
+1336|AVX512F_256|{evex} vpmovsqw xmm29{k2}{z},ymm17
+1337|AVX512F_512|{evex} vpmovsqw xmm29{k2}{z},zmm17
+1338|AVX512F_128|{evex} vpmovsqw dword ptr [r13+r14*4+508]{k2},xmm17
+1339|AVX512F_256|{evex} vpmovsqw qword ptr [r13+r14*4+1016]{k2},ymm17
+1340|AVX512F_512|{evex} vpmovsqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1341|AVX512F_128|{evex} vpmovsxbd xmm17{k2}{z},xmm29
+1342|AVX512F_256|{evex} vpmovsxbd ymm17{k2}{z},xmm29
+1343|AVX512F_512|{evex} vpmovsxbd zmm17{k2}{z},xmm29
+1344|AVX512F_128|{evex} vpmovsxbd xmm17{k2}{z},dword ptr [r13+r14*4+508]
+1345|AVX512F_256|{evex} vpmovsxbd ymm17{k2}{z},qword ptr [r13+r14*4+1016]
+1346|AVX512F_512|{evex} vpmovsxbd zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1347|AVX512F_128|{evex} vpmovsxbq xmm17{k2}{z},xmm29
+1348|AVX512F_256|{evex} vpmovsxbq ymm17{k2}{z},xmm29
+1349|AVX512F_512|{evex} vpmovsxbq zmm17{k2}{z},xmm29
+1350|AVX512F_128|{evex} vpmovsxbq xmm17{k2}{z},word ptr [r13+r14*4+254]
+1351|AVX512F_256|{evex} vpmovsxbq ymm17{k2}{z},dword ptr [r13+r14*4+508]
+1352|AVX512F_512|{evex} vpmovsxbq zmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1353|AVX512F_128|{evex} vpmovsxdq xmm17{k2}{z},xmm29
+1354|AVX512F_256|{evex} vpmovsxdq ymm17{k2}{z},xmm29
+1355|AVX512F_512|{evex} vpmovsxdq zmm17{k2}{z},ymm29
+1356|AVX512F_128|{evex} vpmovsxdq xmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1357|AVX512F_256|{evex} vpmovsxdq ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1358|AVX512F_512|{evex} vpmovsxdq zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1359|AVX512F_128|{evex} vpmovsxwd xmm17{k2}{z},xmm29
+1360|AVX512F_256|{evex} vpmovsxwd ymm17{k2}{z},xmm29
+1361|AVX512F_512|{evex} vpmovsxwd zmm17{k2}{z},ymm29
+1362|AVX512F_128|{evex} vpmovsxwd xmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1363|AVX512F_256|{evex} vpmovsxwd ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1364|AVX512F_512|{evex} vpmovsxwd zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1365|AVX512F_128|{evex} vpmovsxwq xmm17{k2}{z},xmm29
+1366|AVX512F_256|{evex} vpmovsxwq ymm17{k2}{z},xmm29
+1367|AVX512F_512|{evex} vpmovsxwq zmm17{k2}{z},xmm29
+1368|AVX512F_128|{evex} vpmovsxwq xmm17{k2}{z},dword ptr [r13+r14*4+508]
+1369|AVX512F_256|{evex} vpmovsxwq ymm17{k2}{z},qword ptr [r13+r14*4+1016]
+1370|AVX512F_512|{evex} vpmovsxwq zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1371|AVX512F_128|{evex} vpmovusdb xmm29{k2}{z},xmm17
+1372|AVX512F_256|{evex} vpmovusdb xmm29{k2}{z},ymm17
+1373|AVX512F_512|{evex} vpmovusdb xmm29{k2}{z},zmm17
+1374|AVX512F_128|{evex} vpmovusdb dword ptr [r13+r14*4+508]{k2},xmm17
+1375|AVX512F_256|{evex} vpmovusdb qword ptr [r13+r14*4+1016]{k2},ymm17
+1376|AVX512F_512|{evex} vpmovusdb xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1377|AVX512F_128|{evex} vpmovusdw xmm29{k2}{z},xmm17
+1378|AVX512F_256|{evex} vpmovusdw xmm29{k2}{z},ymm17
+1379|AVX512F_512|{evex} vpmovusdw ymm29{k2}{z},zmm17
+1380|AVX512F_128|{evex} vpmovusdw qword ptr [r13+r14*4+1016]{k2},xmm17
+1381|AVX512F_256|{evex} vpmovusdw xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1382|AVX512F_512|{evex} vpmovusdw ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1383|AVX512F_128|{evex} vpmovusqb xmm29{k2}{z},xmm17
+1384|AVX512F_256|{evex} vpmovusqb xmm29{k2}{z},ymm17
+1385|AVX512F_512|{evex} vpmovusqb xmm29{k2}{z},zmm17
+1386|AVX512F_128|{evex} vpmovusqb word ptr [r13+r14*4+254]{k2},xmm17
+1387|AVX512F_256|{evex} vpmovusqb dword ptr [r13+r14*4+508]{k2},ymm17
+1388|AVX512F_512|{evex} vpmovusqb qword ptr [r13+r14*4+1016]{k2},zmm17
+1389|AVX512F_128|{evex} vpmovusqd xmm29{k2}{z},xmm17
+1390|AVX512F_256|{evex} vpmovusqd xmm29{k2}{z},ymm17
+1391|AVX512F_512|{evex} vpmovusqd ymm29{k2}{z},zmm17
+1392|AVX512F_128|{evex} vpmovusqd qword ptr [r13+r14*4+1016]{k2},xmm17
+1393|AVX512F_256|{evex} vpmovusqd xmmword ptr [r13+r14*4+2032]{k2},ymm17
+1394|AVX512F_512|{evex} vpmovusqd ymmword ptr [r13+r14*4+4064]{k2},zmm17
+1395|AVX512F_128|{evex} vpmovusqw xmm29{k2}{z},xmm17
+1396|AVX512F_256|{evex} vpmovusqw xmm29{k2}{z},ymm17
+1397|AVX512F_512|{evex} vpmovusqw xmm29{k2}{z},zmm17
+1398|AVX512F_128|{evex} vpmovusqw dword ptr [r13+r14*4+508]{k2},xmm17
+1399|AVX512F_256|{evex} vpmovusqw qword ptr [r13+r14*4+1016]{k2},ymm17
+1400|AVX512F_512|{evex} vpmovusqw xmmword ptr [r13+r14*4+2032]{k2},zmm17
+1401|AVX512F_128|{evex} vpmovzxbd xmm17{k2}{z},xmm29
+1402|AVX512F_256|{evex} vpmovzxbd ymm17{k2}{z},xmm29
+1403|AVX512F_512|{evex} vpmovzxbd zmm17{k2}{z},xmm29
+1404|AVX512F_128|{evex} vpmovzxbd xmm17{k2}{z},dword ptr [r13+r14*4+508]
+1405|AVX512F_256|{evex} vpmovzxbd ymm17{k2}{z},qword ptr [r13+r14*4+1016]
+1406|AVX512F_512|{evex} vpmovzxbd zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1407|AVX512F_128|{evex} vpmovzxbq xmm17{k2}{z},xmm29
+1408|AVX512F_256|{evex} vpmovzxbq ymm17{k2}{z},xmm29
+1409|AVX512F_512|{evex} vpmovzxbq zmm17{k2}{z},xmm29
+1410|AVX512F_128|{evex} vpmovzxbq xmm17{k2}{z},word ptr [r13+r14*4+254]
+1411|AVX512F_256|{evex} vpmovzxbq ymm17{k2}{z},dword ptr [r13+r14*4+508]
+1412|AVX512F_512|{evex} vpmovzxbq zmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1413|AVX512F_128|{evex} vpmovzxdq xmm17{k2}{z},xmm29
+1414|AVX512F_256|{evex} vpmovzxdq ymm17{k2}{z},xmm29
+1415|AVX512F_512|{evex} vpmovzxdq zmm17{k2}{z},ymm29
+1416|AVX512F_128|{evex} vpmovzxdq xmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1417|AVX512F_256|{evex} vpmovzxdq ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1418|AVX512F_512|{evex} vpmovzxdq zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1419|AVX512F_128|{evex} vpmovzxwd xmm17{k2}{z},xmm29
+1420|AVX512F_256|{evex} vpmovzxwd ymm17{k2}{z},xmm29
+1421|AVX512F_512|{evex} vpmovzxwd zmm17{k2}{z},ymm29
+1422|AVX512F_128|{evex} vpmovzxwd xmm17{k2}{z},qword ptr [r13+r14*4+1016]
+1423|AVX512F_256|{evex} vpmovzxwd ymm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1424|AVX512F_512|{evex} vpmovzxwd zmm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1425|AVX512F_128|{evex} vpmovzxwq xmm17{k2}{z},xmm29
+1426|AVX512F_256|{evex} vpmovzxwq ymm17{k2}{z},xmm29
+1427|AVX512F_512|{evex} vpmovzxwq zmm17{k2}{z},xmm29
+1428|AVX512F_128|{evex} vpmovzxwq xmm17{k2}{z},dword ptr [r13+r14*4+508]
+1429|AVX512F_256|{evex} vpmovzxwq ymm17{k2}{z},qword ptr [r13+r14*4+1016]
+1430|AVX512F_512|{evex} vpmovzxwq zmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1431|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,xmm29
+1432|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,ymm29
+1433|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,zmm29
+1434|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1434|AVX512F_128|{evex} vpmuldq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1435|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1435|AVX512F_256|{evex} vpmuldq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1436|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1436|AVX512F_512|{evex} vpmuldq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1437|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,xmm29
+1438|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,ymm29
+1439|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,zmm29
+1440|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1440|AVX512F_128|{evex} vpmulld xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1441|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1441|AVX512F_256|{evex} vpmulld ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1442|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1442|AVX512F_512|{evex} vpmulld zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1443|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,xmm29
+1444|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,ymm29
+1445|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,zmm29
+1446|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1446|AVX512F_128|{evex} vpmuludq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1447|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1447|AVX512F_256|{evex} vpmuludq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1448|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1448|AVX512F_512|{evex} vpmuludq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1449|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,xmm29
+1450|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,ymm29
+1451|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,zmm29
+1452|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1452|AVX512F_128|{evex} vpord xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1453|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1453|AVX512F_256|{evex} vpord ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1454|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1454|AVX512F_512|{evex} vpord zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1455|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,xmm29
+1456|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,ymm29
+1457|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,zmm29
+1458|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1458|AVX512F_128|{evex} vporq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1459|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1459|AVX512F_256|{evex} vporq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1460|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1460|AVX512F_512|{evex} vporq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1461|AVX512F_128|{evex} vprold xmm22{k2}{z},xmm29,3
+1462|AVX512F_256|{evex} vprold ymm22{k2}{z},ymm29,3
+1463|AVX512F_512|{evex} vprold zmm22{k2}{z},zmm29,3
+1464|AVX512F_128|{evex} vprold xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1464|AVX512F_128|{evex} vprold xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1465|AVX512F_256|{evex} vprold ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1465|AVX512F_256|{evex} vprold ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1466|AVX512F_512|{evex} vprold zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1466|AVX512F_512|{evex} vprold zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1467|AVX512F_128|{evex} vprolq xmm22{k2}{z},xmm29,3
+1468|AVX512F_256|{evex} vprolq ymm22{k2}{z},ymm29,3
+1469|AVX512F_512|{evex} vprolq zmm22{k2}{z},zmm29,3
+1470|AVX512F_128|{evex} vprolq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1470|AVX512F_128|{evex} vprolq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1471|AVX512F_256|{evex} vprolq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1471|AVX512F_256|{evex} vprolq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1472|AVX512F_512|{evex} vprolq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1472|AVX512F_512|{evex} vprolq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1473|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,xmm29
+1474|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,ymm29
+1475|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,zmm29
+1476|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1476|AVX512F_128|{evex} vprolvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1477|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1477|AVX512F_256|{evex} vprolvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1478|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1478|AVX512F_512|{evex} vprolvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1479|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,xmm29
+1480|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,ymm29
+1481|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,zmm29
+1482|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1482|AVX512F_128|{evex} vprolvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1483|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1483|AVX512F_256|{evex} vprolvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1484|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1484|AVX512F_512|{evex} vprolvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1485|AVX512F_128|{evex} vprord xmm22{k2}{z},xmm29,3
+1486|AVX512F_256|{evex} vprord ymm22{k2}{z},ymm29,3
+1487|AVX512F_512|{evex} vprord zmm22{k2}{z},zmm29,3
+1488|AVX512F_128|{evex} vprord xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1488|AVX512F_128|{evex} vprord xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1489|AVX512F_256|{evex} vprord ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1489|AVX512F_256|{evex} vprord ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1490|AVX512F_512|{evex} vprord zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1490|AVX512F_512|{evex} vprord zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1491|AVX512F_128|{evex} vprorq xmm22{k2}{z},xmm29,3
+1492|AVX512F_256|{evex} vprorq ymm22{k2}{z},ymm29,3
+1493|AVX512F_512|{evex} vprorq zmm22{k2}{z},zmm29,3
+1494|AVX512F_128|{evex} vprorq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1494|AVX512F_128|{evex} vprorq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1495|AVX512F_256|{evex} vprorq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1495|AVX512F_256|{evex} vprorq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1496|AVX512F_512|{evex} vprorq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1496|AVX512F_512|{evex} vprorq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1497|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,xmm29
+1498|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,ymm29
+1499|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,zmm29
+1500|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1500|AVX512F_128|{evex} vprorvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1501|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1501|AVX512F_256|{evex} vprorvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1502|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1502|AVX512F_512|{evex} vprorvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1503|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,xmm29
+1504|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,ymm29
+1505|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,zmm29
+1506|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1506|AVX512F_128|{evex} vprorvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1507|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1507|AVX512F_256|{evex} vprorvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1508|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1508|AVX512F_512|{evex} vprorvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1509|AVX512F_128|{evex} vpscatterdd dword ptr [r13+xmm23*4+508]{k2},xmm17
+1510|AVX512F_256|{evex} vpscatterdd dword ptr [r13+ymm23*4+508]{k2},ymm17
+1511|AVX512F_512|{evex} vpscatterdd dword ptr [r13+zmm23*4+508]{k2},zmm17
+1512|AVX512F_128|{evex} vpscatterdq qword ptr [r13+xmm23*4+1016]{k2},xmm17
+1513|AVX512F_256|{evex} vpscatterdq qword ptr [r13+xmm23*4+1016]{k2},ymm17
+1514|AVX512F_512|{evex} vpscatterdq qword ptr [r13+ymm23*4+1016]{k2},zmm17
+1515|AVX512F_128|{evex} vpscatterqd dword ptr [r13+xmm23*4+508]{k2},xmm17
+1516|AVX512F_256|{evex} vpscatterqd dword ptr [r13+ymm23*4+508]{k2},xmm17
+1517|AVX512F_512|{evex} vpscatterqd dword ptr [r13+zmm23*4+508]{k2},ymm17
+1518|AVX512F_128|{evex} vpscatterqq qword ptr [r13+xmm23*4+1016]{k2},xmm17
+1519|AVX512F_256|{evex} vpscatterqq qword ptr [r13+ymm23*4+1016]{k2},ymm17
+1520|AVX512F_512|{evex} vpscatterqq qword ptr [r13+zmm23*4+1016]{k2},zmm17
+1521|AVX512F_128|{evex} vpshufd xmm17{k2}{z},xmm29,3
+1522|AVX512F_256|{evex} vpshufd ymm17{k2}{z},ymm29,3
+1523|AVX512F_512|{evex} vpshufd zmm17{k2}{z},zmm29,3
+1524|AVX512F_128|{evex} vpshufd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1524|AVX512F_128|{evex} vpshufd xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1525|AVX512F_256|{evex} vpshufd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1525|AVX512F_256|{evex} vpshufd ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1526|AVX512F_512|{evex} vpshufd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1526|AVX512F_512|{evex} vpshufd zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1527|AVX512F_128|{evex} vpslld xmm22{k2}{z},xmm29,3
+1528|AVX512F_256|{evex} vpslld ymm22{k2}{z},ymm29,3
+1529|AVX512F_512|{evex} vpslld zmm22{k2}{z},zmm29,3
+1530|AVX512F_128|{evex} vpslld xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1530|AVX512F_128|{evex} vpslld xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1531|AVX512F_256|{evex} vpslld ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1531|AVX512F_256|{evex} vpslld ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1532|AVX512F_512|{evex} vpslld zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1532|AVX512F_512|{evex} vpslld zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1533|AVX512F_128|{evex} vpslld xmm17{k2}{z},xmm22,xmm29
+1534|AVX512F_256|{evex} vpslld ymm17{k2}{z},ymm22,xmm29
+1535|AVX512F_512|{evex} vpslld zmm17{k2}{z},zmm22,xmm29
+1536|AVX512F_128|{evex} vpslld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1537|AVX512F_256|{evex} vpslld ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1538|AVX512F_512|{evex} vpslld zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1539|AVX512F_128|{evex} vpsllq xmm22{k2}{z},xmm29,3
+1540|AVX512F_256|{evex} vpsllq ymm22{k2}{z},ymm29,3
+1541|AVX512F_512|{evex} vpsllq zmm22{k2}{z},zmm29,3
+1542|AVX512F_128|{evex} vpsllq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1542|AVX512F_128|{evex} vpsllq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1543|AVX512F_256|{evex} vpsllq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1543|AVX512F_256|{evex} vpsllq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1544|AVX512F_512|{evex} vpsllq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1544|AVX512F_512|{evex} vpsllq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1545|AVX512F_128|{evex} vpsllq xmm17{k2}{z},xmm22,xmm29
+1546|AVX512F_256|{evex} vpsllq ymm17{k2}{z},ymm22,xmm29
+1547|AVX512F_512|{evex} vpsllq zmm17{k2}{z},zmm22,xmm29
+1548|AVX512F_128|{evex} vpsllq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1549|AVX512F_256|{evex} vpsllq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1550|AVX512F_512|{evex} vpsllq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1551|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,xmm29
+1552|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,ymm29
+1553|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,zmm29
+1554|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1554|AVX512F_128|{evex} vpsllvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1555|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1555|AVX512F_256|{evex} vpsllvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1556|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1556|AVX512F_512|{evex} vpsllvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1557|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,xmm29
+1558|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,ymm29
+1559|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,zmm29
+1560|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1560|AVX512F_128|{evex} vpsllvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1561|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1561|AVX512F_256|{evex} vpsllvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1562|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1562|AVX512F_512|{evex} vpsllvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1563|AVX512F_128|{evex} vpsrad xmm22{k2}{z},xmm29,3
+1564|AVX512F_256|{evex} vpsrad ymm22{k2}{z},ymm29,3
+1565|AVX512F_512|{evex} vpsrad zmm22{k2}{z},zmm29,3
+1566|AVX512F_128|{evex} vpsrad xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1566|AVX512F_128|{evex} vpsrad xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1567|AVX512F_256|{evex} vpsrad ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1567|AVX512F_256|{evex} vpsrad ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1568|AVX512F_512|{evex} vpsrad zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1568|AVX512F_512|{evex} vpsrad zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1569|AVX512F_128|{evex} vpsrad xmm17{k2}{z},xmm22,xmm29
+1570|AVX512F_256|{evex} vpsrad ymm17{k2}{z},ymm22,xmm29
+1571|AVX512F_512|{evex} vpsrad zmm17{k2}{z},zmm22,xmm29
+1572|AVX512F_128|{evex} vpsrad xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1573|AVX512F_256|{evex} vpsrad ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1574|AVX512F_512|{evex} vpsrad zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1575|AVX512F_128|{evex} vpsraq xmm22{k2}{z},xmm29,3
+1576|AVX512F_256|{evex} vpsraq ymm22{k2}{z},ymm29,3
+1577|AVX512F_512|{evex} vpsraq zmm22{k2}{z},zmm29,3
+1578|AVX512F_128|{evex} vpsraq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1578|AVX512F_128|{evex} vpsraq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1579|AVX512F_256|{evex} vpsraq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1579|AVX512F_256|{evex} vpsraq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1580|AVX512F_512|{evex} vpsraq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1580|AVX512F_512|{evex} vpsraq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1581|AVX512F_128|{evex} vpsraq xmm17{k2}{z},xmm22,xmm29
+1582|AVX512F_256|{evex} vpsraq ymm17{k2}{z},ymm22,xmm29
+1583|AVX512F_512|{evex} vpsraq zmm17{k2}{z},zmm22,xmm29
+1584|AVX512F_128|{evex} vpsraq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1585|AVX512F_256|{evex} vpsraq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1586|AVX512F_512|{evex} vpsraq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1587|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,xmm29
+1588|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,ymm29
+1589|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,zmm29
+1590|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1590|AVX512F_128|{evex} vpsravd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1591|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1591|AVX512F_256|{evex} vpsravd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1592|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1592|AVX512F_512|{evex} vpsravd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1593|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,xmm29
+1594|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,ymm29
+1595|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,zmm29
+1596|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1596|AVX512F_128|{evex} vpsravq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1597|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1597|AVX512F_256|{evex} vpsravq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1598|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1598|AVX512F_512|{evex} vpsravq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1599|AVX512F_128|{evex} vpsrld xmm22{k2}{z},xmm29,3
+1600|AVX512F_256|{evex} vpsrld ymm22{k2}{z},ymm29,3
+1601|AVX512F_512|{evex} vpsrld zmm22{k2}{z},zmm29,3
+1602|AVX512F_128|{evex} vpsrld xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1602|AVX512F_128|{evex} vpsrld xmm22{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1603|AVX512F_256|{evex} vpsrld ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1603|AVX512F_256|{evex} vpsrld ymm22{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1604|AVX512F_512|{evex} vpsrld zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1604|AVX512F_512|{evex} vpsrld zmm22{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1605|AVX512F_128|{evex} vpsrld xmm17{k2}{z},xmm22,xmm29
+1606|AVX512F_256|{evex} vpsrld ymm17{k2}{z},ymm22,xmm29
+1607|AVX512F_512|{evex} vpsrld zmm17{k2}{z},zmm22,xmm29
+1608|AVX512F_128|{evex} vpsrld xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1609|AVX512F_256|{evex} vpsrld ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1610|AVX512F_512|{evex} vpsrld zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1611|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},xmm29,3
+1612|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},ymm29,3
+1613|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},zmm29,3
+1614|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1614|AVX512F_128|{evex} vpsrlq xmm22{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1615|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1615|AVX512F_256|{evex} vpsrlq ymm22{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1616|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1616|AVX512F_512|{evex} vpsrlq zmm22{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1617|AVX512F_128|{evex} vpsrlq xmm17{k2}{z},xmm22,xmm29
+1618|AVX512F_256|{evex} vpsrlq ymm17{k2}{z},ymm22,xmm29
+1619|AVX512F_512|{evex} vpsrlq zmm17{k2}{z},zmm22,xmm29
+1620|AVX512F_128|{evex} vpsrlq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1621|AVX512F_256|{evex} vpsrlq ymm17{k2}{z},ymm22,xmmword ptr [r13+r14*4+2032]
+1622|AVX512F_512|{evex} vpsrlq zmm17{k2}{z},zmm22,xmmword ptr [r13+r14*4+2032]
+1623|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,xmm29
+1624|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,ymm29
+1625|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,zmm29
+1626|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1626|AVX512F_128|{evex} vpsrlvd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1627|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1627|AVX512F_256|{evex} vpsrlvd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1628|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1628|AVX512F_512|{evex} vpsrlvd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1629|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,xmm29
+1630|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,ymm29
+1631|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,zmm29
+1632|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1632|AVX512F_128|{evex} vpsrlvq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1633|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1633|AVX512F_256|{evex} vpsrlvq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1634|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1634|AVX512F_512|{evex} vpsrlvq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1635|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,xmm29
+1636|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,ymm29
+1637|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,zmm29
+1638|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1638|AVX512F_128|{evex} vpsubd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1639|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1639|AVX512F_256|{evex} vpsubd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1640|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1640|AVX512F_512|{evex} vpsubd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1641|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,xmm29
+1642|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,ymm29
+1643|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,zmm29
+1644|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1644|AVX512F_128|{evex} vpsubq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1645|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1645|AVX512F_256|{evex} vpsubq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1646|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1646|AVX512F_512|{evex} vpsubq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1647|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,xmm29,3
+1648|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,ymm29,3
+1649|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,zmm29,3
+1650|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
+1650|AVX512F_128|{evex} vpternlogd xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
+1651|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1651|AVX512F_256|{evex} vpternlogd ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1652|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1652|AVX512F_512|{evex} vpternlogd zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1653|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,xmm29,3
+1654|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,ymm29,3
+1655|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,zmm29,3
+1656|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
+1656|AVX512F_128|{evex} vpternlogq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
+1657|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1657|AVX512F_256|{evex} vpternlogq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1658|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1658|AVX512F_512|{evex} vpternlogq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1659|AVX512F_128|{evex} vptestmd k4{k2},xmm22,xmm29
+1660|AVX512F_256|{evex} vptestmd k4{k2},ymm22,ymm29
+1661|AVX512F_512|{evex} vptestmd k4{k2},zmm22,zmm29
+1662|AVX512F_128|{evex} vptestmd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1662|AVX512F_128|{evex} vptestmd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1663|AVX512F_256|{evex} vptestmd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1663|AVX512F_256|{evex} vptestmd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1664|AVX512F_512|{evex} vptestmd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1664|AVX512F_512|{evex} vptestmd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1665|AVX512F_128|{evex} vptestmq k4{k2},xmm22,xmm29
+1666|AVX512F_256|{evex} vptestmq k4{k2},ymm22,ymm29
+1667|AVX512F_512|{evex} vptestmq k4{k2},zmm22,zmm29
+1668|AVX512F_128|{evex} vptestmq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1668|AVX512F_128|{evex} vptestmq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1669|AVX512F_256|{evex} vptestmq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1669|AVX512F_256|{evex} vptestmq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1670|AVX512F_512|{evex} vptestmq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1670|AVX512F_512|{evex} vptestmq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1671|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,xmm29
+1672|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,ymm29
+1673|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,zmm29
+1674|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1674|AVX512F_128|{evex} vptestnmd k4{k2},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1675|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1675|AVX512F_256|{evex} vptestnmd k4{k2},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1676|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1676|AVX512F_512|{evex} vptestnmd k4{k2},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1677|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,xmm29
+1678|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,ymm29
+1679|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,zmm29
+1680|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,xmmword ptr [r13+r14*4+2032]
+1680|AVX512F_128|{evex} vptestnmq k4{k2},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1681|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,ymmword ptr [r13+r14*4+4064]
+1681|AVX512F_256|{evex} vptestnmq k4{k2},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1682|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,zmmword ptr [r13+r14*4+8128]
+1682|AVX512F_512|{evex} vptestnmq k4{k2},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1683|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,xmm29
+1684|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,ymm29
+1685|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,zmm29
+1686|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1686|AVX512F_128|{evex} vpunpckhdq xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1687|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1687|AVX512F_256|{evex} vpunpckhdq ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1688|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1688|AVX512F_512|{evex} vpunpckhdq zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1689|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,xmm29
+1690|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,ymm29
+1691|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,zmm29
+1692|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1692|AVX512F_128|{evex} vpunpckhqdq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1693|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1693|AVX512F_256|{evex} vpunpckhqdq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1694|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1694|AVX512F_512|{evex} vpunpckhqdq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1695|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,xmm29
+1696|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,ymm29
+1697|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,zmm29
+1698|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1698|AVX512F_128|{evex} vpunpckldq xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1699|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1699|AVX512F_256|{evex} vpunpckldq ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1700|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1700|AVX512F_512|{evex} vpunpckldq zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1701|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,xmm29
+1702|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,ymm29
+1703|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,zmm29
+1704|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1704|AVX512F_128|{evex} vpunpcklqdq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1705|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1705|AVX512F_256|{evex} vpunpcklqdq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1706|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1706|AVX512F_512|{evex} vpunpcklqdq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1707|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,xmm29
+1708|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,ymm29
+1709|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,zmm29
+1710|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1710|AVX512F_128|{evex} vpxord xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1711|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1711|AVX512F_256|{evex} vpxord ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1712|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1712|AVX512F_512|{evex} vpxord zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1713|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,xmm29
+1714|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,ymm29
+1715|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,zmm29
+1716|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1716|AVX512F_128|{evex} vpxorq xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1717|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1717|AVX512F_256|{evex} vpxorq ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1718|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1718|AVX512F_512|{evex} vpxorq zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1719|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},xmm29
+1720|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},ymm29
+1721|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},zmm29
+1722|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1722|AVX512F_128|{evex} vrcp14pd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
+1723|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1723|AVX512F_256|{evex} vrcp14pd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
+1724|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1724|AVX512F_512|{evex} vrcp14pd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
+1725|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},xmm29
+1726|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},ymm29
+1727|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},zmm29
+1728|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1728|AVX512F_128|{evex} vrcp14ps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
+1729|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1729|AVX512F_256|{evex} vrcp14ps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
+1730|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1730|AVX512F_512|{evex} vrcp14ps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
+1731|AVX512F_SCALAR|{evex} vrcp14sd xmm17{k2}{z},xmm22,xmm29
+1732|AVX512F_SCALAR|{evex} vrcp14sd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
+1733|AVX512F_SCALAR|{evex} vrcp14ss xmm17{k2}{z},xmm22,xmm29
+1734|AVX512F_SCALAR|{evex} vrcp14ss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
+1735|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmm29,{sae},3
+1736|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},xmm29,3
+1737|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},ymm29,3
+1738|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmm29,3
+1739|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1739|AVX512F_128|{evex} vrndscalepd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2},3
+1740|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1740|AVX512F_256|{evex} vrndscalepd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4},3
+1741|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1741|AVX512F_512|{evex} vrndscalepd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8},3
+1742|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmm29,{sae},3
+1743|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},xmm29,3
+1744|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},ymm29,3
+1745|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmm29,3
+1746|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032],3
+1746|AVX512F_128|{evex} vrndscaleps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4},3
+1747|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064],3
+1747|AVX512F_256|{evex} vrndscaleps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8},3
+1748|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128],3
+1748|AVX512F_512|{evex} vrndscaleps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16},3
+1749|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,xmm29,3
+1750|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,xmm29,{sae},3
+1751|AVX512F_SCALAR|{evex} vrndscalesd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016],3
+1752|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,xmm29,3
+1753|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,xmm29,{sae},3
+1754|AVX512F_SCALAR|{evex} vrndscaless xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508],3
+1755|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},xmm29
+1756|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},ymm29
+1757|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},zmm29
+1758|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1758|AVX512F_128|{evex} vrsqrt14pd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
+1759|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1759|AVX512F_256|{evex} vrsqrt14pd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
+1760|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1760|AVX512F_512|{evex} vrsqrt14pd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
+1761|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},xmm29
+1762|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},ymm29
+1763|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},zmm29
+1764|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1764|AVX512F_128|{evex} vrsqrt14ps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
+1765|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1765|AVX512F_256|{evex} vrsqrt14ps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
+1766|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1766|AVX512F_512|{evex} vrsqrt14ps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
+1767|AVX512F_SCALAR|{evex} vrsqrt14sd xmm17{k2}{z},xmm22,xmm29
+1768|AVX512F_SCALAR|{evex} vrsqrt14sd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
+1769|AVX512F_SCALAR|{evex} vrsqrt14ss xmm17{k2}{z},xmm22,xmm29
+1770|AVX512F_SCALAR|{evex} vrsqrt14ss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
+1771|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmm29,{rn-sae}
+1772|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,xmm29
+1773|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,ymm29
+1774|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmm29
+1775|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1775|AVX512F_128|{evex} vscalefpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1776|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1776|AVX512F_256|{evex} vscalefpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1777|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1777|AVX512F_512|{evex} vscalefpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1778|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmm29,{rn-sae}
+1779|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,xmm29
+1780|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,ymm29
+1781|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmm29
+1782|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1782|AVX512F_128|{evex} vscalefps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1783|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1783|AVX512F_256|{evex} vscalefps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1784|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1784|AVX512F_512|{evex} vscalefps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1785|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,xmm29
+1786|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1787|AVX512F_SCALAR|{evex} vscalefsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
+1788|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,xmm29
+1789|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1790|AVX512F_SCALAR|{evex} vscalefss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
+1791|AVX512F_128|{evex} vscatterdpd qword ptr [r13+xmm23*4+1016]{k2},xmm17
+1792|AVX512F_256|{evex} vscatterdpd qword ptr [r13+xmm23*4+1016]{k2},ymm17
+1793|AVX512F_512|{evex} vscatterdpd qword ptr [r13+ymm23*4+1016]{k2},zmm17
+1794|AVX512F_128|{evex} vscatterdps dword ptr [r13+xmm23*4+508]{k2},xmm17
+1795|AVX512F_256|{evex} vscatterdps dword ptr [r13+ymm23*4+508]{k2},ymm17
+1796|AVX512F_512|{evex} vscatterdps dword ptr [r13+zmm23*4+508]{k2},zmm17
+1797|AVX512F_128|{evex} vscatterqpd qword ptr [r13+xmm23*4+1016]{k2},xmm17
+1798|AVX512F_256|{evex} vscatterqpd qword ptr [r13+ymm23*4+1016]{k2},ymm17
+1799|AVX512F_512|{evex} vscatterqpd qword ptr [r13+zmm23*4+1016]{k2},zmm17
+1800|AVX512F_128|{evex} vscatterqps dword ptr [r13+xmm23*4+508]{k2},xmm17
+1801|AVX512F_256|{evex} vscatterqps dword ptr [r13+ymm23*4+508]{k2},xmm17
+1802|AVX512F_512|{evex} vscatterqps dword ptr [r13+zmm23*4+508]{k2},ymm17
+1803|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,ymm29,3
+1804|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,zmm29,3
+1805|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1805|AVX512F_256|{evex} vshuff32x4 ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1806|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1806|AVX512F_512|{evex} vshuff32x4 zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1807|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,ymm29,3
+1808|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,zmm29,3
+1809|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1809|AVX512F_256|{evex} vshuff64x2 ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1810|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1810|AVX512F_512|{evex} vshuff64x2 zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1811|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,ymm29,3
+1812|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,zmm29,3
+1813|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1813|AVX512F_256|{evex} vshufi32x4 ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1814|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1814|AVX512F_512|{evex} vshufi32x4 zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1815|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,ymm29,3
+1816|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,zmm29,3
+1817|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1817|AVX512F_256|{evex} vshufi64x2 ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1818|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1818|AVX512F_512|{evex} vshufi64x2 zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1819|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,xmm29,3
+1820|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,ymm29,3
+1821|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,zmm29,3
+1822|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
+1822|AVX512F_128|{evex} vshufpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2},3
+1823|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1823|AVX512F_256|{evex} vshufpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4},3
+1824|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1824|AVX512F_512|{evex} vshufpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8},3
+1825|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,xmm29,3
+1826|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,ymm29,3
+1827|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,zmm29,3
+1828|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032],3
+1828|AVX512F_128|{evex} vshufps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4},3
+1829|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064],3
+1829|AVX512F_256|{evex} vshufps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8},3
+1830|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128],3
+1830|AVX512F_512|{evex} vshufps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16},3
+1831|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmm29,{rn-sae}
+1832|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},xmm29
+1833|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},ymm29
+1834|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmm29
+1835|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1835|AVX512F_128|{evex} vsqrtpd xmm17{k2}{z},qword ptr [r13+r14*4+2032]{1to2}
+1836|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1836|AVX512F_256|{evex} vsqrtpd ymm17{k2}{z},qword ptr [r13+r14*4+4064]{1to4}
+1837|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1837|AVX512F_512|{evex} vsqrtpd zmm17{k2}{z},qword ptr [r13+r14*4+8128]{1to8}
+1838|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmm29,{rn-sae}
+1839|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},xmm29
+1840|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},ymm29
+1841|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmm29
+1842|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},xmmword ptr [r13+r14*4+2032]
+1842|AVX512F_128|{evex} vsqrtps xmm17{k2}{z},dword ptr [r13+r14*4+2032]{1to4}
+1843|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},ymmword ptr [r13+r14*4+4064]
+1843|AVX512F_256|{evex} vsqrtps ymm17{k2}{z},dword ptr [r13+r14*4+4064]{1to8}
+1844|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},zmmword ptr [r13+r14*4+8128]
+1844|AVX512F_512|{evex} vsqrtps zmm17{k2}{z},dword ptr [r13+r14*4+8128]{1to16}
+1845|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,xmm29
+1846|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1847|AVX512F_SCALAR|{evex} vsqrtsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
+1848|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,xmm29
+1849|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1850|AVX512F_SCALAR|{evex} vsqrtss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
+1851|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmm29,{rn-sae}
+1852|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,xmm29
+1853|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,ymm29
+1854|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmm29
+1855|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1855|AVX512F_128|{evex} vsubpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1856|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1856|AVX512F_256|{evex} vsubpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1857|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1857|AVX512F_512|{evex} vsubpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1858|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmm29,{rn-sae}
+1859|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,xmm29
+1860|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,ymm29
+1861|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmm29
+1862|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1862|AVX512F_128|{evex} vsubps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1863|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1863|AVX512F_256|{evex} vsubps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1864|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1864|AVX512F_512|{evex} vsubps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1865|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,xmm29
+1866|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1867|AVX512F_SCALAR|{evex} vsubsd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+1016]
+1868|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,xmm29
+1869|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,xmm29,{rn-sae}
+1870|AVX512F_SCALAR|{evex} vsubss xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+508]
+1871|AVX512F_SCALAR|{evex} vucomisd xmm17,xmm29
+1872|AVX512F_SCALAR|{evex} vucomisd xmm17,xmm29,{sae}
+1873|AVX512F_SCALAR|{evex} vucomisd xmm17,qword ptr [r13+r14*4+1016]
+1874|AVX512F_SCALAR|{evex} vucomiss xmm17,xmm29
+1875|AVX512F_SCALAR|{evex} vucomiss xmm17,xmm29,{sae}
+1876|AVX512F_SCALAR|{evex} vucomiss xmm17,dword ptr [r13+r14*4+508]
+1877|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,xmm29
+1878|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,ymm29
+1879|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,zmm29
+1880|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1880|AVX512F_128|{evex} vunpckhpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1881|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1881|AVX512F_256|{evex} vunpckhpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1882|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1882|AVX512F_512|{evex} vunpckhpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1883|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,xmm29
+1884|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,ymm29
+1885|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,zmm29
+1886|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1886|AVX512F_128|{evex} vunpckhps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1887|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1887|AVX512F_256|{evex} vunpckhps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1888|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1888|AVX512F_512|{evex} vunpckhps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}
+1889|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,xmm29
+1890|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,ymm29
+1891|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,zmm29
+1892|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1892|AVX512F_128|{evex} vunpcklpd xmm17{k2}{z},xmm22,qword ptr [r13+r14*4+2032]{1to2}
+1893|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1893|AVX512F_256|{evex} vunpcklpd ymm17{k2}{z},ymm22,qword ptr [r13+r14*4+4064]{1to4}
+1894|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1894|AVX512F_512|{evex} vunpcklpd zmm17{k2}{z},zmm22,qword ptr [r13+r14*4+8128]{1to8}
+1895|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,xmm29
+1896|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,ymm29
+1897|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,zmm29
+1898|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,xmmword ptr [r13+r14*4+2032]
+1898|AVX512F_128|{evex} vunpcklps xmm17{k2}{z},xmm22,dword ptr [r13+r14*4+2032]{1to4}
+1899|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,ymmword ptr [r13+r14*4+4064]
+1899|AVX512F_256|{evex} vunpcklps ymm17{k2}{z},ymm22,dword ptr [r13+r14*4+4064]{1to8}
+1900|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,zmmword ptr [r13+r14*4+8128]
+1900|AVX512F_512|{evex} vunpcklps zmm17{k2}{z},zmm22,dword ptr [r13+r14*4+8128]{1to16}

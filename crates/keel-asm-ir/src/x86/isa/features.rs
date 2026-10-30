@@ -562,5 +562,6 @@ pub fn feature_policy(isa: &str) -> Features { match isa {
 "AMX_FP16" => Features { xsave: true, osxsave: true, amx_tile: true, amx_fp16: true, ..Features::NONE },
 "APX_F" => Features { xsave: true, osxsave: true, apx_f: true, ..Features::NONE },
 "MONITOR" => Features { monitor: true, ..Features::NONE },
+"AVX512_VPCLMULQDQ_512" => Features { vpclmulqdq: true, avx: true, xsave: true, osxsave: true, avx512f: true, ..Features::NONE },
 _ => Features::NONE,
 } }

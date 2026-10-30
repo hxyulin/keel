@@ -172,5 +172,10 @@
   ],
   "MONITOR": [
     "monitor"
+  ],
+  "AVX512_VPCLMULQDQ_512": [
+    "avx",
+    "avx512f",
+    "vpclmulqdq"
   ]
 }

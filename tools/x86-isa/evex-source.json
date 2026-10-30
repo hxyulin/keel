@@ -4,6 +4,6 @@
   "path": "datafiles/instructions.json",
   "url": "https://raw.githubusercontent.com/zyantific/zydis-db/eaf92a02dca616b90c12b2ebc338d87ed943c84f/datafiles/instructions.json",
   "upstream_sha256": "43a234ab7e3559b992c0ebad606279b750f2eb7c322c15e96bdfb6c3fd3f73c6",
-  "subset_sha256": "6fab09bc22a8ce3786a722e034832f057660fec3311492c7a2294166b84d8f7a",
-  "selection": "EVEX AVX512F_* and VEX AVX512F_KOP forms except explicit !64 mode; upstream comment removed; all other keys preserved"
+  "subset_sha256": "59c7f655cd050675a9fc1c227aa2d477e7fd6aff7df6d0f646c5ce640048764a",
+  "selection": "EVEX AVX512F_* and AVX512_VPCLMULQDQ_512 and VEX AVX512F_KOP forms except explicit !64 mode; upstream comment removed; all other keys preserved"
 }

@@ -14,10 +14,10 @@ class EvexTests(unittest.TestCase):
         self.rows = evex.load(ROOT)
 
     def test_import_scope_and_smoke_cases(self):
-        self.assertEqual(len(self.rows), 1899)
-        self.assertEqual(sum(r['encoding'] == 'evex' for r in self.rows), 1884)
-        self.assertEqual(len({r['mnemonic'] for r in self.rows}), 351)
-        self.assertEqual(len(assembly_smoke.evex_sources(ROOT).splitlines()) - 1, 2423)
+        self.assertEqual(len(self.rows), 1901)
+        self.assertEqual(sum(r['encoding'] == 'evex' for r in self.rows), 1886)
+        self.assertEqual(len({r['mnemonic'] for r in self.rows}), 352)
+        self.assertEqual(len(assembly_smoke.evex_sources(ROOT).splitlines()) - 1, 2425)
         self.assertEqual(json.loads((ROOT / 'evex-source.json').read_text())['commit'],
                          json.loads((ROOT / 'zydis-source.json').read_text())['commit'])
 
