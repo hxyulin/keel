@@ -1535,6 +1535,62 @@ fn lookup(base: &str) -> Option<Binding> {
         "keel_avx512bw_pmovswbstore512" => Binding::Value(Intrinsic::X86Avx512BwPmovswbStore512, &[]),
         "keel_avx512bw_pmovuswb512" => Binding::Value(Intrinsic::X86Avx512BwPmovuswb512, &[]),
         "keel_avx512bw_pmovuswbstore512" => Binding::Value(Intrinsic::X86Avx512BwPmovuswbStore512, &[]),
+        "keel_avx512vl_vpgatherdd128" => Binding::Value(Intrinsic::X86Avx512VlVpgatherdd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterdd128" => Binding::Value(Intrinsic::X86Avx512VlVpscatterdd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherdps128" => Binding::Value(Intrinsic::X86Avx512VlVgatherdps128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterdps128" => Binding::Value(Intrinsic::X86Avx512VlVscatterdps128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherdq128" => Binding::Value(Intrinsic::X86Avx512VlVpgatherdq128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterdq128" => Binding::Value(Intrinsic::X86Avx512VlVpscatterdq128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherdpd128" => Binding::Value(Intrinsic::X86Avx512VlVgatherdpd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterdpd128" => Binding::Value(Intrinsic::X86Avx512VlVscatterdpd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherqd128" => Binding::Value(Intrinsic::X86Avx512VlVpgatherqd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterqd128" => Binding::Value(Intrinsic::X86Avx512VlVpscatterqd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherqps128" => Binding::Value(Intrinsic::X86Avx512VlVgatherqps128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterqps128" => Binding::Value(Intrinsic::X86Avx512VlVscatterqps128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherqq128" => Binding::Value(Intrinsic::X86Avx512VlVpgatherqq128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterqq128" => Binding::Value(Intrinsic::X86Avx512VlVpscatterqq128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherqpd128" => Binding::Value(Intrinsic::X86Avx512VlVgatherqpd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterqpd128" => Binding::Value(Intrinsic::X86Avx512VlVscatterqpd128, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherdd256" => Binding::Value(Intrinsic::X86Avx512VlVpgatherdd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterdd256" => Binding::Value(Intrinsic::X86Avx512VlVpscatterdd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherdps256" => Binding::Value(Intrinsic::X86Avx512VlVgatherdps256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterdps256" => Binding::Value(Intrinsic::X86Avx512VlVscatterdps256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherdq256" => Binding::Value(Intrinsic::X86Avx512VlVpgatherdq256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterdq256" => Binding::Value(Intrinsic::X86Avx512VlVpscatterdq256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherdpd256" => Binding::Value(Intrinsic::X86Avx512VlVgatherdpd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterdpd256" => Binding::Value(Intrinsic::X86Avx512VlVscatterdpd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherqd256" => Binding::Value(Intrinsic::X86Avx512VlVpgatherqd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterqd256" => Binding::Value(Intrinsic::X86Avx512VlVpscatterqd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherqps256" => Binding::Value(Intrinsic::X86Avx512VlVgatherqps256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterqps256" => Binding::Value(Intrinsic::X86Avx512VlVscatterqps256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpgatherqq256" => Binding::Value(Intrinsic::X86Avx512VlVpgatherqq256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vpscatterqq256" => Binding::Value(Intrinsic::X86Avx512VlVpscatterqq256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vgatherqpd256" => Binding::Value(Intrinsic::X86Avx512VlVgatherqpd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512vl_vscatterqpd256" => Binding::Value(Intrinsic::X86Avx512VlVscatterqpd256, &[ImmediateControl { allowed_values: &[1, 2, 4, 8], index: 4, maximum: 8, mask: 15, diagnostic: "gather scale must be an integer constant expression equal to 1, 2, 4 or 8" }]),
+        "keel_avx512bw_kandd" => Binding::Value(Intrinsic::X86Avx512BwKandd, &[]),
+        "keel_avx512bw_kandnd" => Binding::Value(Intrinsic::X86Avx512BwKandnd, &[]),
+        "keel_avx512bw_kord" => Binding::Value(Intrinsic::X86Avx512BwKord, &[]),
+        "keel_avx512bw_kxord" => Binding::Value(Intrinsic::X86Avx512BwKxord, &[]),
+        "keel_avx512bw_kxnord" => Binding::Value(Intrinsic::X86Avx512BwKxnord, &[]),
+        "keel_avx512bw_knotd" => Binding::Value(Intrinsic::X86Avx512BwKnotd, &[]),
+        "keel_avx512bw_kshiftld" => Binding::Value(Intrinsic::X86Avx512BwKshiftld, &[ImmediateControl { allowed_values: &[], index: 1, maximum: 255, mask: 255, diagnostic: "AVX512BW mask shift requires an integer constant in 0..255" }]),
+        "keel_avx512bw_kshiftrd" => Binding::Value(Intrinsic::X86Avx512BwKshiftrd, &[ImmediateControl { allowed_values: &[], index: 1, maximum: 255, mask: 255, diagnostic: "AVX512BW mask shift requires an integer constant in 0..255" }]),
+        "keel_avx512bw_kaddd" => Binding::Value(Intrinsic::X86Avx512BwKaddd, &[]),
+        "keel_avx512bw_ktestd" => Binding::Value(Intrinsic::X86Avx512BwKtestd, &[]),
+        "keel_avx512bw_kortestd" => Binding::Value(Intrinsic::X86Avx512BwKortestd, &[]),
+        "keel_avx512bw_kunpckwd" => Binding::Value(Intrinsic::X86Avx512BwKunpckwd, &[]),
+        "keel_avx512bw_kandq" => Binding::Value(Intrinsic::X86Avx512BwKandq, &[]),
+        "keel_avx512bw_kandnq" => Binding::Value(Intrinsic::X86Avx512BwKandnq, &[]),
+        "keel_avx512bw_korq" => Binding::Value(Intrinsic::X86Avx512BwKorq, &[]),
+        "keel_avx512bw_kxorq" => Binding::Value(Intrinsic::X86Avx512BwKxorq, &[]),
+        "keel_avx512bw_kxnorq" => Binding::Value(Intrinsic::X86Avx512BwKxnorq, &[]),
+        "keel_avx512bw_knotq" => Binding::Value(Intrinsic::X86Avx512BwKnotq, &[]),
+        "keel_avx512bw_kshiftlq" => Binding::Value(Intrinsic::X86Avx512BwKshiftlq, &[ImmediateControl { allowed_values: &[], index: 1, maximum: 255, mask: 255, diagnostic: "AVX512BW mask shift requires an integer constant in 0..255" }]),
+        "keel_avx512bw_kshiftrq" => Binding::Value(Intrinsic::X86Avx512BwKshiftrq, &[ImmediateControl { allowed_values: &[], index: 1, maximum: 255, mask: 255, diagnostic: "AVX512BW mask shift requires an integer constant in 0..255" }]),
+        "keel_avx512bw_kaddq" => Binding::Value(Intrinsic::X86Avx512BwKaddq, &[]),
+        "keel_avx512bw_ktestq" => Binding::Value(Intrinsic::X86Avx512BwKtestq, &[]),
+        "keel_avx512bw_kortestq" => Binding::Value(Intrinsic::X86Avx512BwKortestq, &[]),
+        "keel_avx512bw_kunpckdq" => Binding::Value(Intrinsic::X86Avx512BwKunpckdq, &[]),
         _ => return None,
     })
 }
@@ -3069,6 +3125,62 @@ const _: () = {
     assert!(Intrinsic::X86Avx512BwPmovswbStore512 as u16 == 2019);
     assert!(Intrinsic::X86Avx512BwPmovuswb512 as u16 == 2020);
     assert!(Intrinsic::X86Avx512BwPmovuswbStore512 as u16 == 2021);
+    assert!(Intrinsic::X86Avx512VlVpgatherdd128 as u16 == 2022);
+    assert!(Intrinsic::X86Avx512VlVpscatterdd128 as u16 == 2023);
+    assert!(Intrinsic::X86Avx512VlVgatherdps128 as u16 == 2024);
+    assert!(Intrinsic::X86Avx512VlVscatterdps128 as u16 == 2025);
+    assert!(Intrinsic::X86Avx512VlVpgatherdq128 as u16 == 2026);
+    assert!(Intrinsic::X86Avx512VlVpscatterdq128 as u16 == 2027);
+    assert!(Intrinsic::X86Avx512VlVgatherdpd128 as u16 == 2028);
+    assert!(Intrinsic::X86Avx512VlVscatterdpd128 as u16 == 2029);
+    assert!(Intrinsic::X86Avx512VlVpgatherqd128 as u16 == 2030);
+    assert!(Intrinsic::X86Avx512VlVpscatterqd128 as u16 == 2031);
+    assert!(Intrinsic::X86Avx512VlVgatherqps128 as u16 == 2032);
+    assert!(Intrinsic::X86Avx512VlVscatterqps128 as u16 == 2033);
+    assert!(Intrinsic::X86Avx512VlVpgatherqq128 as u16 == 2034);
+    assert!(Intrinsic::X86Avx512VlVpscatterqq128 as u16 == 2035);
+    assert!(Intrinsic::X86Avx512VlVgatherqpd128 as u16 == 2036);
+    assert!(Intrinsic::X86Avx512VlVscatterqpd128 as u16 == 2037);
+    assert!(Intrinsic::X86Avx512VlVpgatherdd256 as u16 == 2038);
+    assert!(Intrinsic::X86Avx512VlVpscatterdd256 as u16 == 2039);
+    assert!(Intrinsic::X86Avx512VlVgatherdps256 as u16 == 2040);
+    assert!(Intrinsic::X86Avx512VlVscatterdps256 as u16 == 2041);
+    assert!(Intrinsic::X86Avx512VlVpgatherdq256 as u16 == 2042);
+    assert!(Intrinsic::X86Avx512VlVpscatterdq256 as u16 == 2043);
+    assert!(Intrinsic::X86Avx512VlVgatherdpd256 as u16 == 2044);
+    assert!(Intrinsic::X86Avx512VlVscatterdpd256 as u16 == 2045);
+    assert!(Intrinsic::X86Avx512VlVpgatherqd256 as u16 == 2046);
+    assert!(Intrinsic::X86Avx512VlVpscatterqd256 as u16 == 2047);
+    assert!(Intrinsic::X86Avx512VlVgatherqps256 as u16 == 2048);
+    assert!(Intrinsic::X86Avx512VlVscatterqps256 as u16 == 2049);
+    assert!(Intrinsic::X86Avx512VlVpgatherqq256 as u16 == 2050);
+    assert!(Intrinsic::X86Avx512VlVpscatterqq256 as u16 == 2051);
+    assert!(Intrinsic::X86Avx512VlVgatherqpd256 as u16 == 2052);
+    assert!(Intrinsic::X86Avx512VlVscatterqpd256 as u16 == 2053);
+    assert!(Intrinsic::X86Avx512BwKandd as u16 == 2054);
+    assert!(Intrinsic::X86Avx512BwKandnd as u16 == 2055);
+    assert!(Intrinsic::X86Avx512BwKord as u16 == 2056);
+    assert!(Intrinsic::X86Avx512BwKxord as u16 == 2057);
+    assert!(Intrinsic::X86Avx512BwKxnord as u16 == 2058);
+    assert!(Intrinsic::X86Avx512BwKnotd as u16 == 2059);
+    assert!(Intrinsic::X86Avx512BwKshiftld as u16 == 2060);
+    assert!(Intrinsic::X86Avx512BwKshiftrd as u16 == 2061);
+    assert!(Intrinsic::X86Avx512BwKaddd as u16 == 2062);
+    assert!(Intrinsic::X86Avx512BwKtestd as u16 == 2063);
+    assert!(Intrinsic::X86Avx512BwKortestd as u16 == 2064);
+    assert!(Intrinsic::X86Avx512BwKunpckwd as u16 == 2065);
+    assert!(Intrinsic::X86Avx512BwKandq as u16 == 2066);
+    assert!(Intrinsic::X86Avx512BwKandnq as u16 == 2067);
+    assert!(Intrinsic::X86Avx512BwKorq as u16 == 2068);
+    assert!(Intrinsic::X86Avx512BwKxorq as u16 == 2069);
+    assert!(Intrinsic::X86Avx512BwKxnorq as u16 == 2070);
+    assert!(Intrinsic::X86Avx512BwKnotq as u16 == 2071);
+    assert!(Intrinsic::X86Avx512BwKshiftlq as u16 == 2072);
+    assert!(Intrinsic::X86Avx512BwKshiftrq as u16 == 2073);
+    assert!(Intrinsic::X86Avx512BwKaddq as u16 == 2074);
+    assert!(Intrinsic::X86Avx512BwKtestq as u16 == 2075);
+    assert!(Intrinsic::X86Avx512BwKortestq as u16 == 2076);
+    assert!(Intrinsic::X86Avx512BwKunpckdq as u16 == 2077);
 };
 
 #[cfg(test)]
@@ -4592,6 +4704,62 @@ mod tests {
             (Intrinsic::X86Avx512BwPmovswbStore512, &[Type::Ptr, Type::Vector(VectorType::I16x32), Type::I32], &[]),
             (Intrinsic::X86Avx512BwPmovuswb512, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I8x32)]),
             (Intrinsic::X86Avx512BwPmovuswbStore512, &[Type::Ptr, Type::Vector(VectorType::I16x32), Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherdd128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512VlVpscatterdd128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherdps128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlVscatterdps128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherdq128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I64x2), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512VlVpscatterdq128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I64x2), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherdpd128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F64x2), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlVscatterdpd128, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F64x2), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherqd128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512VlVpscatterqd128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherqps128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlVscatterqps128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherqq128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::I64x2), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512VlVpscatterqq128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::I64x2), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherqpd128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::F64x2), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlVscatterqpd128, &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::F64x2), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherdd256, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I32x8), Type::I8, Type::I32], &[Type::Vector(VectorType::I32x8)]),
+            (Intrinsic::X86Avx512VlVpscatterdd256, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::I32x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherdps256, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::F32x8), Type::I8, Type::I32], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlVscatterdps256, &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::Vector(VectorType::F32x8), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherdq256, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I64x4), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512VlVpscatterdq256, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::I64x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherdpd256, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F64x4), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlVscatterdpd256, &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::Vector(VectorType::F64x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherqd256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512VlVpscatterqd256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::I32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherqps256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlVscatterqps256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::F32x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVpgatherqq256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::I64x4), Type::I8, Type::I32], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512VlVpscatterqq256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::I64x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512VlVgatherqpd256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::F64x4), Type::I8, Type::I32], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlVscatterqpd256, &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::F64x4), Type::I8, Type::I32], &[]),
+            (Intrinsic::X86Avx512BwKandd, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKandnd, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKord, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKxord, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKxnord, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKnotd, &[Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKshiftld, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKshiftrd, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKaddd, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKtestd, &[Type::I32, Type::I32], &[Type::I8]),
+            (Intrinsic::X86Avx512BwKortestd, &[Type::I32, Type::I32], &[Type::I8]),
+            (Intrinsic::X86Avx512BwKunpckwd, &[Type::I32, Type::I32], &[Type::I32]),
+            (Intrinsic::X86Avx512BwKandq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKandnq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKorq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKxorq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKxnorq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKnotq, &[Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKshiftlq, &[Type::I64, Type::I32], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKshiftrq, &[Type::I64, Type::I32], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKaddq, &[Type::I64, Type::I64], &[Type::I64]),
+            (Intrinsic::X86Avx512BwKtestq, &[Type::I64, Type::I64], &[Type::I8]),
+            (Intrinsic::X86Avx512BwKortestq, &[Type::I64, Type::I64], &[Type::I8]),
+            (Intrinsic::X86Avx512BwKunpckdq, &[Type::I64, Type::I64], &[Type::I64]),
         ];
         for &(intrinsic, params, result) in signatures {
             assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");

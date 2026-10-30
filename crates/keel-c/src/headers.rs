@@ -67,6 +67,8 @@ pub fn get(name: &Path) -> Option<&'static str> {
         "__keel_avx512_dq_mask_alu.h" => include_str!("../include/__keel_avx512_dq_mask_alu.h"),
         "__keel_avx512_vl_pack.h" => include_str!("../include/__keel_avx512_vl_pack.h"),
         "__keel_avx512_bw_convert.h" => include_str!("../include/__keel_avx512_bw_convert.h"),
+        "__keel_avx512_bw_mask_alu.h" => include_str!("../include/__keel_avx512_bw_mask_alu.h"),
+        "__keel_avx512_vl_indexed.h" => include_str!("../include/__keel_avx512_vl_indexed.h"),
         "shaintrin.h" => include_str!("../include/shaintrin.h"),
         "__keel_aes.h" => include_str!("../include/__keel_aes.h"),
         "fmaintrin.h" => include_str!("../include/fmaintrin.h"),

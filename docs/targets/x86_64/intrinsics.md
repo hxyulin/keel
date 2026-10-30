@@ -748,6 +748,17 @@ SSA masks and indices remain unchanged after the operation. A fault may leave
 partial memory effects, as on the instruction itself. The intrinsics do not
 provide a signal-handler resume ABI or expose partially cleared hardware masks.
 
+AVX512VL adds 128- and 256-bit encodings under `x86_avx512vl_`,
+with width suffixes 128 and 256. Gather takes `(ptr, index, merge, i8_mask,
+scale)` and returns the data vector; scatter replaces merge with the value
+and returns void. These forms require F plus VL. At 128 bits, qword-index
+dword-data gathers produce two low elements and always zero the upper two,
+even with a zero mask. Corresponding scatters ignore the upper two data lanes.
+Dword-index qword-data forms use only the required low index lanes. High mask
+bits never activate an absent lane. C exposes narrow scalar-mask gathers and
+masked or unmasked scatters; existing AVX2 vector-mask gathers retain their
+feature requirements.
+
 ### Compression and expansion
 
 The typed `x86_avx512_compress{d,q,ps,pd}` intrinsics take a merge vector,
@@ -1625,3 +1636,17 @@ C exposes register conversions and narrowing stores. Existing narrow
 unmasked widening APIs keep their legacy requirements. Direct masked
 widening loads use compiler-owned `__keel_mm{,256,512}_mask_load_cvtepi8_epi16`
 and `...cvtepu8_epi16` names, with corresponding mask-zero forms.
+
+BW dword and qword mask algebra uses `x86_avx512bw_` names matching the
+KAND, KANDN, KOR, KXOR, KXNOR, KNOT, KSHIFT, KADD, KTEST, KORTEST and
+KUNPCK opcodes. Operands and results are `i32` or `i64`, except tests return
+an `i8` with ZF in bit zero and CF in bit one. Upper flag bits are zero.
+Shifts take an immediate integer in 0..255 and return zero for counts at
+least the mask width. Addition wraps. Unpack places the first input's low
+half above the second input's low half. These pure operations require F plus
+BW without DQ or VL. Scalar SSA masks remain unchanged by native staging.
+
+C exposes the 32- and 64-bit mask APIs, including flag-result pointer forms.
+Scalar mask conversions and 4/8-byte mask loads and stores use ordinary
+scalar operations and remain legal without BW. Their arguments are evaluated
+once, and memory accesses use exactly the mask width.

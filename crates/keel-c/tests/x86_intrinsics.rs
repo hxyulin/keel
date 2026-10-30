@@ -1693,3 +1693,9 @@ mod x86_avx512_bw_convert;
 mod x86_avx512_dq_mask_alu;
 #[path = "x86_intrinsics/x86_avx512_vl_pack.rs"]
 mod x86_avx512_vl_pack;
+
+#[path = "x86_intrinsics/x86_avx512_bw_mask_alu.rs"]
+mod x86_avx512_bw_mask_alu;
+
+#[path = "x86_intrinsics/x86_avx512_vl_indexed.rs"]
+mod x86_avx512_vl_indexed;
