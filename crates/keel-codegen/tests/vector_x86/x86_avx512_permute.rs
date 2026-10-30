@@ -20,6 +20,9 @@ fn sources() -> (String, String) {
     );
     let mut checks = String::new();
     for id in Intrinsic::ALL {
+        if id.x86_avx512_vl_permute().is_some() {
+            continue;
+        }
         let Some((opcode, kind)) = id.x86_avx512_permute() else {
             continue;
         };
@@ -197,7 +200,7 @@ fn avx512_permutation_controls_and_effects() {
     let mut count = 0;
     for id in Intrinsic::ALL
         .into_iter()
-        .filter(|id| id.x86_avx512_permute().is_some())
+        .filter(|id| id.x86_avx512_permute().is_some() && id.x86_avx512_vl_permute().is_none())
     {
         count += 1;
         let data = InstData::Intrinsic { id, args: vec![] };

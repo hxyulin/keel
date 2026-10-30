@@ -965,3 +965,12 @@ mod x86_avx512_bw_mul;
 
 #[path = "vector_x86/x86_avx512_dq_lane.rs"]
 mod x86_avx512_dq_lane;
+
+#[path = "vector_x86/x86_avx512_bw_pack.rs"]
+mod x86_avx512_bw_pack;
+
+#[path = "vector_x86/x86_avx512_dq_special.rs"]
+mod x86_avx512_dq_special;
+
+#[path = "vector_x86/x86_avx512_vl_permute.rs"]
+mod x86_avx512_vl_permute;

@@ -2,15 +2,14 @@
 use super::*;
 use keel_asm_ir::x86::evex::EvexOpcode;
 use keel_ir::X86Avx512PermuteKind as K;
-const MERGE: u8 = 12;
 pub(super) fn validate(
     func: &Function,
     id: Intrinsic,
     args: &[Value],
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
-    if !features.avx512f {
-        return Err("AVX512 permutation requires AVX512F");
+    if !features.avx512f || (id.x86_avx512_vl_permute().is_some() && !features.avx512vl) {
+        return Err("AVX512 permutation requires AVX512F and narrow forms require AVX512VL");
     }
     if args.len() != id.info().params.len()
         || args
@@ -36,7 +35,7 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         let (name, kind) = id.x86_avx512_permute().expect("permutation intrinsic");
-        self.avx512_stage_vector(args[0], MERGE);
+        let width = (self.ty(args[0]).bytes().expect("permutation width") * 8) as u16;
         self.avx512_stage_vector(args[2], FS0);
         if matches!(
             kind,
@@ -48,7 +47,7 @@ impl FunctionCompiler<'_> {
             self.avx512_stage_vector(args[4], FS2);
         }
         let op = Opcode::Evex(EvexOpcode::parse(name).expect("AVX512F permutation opcode"));
-        let z = |r| asm_arg(simd_width(r, 512));
+        let z = |r| asm_arg(simd_width(r, width));
         let computed = match kind {
             K::Full => {
                 self.emit(op, [z(FS2), z(FS1), z(FS0)]);
@@ -98,6 +97,10 @@ impl FunctionCompiler<'_> {
                 FS2
             }
         };
+        // Read the original merge only after the tied computation. Every source
+        // remains in an allocated register or spill, and scratch12 is avoided.
+        let merge = if computed == FS0 { FS1 } else { FS0 };
+        self.avx512_stage_vector(args[0], merge);
         self.avx512_stage_mask(args[1]);
         let shape = self.ty(args[0]).vector().expect("permutation vector");
         let name = if shape.lane_type().bytes() == Some(8) {
@@ -105,10 +108,10 @@ impl FunctionCompiler<'_> {
         } else {
             "vmovups"
         };
-        self.emit(avx512_mask::opcode(name, true), [z(MERGE), z(computed)]);
+        self.emit(avx512_mask::opcode(name, true), [z(merge), z(computed)]);
         let d = self.def_freg(result);
-        if d != MERGE {
-            self.emit(movs(self.ty(args[0])), [z(d), z(MERGE)]);
+        if d != merge {
+            self.emit(movs(self.ty(args[0])), [z(d), z(merge)]);
         }
         self.def_done(result, d);
     }

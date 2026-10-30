@@ -2990,10 +2990,238 @@ pub enum Intrinsic {
     X86Avx512BwAvgb512 = 1832,
     #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
     X86Avx512BwAvgw512 = 1833,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangeps128 = 1834,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangepd128 = 1835,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReduceps128 = 1836,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReducepd128 = 1837,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclassps128 = 1838,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclasspd128 = 1839,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangeps256 = 1840,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangepd256 = 1841,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReduceps256 = 1842,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReducepd256 = 1843,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclassps256 = 1844,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclasspd256 = 1845,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangeps512 = 1846,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangepd512 = 1847,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReduceps512 = 1848,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReducepd512 = 1849,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclassps512 = 1850,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclasspd512 = 1851,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangess = 1852,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqRangesd = 1853,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReducess = 1854,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqReducesd = 1855,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclassss = 1856,
+    #[doc = "Raw AVX512DQ RANGE, REDUCE or FPCLASS operation ordered with MXCSR. FPCLASS observes DAZ without raising SIMD exceptions. Only packed narrow forms require AVX512VL; scalar upper passthrough is independent of low-lane merge."]
+    X86Avx512DqFpclasssd = 1857,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2d128 = 1858,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2q128 = 1859,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2ps128 = 1860,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2pd128 = 1861,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2d128 = 1862,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2q128 = 1863,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2ps128 = 1864,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2pd128 = 1865,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilps128 = 1866,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpd128 = 1867,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpsImm128 = 1868,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpdImm128 = 1869,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufps128 = 1870,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufpd128 = 1871,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpshufd128 = 1872,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlValignd128 = 1873,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlValignq128 = 1874,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckldq128 = 1875,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpcklqdq128 = 1876,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpcklps128 = 1877,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpcklpd128 = 1878,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckhdq128 = 1879,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckhqdq128 = 1880,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpckhps128 = 1881,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpckhpd128 = 1882,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovshdup128 = 1883,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovsldup128 = 1884,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovddup128 = 1885,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermd256 = 1886,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermq256 = 1887,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermps256 = 1888,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermpd256 = 1889,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2d256 = 1890,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2q256 = 1891,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2ps256 = 1892,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermi2pd256 = 1893,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2d256 = 1894,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2q256 = 1895,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2ps256 = 1896,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermt2pd256 = 1897,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilps256 = 1898,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpd256 = 1899,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpsImm256 = 1900,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermilpdImm256 = 1901,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermqImm256 = 1902,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpermpdImm256 = 1903,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufps256 = 1904,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufpd256 = 1905,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpshufd256 = 1906,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufi32x4256 = 1907,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshufi64x2256 = 1908,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshuff32x4256 = 1909,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVshuff64x2256 = 1910,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlValignd256 = 1911,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlValignq256 = 1912,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckldq256 = 1913,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpcklqdq256 = 1914,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpcklps256 = 1915,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpcklpd256 = 1916,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckhdq256 = 1917,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVpunpckhqdq256 = 1918,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpckhps256 = 1919,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVunpckhpd256 = 1920,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovshdup256 = 1921,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovsldup256 = 1922,
+    #[doc = "Pure narrow AVX512 permutation or shuffle with an independent inactive merge. Local shuffles and unpacks retain 128-bit lane boundaries; tied two-table operands preserve all live sources. Requires AVX512F and AVX512VL."]
+    X86Avx512VlVmovddup256 = 1923,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPacksswb128 = 1924,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackuswb128 = 1925,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackssdw128 = 1926,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackusdw128 = 1927,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklbw128 = 1928,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhbw128 = 1929,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklwd128 = 1930,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhwd128 = 1931,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPacksswb256 = 1932,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackuswb256 = 1933,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackssdw256 = 1934,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackusdw256 = 1935,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklbw256 = 1936,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhbw256 = 1937,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklwd256 = 1938,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhwd256 = 1939,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPacksswb512 = 1940,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackuswb512 = 1941,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackssdw512 = 1942,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwPackusdw512 = 1943,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklbw512 = 1944,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhbw512 = 1945,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpcklwd512 = 1946,
+    #[doc = "Pure masked AVX512BW saturating pack or interleaving unpack. Each 128-bit block operates independently. PACKUS inputs are signed; destination lanes saturate to unsigned. Narrow forms require AVX512VL."]
+    X86Avx512BwUnpckhwd512 = 1947,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1834] = [
+    pub const ALL: [Intrinsic; 1948] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -4828,6 +5056,120 @@ impl Intrinsic {
         Intrinsic::X86Avx512BwMaddubsw512,
         Intrinsic::X86Avx512BwAvgb512,
         Intrinsic::X86Avx512BwAvgw512,
+        Intrinsic::X86Avx512DqRangeps128,
+        Intrinsic::X86Avx512DqRangepd128,
+        Intrinsic::X86Avx512DqReduceps128,
+        Intrinsic::X86Avx512DqReducepd128,
+        Intrinsic::X86Avx512DqFpclassps128,
+        Intrinsic::X86Avx512DqFpclasspd128,
+        Intrinsic::X86Avx512DqRangeps256,
+        Intrinsic::X86Avx512DqRangepd256,
+        Intrinsic::X86Avx512DqReduceps256,
+        Intrinsic::X86Avx512DqReducepd256,
+        Intrinsic::X86Avx512DqFpclassps256,
+        Intrinsic::X86Avx512DqFpclasspd256,
+        Intrinsic::X86Avx512DqRangeps512,
+        Intrinsic::X86Avx512DqRangepd512,
+        Intrinsic::X86Avx512DqReduceps512,
+        Intrinsic::X86Avx512DqReducepd512,
+        Intrinsic::X86Avx512DqFpclassps512,
+        Intrinsic::X86Avx512DqFpclasspd512,
+        Intrinsic::X86Avx512DqRangess,
+        Intrinsic::X86Avx512DqRangesd,
+        Intrinsic::X86Avx512DqReducess,
+        Intrinsic::X86Avx512DqReducesd,
+        Intrinsic::X86Avx512DqFpclassss,
+        Intrinsic::X86Avx512DqFpclasssd,
+        Intrinsic::X86Avx512VlVpermi2d128,
+        Intrinsic::X86Avx512VlVpermi2q128,
+        Intrinsic::X86Avx512VlVpermi2ps128,
+        Intrinsic::X86Avx512VlVpermi2pd128,
+        Intrinsic::X86Avx512VlVpermt2d128,
+        Intrinsic::X86Avx512VlVpermt2q128,
+        Intrinsic::X86Avx512VlVpermt2ps128,
+        Intrinsic::X86Avx512VlVpermt2pd128,
+        Intrinsic::X86Avx512VlVpermilps128,
+        Intrinsic::X86Avx512VlVpermilpd128,
+        Intrinsic::X86Avx512VlVpermilpsImm128,
+        Intrinsic::X86Avx512VlVpermilpdImm128,
+        Intrinsic::X86Avx512VlVshufps128,
+        Intrinsic::X86Avx512VlVshufpd128,
+        Intrinsic::X86Avx512VlVpshufd128,
+        Intrinsic::X86Avx512VlValignd128,
+        Intrinsic::X86Avx512VlValignq128,
+        Intrinsic::X86Avx512VlVpunpckldq128,
+        Intrinsic::X86Avx512VlVpunpcklqdq128,
+        Intrinsic::X86Avx512VlVunpcklps128,
+        Intrinsic::X86Avx512VlVunpcklpd128,
+        Intrinsic::X86Avx512VlVpunpckhdq128,
+        Intrinsic::X86Avx512VlVpunpckhqdq128,
+        Intrinsic::X86Avx512VlVunpckhps128,
+        Intrinsic::X86Avx512VlVunpckhpd128,
+        Intrinsic::X86Avx512VlVmovshdup128,
+        Intrinsic::X86Avx512VlVmovsldup128,
+        Intrinsic::X86Avx512VlVmovddup128,
+        Intrinsic::X86Avx512VlVpermd256,
+        Intrinsic::X86Avx512VlVpermq256,
+        Intrinsic::X86Avx512VlVpermps256,
+        Intrinsic::X86Avx512VlVpermpd256,
+        Intrinsic::X86Avx512VlVpermi2d256,
+        Intrinsic::X86Avx512VlVpermi2q256,
+        Intrinsic::X86Avx512VlVpermi2ps256,
+        Intrinsic::X86Avx512VlVpermi2pd256,
+        Intrinsic::X86Avx512VlVpermt2d256,
+        Intrinsic::X86Avx512VlVpermt2q256,
+        Intrinsic::X86Avx512VlVpermt2ps256,
+        Intrinsic::X86Avx512VlVpermt2pd256,
+        Intrinsic::X86Avx512VlVpermilps256,
+        Intrinsic::X86Avx512VlVpermilpd256,
+        Intrinsic::X86Avx512VlVpermilpsImm256,
+        Intrinsic::X86Avx512VlVpermilpdImm256,
+        Intrinsic::X86Avx512VlVpermqImm256,
+        Intrinsic::X86Avx512VlVpermpdImm256,
+        Intrinsic::X86Avx512VlVshufps256,
+        Intrinsic::X86Avx512VlVshufpd256,
+        Intrinsic::X86Avx512VlVpshufd256,
+        Intrinsic::X86Avx512VlVshufi32x4256,
+        Intrinsic::X86Avx512VlVshufi64x2256,
+        Intrinsic::X86Avx512VlVshuff32x4256,
+        Intrinsic::X86Avx512VlVshuff64x2256,
+        Intrinsic::X86Avx512VlValignd256,
+        Intrinsic::X86Avx512VlValignq256,
+        Intrinsic::X86Avx512VlVpunpckldq256,
+        Intrinsic::X86Avx512VlVpunpcklqdq256,
+        Intrinsic::X86Avx512VlVunpcklps256,
+        Intrinsic::X86Avx512VlVunpcklpd256,
+        Intrinsic::X86Avx512VlVpunpckhdq256,
+        Intrinsic::X86Avx512VlVpunpckhqdq256,
+        Intrinsic::X86Avx512VlVunpckhps256,
+        Intrinsic::X86Avx512VlVunpckhpd256,
+        Intrinsic::X86Avx512VlVmovshdup256,
+        Intrinsic::X86Avx512VlVmovsldup256,
+        Intrinsic::X86Avx512VlVmovddup256,
+        Intrinsic::X86Avx512BwPacksswb128,
+        Intrinsic::X86Avx512BwPackuswb128,
+        Intrinsic::X86Avx512BwPackssdw128,
+        Intrinsic::X86Avx512BwPackusdw128,
+        Intrinsic::X86Avx512BwUnpcklbw128,
+        Intrinsic::X86Avx512BwUnpckhbw128,
+        Intrinsic::X86Avx512BwUnpcklwd128,
+        Intrinsic::X86Avx512BwUnpckhwd128,
+        Intrinsic::X86Avx512BwPacksswb256,
+        Intrinsic::X86Avx512BwPackuswb256,
+        Intrinsic::X86Avx512BwPackssdw256,
+        Intrinsic::X86Avx512BwPackusdw256,
+        Intrinsic::X86Avx512BwUnpcklbw256,
+        Intrinsic::X86Avx512BwUnpckhbw256,
+        Intrinsic::X86Avx512BwUnpcklwd256,
+        Intrinsic::X86Avx512BwUnpckhwd256,
+        Intrinsic::X86Avx512BwPacksswb512,
+        Intrinsic::X86Avx512BwPackuswb512,
+        Intrinsic::X86Avx512BwPackssdw512,
+        Intrinsic::X86Avx512BwPackusdw512,
+        Intrinsic::X86Avx512BwUnpcklbw512,
+        Intrinsic::X86Avx512BwUnpckhbw512,
+        Intrinsic::X86Avx512BwUnpcklwd512,
+        Intrinsic::X86Avx512BwUnpckhwd512,
     ];
 }
 
@@ -6658,5 +7000,119 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512BwMaddubsw512
             | $crate::Intrinsic::X86Avx512BwAvgb512
             | $crate::Intrinsic::X86Avx512BwAvgw512
+            | $crate::Intrinsic::X86Avx512DqRangeps128
+            | $crate::Intrinsic::X86Avx512DqRangepd128
+            | $crate::Intrinsic::X86Avx512DqReduceps128
+            | $crate::Intrinsic::X86Avx512DqReducepd128
+            | $crate::Intrinsic::X86Avx512DqFpclassps128
+            | $crate::Intrinsic::X86Avx512DqFpclasspd128
+            | $crate::Intrinsic::X86Avx512DqRangeps256
+            | $crate::Intrinsic::X86Avx512DqRangepd256
+            | $crate::Intrinsic::X86Avx512DqReduceps256
+            | $crate::Intrinsic::X86Avx512DqReducepd256
+            | $crate::Intrinsic::X86Avx512DqFpclassps256
+            | $crate::Intrinsic::X86Avx512DqFpclasspd256
+            | $crate::Intrinsic::X86Avx512DqRangeps512
+            | $crate::Intrinsic::X86Avx512DqRangepd512
+            | $crate::Intrinsic::X86Avx512DqReduceps512
+            | $crate::Intrinsic::X86Avx512DqReducepd512
+            | $crate::Intrinsic::X86Avx512DqFpclassps512
+            | $crate::Intrinsic::X86Avx512DqFpclasspd512
+            | $crate::Intrinsic::X86Avx512DqRangess
+            | $crate::Intrinsic::X86Avx512DqRangesd
+            | $crate::Intrinsic::X86Avx512DqReducess
+            | $crate::Intrinsic::X86Avx512DqReducesd
+            | $crate::Intrinsic::X86Avx512DqFpclassss
+            | $crate::Intrinsic::X86Avx512DqFpclasssd
+            | $crate::Intrinsic::X86Avx512VlVpermi2d128
+            | $crate::Intrinsic::X86Avx512VlVpermi2q128
+            | $crate::Intrinsic::X86Avx512VlVpermi2ps128
+            | $crate::Intrinsic::X86Avx512VlVpermi2pd128
+            | $crate::Intrinsic::X86Avx512VlVpermt2d128
+            | $crate::Intrinsic::X86Avx512VlVpermt2q128
+            | $crate::Intrinsic::X86Avx512VlVpermt2ps128
+            | $crate::Intrinsic::X86Avx512VlVpermt2pd128
+            | $crate::Intrinsic::X86Avx512VlVpermilps128
+            | $crate::Intrinsic::X86Avx512VlVpermilpd128
+            | $crate::Intrinsic::X86Avx512VlVpermilpsImm128
+            | $crate::Intrinsic::X86Avx512VlVpermilpdImm128
+            | $crate::Intrinsic::X86Avx512VlVshufps128
+            | $crate::Intrinsic::X86Avx512VlVshufpd128
+            | $crate::Intrinsic::X86Avx512VlVpshufd128
+            | $crate::Intrinsic::X86Avx512VlValignd128
+            | $crate::Intrinsic::X86Avx512VlValignq128
+            | $crate::Intrinsic::X86Avx512VlVpunpckldq128
+            | $crate::Intrinsic::X86Avx512VlVpunpcklqdq128
+            | $crate::Intrinsic::X86Avx512VlVunpcklps128
+            | $crate::Intrinsic::X86Avx512VlVunpcklpd128
+            | $crate::Intrinsic::X86Avx512VlVpunpckhdq128
+            | $crate::Intrinsic::X86Avx512VlVpunpckhqdq128
+            | $crate::Intrinsic::X86Avx512VlVunpckhps128
+            | $crate::Intrinsic::X86Avx512VlVunpckhpd128
+            | $crate::Intrinsic::X86Avx512VlVmovshdup128
+            | $crate::Intrinsic::X86Avx512VlVmovsldup128
+            | $crate::Intrinsic::X86Avx512VlVmovddup128
+            | $crate::Intrinsic::X86Avx512VlVpermd256
+            | $crate::Intrinsic::X86Avx512VlVpermq256
+            | $crate::Intrinsic::X86Avx512VlVpermps256
+            | $crate::Intrinsic::X86Avx512VlVpermpd256
+            | $crate::Intrinsic::X86Avx512VlVpermi2d256
+            | $crate::Intrinsic::X86Avx512VlVpermi2q256
+            | $crate::Intrinsic::X86Avx512VlVpermi2ps256
+            | $crate::Intrinsic::X86Avx512VlVpermi2pd256
+            | $crate::Intrinsic::X86Avx512VlVpermt2d256
+            | $crate::Intrinsic::X86Avx512VlVpermt2q256
+            | $crate::Intrinsic::X86Avx512VlVpermt2ps256
+            | $crate::Intrinsic::X86Avx512VlVpermt2pd256
+            | $crate::Intrinsic::X86Avx512VlVpermilps256
+            | $crate::Intrinsic::X86Avx512VlVpermilpd256
+            | $crate::Intrinsic::X86Avx512VlVpermilpsImm256
+            | $crate::Intrinsic::X86Avx512VlVpermilpdImm256
+            | $crate::Intrinsic::X86Avx512VlVpermqImm256
+            | $crate::Intrinsic::X86Avx512VlVpermpdImm256
+            | $crate::Intrinsic::X86Avx512VlVshufps256
+            | $crate::Intrinsic::X86Avx512VlVshufpd256
+            | $crate::Intrinsic::X86Avx512VlVpshufd256
+            | $crate::Intrinsic::X86Avx512VlVshufi32x4256
+            | $crate::Intrinsic::X86Avx512VlVshufi64x2256
+            | $crate::Intrinsic::X86Avx512VlVshuff32x4256
+            | $crate::Intrinsic::X86Avx512VlVshuff64x2256
+            | $crate::Intrinsic::X86Avx512VlValignd256
+            | $crate::Intrinsic::X86Avx512VlValignq256
+            | $crate::Intrinsic::X86Avx512VlVpunpckldq256
+            | $crate::Intrinsic::X86Avx512VlVpunpcklqdq256
+            | $crate::Intrinsic::X86Avx512VlVunpcklps256
+            | $crate::Intrinsic::X86Avx512VlVunpcklpd256
+            | $crate::Intrinsic::X86Avx512VlVpunpckhdq256
+            | $crate::Intrinsic::X86Avx512VlVpunpckhqdq256
+            | $crate::Intrinsic::X86Avx512VlVunpckhps256
+            | $crate::Intrinsic::X86Avx512VlVunpckhpd256
+            | $crate::Intrinsic::X86Avx512VlVmovshdup256
+            | $crate::Intrinsic::X86Avx512VlVmovsldup256
+            | $crate::Intrinsic::X86Avx512VlVmovddup256
+            | $crate::Intrinsic::X86Avx512BwPacksswb128
+            | $crate::Intrinsic::X86Avx512BwPackuswb128
+            | $crate::Intrinsic::X86Avx512BwPackssdw128
+            | $crate::Intrinsic::X86Avx512BwPackusdw128
+            | $crate::Intrinsic::X86Avx512BwUnpcklbw128
+            | $crate::Intrinsic::X86Avx512BwUnpckhbw128
+            | $crate::Intrinsic::X86Avx512BwUnpcklwd128
+            | $crate::Intrinsic::X86Avx512BwUnpckhwd128
+            | $crate::Intrinsic::X86Avx512BwPacksswb256
+            | $crate::Intrinsic::X86Avx512BwPackuswb256
+            | $crate::Intrinsic::X86Avx512BwPackssdw256
+            | $crate::Intrinsic::X86Avx512BwPackusdw256
+            | $crate::Intrinsic::X86Avx512BwUnpcklbw256
+            | $crate::Intrinsic::X86Avx512BwUnpckhbw256
+            | $crate::Intrinsic::X86Avx512BwUnpcklwd256
+            | $crate::Intrinsic::X86Avx512BwUnpckhwd256
+            | $crate::Intrinsic::X86Avx512BwPacksswb512
+            | $crate::Intrinsic::X86Avx512BwPackuswb512
+            | $crate::Intrinsic::X86Avx512BwPackssdw512
+            | $crate::Intrinsic::X86Avx512BwPackusdw512
+            | $crate::Intrinsic::X86Avx512BwUnpcklbw512
+            | $crate::Intrinsic::X86Avx512BwUnpckhbw512
+            | $crate::Intrinsic::X86Avx512BwUnpcklwd512
+            | $crate::Intrinsic::X86Avx512BwUnpckhwd512
     };
 }

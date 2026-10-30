@@ -1699,6 +1699,25 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if let Some(d) = id.x86_avx512_dq_special() {
+                    for index in [Some(d.immediate), d.sae].into_iter().flatten() {
+                        let control =
+                            args.get(index)
+                                .and_then(|&v| match func.value_def(func.resolve(v)) {
+                                    ValueDef::Result(i, _) => match func.inst_data(i) {
+                                        InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                        _ => None,
+                                    },
+                                    _ => None,
+                                });
+                        if !control.is_some_and(|n| d.valid_control(index, n)) {
+                            self.inst_error(
+                                inst,
+                                "invalid DQ floating-special immediate or SAE control".into(),
+                            );
+                        }
+                    }
+                }
                 if let Some((index, max)) = id.x86_avx512_lane_control() {
                     let control =
                         args.get(index)
