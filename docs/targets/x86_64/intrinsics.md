@@ -644,6 +644,21 @@ addresses. Inactive lanes do not access memory. The wrappers use Keel-private
 builtins with reviewed typed signatures; they do not claim vendor builtin
 compatibility.
 
+The floating wrappers use the same scalar masks: `ps` has sixteen lanes
+and `pd` has eight. `_mm512_mask_cmp_ps_mask` and
+`_mm512_mask_cmp_pd_mask` accept an input mask followed by two vectors and a
+constant predicate in 0..31. Their unmasked `_mm512_cmp_ps_mask` and
+`_mm512_cmp_pd_mask` forms enable every lane. Predicates retain the x86
+ordered/unordered and signaling distinctions.
+
+`_mm512_mask_{add,sub,mul,div}_{ps,pd}` and
+`_mm512_mask_sqrt_{ps,pd}` preserve the merge source in inactive lanes.
+Inactive lanes suppress floating exceptions. Active arithmetic observes
+MXCSR; these raw operations remain pinned through optimization.
+`_mm512_mask_loadu_{ps,pd}` and `_mm512_mask_storeu_{ps,pd}` access only
+active lanes and accept unaligned addresses. All these wrappers require
+AVX512F permission.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes

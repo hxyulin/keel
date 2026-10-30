@@ -1000,10 +1000,42 @@ pub enum Intrinsic {
     X86Avx512MaskStored = 837,
     #[doc = "AVX512F scalar-mask operation. Mask bit i controls lane i; inactive memory lanes do not access memory."]
     X86Avx512MaskStoreq = 838,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512Cmpps = 839,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512Cmppd = 840,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskAddps = 841,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskAddpd = 842,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskSubps = 843,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskSubpd = 844,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskMulps = 845,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskMulpd = 846,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskDivps = 847,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskDivpd = 848,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskSqrtps = 849,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskSqrtpd = 850,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskLoadps = 851,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskLoadpd = 852,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskStoreps = 853,
+    #[doc = "Masked AVX512F floating operation. Inactive lanes preserve merge bits and suppress memory accesses or floating exceptions. Raw arithmetic observes MXCSR."]
+    X86Avx512MaskStorepd = 854,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 839] = [
+    pub const ALL: [Intrinsic; 855] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1843,6 +1875,22 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskLoadq,
         Intrinsic::X86Avx512MaskStored,
         Intrinsic::X86Avx512MaskStoreq,
+        Intrinsic::X86Avx512Cmpps,
+        Intrinsic::X86Avx512Cmppd,
+        Intrinsic::X86Avx512MaskAddps,
+        Intrinsic::X86Avx512MaskAddpd,
+        Intrinsic::X86Avx512MaskSubps,
+        Intrinsic::X86Avx512MaskSubpd,
+        Intrinsic::X86Avx512MaskMulps,
+        Intrinsic::X86Avx512MaskMulpd,
+        Intrinsic::X86Avx512MaskDivps,
+        Intrinsic::X86Avx512MaskDivpd,
+        Intrinsic::X86Avx512MaskSqrtps,
+        Intrinsic::X86Avx512MaskSqrtpd,
+        Intrinsic::X86Avx512MaskLoadps,
+        Intrinsic::X86Avx512MaskLoadpd,
+        Intrinsic::X86Avx512MaskStoreps,
+        Intrinsic::X86Avx512MaskStorepd,
     ];
 }
 
@@ -2678,5 +2726,21 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskLoadq
             | $crate::Intrinsic::X86Avx512MaskStored
             | $crate::Intrinsic::X86Avx512MaskStoreq
+            | $crate::Intrinsic::X86Avx512Cmpps
+            | $crate::Intrinsic::X86Avx512Cmppd
+            | $crate::Intrinsic::X86Avx512MaskAddps
+            | $crate::Intrinsic::X86Avx512MaskAddpd
+            | $crate::Intrinsic::X86Avx512MaskSubps
+            | $crate::Intrinsic::X86Avx512MaskSubpd
+            | $crate::Intrinsic::X86Avx512MaskMulps
+            | $crate::Intrinsic::X86Avx512MaskMulpd
+            | $crate::Intrinsic::X86Avx512MaskDivps
+            | $crate::Intrinsic::X86Avx512MaskDivpd
+            | $crate::Intrinsic::X86Avx512MaskSqrtps
+            | $crate::Intrinsic::X86Avx512MaskSqrtpd
+            | $crate::Intrinsic::X86Avx512MaskLoadps
+            | $crate::Intrinsic::X86Avx512MaskLoadpd
+            | $crate::Intrinsic::X86Avx512MaskStoreps
+            | $crate::Intrinsic::X86Avx512MaskStorepd
     };
 }

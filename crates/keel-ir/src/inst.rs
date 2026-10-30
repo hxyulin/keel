@@ -958,6 +958,20 @@ impl InstData {
             Self::Intrinsic { id, .. } => match id {
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                Intrinsic::X86Avx512MaskLoadps | Intrinsic::X86Avx512MaskLoadpd => Read,
+                Intrinsic::X86Avx512MaskStoreps | Intrinsic::X86Avx512MaskStorepd => Write,
+                Intrinsic::X86Avx512Cmpps
+                | Intrinsic::X86Avx512Cmppd
+                | Intrinsic::X86Avx512MaskAddps
+                | Intrinsic::X86Avx512MaskAddpd
+                | Intrinsic::X86Avx512MaskSubps
+                | Intrinsic::X86Avx512MaskSubpd
+                | Intrinsic::X86Avx512MaskMulps
+                | Intrinsic::X86Avx512MaskMulpd
+                | Intrinsic::X86Avx512MaskDivps
+                | Intrinsic::X86Avx512MaskDivpd
+                | Intrinsic::X86Avx512MaskSqrtps
+                | Intrinsic::X86Avx512MaskSqrtpd => Barrier,
                 Intrinsic::X86Avx512MaskLoadd | Intrinsic::X86Avx512MaskLoadq => Read,
                 Intrinsic::X86Avx512MaskStored | Intrinsic::X86Avx512MaskStoreq => Write,
                 Intrinsic::X86FmaVfmadd132pd128

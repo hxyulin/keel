@@ -131,6 +131,7 @@ use std::fmt::Write;
 mod avx256;
 mod avx512;
 mod avx512_float;
+mod avx512_float_mask;
 mod avx512_mask;
 mod gather;
 mod mmx_value;

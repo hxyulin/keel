@@ -376,3 +376,65 @@ fn avx512_scalar_mask_headers_and_predicate_controls() {
     keel_asm::x86::assemble_program_object_with_features(&program, selector.features).unwrap();
     assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
 }
+
+#[test]
+fn avx512_floating_mask_headers_and_predicates() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (suffix, vector, mask) in [("ps", "__m512", "__mmask16"), ("pd", "__m512d", "__mmask8")] {
+        for predicate in 0..32 {
+            source += &format!(
+                "{mask} cmp_{suffix}_{predicate}({vector} a,{vector} b,{mask} k){{return _mm512_mask_cmp_{suffix}_mask(k,a,b,{predicate});}}\n"
+            );
+        }
+        source += &format!(
+            "{mask} all_{suffix}({vector} a,{vector} b){{return _mm512_cmp_{suffix}_mask(a,b,0);}}\n"
+        );
+        for op in ["add", "sub", "mul", "div"] {
+            source += &format!(
+                "{vector} {op}_{suffix}({vector} s,{mask} k,{vector} a,{vector} b){{return _mm512_mask_{op}_{suffix}(s,k,a,b);}}\n"
+            );
+        }
+        source += &format!(
+            "{vector} sqrt_{suffix}({vector} s,{mask} k,{vector} a){{return _mm512_mask_sqrt_{suffix}(s,k,a);}}\n{vector} load_{suffix}(const void*p,{vector} s,{mask} k){{return _mm512_mask_loadu_{suffix}(s,k,p);}}\nvoid store_{suffix}(void*p,{vector} a,{mask} k){{_mm512_mask_storeu_{suffix}(p,k,a);}}\n"
+        );
+    }
+    let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let ir = module.to_string();
+    for suffix in ["ps", "pd"] {
+        for op in [
+            "cmp",
+            "maskadd",
+            "masksub",
+            "maskmul",
+            "maskdiv",
+            "masksqrt",
+            "maskload",
+            "maskstore",
+        ] {
+            assert!(
+                ir.contains(&format!("x86_avx512_{op}{suffix}")),
+                "missing {op}{suffix}: {ir}"
+            );
+        }
+    }
+    for predicate in ["-1", "32", "k"] {
+        let bad = format!(
+            "#include <immintrin.h>\n__mmask16 f(__m512 a,__m512 b,int k){{return _mm512_cmp_ps_mask(a,b,{predicate});}}"
+        );
+        assert!(parse(&bad, Target::X86_64LinuxGnu).is_err(), "{predicate}");
+    }
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features: Features::NONE.with_features("avx512f").unwrap(),
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program =
+        keel_codegen::compile_program_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
+            .unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, selector.features).unwrap();
+    assert!(parse(&source, Target::Aarch64LinuxGnu).is_err());
+}

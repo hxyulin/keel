@@ -5669,6 +5669,320 @@
       ],
       "ownership": "keel",
       "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_cmpps",
+      "intrinsic": "X86Avx512Cmpps",
+      "intrinsic_id": 839,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "f32x16",
+        "i16",
+        "i32"
+      ],
+      "result": "i16",
+      "control": "avx512_fp_cmp_imm5",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_cmppd",
+      "intrinsic": "X86Avx512Cmppd",
+      "intrinsic_id": 840,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "f64x8",
+        "i8",
+        "i32"
+      ],
+      "result": "i8",
+      "control": "avx512_fp_cmp_imm5",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskaddps",
+      "intrinsic": "X86Avx512MaskAddps",
+      "intrinsic_id": 841,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "i16",
+        "f32x16",
+        "f32x16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskaddpd",
+      "intrinsic": "X86Avx512MaskAddpd",
+      "intrinsic_id": 842,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "i8",
+        "f64x8",
+        "f64x8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_masksubps",
+      "intrinsic": "X86Avx512MaskSubps",
+      "intrinsic_id": 843,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "i16",
+        "f32x16",
+        "f32x16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_masksubpd",
+      "intrinsic": "X86Avx512MaskSubpd",
+      "intrinsic_id": 844,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "i8",
+        "f64x8",
+        "f64x8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskmulps",
+      "intrinsic": "X86Avx512MaskMulps",
+      "intrinsic_id": 845,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "i16",
+        "f32x16",
+        "f32x16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskmulpd",
+      "intrinsic": "X86Avx512MaskMulpd",
+      "intrinsic_id": 846,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "i8",
+        "f64x8",
+        "f64x8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskdivps",
+      "intrinsic": "X86Avx512MaskDivps",
+      "intrinsic_id": 847,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "i16",
+        "f32x16",
+        "f32x16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskdivpd",
+      "intrinsic": "X86Avx512MaskDivpd",
+      "intrinsic_id": 848,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "i8",
+        "f64x8",
+        "f64x8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_masksqrtps",
+      "intrinsic": "X86Avx512MaskSqrtps",
+      "intrinsic_id": 849,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f32x16",
+        "i16",
+        "f32x16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_masksqrtpd",
+      "intrinsic": "X86Avx512MaskSqrtpd",
+      "intrinsic_id": 850,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "f64x8",
+        "i8",
+        "f64x8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskloadps",
+      "intrinsic": "X86Avx512MaskLoadps",
+      "intrinsic_id": 851,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "ptr",
+        "f32x16",
+        "i16"
+      ],
+      "result": "f32x16",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskloadpd",
+      "intrinsic": "X86Avx512MaskLoadpd",
+      "intrinsic_id": 852,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "ptr",
+        "f64x8",
+        "i8"
+      ],
+      "result": "f64x8",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskstoreps",
+      "intrinsic": "X86Avx512MaskStoreps",
+      "intrinsic_id": 853,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "ptr",
+        "f32x16",
+        "i16"
+      ],
+      "result": "void",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
+    },
+    {
+      "builtin": "keel_avx512_maskstorepd",
+      "intrinsic": "X86Avx512MaskStorepd",
+      "intrinsic_id": 854,
+      "family": "value",
+      "header": "__keel_avx512f.h",
+      "params": [
+        "ptr",
+        "f64x8",
+        "i8"
+      ],
+      "result": "void",
+      "control": "none",
+      "features": [
+        "avx512f"
+      ],
+      "ownership": "keel",
+      "reference": "keel_reviewed"
     }
   ],
   "reference_file": "vendor-references.json"

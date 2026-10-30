@@ -22,10 +22,15 @@ pub(super) fn validate(
     if id.is_x86_avx512_compare() && !iconst(func, args[2]).is_some_and(|n| (0..8).contains(&n)) {
         return Err("AVX512 integer predicate must be iconst.i32 in0..=7");
     }
+    if id.is_x86_avx512_float_compare()
+        && !iconst(func, args[3]).is_some_and(|n| (0..32).contains(&n))
+    {
+        return Err("AVX512 floating predicate must be iconst.i32 in0..=31");
+    }
     Ok(())
 }
 
-fn k1() -> Register {
+pub(super) fn k1() -> Register {
     Register {
         class: RegisterClass::Mask,
         number: 1,
@@ -33,7 +38,7 @@ fn k1() -> Register {
         width: 64,
     }
 }
-fn opcode(name: &str, masked: bool) -> Opcode {
+pub(super) fn opcode(name: &str, masked: bool) -> Opcode {
     let mut op = EvexOpcode::parse(name).expect("registered AVX512 mask opcode");
     if masked {
         op.options.mask = Some(1);
@@ -41,7 +46,7 @@ fn opcode(name: &str, masked: bool) -> Opcode {
     Opcode::Evex(op)
 }
 impl FunctionCompiler<'_> {
-    fn avx512_stage_vector(&mut self, value: Value, scratch: u8) {
+    pub(super) fn avx512_stage_vector(&mut self, value: Value, scratch: u8) {
         let source = self.use_freg(value, scratch);
         if source != scratch {
             self.emit(
@@ -53,7 +58,7 @@ impl FunctionCompiler<'_> {
             );
         }
     }
-    fn avx512_stage_mask(&mut self, value: Value) {
+    pub(super) fn avx512_stage_mask(&mut self, value: Value) {
         let source = self.use_reg(value, S0);
         self.emit(
             Opcode::parse("kmovw").expect("AVX512F mask move"),
@@ -67,6 +72,10 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         use Intrinsic::*;
+        if id.is_x86_avx512_float_mask() {
+            self.native_avx512_float_mask(id, args, result);
+            return;
+        }
         if id.is_x86_avx512_compare() {
             self.avx512_stage_vector(args[0], FS0);
             self.avx512_stage_vector(args[1], FS1);
