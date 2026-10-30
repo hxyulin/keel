@@ -961,3 +961,168 @@ int main(void){float a[16],b[16],c[16],out[32];for(unsigned i=0;i<16;i++){a[i]=2
         );
     }
 }
+
+#[test]
+fn avx512_scalar_and_integer_conversion_headers_validate_exact_shapes() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (suffix, ty) in [("ss", "__m128"), ("sd", "__m128d")] {
+        for op in ["fmadd", "fmsub", "fnmadd", "fnmsub"] {
+            source += &format!(
+                "{ty} {op}_{suffix}_round({ty} a,{ty} b,{ty} c,__mmask8 k){{return _mm_mask3_{op}_round_{suffix}(a,b,c,k,8);}}\n{ty} {op}_{suffix}_zero({ty} a,{ty} b,{ty} c,__mmask8 k){{return _mm_maskz_{op}_{suffix}(k,a,b,c);}}\n"
+            );
+        }
+        for (bits, ctype) in [(32, "int"), (64, "long long")] {
+            let control = if suffix == "sd" && bits == 32 {
+                "4"
+            } else {
+                "8"
+            };
+            if !(suffix == "sd" && bits == 32) {
+                source += &format!(
+                    "{ty} int_{bits}_{suffix}({ty} a,{ctype} b){{return _mm_cvt_roundi{bits}_{suffix}(a,b,{control});}}\n{ty} uint_{bits}_{suffix}({ty} a,unsigned {ctype} b){{return _mm_cvt_roundu{bits}_{suffix}(a,b,{control});}}\n"
+                );
+            } else {
+                source += &format!(
+                    "{ty} int_{bits}_{suffix}({ty} a,{ctype} b){{return _mm_cvti{bits}_{suffix}(a,b);}}\n{ty} uint_{bits}_{suffix}({ty} a,unsigned {ctype} b){{return _mm_cvtu{bits}_{suffix}(a,b);}}\n"
+                );
+            }
+            for op in ["cvt", "cvtt"] {
+                source += &format!(
+                    "{ctype} {op}_{suffix}_{bits}({ty} a){{return _mm_{op}_round{suffix}_i{bits}(a,8);}}\nunsigned {ctype} {op}_{suffix}_u{bits}({ty} a){{return _mm_{op}_round{suffix}_u{bits}(a,8);}}\n"
+                );
+            }
+        }
+        for pred in 0..32 {
+            source += &format!(
+                "int comi_{suffix}_{pred}({ty} a,{ty} b){{return _mm_comi_round_{suffix}(a,b,{pred},8);}}\n"
+            );
+        }
+        source += &format!(
+            "unsigned char flags_{suffix}({ty} a,{ty} b){{return __keel_mm_comi_round_flags_{suffix}(a,b,8)|__keel_mm_ucomi_round_flags_{suffix}(a,b,8);}}\n"
+        );
+    }
+    source += "__m128d widen_scalar(__m128d s,__m128d a,__m128 b,__mmask8 k){return _mm_mask_cvt_roundss_sd(s,k,a,b,8);}\n__m128 narrow_scalar(__m128 s,__m128 a,__m128d b,__mmask8 k){return _mm_mask_cvt_roundsd_ss(s,k,a,b,8);}\n";
+    for (from, to, input) in [
+        (8, 32, "__m128i"),
+        (8, 64, "__m128i"),
+        (16, 32, "__m256i"),
+        (16, 64, "__m128i"),
+        (32, 64, "__m256i"),
+    ] {
+        for sign in ["i", "u"] {
+            let api = format!("cvtep{sign}{from}_epi{to}");
+            source += &format!(
+                "__m512i reg_{api}(__m512i s,{input} a,__mmask16 k){{return _mm512_mask_{api}(s,k,a);}}\n__m512i load_{api}(__m512i s,const void*p,__mmask16 k){{return __keel_mm512_mask_loadu_{api}(s,k,p);}}\n"
+            );
+        }
+    }
+    for (from, to, result) in [
+        (32, 8, "__m128i"),
+        (32, 16, "__m256i"),
+        (64, 8, "__m128i"),
+        (64, 32, "__m256i"),
+        (64, 16, "__m128i"),
+    ] {
+        for prefix in ["cvt", "cvts", "cvtus"] {
+            let api = format!("{prefix}epi{from}_epi{to}");
+            let store = format!("{prefix}epi{from}_storeu_epi{to}");
+            source += &format!(
+                "{result} reg_{api}({result} s,__m512i a,__mmask16 k){{return _mm512_mask_{api}(s,k,a);}}\nvoid store_{api}(void*p,__m512i a,__mmask16 k){{_mm512_mask_{store}(p,k,a);}}\n"
+            );
+        }
+    }
+    let target = Target::X86_64LinuxGnu;
+    let mut module = parse(&source, target).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    assert!(!features.fma && !features.avx2 && !features.avx512vl);
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    for expression in [
+        "_mm_cvt_roundi64_ss(a,1,n)",
+        "_mm_cvt_roundss_u64(a,n)",
+        "_mm_comi_round_ss(a,a,n,8)",
+        "_mm_mask3_fmadd_round_ss(a,a,a,1,5)",
+    ] {
+        let invalid = format!(
+            "#include <immintrin.h>\n__m128 f(__m128 a,int n){{(void)({expression});return a;}}"
+        );
+        assert!(parse(&invalid, target).is_err(), "accepted {expression}");
+    }
+}
+
+#[test]
+fn avx512_scalar_fma_headers_keep_upper_lanes_and_narrow_store_widths() {
+    let source = r#"
+#include <immintrin.h>
+int scalar_fma_evaluations;
+unsigned char scalar_fma_mask;
+static __m128 get_scalar(const void*p){scalar_fma_evaluations++;return _mm_loadu_ps(p);}
+static __mmask8 get_scalar_mask(void){scalar_fma_evaluations++;return scalar_fma_mask;}
+void scalar_fma_once(const void*a,const void*b,const void*c,void*out){_mm_storeu_ps(out,_mm_mask3_fmadd_ss(get_scalar(a),get_scalar(b),get_scalar(c),get_scalar_mask()));}
+void unsigned_widen(const void*a,unsigned long long b,void*out){_mm_storeu_pd(out,_mm_cvt_roundu64_sd(_mm_loadu_pd(a),b,8));}
+void byte_narrow(const void*a,void*out){_mm512_mask_cvtusepi64_storeu_epi8(out,0xff,_mm512_loadu_si512(a));}
+"#;
+    let target = Target::X86_64LinuxGnu;
+    let mut module = parse(source, target).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
+    let object = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx512f") {
+            eprintln!("SKIP native scalar headers: AVX512F unavailable");
+            return;
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "keel-avx512-scalar-convert-c-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        fs::write(directory.join("harness.c"),r#"
+#include <stdint.h>
+#include <string.h>
+extern int scalar_fma_evaluations;
+extern unsigned char scalar_fma_mask;
+extern void scalar_fma_once(const void*,const void*,const void*,void*),unsigned_widen(const void*,unsigned long long,void*),byte_narrow(const void*,void*);
+int main(void){uint32_t a[4]={0x40000000,0x7f812345,0x80000000,0xdeadbeef},b[4]={0x40400000,1,2,3},c[4]={0x40800000,4,5,6},out[4];unsigned masks[]={0xfe,0xff};for(unsigned j=0;j<2;j++){scalar_fma_mask=masks[j];scalar_fma_evaluations=0;scalar_fma_once(a,b,c,out);if(scalar_fma_evaluations!=4||memcmp(out+1,a+1,12)||out[0]!=(j?0x41200000:0x40800000))return 1;}uint64_t upper[2]={0,0xfff0123456789abcULL},wide[2];unsigned_widen(upper,~0ULL,wide);double want=0x1p64;if(memcmp(wide,&want,8)||wide[1]!=upper[1])return 2;uint64_t x[8];unsigned char bytes[12];for(unsigned i=0;i<8;i++)x[i]=~0ULL;memset(bytes,0xa5,12);byte_narrow(x,bytes+2);if(bytes[0]!=0xa5||bytes[1]!=0xa5||bytes[10]!=0xa5||bytes[11]!=0xa5)return 3;for(unsigned i=2;i<10;i++)if(bytes[i]!=255)return 4;return 0;}
+"#).unwrap();
+        let output = Command::new("cc")
+            .arg(directory.join("harness.c"))
+            .arg(directory.join("code.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(directory.join("run"))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}

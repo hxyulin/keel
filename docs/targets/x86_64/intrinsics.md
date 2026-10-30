@@ -823,6 +823,97 @@ return only the two specified predicate bits and require no AVX512BW or DQ.
 C mask-test wrappers return ZF and write CF through an `unsigned char *`,
 accessing exactly one byte.
 
+## Scalar EVEX fused operations
+
+Scalar raw FMA intrinsics provide 132, 213 and 231 arrangements of add,
+subtract, negated-add and negated-subtract in `f32x4` and `f64x2` containers.
+Arguments are `(merge, mask, a, b, c, control)`. Only mask bit zero controls
+the scalar arithmetic lane. Inactive low lanes preserve the independent merge
+value. Upper XMM lanes always retain arithmetic operand `a`, regardless of
+mask bits or merge contents. Rounding and SAE controls match packed FMA.
+These operations require AVX512F without AVX512VL or separate FMA permission.
+
+The scalar C masked, mask3, mask-zero and explicit-rounding interfaces retain
+these upper-lane rules. Each mathematical argument is evaluated once.
+
+## Scalar EVEX conversions and flag comparisons
+
+The `x86_avx512_vcvt*` scalar conversion intrinsics expose signed and unsigned
+32- and 64-bit GPR conversions with scalar float or double. Integer-to-float
+conversion takes an XMM passthrough container, integer and rounding control.
+Float-to-integer conversion takes an XMM container and control; truncating
+variants use `vcvtt` names. The `32` or `64` suffix selects the GPR width.
+Unsigned 64-bit scalar conversions require AVX512F, independently of packed
+qword conversion instructions in AVX512DQ.
+
+Rounded conversions accept control 4 or 8..11 for current direction or
+nearest/down/up/zero rounding with SAE. Truncating conversions accept 4 or 8.
+Signed and unsigned 32-bit integer-to-double conversion is exact and accepts
+only control 4 because its instruction has no embedded-rounding form.
+
+`x86_avx512_vcvtss2sd` and `x86_avx512_vcvtsd2ss` take a merge container,
+`i8` mask, upper-bit passthrough container, source container and control.
+Only mask bit zero affects the low lane. Float-to-double accepts SAE controls
+4 or 8; double-to-float also accepts embedded rounding controls 9..11.
+
+`x86_avx512_vcomiss`, `vcomisd`, `vucomiss` and `vucomisd` take two XMM
+containers and SAE control 4 or 8. They return an `i8` flag byte with CF in
+bit 0, PF in bit 2 and ZF in bit 6, matching the existing raw comparison
+flag positions. COMI and UCOMI retain their different quiet-NaN exception
+behavior. All these operations require AVX512F, remain pinned relative to
+MXCSR, and retain hardware invalid-conversion results and exception flags.
+
+C scalar conversion wrappers expose explicit rounding and unsigned results.
+`_mm_comi_round_{ss,sd}` uses scalar comparison predicates. Compiler-owned
+`__keel_mm_{comi,ucomi}_round_flags_{ss,sd}` exposes the raw flag byte.
+
+## AVX512F integer extension and narrowing
+
+AVX512F imports signed and zero extension for byte-to-dword, byte-to-qword,
+word-to-dword, word-to-qword and dword-to-qword conversions. The register
+intrinsics `x86_avx512_maskpmov{sx,zx}{bd,bq,wd,wq,dq}` take
+`(merge, mask, input)` and return a 512-bit vector. Their
+`maskloadpmov...` forms take `(ptr, merge, mask)` and read the shortened
+source directly. Byte-to-qword register conversion uses the low eight bytes
+of its 128-bit input; the memory form reads eight bytes at most.
+
+| Widening pair | Source register value | Result | Memory capacity |
+| --- | --- | --- | --- |
+| `bd` | `i8x16` | `i32x16` | 16 bytes |
+| `bq` | `i8x16`, low eight lanes | `i64x8` | 8 bytes |
+| `wd` | `i16x16` | `i32x16` | 32 bytes |
+| `wq` | `i16x8` | `i64x8` | 16 bytes |
+| `dq` | `i32x8` | `i64x8` | 32 bytes |
+
+Narrowing provides truncation (`maskpmov...`), signed saturation
+(`maskpmovs...`) and unsigned saturation (`maskpmovus...`) for the pairs
+below. Unsigned saturation interprets the source as unsigned and clamps it
+to the destination's unsigned maximum. Register forms take
+`(merge, mask, input)`. Their `maskstorepmov...` forms take
+`(ptr, input, mask)` and write shortened elements directly.
+
+| Narrowing pair | Source | Result | Memory capacity |
+| --- | --- | --- | --- |
+| `db` | `i32x16` | `i8x16` | 16 bytes |
+| `dw` | `i32x16` | `i16x16` | 32 bytes |
+| `qb` | `i64x8` | `i8x16`, low eight lanes | 8 bytes |
+| `qd` | `i64x8` | `i32x8` | 32 bytes |
+| `qw` | `i64x8` | `i16x8` | 16 bytes |
+
+Inactive register lanes preserve the merge value. Qword-to-byte conversions
+always zero the unused upper eight bytes, including with a zero mask.
+Sixteen-lane conversions use `i16` masks; eight-lane conversions use `i8`.
+Memory mask bit `i` controls source or destination element `i`, without
+packing. Inactive elements suppress access and a zero mask permits an
+invalid pointer. Addresses may be unaligned. These forms require AVX512F
+without AVX512BW, DQ, VL or AVX2. Byte-to-word extension and word-to-byte
+narrowing are outside this foundation instruction set.
+
+C register and narrowing-store wrappers use the corresponding `_mm512_`
+conversion names. Shortened masked widening loads are available through
+compiler-owned `__keel_mm512_mask_loadu_cvt...` wrappers. These loads preserve
+the same inactive-element fault suppression as the typed memory operation.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes
