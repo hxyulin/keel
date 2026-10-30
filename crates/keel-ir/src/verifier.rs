@@ -1716,6 +1716,24 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if let Some((_, index)) = id.x86_avx512_scalar_convert() {
+                    let value =
+                        args.get(index)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !value.is_some_and(|value| id.valid_x86_avx512_scalar_convert_control(value))
+                    {
+                        self.inst_error(
+                            inst,
+                            "invalid scalar EVEX conversion/flag rounding or SAE control".into(),
+                        );
+                    }
+                }
                 if let Some((_, immediate, control)) = id.x86_avx512_scalar() {
                     for index in immediate.into_iter().chain(control) {
                         let value = args.get(index).and_then(|&arg| {
@@ -1737,7 +1755,9 @@ impl Verifier<'_> {
                         }
                     }
                 }
-                if id.x86_avx512_fma_opcode().is_some() {
+                if id.x86_avx512_fma_opcode().is_some()
+                    || id.x86_avx512_scalar_fma_opcode().is_some()
+                {
                     let control =
                         args.get(5)
                             .and_then(|&arg| match func.value_def(func.resolve(arg)) {

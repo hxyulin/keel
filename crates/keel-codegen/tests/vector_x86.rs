@@ -898,3 +898,11 @@ mod x86_avx512_scalar;
 
 #[path = "vector_x86/x86_avx512_mask_alu.rs"]
 mod x86_avx512_mask_alu;
+#[path = "vector_x86/x86_avx512_scalar_fma.rs"]
+mod x86_avx512_scalar_fma;
+
+#[path = "vector_x86/x86_avx512_scalar_convert.rs"]
+mod x86_avx512_scalar_convert;
+
+#[path = "vector_x86/x86_avx512_integer_convert.rs"]
+mod x86_avx512_integer_convert;

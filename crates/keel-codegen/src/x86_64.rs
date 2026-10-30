@@ -135,12 +135,15 @@ mod avx512_float;
 mod avx512_float_mask;
 mod avx512_fma;
 mod avx512_indexed;
+mod avx512_integer_convert;
 mod avx512_integer_intrinsics;
 mod avx512_mask;
 mod avx512_mask_alu;
 mod avx512_pack;
 mod avx512_reduce;
 mod avx512_scalar;
+mod avx512_scalar_convert;
+mod avx512_scalar_fma;
 mod avx512_special;
 mod gather;
 mod mmx_value;
@@ -1184,6 +1187,15 @@ impl<'a> FunctionCompiler<'a> {
                     avx512_mask_alu::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
+                if id.is_x86_avx512_integer_convert() {
+                    avx512_integer_convert::validate(
+                        func,
+                        *id,
+                        args,
+                        pipeline.selector.x86_features(),
+                    )
+                    .map_err(|s| err(s.into()))?;
+                }
                 if id.is_x86_avx512_integer() {
                     avx512_integer_intrinsics::validate(
                         func,
@@ -1201,8 +1213,21 @@ impl<'a> FunctionCompiler<'a> {
                     avx512_special::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
+                if id.x86_avx512_scalar_convert().is_some() {
+                    avx512_scalar_convert::validate(
+                        func,
+                        *id,
+                        args,
+                        pipeline.selector.x86_features(),
+                    )
+                    .map_err(|s| err(s.into()))?;
+                }
                 if id.x86_avx512_scalar().is_some() {
                     avx512_scalar::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_scalar_fma_opcode().is_some() {
+                    avx512_scalar_fma::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
@@ -3166,6 +3191,9 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.is_x86_avx512_mask_alu() => {
                 self.native_avx512_mask_alu(id, args, result)
             }
+            InstData::Intrinsic { id, ref args } if id.is_x86_avx512_integer_convert() => {
+                self.native_avx512_integer_convert(id, args, result)
+            }
             InstData::Intrinsic { id, ref args } if id.is_x86_avx512_integer() => {
                 self.native_avx512_integer_intrinsic(id, args, result)
             }
@@ -3175,8 +3203,14 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_avx512_special().is_some() => {
                 self.native_avx512_special(id, args, result)
             }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_scalar_convert().is_some() => {
+                self.native_avx512_scalar_convert(id, args, result)
+            }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_scalar().is_some() => {
                 self.native_avx512_scalar(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_scalar_fma_opcode().is_some() => {
+                self.native_avx512_scalar_fma(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)

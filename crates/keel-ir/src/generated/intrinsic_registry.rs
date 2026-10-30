@@ -1358,10 +1358,218 @@ pub enum Intrinsic {
     X86Avx512Ktestw = 1016,
     #[doc = "Pure foundation 16-bit mask algebra. Test helpers return ZF in bit 0 and CF in bit 1; all other bits are zero. KTEST semantics use an AVX512F recipe rather than the AVX512DQ instruction."]
     X86Avx512Kortestw = 1017,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd132ss = 1018,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd132sd = 1019,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd213ss = 1020,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd213sd = 1021,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd231ss = 1022,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmadd231sd = 1023,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub132ss = 1024,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub132sd = 1025,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub213ss = 1026,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub213sd = 1027,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub231ss = 1028,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfmsub231sd = 1029,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd132ss = 1030,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd132sd = 1031,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd213ss = 1032,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd213sd = 1033,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd231ss = 1034,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmadd231sd = 1035,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub132ss = 1036,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub132sd = 1037,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub213ss = 1038,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub213sd = 1039,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub231ss = 1040,
+    #[doc = "Raw scalar AVX512F FMA in encoded Intel operand order. Only mask bit 0 controls arithmetic; inactive low bits come from independent merge, and upper XMM lanes retain arithmetic destination a. Control 4 uses MXCSR; 8..11 select static rounding with SAE."]
+    X86Avx512Vfnmsub231sd = 1041,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsi2ss32 = 1042,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsi2sd32 = 1043,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsi2ss64 = 1044,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsi2sd64 = 1045,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtusi2ss32 = 1046,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtusi2sd32 = 1047,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtusi2ss64 = 1048,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtusi2sd64 = 1049,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtss2si32 = 1050,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtss2si64 = 1051,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttss2si32 = 1052,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttss2si64 = 1053,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtss2usi32 = 1054,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtss2usi64 = 1055,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttss2usi32 = 1056,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttss2usi64 = 1057,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsd2si32 = 1058,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsd2si64 = 1059,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttsd2si32 = 1060,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttsd2si64 = 1061,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsd2usi32 = 1062,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsd2usi64 = 1063,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttsd2usi32 = 1064,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvttsd2usi64 = 1065,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtss2sd = 1066,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcvtsd2ss = 1067,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcomiss = 1068,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vcomisd = 1069,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vucomiss = 1070,
+    #[doc = "Raw scalar AVX512F conversion or flag comparison with explicit rounding/SAE and exact XMM passthrough. Flags return CF bit0, PF bit2 and ZF bit6."]
+    X86Avx512Vucomisd = 1071,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsxbd = 1072,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsxbq = 1073,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsxwd = 1074,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsxwq = 1075,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsxdq = 1076,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovzxbd = 1077,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovzxbq = 1078,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovzxwd = 1079,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovzxwq = 1080,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovzxdq = 1081,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovsxbd = 1082,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovsxbq = 1083,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovsxwd = 1084,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovsxwq = 1085,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovsxdq = 1086,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovzxbd = 1087,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovzxbq = 1088,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovzxwd = 1089,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovzxwq = 1090,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskLoadPmovzxdq = 1091,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovdb = 1092,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovdw = 1093,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovqb = 1094,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovqd = 1095,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovqw = 1096,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsdb = 1097,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsdw = 1098,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsqb = 1099,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsqd = 1100,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovsqw = 1101,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovusdb = 1102,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovusdw = 1103,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovusqb = 1104,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovusqd = 1105,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskPmovusqw = 1106,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovdb = 1107,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovdw = 1108,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovqb = 1109,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovqd = 1110,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovqw = 1111,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovsdb = 1112,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovsdw = 1113,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovsqb = 1114,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovsqd = 1115,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovsqw = 1116,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovusdb = 1117,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovusdw = 1118,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovusqb = 1119,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovusqd = 1120,
+    #[doc = "AVX512F masked integer conversion with exact shortened memory access. Register merge preserves inactive result lanes; qword-to-byte conversion zeros unused upper eight bytes. Unsigned saturation interprets its source as unsigned."]
+    X86Avx512MaskStorePmovusqw = 1121,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1018] = [
+    pub const ALL: [Intrinsic; 1122] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -2380,6 +2588,110 @@ impl Intrinsic {
         Intrinsic::X86Avx512Kunpckbw,
         Intrinsic::X86Avx512Ktestw,
         Intrinsic::X86Avx512Kortestw,
+        Intrinsic::X86Avx512Vfmadd132ss,
+        Intrinsic::X86Avx512Vfmadd132sd,
+        Intrinsic::X86Avx512Vfmadd213ss,
+        Intrinsic::X86Avx512Vfmadd213sd,
+        Intrinsic::X86Avx512Vfmadd231ss,
+        Intrinsic::X86Avx512Vfmadd231sd,
+        Intrinsic::X86Avx512Vfmsub132ss,
+        Intrinsic::X86Avx512Vfmsub132sd,
+        Intrinsic::X86Avx512Vfmsub213ss,
+        Intrinsic::X86Avx512Vfmsub213sd,
+        Intrinsic::X86Avx512Vfmsub231ss,
+        Intrinsic::X86Avx512Vfmsub231sd,
+        Intrinsic::X86Avx512Vfnmadd132ss,
+        Intrinsic::X86Avx512Vfnmadd132sd,
+        Intrinsic::X86Avx512Vfnmadd213ss,
+        Intrinsic::X86Avx512Vfnmadd213sd,
+        Intrinsic::X86Avx512Vfnmadd231ss,
+        Intrinsic::X86Avx512Vfnmadd231sd,
+        Intrinsic::X86Avx512Vfnmsub132ss,
+        Intrinsic::X86Avx512Vfnmsub132sd,
+        Intrinsic::X86Avx512Vfnmsub213ss,
+        Intrinsic::X86Avx512Vfnmsub213sd,
+        Intrinsic::X86Avx512Vfnmsub231ss,
+        Intrinsic::X86Avx512Vfnmsub231sd,
+        Intrinsic::X86Avx512Vcvtsi2ss32,
+        Intrinsic::X86Avx512Vcvtsi2sd32,
+        Intrinsic::X86Avx512Vcvtsi2ss64,
+        Intrinsic::X86Avx512Vcvtsi2sd64,
+        Intrinsic::X86Avx512Vcvtusi2ss32,
+        Intrinsic::X86Avx512Vcvtusi2sd32,
+        Intrinsic::X86Avx512Vcvtusi2ss64,
+        Intrinsic::X86Avx512Vcvtusi2sd64,
+        Intrinsic::X86Avx512Vcvtss2si32,
+        Intrinsic::X86Avx512Vcvtss2si64,
+        Intrinsic::X86Avx512Vcvttss2si32,
+        Intrinsic::X86Avx512Vcvttss2si64,
+        Intrinsic::X86Avx512Vcvtss2usi32,
+        Intrinsic::X86Avx512Vcvtss2usi64,
+        Intrinsic::X86Avx512Vcvttss2usi32,
+        Intrinsic::X86Avx512Vcvttss2usi64,
+        Intrinsic::X86Avx512Vcvtsd2si32,
+        Intrinsic::X86Avx512Vcvtsd2si64,
+        Intrinsic::X86Avx512Vcvttsd2si32,
+        Intrinsic::X86Avx512Vcvttsd2si64,
+        Intrinsic::X86Avx512Vcvtsd2usi32,
+        Intrinsic::X86Avx512Vcvtsd2usi64,
+        Intrinsic::X86Avx512Vcvttsd2usi32,
+        Intrinsic::X86Avx512Vcvttsd2usi64,
+        Intrinsic::X86Avx512Vcvtss2sd,
+        Intrinsic::X86Avx512Vcvtsd2ss,
+        Intrinsic::X86Avx512Vcomiss,
+        Intrinsic::X86Avx512Vcomisd,
+        Intrinsic::X86Avx512Vucomiss,
+        Intrinsic::X86Avx512Vucomisd,
+        Intrinsic::X86Avx512MaskPmovsxbd,
+        Intrinsic::X86Avx512MaskPmovsxbq,
+        Intrinsic::X86Avx512MaskPmovsxwd,
+        Intrinsic::X86Avx512MaskPmovsxwq,
+        Intrinsic::X86Avx512MaskPmovsxdq,
+        Intrinsic::X86Avx512MaskPmovzxbd,
+        Intrinsic::X86Avx512MaskPmovzxbq,
+        Intrinsic::X86Avx512MaskPmovzxwd,
+        Intrinsic::X86Avx512MaskPmovzxwq,
+        Intrinsic::X86Avx512MaskPmovzxdq,
+        Intrinsic::X86Avx512MaskLoadPmovsxbd,
+        Intrinsic::X86Avx512MaskLoadPmovsxbq,
+        Intrinsic::X86Avx512MaskLoadPmovsxwd,
+        Intrinsic::X86Avx512MaskLoadPmovsxwq,
+        Intrinsic::X86Avx512MaskLoadPmovsxdq,
+        Intrinsic::X86Avx512MaskLoadPmovzxbd,
+        Intrinsic::X86Avx512MaskLoadPmovzxbq,
+        Intrinsic::X86Avx512MaskLoadPmovzxwd,
+        Intrinsic::X86Avx512MaskLoadPmovzxwq,
+        Intrinsic::X86Avx512MaskLoadPmovzxdq,
+        Intrinsic::X86Avx512MaskPmovdb,
+        Intrinsic::X86Avx512MaskPmovdw,
+        Intrinsic::X86Avx512MaskPmovqb,
+        Intrinsic::X86Avx512MaskPmovqd,
+        Intrinsic::X86Avx512MaskPmovqw,
+        Intrinsic::X86Avx512MaskPmovsdb,
+        Intrinsic::X86Avx512MaskPmovsdw,
+        Intrinsic::X86Avx512MaskPmovsqb,
+        Intrinsic::X86Avx512MaskPmovsqd,
+        Intrinsic::X86Avx512MaskPmovsqw,
+        Intrinsic::X86Avx512MaskPmovusdb,
+        Intrinsic::X86Avx512MaskPmovusdw,
+        Intrinsic::X86Avx512MaskPmovusqb,
+        Intrinsic::X86Avx512MaskPmovusqd,
+        Intrinsic::X86Avx512MaskPmovusqw,
+        Intrinsic::X86Avx512MaskStorePmovdb,
+        Intrinsic::X86Avx512MaskStorePmovdw,
+        Intrinsic::X86Avx512MaskStorePmovqb,
+        Intrinsic::X86Avx512MaskStorePmovqd,
+        Intrinsic::X86Avx512MaskStorePmovqw,
+        Intrinsic::X86Avx512MaskStorePmovsdb,
+        Intrinsic::X86Avx512MaskStorePmovsdw,
+        Intrinsic::X86Avx512MaskStorePmovsqb,
+        Intrinsic::X86Avx512MaskStorePmovsqd,
+        Intrinsic::X86Avx512MaskStorePmovsqw,
+        Intrinsic::X86Avx512MaskStorePmovusdb,
+        Intrinsic::X86Avx512MaskStorePmovusdw,
+        Intrinsic::X86Avx512MaskStorePmovusqb,
+        Intrinsic::X86Avx512MaskStorePmovusqd,
+        Intrinsic::X86Avx512MaskStorePmovusqw,
     ];
 }
 
@@ -3394,5 +3706,109 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512Kunpckbw
             | $crate::Intrinsic::X86Avx512Ktestw
             | $crate::Intrinsic::X86Avx512Kortestw
+            | $crate::Intrinsic::X86Avx512Vfmadd132ss
+            | $crate::Intrinsic::X86Avx512Vfmadd132sd
+            | $crate::Intrinsic::X86Avx512Vfmadd213ss
+            | $crate::Intrinsic::X86Avx512Vfmadd213sd
+            | $crate::Intrinsic::X86Avx512Vfmadd231ss
+            | $crate::Intrinsic::X86Avx512Vfmadd231sd
+            | $crate::Intrinsic::X86Avx512Vfmsub132ss
+            | $crate::Intrinsic::X86Avx512Vfmsub132sd
+            | $crate::Intrinsic::X86Avx512Vfmsub213ss
+            | $crate::Intrinsic::X86Avx512Vfmsub213sd
+            | $crate::Intrinsic::X86Avx512Vfmsub231ss
+            | $crate::Intrinsic::X86Avx512Vfmsub231sd
+            | $crate::Intrinsic::X86Avx512Vfnmadd132ss
+            | $crate::Intrinsic::X86Avx512Vfnmadd132sd
+            | $crate::Intrinsic::X86Avx512Vfnmadd213ss
+            | $crate::Intrinsic::X86Avx512Vfnmadd213sd
+            | $crate::Intrinsic::X86Avx512Vfnmadd231ss
+            | $crate::Intrinsic::X86Avx512Vfnmadd231sd
+            | $crate::Intrinsic::X86Avx512Vfnmsub132ss
+            | $crate::Intrinsic::X86Avx512Vfnmsub132sd
+            | $crate::Intrinsic::X86Avx512Vfnmsub213ss
+            | $crate::Intrinsic::X86Avx512Vfnmsub213sd
+            | $crate::Intrinsic::X86Avx512Vfnmsub231ss
+            | $crate::Intrinsic::X86Avx512Vfnmsub231sd
+            | $crate::Intrinsic::X86Avx512Vcvtsi2ss32
+            | $crate::Intrinsic::X86Avx512Vcvtsi2sd32
+            | $crate::Intrinsic::X86Avx512Vcvtsi2ss64
+            | $crate::Intrinsic::X86Avx512Vcvtsi2sd64
+            | $crate::Intrinsic::X86Avx512Vcvtusi2ss32
+            | $crate::Intrinsic::X86Avx512Vcvtusi2sd32
+            | $crate::Intrinsic::X86Avx512Vcvtusi2ss64
+            | $crate::Intrinsic::X86Avx512Vcvtusi2sd64
+            | $crate::Intrinsic::X86Avx512Vcvtss2si32
+            | $crate::Intrinsic::X86Avx512Vcvtss2si64
+            | $crate::Intrinsic::X86Avx512Vcvttss2si32
+            | $crate::Intrinsic::X86Avx512Vcvttss2si64
+            | $crate::Intrinsic::X86Avx512Vcvtss2usi32
+            | $crate::Intrinsic::X86Avx512Vcvtss2usi64
+            | $crate::Intrinsic::X86Avx512Vcvttss2usi32
+            | $crate::Intrinsic::X86Avx512Vcvttss2usi64
+            | $crate::Intrinsic::X86Avx512Vcvtsd2si32
+            | $crate::Intrinsic::X86Avx512Vcvtsd2si64
+            | $crate::Intrinsic::X86Avx512Vcvttsd2si32
+            | $crate::Intrinsic::X86Avx512Vcvttsd2si64
+            | $crate::Intrinsic::X86Avx512Vcvtsd2usi32
+            | $crate::Intrinsic::X86Avx512Vcvtsd2usi64
+            | $crate::Intrinsic::X86Avx512Vcvttsd2usi32
+            | $crate::Intrinsic::X86Avx512Vcvttsd2usi64
+            | $crate::Intrinsic::X86Avx512Vcvtss2sd
+            | $crate::Intrinsic::X86Avx512Vcvtsd2ss
+            | $crate::Intrinsic::X86Avx512Vcomiss
+            | $crate::Intrinsic::X86Avx512Vcomisd
+            | $crate::Intrinsic::X86Avx512Vucomiss
+            | $crate::Intrinsic::X86Avx512Vucomisd
+            | $crate::Intrinsic::X86Avx512MaskPmovsxbd
+            | $crate::Intrinsic::X86Avx512MaskPmovsxbq
+            | $crate::Intrinsic::X86Avx512MaskPmovsxwd
+            | $crate::Intrinsic::X86Avx512MaskPmovsxwq
+            | $crate::Intrinsic::X86Avx512MaskPmovsxdq
+            | $crate::Intrinsic::X86Avx512MaskPmovzxbd
+            | $crate::Intrinsic::X86Avx512MaskPmovzxbq
+            | $crate::Intrinsic::X86Avx512MaskPmovzxwd
+            | $crate::Intrinsic::X86Avx512MaskPmovzxwq
+            | $crate::Intrinsic::X86Avx512MaskPmovzxdq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovsxbd
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovsxbq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovsxwd
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovsxwq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovsxdq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovzxbd
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovzxbq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovzxwd
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovzxwq
+            | $crate::Intrinsic::X86Avx512MaskLoadPmovzxdq
+            | $crate::Intrinsic::X86Avx512MaskPmovdb
+            | $crate::Intrinsic::X86Avx512MaskPmovdw
+            | $crate::Intrinsic::X86Avx512MaskPmovqb
+            | $crate::Intrinsic::X86Avx512MaskPmovqd
+            | $crate::Intrinsic::X86Avx512MaskPmovqw
+            | $crate::Intrinsic::X86Avx512MaskPmovsdb
+            | $crate::Intrinsic::X86Avx512MaskPmovsdw
+            | $crate::Intrinsic::X86Avx512MaskPmovsqb
+            | $crate::Intrinsic::X86Avx512MaskPmovsqd
+            | $crate::Intrinsic::X86Avx512MaskPmovsqw
+            | $crate::Intrinsic::X86Avx512MaskPmovusdb
+            | $crate::Intrinsic::X86Avx512MaskPmovusdw
+            | $crate::Intrinsic::X86Avx512MaskPmovusqb
+            | $crate::Intrinsic::X86Avx512MaskPmovusqd
+            | $crate::Intrinsic::X86Avx512MaskPmovusqw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovdb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovdw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovqb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovqd
+            | $crate::Intrinsic::X86Avx512MaskStorePmovqw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovsdb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovsdw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovsqb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovsqd
+            | $crate::Intrinsic::X86Avx512MaskStorePmovsqw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovusdb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovusdw
+            | $crate::Intrinsic::X86Avx512MaskStorePmovusqb
+            | $crate::Intrinsic::X86Avx512MaskStorePmovusqd
+            | $crate::Intrinsic::X86Avx512MaskStorePmovusqw
     };
 }
