@@ -1936,10 +1936,50 @@ pub enum Intrinsic {
     X86Avx512VlCmpps256 = 1305,
     #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
     X86Avx512VlCmppd256 = 1306,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMulps128 = 1307,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMulpd128 = 1308,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskDivps128 = 1309,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskDivpd128 = 1310,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskSqrtps128 = 1311,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskSqrtpd128 = 1312,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMinps128 = 1313,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMinpd128 = 1314,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMaxps128 = 1315,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMaxpd128 = 1316,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMulps256 = 1317,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMulpd256 = 1318,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskDivps256 = 1319,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskDivpd256 = 1320,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskSqrtps256 = 1321,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskSqrtpd256 = 1322,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMinps256 = 1323,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMinpd256 = 1324,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMaxps256 = 1325,
+    #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
+    X86Avx512VlMaskMaxpd256 = 1326,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1307] = [
+    pub const ALL: [Intrinsic; 1327] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3247,6 +3287,26 @@ impl Intrinsic {
         Intrinsic::X86Avx512VlMaskStorepd256,
         Intrinsic::X86Avx512VlCmpps256,
         Intrinsic::X86Avx512VlCmppd256,
+        Intrinsic::X86Avx512VlMaskMulps128,
+        Intrinsic::X86Avx512VlMaskMulpd128,
+        Intrinsic::X86Avx512VlMaskDivps128,
+        Intrinsic::X86Avx512VlMaskDivpd128,
+        Intrinsic::X86Avx512VlMaskSqrtps128,
+        Intrinsic::X86Avx512VlMaskSqrtpd128,
+        Intrinsic::X86Avx512VlMaskMinps128,
+        Intrinsic::X86Avx512VlMaskMinpd128,
+        Intrinsic::X86Avx512VlMaskMaxps128,
+        Intrinsic::X86Avx512VlMaskMaxpd128,
+        Intrinsic::X86Avx512VlMaskMulps256,
+        Intrinsic::X86Avx512VlMaskMulpd256,
+        Intrinsic::X86Avx512VlMaskDivps256,
+        Intrinsic::X86Avx512VlMaskDivpd256,
+        Intrinsic::X86Avx512VlMaskSqrtps256,
+        Intrinsic::X86Avx512VlMaskSqrtpd256,
+        Intrinsic::X86Avx512VlMaskMinps256,
+        Intrinsic::X86Avx512VlMaskMinpd256,
+        Intrinsic::X86Avx512VlMaskMaxps256,
+        Intrinsic::X86Avx512VlMaskMaxpd256,
     ];
 }
 
@@ -4550,5 +4610,25 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512VlMaskStorepd256
             | $crate::Intrinsic::X86Avx512VlCmpps256
             | $crate::Intrinsic::X86Avx512VlCmppd256
+            | $crate::Intrinsic::X86Avx512VlMaskMulps128
+            | $crate::Intrinsic::X86Avx512VlMaskMulpd128
+            | $crate::Intrinsic::X86Avx512VlMaskDivps128
+            | $crate::Intrinsic::X86Avx512VlMaskDivpd128
+            | $crate::Intrinsic::X86Avx512VlMaskSqrtps128
+            | $crate::Intrinsic::X86Avx512VlMaskSqrtpd128
+            | $crate::Intrinsic::X86Avx512VlMaskMinps128
+            | $crate::Intrinsic::X86Avx512VlMaskMinpd128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxps128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxpd128
+            | $crate::Intrinsic::X86Avx512VlMaskMulps256
+            | $crate::Intrinsic::X86Avx512VlMaskMulpd256
+            | $crate::Intrinsic::X86Avx512VlMaskDivps256
+            | $crate::Intrinsic::X86Avx512VlMaskDivpd256
+            | $crate::Intrinsic::X86Avx512VlMaskSqrtps256
+            | $crate::Intrinsic::X86Avx512VlMaskSqrtpd256
+            | $crate::Intrinsic::X86Avx512VlMaskMinps256
+            | $crate::Intrinsic::X86Avx512VlMaskMinpd256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxps256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxpd256
     };
 }

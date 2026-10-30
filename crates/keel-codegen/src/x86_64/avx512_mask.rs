@@ -8,7 +8,10 @@ pub(super) fn validate(
     args: &[Value],
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
-    if !features.avx512f || id.is_x86_avx512_vl_core() && !features.avx512vl {
+    if !features.avx512f
+        || (id.is_x86_avx512_vl_core() || id.x86_avx512_vl_float_arithmetic().is_some())
+            && !features.avx512vl
+    {
         return Err(
             "masked vector operation requires AVX512F and, for 128/256-bit packed forms, AVX512VL",
         );

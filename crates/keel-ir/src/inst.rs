@@ -1087,6 +1087,26 @@ impl InstData {
                 | Intrinsic::X86Avx512MaskStoreExtractf64x4 => Write,
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                Intrinsic::X86Avx512VlMaskMulps128
+                | Intrinsic::X86Avx512VlMaskMulpd128
+                | Intrinsic::X86Avx512VlMaskDivps128
+                | Intrinsic::X86Avx512VlMaskDivpd128
+                | Intrinsic::X86Avx512VlMaskSqrtps128
+                | Intrinsic::X86Avx512VlMaskSqrtpd128
+                | Intrinsic::X86Avx512VlMaskMinps128
+                | Intrinsic::X86Avx512VlMaskMinpd128
+                | Intrinsic::X86Avx512VlMaskMaxps128
+                | Intrinsic::X86Avx512VlMaskMaxpd128
+                | Intrinsic::X86Avx512VlMaskMulps256
+                | Intrinsic::X86Avx512VlMaskMulpd256
+                | Intrinsic::X86Avx512VlMaskDivps256
+                | Intrinsic::X86Avx512VlMaskDivpd256
+                | Intrinsic::X86Avx512VlMaskSqrtps256
+                | Intrinsic::X86Avx512VlMaskSqrtpd256
+                | Intrinsic::X86Avx512VlMaskMinps256
+                | Intrinsic::X86Avx512VlMaskMinpd256
+                | Intrinsic::X86Avx512VlMaskMaxps256
+                | Intrinsic::X86Avx512VlMaskMaxpd256 => Barrier,
                 id @ (Intrinsic::X86Avx512VlMaskAddd128
                 | Intrinsic::X86Avx512VlMaskAddq128
                 | Intrinsic::X86Avx512VlMaskSubd128

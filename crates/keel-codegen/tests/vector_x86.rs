@@ -920,3 +920,6 @@ mod x86_avx512_scalar_move;
 
 #[path = "vector_x86/x86_avx512_vl.rs"]
 mod x86_avx512_vl;
+
+#[path = "vector_x86/x86_avx512_vl_float.rs"]
+mod x86_avx512_vl_float;
