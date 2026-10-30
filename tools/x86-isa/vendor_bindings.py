@@ -104,6 +104,10 @@ VALUE_CONTROLS['avx512dq_cvt_sae'] = ({'X86Avx512Dq' + op + '512' for op in ['Vc
 CONTROL_ALLOWED_VALUES.update({'avx512dq_cvt_rc': [4, 8, 9, 10, 11], 'avx512dq_cvt_sae': [4, 8]})
 VALUE_CONTROLS['avx512bw_cmp_imm3'] = ({'X86Avx512Bw' + op + lane + str(width) for op in ['Cmp', 'Cmpu'] for lane in ['b', 'w'] for width in [128, 256, 512]}, 3, 7, 7, 'AVX512BW comparison predicate must be an integer constant in 0..7')
 
+VALUE_CONTROLS['avx512vl_mant_imm4'] = ({'X86Avx512VlGetmant' + suffix + str(width) for suffix in ['ps', 'pd'] for width in [128, 256]}, 3, 15, 15, 'AVX512VL mantissa immediate must be an integer constant in 0..15')
+VALUE_CONTROLS['avx512vl_roundscale_imm8'] = ({'X86Avx512VlRoundscale' + suffix + str(width) for suffix in ['ps', 'pd'] for width in [128, 256]}, 3, 255, 255, 'AVX512VL rounding immediate must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512vl_fixup_imm8'] = ({'X86Avx512VlFixupimm' + suffix + str(width) for suffix in ['ps', 'pd'] for width in [128, 256]}, 5, 255, 255, 'AVX512VL fixup immediate must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512bw_shift_imm8'] = ({'X86Avx512Bw' + op + str(width) for op in ['Slliw', 'Srliw', 'Sraiw'] for width in [128, 256, 512]}, 3, 255, 255, 'AVX512BW shift immediate must be an integer constant in 0..255')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 

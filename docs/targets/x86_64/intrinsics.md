@@ -1146,6 +1146,21 @@ no ER/SAE operand. They require AVX512F plus AVX512VL without FMA permission.
 The corresponding standard C mask, mask3 and mask-zero wrappers preserve
 their specified merge source and evaluate each operand once.
 
+Narrow packed special operations cover `getexp`, `getmant`, `scalef`, `rcp14`,
+`rsqrt14`, `roundscale` and `fixupimm`, with `ps`/`pd` and 128-/256-bit
+suffixes. They use the same F plus VL permissions and remain pinned relative
+to MXCSR. Unary forms take `(merge, i8 mask, input)`; GETMANT and RNDSCALE add
+an `i32` immediate, and SCALEF adds a second floating vector. GETMANT accepts
+0..15; RNDSCALE accepts 0..255, including its immediate precision-suppression
+bit. These narrow instructions have no separate ER/SAE argument.
+
+FIXUPIMM takes `(merge, i8 mask, a, b, table, i32 immediate)`. The integer
+table has the same lane width and count as the floating result. Its immediate
+is 0..255. Active lanes can return the original arithmetic input `a`, while
+inactive lanes retain the independent merge value. The C mask-zero interface
+preserves this distinction. Standard C unmasked, merge and mask-zero
+interfaces are provided for all seven families at both widths.
+
 ## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
@@ -1185,6 +1200,14 @@ merge bits and suppress exceptions. Invalid active float-to-integer lanes
 retain native indefinite results. These conversions remain pinned relative
 to MXCSR. Standard C interfaces include unmasked, masked and mask-zero
 forms, plus 512-bit rounding and SAE forms.
+
+`movd2m` and `movq2m`, followed by 128, 256 or 512, extract each dword or
+qword lane's sign bit to a scalar mask. `movm2d` and `movm2q` expand scalar
+mask bits to zero or all-ones lanes. These pure operations require F plus DQ,
+and narrow forms also require VL. The scalar mask is `i8`, except 512-bit
+dword forms use `i16`. Extraction clears unused mask bits; expansion ignores
+bits beyond the lane count. C exposes `_mm{,256,512}_movepi{32,64}_mask`
+and `_mm{,256,512}_movm_epi{32,64}`.
 
 ## AVX512CD conflict and leading-zero count
 
@@ -1417,3 +1440,19 @@ pure operations use the same vector shapes, scalar mask widths and feature
 permissions as BW arithmetic. Scalar transfers preserve all 64 byte-mask
 bits for a 512-bit vector. C exposes comparisons, tests and conversions at
 all three widths.
+
+Word shifts use `slliw`, `srliw` and `sraiw` for immediate counts, `sllw`,
+`srlw` and `sraw` for shared XMM counts, and `sllvw`, `srlvw` and `sravw`
+for per-lane word counts. Names end in 128, 256 or 512. They take
+`(merge, mask, input, count)` with word vectors and scalar masks `i8`, `i16`
+or `i32` at the respective widths. Immediate counts are `i32` constants in
+0..255. Shared counts use the unsigned low qword of an `i64x2` input and
+ignore its upper qword. Variable counts are unsigned words in a vector of
+the same shape as the data.
+
+Counts saturate instead of wrapping modulo 16. Logical counts of 16 or more
+produce zero; arithmetic right shifts fill every result bit with the sign.
+Inactive lanes retain merge bits. All forms require F plus BW, and narrow
+forms also require VL. C supplies masked and mask-zero interfaces at all
+widths, all 512-bit unmasked forms, and narrow variable-word shifts. Existing
+narrow unmasked immediate/shared-count interfaces keep their prior contracts.

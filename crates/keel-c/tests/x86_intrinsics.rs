@@ -1663,3 +1663,10 @@ mod x86_avx512_bw_mask;
 mod x86_avx512_dq_convert;
 #[path = "x86_intrinsics/x86_avx512_vl_fma.rs"]
 mod x86_avx512_vl_fma;
+
+#[path = "x86_intrinsics/x86_avx512_bw_shift.rs"]
+mod x86_avx512_bw_shift;
+#[path = "x86_intrinsics/x86_avx512_dq_mask.rs"]
+mod x86_avx512_dq_mask;
+#[path = "x86_intrinsics/x86_avx512_vl_special.rs"]
+mod x86_avx512_vl_special;
