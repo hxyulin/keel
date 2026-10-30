@@ -762,6 +762,67 @@ into eight qword results using signed or unsigned interpretation. Absolute
 value retains the minimum signed value's bit pattern. These operations are
 pure bit computations and require AVX512F without AVX512DQ, AVX2 or AVX512VL.
 
+## Packed AVX512F fused operations
+
+Typed raw FMA intrinsics expose the 132, 213 and 231 arrangements for
+`vfmadd`, `vfmsub`, `vfnmadd`, `vfnmsub`, `vfmaddsub` and `vfmsubadd` in
+single and double precision. Arguments are `(merge, mask, a, b, c, control)`.
+For addition, the encoded orders compute `a*c+b`, `b*a+c` and `b*c+a`,
+respectively. The instruction retains its operand order for NaN selection.
+Control 4 uses MXCSR; 8..11 select nearest/down/up/zero rounding with SAE.
+Inactive lanes preserve the independent merge vector and suppress exceptions.
+These pinned operations require AVX512F without independent FMA permission.
+
+The `_mm512_` C interfaces provide ordinary, masked, mask3, mask-zero and
+explicit-rounding forms. Masked forms merge from the first mathematical
+operand; mask3 forms merge from the addend. Each argument is evaluated once.
+
+## Scalar EVEX floating operations
+
+The typed `x86_avx512_{add,sub,mul,div,sqrt,min,max,cmp,getexp,getmant,scalef,rcp14,rsqrt14,roundscale,fixupimm}{ss,sd}`
+intrinsics require AVX512F, including scalar forms without AVX512VL. They use
+`f32x4` or `f64x2` containers so the entire XMM result remains observable.
+Only bit zero of the `i8` execution mask controls the scalar lane.
+
+Arithmetic takes an independent merge vector, mask and two source containers.
+Upper XMM bits follow the encoded instruction's passthrough source even when
+the scalar lane is inactive. The inactive low lane preserves merge bits and
+suppresses exceptions. Fixup uses its merge container as the mathematical
+first operand and takes an integer response table as its final source.
+Comparison takes two containers, an execution mask, a constant predicate in
+0..31 and SAE control. It returns an `i8` mask with only bit zero possibly set.
+
+Add, subtract, multiply, divide, square root and scalef accept control 4 or
+8..11 for current rounding or embedded nearest/down/up/zero rounding with
+SAE. Other operations with SAE accept 4 or 8. Reciprocal14 and
+reciprocal-square-root14 have no rounding/SAE argument. Get-mantissa controls
+are in 0..15; roundscale and fixup immediates are in 0..255. All controls must
+be `iconst.i32` values. These raw operations remain pinned relative to MXCSR
+and preserve vendor instruction semantics, including min/max NaN selection.
+
+The scalar C mask and explicit-rounding wrappers use these same contracts.
+Legacy unmasked SSE entry points retain their existing signatures and permissions.
+
+## AVX512F word mask algebra
+
+Typed word-mask intrinsics operate on scalar `i16` SSA values. AND, AND-NOT,
+OR, XOR, XNOR and NOT use the foundation K-word instructions. AND-NOT computes
+`(~a) & b`. Word shifts take a constant `i32` byte in 0..255; counts at least
+16 produce zero. `x86_avx512_kunpckbw(a,b)` places the low byte of `a` in the
+upper result byte and the low byte of `b` in the lower result byte. Inputs
+remain immutable; K1 through K3 are transient scratch registers.
+
+`x86_avx512_kortestw(a,b)` returns an `i8` with ZF in bit zero and CF in bit
+one, with all other bits zero. ZF means `(a | b) == 0`; CF means
+`(a | b) == 0xffff`. The `x86_avx512_ktestw` helper uses the same encoding for
+ZF meaning `(a & b) == 0` and CF meaning `((~a) & b) == 0`. The latter uses
+an AVX512F AND/AND-NOT and KORTEST recipe. The independent hardware KTESTW
+instruction requires AVX512DQ and remains outside this imported instruction
+set. No architectural FLAGS value becomes an SSA value. These pure helpers
+return only the two specified predicate bits and require no AVX512BW or DQ.
+C mask-test wrappers return ZF and write CF through an `unsigned char *`,
+accessing exactly one byte.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes

@@ -828,3 +828,136 @@ int main(void){uint32_t a[16],b[16],c[16],out[16];for(unsigned i=0;i<16;i++){a[i
         );
     }
 }
+
+#[test]
+fn avx512_fma_scalar_and_mask_headers_preserve_controls_and_evaluation() {
+    let mut source = String::from("#include <immintrin.h>\n");
+    for (suffix, ty) in [("ps", "__m512"), ("pd", "__m512d")] {
+        for op in ["fmadd", "fmsub", "fnmadd", "fnmsub", "fmaddsub", "fmsubadd"] {
+            for form in ["all", "merge", "third", "zero"] {
+                let call = match form {
+                    "all" => format!("_mm512_{op}_round_{suffix}(a,b,c,8)"),
+                    "merge" => format!("_mm512_mask_{op}_round_{suffix}(a,k,b,c,8)"),
+                    "third" => format!("_mm512_mask3_{op}_round_{suffix}(a,b,c,k,8)"),
+                    _ => format!("_mm512_maskz_{op}_round_{suffix}(k,a,b,c,8)"),
+                };
+                source += &format!(
+                    "{ty} {op}_{suffix}_{form}({ty} a,{ty} b,{ty} c,__mmask16 k){{return {call};}}\n"
+                );
+            }
+        }
+    }
+    for (suffix, ty) in [("ss", "__m128"), ("sd", "__m128d")] {
+        for op in [
+            "add",
+            "sub",
+            "mul",
+            "div",
+            "sqrt",
+            "min",
+            "max",
+            "getexp",
+            "getmant",
+            "scalef",
+            "rcp14",
+            "rsqrt14",
+            "roundscale",
+            "fixupimm",
+        ] {
+            let rest = match op {
+                "getmant" => "a,b,0,0",
+                "roundscale" => "a,b,0x20",
+                "fixupimm" => "b,c,0x80",
+                _ => "a,b",
+            };
+            let merge = if op == "fixupimm" { "a" } else { "s" };
+            source += &format!(
+                "{ty} scalar_{op}_{suffix}({ty} s,{ty} a,{ty} b,__m128i c,__mmask8 k){{return _mm_mask_{op}_{suffix}({merge},k,{rest});}}\n"
+            );
+            if !matches!(op, "rcp14" | "rsqrt14") {
+                source += &format!(
+                    "{ty} scalar_{op}_round_{suffix}({ty} s,{ty} a,{ty} b,__m128i c,__mmask8 k){{return _mm_mask_{op}_round_{suffix}({merge},k,{rest},8);}}\n"
+                );
+            }
+        }
+        source += &format!(
+            "__mmask8 scalar_cmp_{suffix}({ty} a,{ty} b,__mmask8 k){{return _mm_mask_cmp_round_{suffix}_mask(k,a,b,31,8);}}\n"
+        );
+    }
+    source += "__mmask16 mask_logic(__mmask16 a,__mmask16 b){return _kand_mask16(a,b)^_kandn_mask16(a,b)^_kor_mask16(a,b)^_kxor_mask16(a,b)^_kxnor_mask16(a,b)^_knot_mask16(a)^_mm512_kunpackb(a,b)^_kshiftli_mask16(a,15)^_kshiftri_mask16(a,255);}\n";
+    source += r#"
+int fma_evaluations;
+static __m512 fetch_fma(const void*p){fma_evaluations++;return _mm512_loadu_ps(p);}
+static __mmask16 fetch_mask(void){fma_evaluations++;return 0xa55a;}
+void fma_once(const void*a,const void*b,const void*c,void*out){
+ _mm512_storeu_ps(out,_mm512_mask_fmadd_ps(fetch_fma(a),fetch_mask(),fetch_fma(b),fetch_fma(c)));
+ _mm512_storeu_ps((char*)out+64,_mm512_mask3_fmadd_ps(fetch_fma(a),fetch_fma(b),fetch_fma(c),fetch_mask()));
+}
+unsigned char mask_test(unsigned short a,unsigned short b,unsigned char*cf){return _ktest_mask16_u8(a,b,cf);}
+unsigned char mask_or_test(unsigned short a,unsigned short b,unsigned char*cf){return _kortest_mask16_u8(a,b,cf);}
+__m512 maskzero_basic(__mmask16 k,const void*p,__m512 a){return _mm512_maskz_sqrt_ps(k,_mm512_maskz_add_ps(k,_mm512_maskz_loadu_ps(k,p),a));}
+"#;
+    let target = Target::X86_64LinuxGnu;
+    let mut module = parse(&source, target).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    assert!(!features.fma && !features.avx2 && !features.avx512vl);
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    let program = keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
+    let object = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    for expression in [
+        "_mm_mask_cmp_round_ss_mask(1,a,a,n,8)",
+        "_mm_mask_cmp_round_ss_mask(1,a,a,0,n)",
+        "_mm_mask_add_round_ss(a,1,a,a,5)",
+        "_mm_mask_getmant_round_ss(a,1,a,a,n,0,8)",
+    ] {
+        let invalid = format!(
+            "#include <immintrin.h>\n__m128 f(__m128 a,int n){{(void)({expression});return a;}}"
+        );
+        assert!(parse(&invalid, target).is_err(), "accepted {expression}");
+    }
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        #[cfg(target_arch = "x86_64")]
+        if !std::is_x86_feature_detected!("avx512f") {
+            eprintln!("SKIP native FMA/mask headers: AVX512F unavailable");
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("keel-avx512-fma-mask-c-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("code.o"), object).unwrap();
+        fs::write(directory.join("harness.c"),r#"
+#include <stdint.h>
+extern int fma_evaluations;
+extern void fma_once(const void*,const void*,const void*,void*);
+extern unsigned char mask_test(unsigned short,unsigned short,unsigned char*),mask_or_test(unsigned short,unsigned short,unsigned char*);
+int main(void){float a[16],b[16],c[16],out[32];for(unsigned i=0;i<16;i++){a[i]=2;b[i]=3;c[i]=4;}fma_once(a,b,c,out);if(fma_evaluations!=8)return 1;for(unsigned i=0;i<16;i++){int on=(0xa55a>>i)&1;if(out[i]!=(on?10:2)||out[16+i]!=(on?10:4))return 2;}unsigned short masks[]={0,1,0x8000,0xaaaa,0xffff};for(unsigned i=0;i<5;i++)for(unsigned j=0;j<5;j++){unsigned short x=masks[i],y=masks[j];unsigned char cf[3]={0x5a,0,0xa5};unsigned char z=mask_test(x,y,cf+1);if(z!=((x&y)==0)||cf[1]!=((unsigned short)(~x)&y?0:1)||cf[0]!=0x5a||cf[2]!=0xa5)return 3;z=mask_or_test(x,y,cf+1);if(z!=((x|y)==0)||cf[1]!=((x|y)==0xffff)||cf[0]!=0x5a||cf[2]!=0xa5)return 4;}return 0;}
+"#).unwrap();
+        let output = Command::new("cc")
+            .arg(directory.join("harness.c"))
+            .arg(directory.join("code.o"))
+            .arg("-o")
+            .arg(directory.join("run"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(directory.join("run"))
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
