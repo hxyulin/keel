@@ -300,3 +300,16 @@ fn typed_wide_pclmul_signature_and_control() {
         assert!(parse(&source.replace(",17)", ",256)"), Target::X86_64LinuxGnu).is_err());
     }
 }
+
+#[test]
+fn floating512_c_shapes_and_header_aliases() {
+    let source = "#include <immintrin.h>\nvoid floats(__m512 *out,const __m512 *a,const __m512 *b){*out=*a+*b;}\nvoid doubles(__m512d *out,const __m512d *a,const __m512d *b){*out=*a / *b;}\n";
+    let module = parse(source, Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let text = module.to_string();
+    assert!(text.contains("f32x16"), "{text}");
+    assert!(text.contains("f64x8"), "{text}");
+    let direct = "typedef float F __attribute__((vector_size(64)));typedef double D __attribute__((vector_size(64)));void f(F *o,F *a,F *b){*o=*a-*b;}void d(D *o,D *a,D *b){*o=*a * *b;}";
+    keel_ir::verify_module(&parse(direct, Target::X86_64LinuxGnu).unwrap()).unwrap();
+    assert!(parse(direct, Target::Aarch64LinuxGnu).is_err());
+}

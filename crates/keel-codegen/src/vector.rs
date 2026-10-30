@@ -90,7 +90,7 @@ fn lower_round(mut f: Function, keep: &impl Fn(&Function, &InstData) -> bool) ->
     // their numbering and the lifetime of captured lane inputs.
     // Inputs are captured before any scalar result is produced. Reuse these
     // buffers across straight-line expansions; no optimizer runs after this pass.
-    let mut slots_by_width: [[Option<keel_ir::StackSlot>; 4]; 3] = [[None; 4]; 3];
+    let mut slots_by_width: [[Option<keel_ir::StackSlot>; 4]; 4] = [[None; 4]; 4];
     let mut expanded = false;
     let work: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
     for inst in work {
@@ -291,6 +291,7 @@ fn lower_round(mut f: Function, keep: &impl Fn(&Function, &InstData) -> bool) ->
             8 => 0,
             16 => 1,
             32 => 2,
+            64 => 3,
             _ => unreachable!(),
         }];
         for i in 0..4 {

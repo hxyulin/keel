@@ -856,3 +856,9 @@ block0(v0:ptr,v1:ptr,v2:ptr):
         }
     }
 }
+
+#[path = "vector_x86/x86_avx512_integer.rs"]
+mod x86_avx512_integer;
+
+#[path = "vector_x86/x86_avx512_float.rs"]
+mod x86_avx512_float;

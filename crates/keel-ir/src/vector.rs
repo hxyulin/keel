@@ -25,9 +25,11 @@ pub enum VectorType {
     F32x2,
     F32x4,
     F32x8,
+    F32x16,
     F64x1,
     F64x2,
     F64x4,
+    F64x8,
 }
 impl VectorType {
     pub const ALL_64: [Self; 6] = [
@@ -54,8 +56,15 @@ impl VectorType {
         Self::F32x8,
         Self::F64x4,
     ];
-    pub const ALL_512: [Self; 4] = [Self::I8x64, Self::I16x32, Self::I32x16, Self::I64x8];
-    pub const ALL: [Self; 22] = [
+    pub const ALL_512: [Self; 6] = [
+        Self::I8x64,
+        Self::I16x32,
+        Self::I32x16,
+        Self::I64x8,
+        Self::F32x16,
+        Self::F64x8,
+    ];
+    pub const ALL: [Self; 24] = [
         Self::I8x8,
         Self::I16x4,
         Self::I32x2,
@@ -78,10 +87,17 @@ impl VectorType {
         Self::I16x32,
         Self::I32x16,
         Self::I64x8,
+        Self::F32x16,
+        Self::F64x8,
     ];
     pub const fn bytes(self) -> u32 {
         match self {
-            Self::I8x64 | Self::I16x32 | Self::I32x16 | Self::I64x8 => 64,
+            Self::I8x64
+            | Self::I16x32
+            | Self::I32x16
+            | Self::I64x8
+            | Self::F32x16
+            | Self::F64x8 => 64,
             Self::I8x8 | Self::I16x4 | Self::I32x2 | Self::I64x1 | Self::F32x2 | Self::F64x1 => 8,
             Self::I8x32 | Self::I16x16 | Self::I32x8 | Self::I64x4 | Self::F32x8 | Self::F64x4 => {
                 32
@@ -95,8 +111,8 @@ impl VectorType {
             Self::I16x4 | Self::I16x8 | Self::I16x16 | Self::I16x32 => Type::I16,
             Self::I32x2 | Self::I32x4 | Self::I32x8 | Self::I32x16 => Type::I32,
             Self::I64x1 | Self::I64x2 | Self::I64x4 | Self::I64x8 => Type::I64,
-            Self::F32x2 | Self::F32x4 | Self::F32x8 => Type::F32,
-            Self::F64x1 | Self::F64x2 | Self::F64x4 => Type::F64,
+            Self::F32x2 | Self::F32x4 | Self::F32x8 | Self::F32x16 => Type::F32,
+            Self::F64x1 | Self::F64x2 | Self::F64x4 | Self::F64x8 => Type::F64,
         }
     }
     pub fn lanes(self) -> u8 {
@@ -108,9 +124,11 @@ impl VectorType {
             Self::F32x2 => Self::I32x2,
             Self::F32x4 => Self::I32x4,
             Self::F32x8 => Self::I32x8,
+            Self::F32x16 => Self::I32x16,
             Self::F64x1 => Self::I64x1,
             Self::F64x2 => Self::I64x2,
             Self::F64x4 => Self::I64x4,
+            Self::F64x8 => Self::I64x8,
             other => other,
         }
     }
@@ -137,9 +155,11 @@ impl fmt::Display for VectorType {
             Self::F32x2 => "f32x2",
             Self::F32x4 => "f32x4",
             Self::F32x8 => "f32x8",
+            Self::F32x16 => "f32x16",
             Self::F64x1 => "f64x1",
             Self::F64x2 => "f64x2",
             Self::F64x4 => "f64x4",
+            Self::F64x8 => "f64x8",
         })
     }
 }
@@ -166,9 +186,11 @@ impl FromStr for VectorType {
             "f32x2" => Self::F32x2,
             "f32x4" => Self::F32x4,
             "f32x8" => Self::F32x8,
+            "f32x16" => Self::F32x16,
             "f64x1" => Self::F64x1,
             "f64x2" => Self::F64x2,
             "f64x4" => Self::F64x4,
+            "f64x8" => Self::F64x8,
             _ => return Err(()),
         })
     }

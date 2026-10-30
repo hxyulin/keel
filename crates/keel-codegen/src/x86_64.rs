@@ -129,6 +129,8 @@ use keel_ir::{
 };
 use std::fmt::Write;
 mod avx256;
+mod avx512;
+mod avx512_float;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -2519,6 +2521,12 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if self.lower_i128(inst, func.inst_data(inst), result) {
+            return;
+        }
+        if self.avx512_float(func.inst_data(inst), result) {
+            return;
+        }
+        if self.avx512(func.inst_data(inst), result) {
             return;
         }
         if self.avx256(func.inst_data(inst), result) {

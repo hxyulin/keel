@@ -449,7 +449,9 @@ fn ty(t: k::Type) -> Result<ir::Type> {
             k::VectorType::I8x64
             | k::VectorType::I16x32
             | k::VectorType::I32x16
-            | k::VectorType::I64x8 => {
+            | k::VectorType::I64x8
+            | k::VectorType::F32x16
+            | k::VectorType::F64x8 => {
                 return Err("512-bit SIMD values are not supported by the diagnostic Cranelift bridge".into());
             }
             k::VectorType::I8x16 => types::I8X16,

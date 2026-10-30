@@ -3,15 +3,16 @@
 The IR has six lane families at each fixed width: integer lanes of 8, 16, 32,
 and 64 bits, and floating lanes of 32 and 64 bits. The 64-bit D shapes are
 `i8x8/i16x4/i32x2/i64x1/f32x2/f64x1`; the 128-bit Q shapes are
-`i8x16/i16x8/i32x4/i64x2/f32x4/f64x2`; the 256-bit shapes double Q's lane counts.
-Each value has its width's exact size and natural alignment: 8, 16, or 32 bytes.
+`i8x16/i16x8/i32x4/i64x2/f32x4/f64x2`; the 256-bit shapes double Q's lane counts. The 512-bit shapes double them again.
+Each value has its width's exact size and natural alignment: 8, 16, 32, or 64 bytes.
 Lane zero occupies the lowest-addressed bytes. `Type::Vector(VectorType::...)`
 represents these values; scalar `is_int()`/`is_float()` remain scalar predicates.
-Use `VectorType::ALL_64`, `ALL_128`, or `ALL_256` for a particular width;
+Use `VectorType::ALL_64`, `ALL_128`, `ALL_256`, or `ALL_512` for a particular width;
 `ALL` includes all widths. Signedness belongs to operations.
 
-Target support is explicit: Apple AArch64 supports D/Q and rejects 256-bit
-values; x86-64 supports Q and AVX-enabled 256-bit values, and rejects D values.
+Target support is explicit: Apple AArch64 supports D/Q and rejects wider
+values; x86-64 supports Q, AVX-enabled 256-bit values and AVX512F-enabled
+512-bit values, and rejects D values.
 A valid target-independent type does not guarantee target ABI support.
 Parsing, verification, builders, printing and generic rewriting support the
 shapes. Codegen combines packed instructions with scalar lane legalization.
@@ -72,8 +73,8 @@ their scalar contracts; vector atomics are not introduced. Supported vector
   selection, not arbitrary bit blending. Scalar `select` may select a whole vector.
 - `bitcast.<type>` preserves bits between equal-size vector/scalar types; it
   does not convert individual lanes. Widening, narrowing and pairwise conversion
-  operations are described below. Generic packed integer division, scalable and
-  512-bit vectors remain outside this set. Typed AVX2 gathers have a separate
+  operations are described below. Generic packed integer division and scalable
+  vectors remain outside this set. Typed AVX2 gathers have a separate
   target-specific memory contract; ordinary loads are not masked gathers.
 
 Vector computation and lane operations are pure, non-trapping and have no memory

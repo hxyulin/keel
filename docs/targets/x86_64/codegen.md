@@ -36,15 +36,29 @@ FS1 before the result is written. VEX integer instructions read both sources
 before writing, so either source may share the destination when its lifetime
 allows. Strict v1 and v2 reject wide SSA transport.
 
-## 512-bit integer transport
+## 512-bit value transport
 
-With `avx512f`, `i8x64`, `i16x32`, `i32x16` and `i64x8` are 64-byte
+With `avx512f`, `i8x64`, `i16x32`, `i32x16`, `i64x8`, `f32x16` and
+`f64x8` are 64-byte
 SSA values. XMM, YMM and ZMM views share physical registers. Loads, stores,
 spills and reloads preserve all 64 bytes, including unaligned addresses.
 Frames containing 64-byte aligned slots use a stable, realigned frame base.
 Per-function target features determine legality during optimization and codegen.
 Accepting a 512-bit value does not enable every AVX-512 arithmetic operation;
 portable operations without a native recipe use lane legalization.
+
+AVX512F lowers `i32x16` and `i64x8` add, subtract, bitwise AND/OR/XOR,
+scalar splats and 512-bit vector bitcasts directly to ZMM instructions. These
+recipes require no AVX2 permission. Three-operand arithmetic accepts overlapping
+inputs and destinations; forced spills use separate reload scratch registers.
+Byte and word arithmetic continues through portable lane lowering.
+
+`f32x16` and `f64x8` add, subtract, multiply, divide and square root use
+unmasked packed ZMM instructions under AVX512F. Source order matches the
+scalar operations, including subtraction and division. These recipes do not
+require FMA permission or combine multiply and add. Other floating operations
+use portable lane lowering. C accepts `float` and `double` vectors with
+`vector_size(64)`; `immintrin.h` defines `__m512` and `__m512d`.
 
 ## Shuffles
 
