@@ -10,15 +10,24 @@ use std::{fs, process::Command};
 #[test]
 fn unmasked_integer512_native_and_spilled_oracle() {
     let mut source = String::new();
-    let mut harness = String::from("#include <stdint.h>\n#include <string.h>\n");
+    let mut harness = String::from(
+        "#include <stdint.h>\n#include <string.h>\nstatic uint32_t sar32(uint32_t a,unsigned n){n&=31;return(a>>n)|((a>>31)?~(UINT32_MAX>>n):0); }\nstatic uint64_t sar64(uint64_t a,unsigned n){n&=63;return(a>>n)|((a>>63)?~(UINT64_MAX>>n):0); }\n",
+    );
     let operations = [
         ("viadd", "+"),
         ("visub", "-"),
         ("vand", "&"),
         ("vor", "|"),
         ("vxor", "^"),
-        // AVX512F has no qword multiply; preserve the lane fallback.
+        // Qword multiply remains a lane fallback.
         ("vimul", "*"),
+        ("vsmin", ""),
+        ("vsmax", ""),
+        ("vumin", ""),
+        ("vumax", ""),
+        ("vshl", ""),
+        ("vushr", ""),
+        ("vsshr", ""),
     ];
     let mut cases = String::new();
     for (shape, scalar, ctype, lanes) in [
@@ -34,8 +43,34 @@ fn unmasked_integer512_native_and_spilled_oracle() {
                 );
                 harness += &format!("extern void {name}(void*,void*,void*);\n");
                 let rhs = if same { "a[i]" } else { "b[i]" };
+                let bits = if shape == "i32x16" { 32 } else { 64 };
+                let sign = format!("(({ctype})1<<{})", bits - 1);
+                let expect = match operation {
+                    "vsmin" => format!("((a[i]^{sign})<({rhs}^{sign})?a[i]:{rhs})"),
+                    "vsmax" => format!("((a[i]^{sign})>({rhs}^{sign})?a[i]:{rhs})"),
+                    "vumin" => format!("(a[i]<{rhs}?a[i]:{rhs})"),
+                    "vumax" => format!("(a[i]>{rhs}?a[i]:{rhs})"),
+                    "vshl" => format!("(a[i]<<({rhs}&{}))", bits - 1),
+                    "vushr" => format!("(a[i]>>({rhs}&{}))", bits - 1),
+                    "vsshr" => format!("sar{bits}(a[i],(unsigned){rhs})"),
+                    _ => format!("(a[i]{symbol}{rhs})"),
+                };
+                let counts = if matches!(operation, "vshl" | "vushr" | "vsshr") {
+                    format!(
+                        "const uint64_t counts[]={{0,{}, {bits},{},UINT64_MAX,1,0x8000000000000000ULL,0x8000000000000020ULL}};",
+                        bits - 1,
+                        bits + 1
+                    )
+                } else {
+                    String::new()
+                };
+                let b_value = if counts.is_empty() {
+                    format!("(({ctype})0xa5a5123456789abcULL-i*31)^((i&2)?{sign}:0)")
+                } else {
+                    "counts[i%8]".to_owned()
+                };
                 cases += &format!(
-                    "{{ {ctype} a[{lanes}],b[{lanes}],out[{lanes}*3];for(unsigned i=0;i<{lanes};i++){{a[i]=({ctype})0xdeadbeef92345678ULL+i*17;b[i]=({ctype})0xa5a5123456789abcULL-i*31;}} {name}(a,b,out);for(unsigned i=0;i<{lanes};i++)if(out[i]!=({ctype})(a[i]{symbol}{rhs})||out[i+{lanes}]!=a[i]||out[i+2*{lanes}]!=b[i])return 1; }}\n"
+                    "{{ {counts} {ctype} a[{lanes}],b[{lanes}],out[{lanes}*3];for(unsigned i=0;i<{lanes};i++){{a[i]=(({ctype})0xdeadbeef92345678ULL+i*17)^((i&1)?{sign}:0);b[i]=({ctype})({b_value});}} {name}(a,b,out);for(unsigned i=0;i<{lanes};i++)if(out[i]!=({ctype}){expect}||out[i+{lanes}]!=a[i]||out[i+2*{lanes}]!=b[i])return 1; }}\n"
                 );
             }
         }
@@ -87,6 +122,21 @@ fn unmasked_integer512_native_and_spilled_oracle() {
             let text =
                 keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
             for opcode in [
+                "vpmulld",
+                "vpminsd",
+                "vpminsq",
+                "vpmaxsd",
+                "vpmaxsq",
+                "vpminud",
+                "vpminuq",
+                "vpmaxud",
+                "vpmaxuq",
+                "vpsllvd",
+                "vpsllvq",
+                "vpsrlvd",
+                "vpsrlvq",
+                "vpsravd",
+                "vpsravq",
                 "vpaddd",
                 "vpaddq",
                 "vpsubd",
