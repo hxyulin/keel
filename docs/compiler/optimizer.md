@@ -222,6 +222,10 @@ and skip reports are owned by
 The signature must match exactly. Each site gets fresh blocks, values and
 stack slots, remapped symbol and signature tables, and a continuation whose
 block parameters carry the return values. Argument evaluation keeps its order.
+Only callee slots referenced by surviving instructions or debug variable homes
+are charged and cloned. Implicit `aggregate_va_arg` homes count as references;
+unused slot declarations do not. Existing caller stack accounting stays
+conservative.
 `byval` arguments up to 128 bytes are copied, padding included, into private
 snapshots before callee effects. `sret` keeps the caller's destination. Callee
 lines, scopes and stack variable homes move into a fresh scope below the call
@@ -255,8 +259,15 @@ outside ordinary loads, stores and address construction makes the object
 escape. Volatile or atomic access excludes the object; inline assembly, frame
 inspection and stack-state barriers exclude the function. Exact typed stores
 satisfy later loads in the same block, and integer loads through 64 bits can be
-rebuilt from stored bytes in little-endian order. No facts cross blocks.
+rebuilt from stored bytes in little-endian order. Across blocks, a store must
+dominate the load and be the only writer of every byte in the forwarded range.
 Stores are removed only when no load from the object remains.
+
+Native x86-64 and AArch64 pipelines also forward an exact eight-byte `i64`
+store into a pointer load using `inttoptr`. This preserves all address bits,
+including null, and neither moves nor widens a memory access. Partial stores,
+overlapping writers and over-aligned pointer loads do not qualify. The
+layout-independent and Wasm pipelines do not apply this reinterpretation.
 
 Full also recovers complete `i32x4` constructors from these byte facts. Four
 copies of one `i32` become `vsplat`, and four extracts from at most two `i32x4`

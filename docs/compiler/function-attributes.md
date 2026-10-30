@@ -197,7 +197,9 @@ than 13 operands and register clobbers in total.
 inside that function. Self and mutual direct recursion are excluded.
 
 Ordinary profitability limits are 64 instructions, 8 blocks and 512 bytes of
-callee stack slots. `inlinehint` doubles each threshold. `alwaysinline` bypasses
+referenced callee stack slots, including debug and implicit ABI homes. Unused
+slot declarations are neither charged nor cloned; by-value snapshots still
+count. `inlinehint` doubles each threshold. `alwaysinline` bypasses
 these three soft thresholds, but cannot bypass legality or the hard safeguards:
 
 - At most 128 expanded original call sites per caller per invocation.

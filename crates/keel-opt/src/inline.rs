@@ -629,10 +629,30 @@ fn tiny_priority_leaf(f: &Function) -> bool {
         && acyclic_cfg(f)
 }
 
+// Promotion leaves declarations in the slot arena. Cost and cloning must
+// agree on surviving storage, including implicit ABI and debugger homes.
+fn inline_stack_slots(callee: &Function) -> Vec<bool> {
+    let mut used = vec![false; callee.num_stack_slots()];
+    for var in &callee.debug_vars {
+        used[var.slot.index()] = true;
+    }
+    for (_, inst) in callee.layout_insts() {
+        match *callee.inst_data(inst) {
+            InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } => {
+                used[slot.index()] = true;
+            }
+            _ => {}
+        }
+    }
+    used
+}
+
 fn inline_cost(callee: &Function) -> (usize, u64) {
+    let used = inline_stack_slots(callee);
     let mut cost = callee.layout_insts().count();
     let mut stack = callee
         .stack_slots()
+        .filter(|(slot, _)| used[slot.index()])
         .map(|(_, s)| u64::from(s.size))
         .sum::<u64>();
     for p in &callee.sig.params {
@@ -1623,8 +1643,10 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
             *arg = dst;
         }
     }
+    let used = inline_stack_slots(callee);
     let slots: FxHashMap<_, _> = callee
         .stack_slots()
+        .filter(|(slot, _)| used[slot.index()])
         .map(|(slot, data)| (slot, caller.create_stack_slot(data.size, data.align)))
         .collect();
     let refs: FxHashMap<_, _> = callee
@@ -1781,6 +1803,84 @@ mod byval_tests {
                 .sum();
             assert_eq!(copied_bytes, size as u64);
         }
+    }
+
+    #[test]
+    fn dead_declarations_do_not_discount_required_byval_snapshots() {
+        let mut module = keel_ir::parse(
+            "func @helper(ptr byval [2 x i64]) local {
+ ss0 = stack_slot 32, align 8
+block0(v0: ptr):
+ return
+}
+func @caller(ptr) {
+block0(v0: ptr):
+ call @helper(v0)
+ return
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(
+            inline_cost(&module.functions[0]),
+            (1 + byval_copy_cost(16), 16)
+        );
+        let (caller, callee) = two_functions(&mut module.functions, 1, 0);
+        let call = caller.block_insts(caller.entry_block().unwrap())[0];
+        inline_call(caller, call, callee);
+        assert_eq!(caller.num_stack_slots(), 1);
+        assert_eq!(caller.stack_slots().next().unwrap().1.size, 16);
+        assert_eq!(
+            caller
+                .layout_insts()
+                .filter(|&(_, i)| matches!(caller.inst_data(i), InstData::Load { .. }))
+                .count(),
+            2,
+            "the potentially trapping byval source reads remain"
+        );
+        keel_ir::verify_module(&module).unwrap();
+    }
+
+    #[test]
+    fn implicit_aggregate_va_arg_home_is_charged_and_remapped() {
+        let mut module = keel_ir::parse(
+            "func @helper(ptr) -> ptr local {
+ ss0 = stack_slot 16, align 8
+ ss1 = stack_slot 16, align 8
+ ss2 = stack_slot 16, align 8
+block0(v0: ptr):
+ v1 = va_arg_aggregate [2 x i64], v0, ss2
+ return v1
+}
+func @caller(ptr) -> ptr {
+ ss0 = stack_slot 8, align 8
+block0(v0: ptr):
+ v1 = call @helper(v0)
+ return v1
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(inline_cost(&module.functions[0]), (2, 16));
+        // Unlike a scalar va_arg, this aggregate operation has an explicit
+        // activation-local home, which must survive without a StackAddr.
+        crate::run_passes(&mut module, &["inline"]).unwrap();
+        let caller = &module.functions[1];
+        assert_eq!(caller.num_stack_slots(), 2);
+        let home = caller
+            .layout_insts()
+            .find_map(|(_, i)| match caller.inst_data(i) {
+                InstData::AggregateVaArg { home, .. } => Some(*home),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            home.index(),
+            1,
+            "the old home ss2 gets a fresh caller identity"
+        );
+        assert_eq!(caller.stack_slots().nth(home.index()).unwrap().1.size, 16);
+        keel_ir::verify_module(&module).unwrap();
     }
 
     #[test]

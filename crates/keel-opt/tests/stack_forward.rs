@@ -1,5 +1,7 @@
 #[path = "stack_forward/stack_forward_lifetimes.rs"]
 mod stack_forward_lifetimes;
+#[path = "stack_forward/stack_forward_pointer.rs"]
+mod stack_forward_pointer;
 #[path = "stack_forward/stack_forward_vector.rs"]
 mod stack_forward_vector;
 #[path = "stack_forward/stack_forward_widen.rs"]

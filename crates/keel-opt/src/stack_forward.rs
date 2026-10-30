@@ -7,15 +7,31 @@
 //! pointers cannot alias.
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value,
-    ValueDef, VectorType,
+    BinaryOp, ConvertOp, DataLayout, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot,
+    Type, Value, ValueDef, VectorType,
 };
+
+/// The native x86-64/AArch64 contract has eight-byte integral addresses:
+/// storing an i64 then reading the identical bytes as ptr preserves every
+/// address bit, including zero. Portable/target-free entrypoints do not have
+/// this contract. No partial-byte or floating-point reinterpretation is added.
+pub(crate) fn run_native64(func: &mut Function) -> bool {
+    run_with_layout(func, Some(DataLayout::NATIVE64))
+}
+
+pub(crate) fn run_with_cfg_native64(func: &mut Function) -> bool {
+    run_with_cfg_layout(func, Some(DataLayout::NATIVE64))
+}
 
 /// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
 /// only when it directly exposes a previously nonconstant branch operand.
 /// Existing constants and expressions needing another folding pass do not
 /// request cleanup. The ordinary `run` path does not collect this snapshot.
 pub fn run_with_cfg(func: &mut Function) -> bool {
+    run_with_cfg_layout(func, None)
+}
+
+fn run_with_cfg_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
     let conditional_inputs: Vec<_> = func
         .blocks()
         .filter_map(|block| {
@@ -30,7 +46,7 @@ pub fn run_with_cfg(func: &mut Function) -> bool {
                 .then_some(value)
         })
         .collect();
-    let changed = run(func);
+    let changed = run_with_layout(func, layout);
     if changed
         && conditional_inputs
             .iter()
@@ -42,6 +58,10 @@ pub fn run_with_cfg(func: &mut Function) -> bool {
 }
 
 pub fn run(func: &mut Function) -> bool {
+    run_with_layout(func, None)
+}
+
+fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
     // Every rewrite below starts from a slot address.
     if func.num_stack_slots() == 0 {
         return false;
@@ -254,6 +274,11 @@ pub fn run(func: &mut Function) -> bool {
                 unique
                     .get(&(slot, offset, ty))
                     .is_some_and(|&(store_block, _, _)| store_block != block)
+                    || (layout == Some(DataLayout::NATIVE64)
+                        && ty == Type::Ptr
+                        && unique
+                            .get(&(slot, offset, Type::I64))
+                            .is_some_and(|&(store_block, _, _)| store_block != block))
                     || subranges
                         .get(&(slot, offset, ty))
                         .is_some_and(|&(store_block, _, _, _)| store_block != block)
@@ -302,7 +327,7 @@ pub fn run(func: &mut Function) -> bool {
                         }
                     }
                 }
-                InstData::Load { addr, ty, .. } => {
+                InstData::Load { addr, ty, flags } => {
                     let Some(&(slot, offset)) = addresses.get(&func.resolve(addr)) else {
                         continue;
                     };
@@ -324,10 +349,44 @@ pub fn run(func: &mut Function) -> bool {
                             dominates.then_some(value)
                         },
                     );
+                    // Only one complete i64 store may supply a pointer. The
+                    // local map invalidates overlaps; the global map retains
+                    // the whole-function unique-writer and dominance proof.
+                    // Convert at the old load, without moving any access or
+                    // synthesizing a pointer from partially written bytes.
+                    let pointer_bits = (layout == Some(DataLayout::NATIVE64)
+                        && ty == Type::Ptr
+                        && flags.align <= 8)
+                        .then(|| {
+                            exact.get(&(slot, offset, Type::I64)).copied().or_else(|| {
+                                let &(store_block, store_position, value) =
+                                    unique.get(&(slot, offset, Type::I64))?;
+                                let dominates = if store_block == block {
+                                    store_position < position
+                                } else {
+                                    dominators.as_ref()?.dominates(store_block, block)
+                                };
+                                dominates.then_some(value)
+                            })
+                        })
+                        .flatten();
                     let forwarded = exact
                         .get(&(slot, offset, ty))
                         .copied()
                         .or(global)
+                        .or_else(|| {
+                            let arg = pointer_bits?;
+                            let converted = func.insert_inst(
+                                InsertPoint::Before(inst),
+                                InstData::Convert {
+                                    op: ConvertOp::IntToPtr,
+                                    ty: Type::Ptr,
+                                    arg,
+                                },
+                            );
+                            func.set_inst_loc(converted, func.inst_loc(inst));
+                            Some(func.first_result(converted))
+                        })
                         .or_else(|| {
                             if local_only
                                 || offset != 0

@@ -117,8 +117,10 @@ fn reserve_has_no_caller_growth_count_or_stack_exemption() {
     // Stack ledger is independent of instruction growth: 64 * 1024 bytes.
     let source = leaf("stack", 3, "alwaysinline local", false)
         .replace("block0:", " ss0 = stack_slot 1024, align 8\nblock0:")
+        .replace(" v1 = iconst.i32 1", " v1 = stack_addr ss0")
         + &leaf("predicate", 3, "local", true)
             .replace("block0:", " ss0 = stack_slot 1, align 1\nblock0:")
+            .replace(" return", " v2 = stack_addr ss0\n return")
         + &caller("caller", "stack", 64).replace(" return\n}", " call @predicate()\n return\n}");
     let (_, sites) = run(&source, PASS);
     // Count and instruction growth still have room.
@@ -226,10 +228,12 @@ fn legality_rejections_match_full_even_when_module_is_saturated() {
 fn snapshot_cost_stack_and_scc_caller_guard_remain_bounded() {
     for (bytes, expected) in [(64, true), (65, false)] {
         let source = saturated()
-            + &leaf("helper", 16, "local", true).replace(
-                "block0:",
-                &format!(" ss0 = stack_slot {bytes}, align 1\nblock0:"),
-            )
+            + &leaf("helper", 16, "local", true)
+                .replace(
+                    "block0:",
+                    &format!(" ss0 = stack_slot {bytes}, align 1\nblock0:"),
+                )
+                .replace(" v2 = iconst.i32 2", " v2 = stack_addr ss0")
             + &caller("late", "helper", 1);
         assert_eq!(!admitted(&run(&source, PASS).1).is_empty(), expected);
     }

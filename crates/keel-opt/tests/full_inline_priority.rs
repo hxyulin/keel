@@ -44,7 +44,11 @@ fn leaf(name: &str, cost: usize, stack: usize, attrs: &str) -> String {
     }
     s += "block0:\n";
     for i in 1..cost {
-        s += &format!(" v{i} = iconst.i64 {i}\n");
+        if stack != 0 && i == 1 {
+            s += " v1 = stack_addr ss0\n";
+        } else {
+            s += &format!(" v{i} = iconst.i64 {i}\n");
+        }
     }
     s + " return\n}\n"
 }
@@ -202,8 +206,8 @@ fn priority_and_remaining_sites_share_call_count_and_stack_ledgers() {
     );
     // Priority consumes 64 stack bytes before the large alwaysinline body tries
     // to consume the whole stack ledger. Without a shared ledger both fit.
-    let s = leaf("large", 1, 65_536, "alwaysinline local")
-        + &leaf("tiny", 1, 64, "alwaysinline local")
+    let s = leaf("large", 2, 65_536, "alwaysinline local")
+        + &leaf("tiny", 2, 64, "alwaysinline local")
         + "func @caller() {\nblock0:\n call @large()\n call @tiny()\n return\n}\n";
     let (_, sites) = run(&s, FULL);
     assert_eq!(outcomes(&sites, "caller", "tiny"), ["inlined"]);
@@ -331,10 +335,11 @@ fn ordinary_and_reserve_preserve_layout_order_and_exact_clone_bytes() {
 fn snapshots_count_toward_priority_cost_and_stack_boundaries() {
     for (padding, stack, priority) in [(26, 56, true), (27, 56, false), (26, 57, false)] {
         // load + store + return + padding + three snapshot instructions.
+        // One padding instruction roots the local stack object.
         let mut tiny = format!(
-            "func @tiny(ptr byval {{i64}}) alwaysinline local {{\n ss0 = stack_slot {stack}, align 1\nblock0(v0: ptr):\n v1 = load.i64 v0\n store v1, v0\n"
+            "func @tiny(ptr byval {{i64}}) alwaysinline local {{\n ss0 = stack_slot {stack}, align 1\nblock0(v0: ptr):\n v1 = load.i64 v0\n store v1, v0\n v100 = stack_addr ss0\n"
         );
-        for i in 0..padding {
+        for i in 0..padding - 1 {
             tiny += &format!(" v{} = iconst.i64 0\n", i + 2);
         }
         tiny += " return\n}\n";

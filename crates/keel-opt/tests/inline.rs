@@ -252,6 +252,13 @@ fn remaps_debug_scopes_slots_and_callee_tables() {
         param: true,
         scope: Some(DebugScope::new(0)),
     });
+    // A debugger-visible home survives even when no instruction addresses it.
+    let mut optimized_var = helper.debug_vars[0].clone();
+    optimized_var.name = "optimized".into();
+    optimized_var.slot = helper.create_stack_slot(4, 4);
+    optimized_var.param = false;
+    helper.debug_vars.push(optimized_var);
+    helper.create_stack_slot(16, 8); // No instruction or debugger reference.
     let address = helper.ins(InsertPoint::End(block)).stack_addr(slot);
     helper.ins(InsertPoint::End(block)).store(arg, address);
     let result = helper.ins(InsertPoint::End(block)).load(Type::I32, address);
@@ -284,7 +291,9 @@ fn remaps_debug_scopes_slots_and_callee_tables() {
     keel_ir::verify_module(&m).unwrap();
     let f = &m.functions[1];
     assert_eq!(f.debug_scopes.len(), 2);
-    assert_eq!(f.debug_vars.len(), 1);
+    assert_eq!(f.debug_vars.len(), 2);
+    assert_eq!(f.num_stack_slots(), 2);
+    assert_ne!(f.debug_vars[0].slot, f.debug_vars[1].slot);
     assert!(!f.debug_vars[0].param);
     assert_eq!(f.debug_vars[0].scope, Some(DebugScope::new(1)));
     let text = m.to_string();
@@ -445,7 +454,7 @@ fn block_stack_thresholds_and_hard_stack_budget() {
         (65537, "alwaysinline", 2),
     ] {
         let source = format!(
-            "func @h() {attrs} local {{\n ss0 = stack_slot {size}, align 1\nblock0:\n return\n}}\nfunc @f() {{\nblock0:\n call @h()\n call @h()\n return\n}}\n"
+            "func @h() {attrs} local {{\n ss0 = stack_slot {size}, align 1\nblock0:\n v0 = stack_addr ss0\n return\n}}\nfunc @f() {{\nblock0:\n call @h()\n call @h()\n return\n}}\n"
         );
         assert_eq!(
             calls(&run(&source, &["inline"]), "f"),
@@ -681,7 +690,7 @@ fn detailed_reports_identify_each_budget_without_changing_decisions() {
         (large_helper(64, "", 1, 33), "caller_instruction_growth_budget", 1),
         (large_helper(2049, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
         (large_helper(254, "alwaysinline", 9, 8), "module_instruction_growth_budget", 8),
-        ("func @h() alwaysinline local {\n ss0 = stack_slot 32769, align 1\nblock0:\n return\n}\nfunc @f() {\nblock0:\n call @h()\n call @h()\n return\n}".into(), "caller_stack_growth_budget", 1),
+        ("func @h() alwaysinline local {\n ss0 = stack_slot 32769, align 1\nblock0:\n v0 = stack_addr ss0\n return\n}\nfunc @f() {\nblock0:\n call @h()\n call @h()\n return\n}".into(), "caller_stack_growth_budget", 1),
     ] {
         let report = detailed_report(&source);
         let sites = &report.invocations[0].inline_sites;
@@ -809,7 +818,9 @@ fn quickjs_dup_value_reducer_uses_the_same_bounded_growth() {
         m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
         2044,
     );
-    assert_eq!(m.functions[1].num_stack_slots(), 146);
+    // Each expansion retains its real byval snapshot, but not the unused
+    // declaration in the historical helper inspection fixture.
+    assert_eq!(m.functions[1].num_stack_slots(), 73);
     let report = detailed_report(&source);
     let sites = &report.invocations[0].inline_sites;
     assert!(sites[..73].iter().all(|s| s.outcome == "inlined"));
@@ -955,6 +966,10 @@ fn reserve_rejects_oversize_stack_nonleaf_and_missing_byval() {
         base.replace(
             "local {\nblock0(v0: ptr",
             "local {\n ss0 = stack_slot 57, align 1\nblock0(v0: ptr",
+        )
+        .replace(
+            " v2 = load.i64 v1",
+            " v9 = stack_addr ss0\n v2 = load.i64 v1",
         ),
         base.replace(
             " v2 = load.i64 v1",
@@ -978,8 +993,8 @@ fn reserve_rejects_oversize_stack_nonleaf_and_missing_byval() {
         .replace(
             " v2 = load.i64 v1",
             &format!(
-                "{} v2 = load.i64 v1",
-                (0..26)
+                " v9 = stack_addr ss0\n{} v2 = load.i64 v1",
+                (0..25)
                     .map(|n| format!(" v{} = iconst.i64 1\n", n + 10))
                     .collect::<String>()
             ),
@@ -1055,6 +1070,62 @@ block0(v0: i64):
     assert_eq!(frame("flat"), 3200);
     assert_eq!(calls(&m, "flat"), 0);
 }
+#[test]
+fn dead_callee_slots_do_not_block_stack_free_inlining_in_recursive_callers() {
+    let source = "func @helper(i64) -> i64 local {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ return v0
+}
+func @rec(i64) -> i64 {
+ ss0 = stack_slot 2048, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ store v0, v1
+ v2 = call @helper(v0)
+ v3 = call @rec(v2)
+ return v3
+}";
+    let module = run(source, &["inline"]);
+    let rec = module.functions.iter().find(|f| f.name == "rec").unwrap();
+    assert_eq!(calls(&module, "rec"), 1, "only the recursive call remains");
+    assert_eq!(rec.num_stack_slots(), 1, "no dead callee home is cloned");
+    assert_eq!(rec.stack_slots().next().unwrap().1.size, 2048);
+}
+
+#[test]
+fn inlining_clones_referenced_slots_without_dead_declaration_gaps() {
+    let source = "func @helper(i64) -> i64 local {
+ ss0 = stack_slot 16, align 8
+ ss1 = stack_slot 8, align 8
+ ss2 = stack_slot 16, align 8
+block0(v0: i64):
+ v1 = stack_addr ss1
+ store v0, v1
+ v2 = load.i64 v1
+ return v2
+}
+func @caller(i64) -> i64 {
+block0(v0: i64):
+ v1 = call @helper(v0)
+ v2 = call @helper(v1)
+ return v2
+}";
+    let module = run(source, &["inline"]);
+    let caller = module
+        .functions
+        .iter()
+        .find(|f| f.name == "caller")
+        .unwrap();
+    assert_eq!(calls(&module, "caller"), 0);
+    assert_eq!(
+        caller.num_stack_slots(),
+        2,
+        "each inline owns one fresh live home"
+    );
+    assert!(caller.stack_slots().all(|(_, slot)| slot.size == 8));
+}
+
 #[test]
 fn callees_no_larger_than_their_call_skip_the_call_count_cap() {
     // One argument and one result: a call costs 5 + 1 + 1 = 7.
