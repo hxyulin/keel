@@ -43,6 +43,7 @@ pub fn get(name: &Path) -> Option<&'static str> {
             include_str!("../include/__keel_avx512_reduce_integer.h")
         }
         "__keel_avx512_reduce_float.h" => include_str!("../include/__keel_avx512_reduce_float.h"),
+        "__keel_avx512_vl.h" => include_str!("../include/__keel_avx512_vl.h"),
         "shaintrin.h" => include_str!("../include/shaintrin.h"),
         "__keel_aes.h" => include_str!("../include/__keel_aes.h"),
         "fmaintrin.h" => include_str!("../include/fmaintrin.h"),

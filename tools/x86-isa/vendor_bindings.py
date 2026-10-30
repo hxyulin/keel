@@ -94,6 +94,8 @@ CONTROL_ALLOWED_VALUES.update({'avx512_packed_round_4_11': [4, 8, 9, 10, 11], 'a
 VALUE_CONTROLS['avx512_compare_sae'] = ({'X86Avx512CmpRoundps', 'X86Avx512CmpRoundpd'}, 4, 8, 15, 'AVX512 comparison SAE control must be an integer constant equal to 4 or 8')
 CONTROL_ALLOWED_VALUES['avx512_compare_sae'] = [4, 8]
 VALUE_EXTRA_CONTROLS['avx512_compare_sae'] = [(3, 31, 31, 'AVX512 comparison predicate must be an integer constant in 0..31', [])]
+VALUE_CONTROLS['avx512_fp_cmp_imm5'][0].update(['X86Avx512VlCmppd128', 'X86Avx512VlCmppd256', 'X86Avx512VlCmpps128', 'X86Avx512VlCmpps256'])
+VALUE_CONTROLS['avx512_vl_int_cmp_imm3'] = ({'X86Avx512VlCmpud256', 'X86Avx512VlCmpq128', 'X86Avx512VlCmpq256', 'X86Avx512VlCmpuq256', 'X86Avx512VlCmpd256', 'X86Avx512VlCmpud128', 'X86Avx512VlCmpd128', 'X86Avx512VlCmpuq128'}, 3, 7, 7, 'AVX512VL integer comparison predicate must be an integer constant in 0..7')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 

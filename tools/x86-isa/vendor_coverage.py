@@ -1,4 +1,4 @@
-"""Compare public C wrapper names against the pinned SSE–AVX512F reference headers.
+"""Compare public C wrapper names against the pinned SSE–AVX512F/VL reference headers.
 
 This is a declaration inventory, not a semantic or feature conformance claim.
 Only function definitions and preprocessor definitions count. References inside
@@ -15,7 +15,7 @@ from pathlib import Path
 HEADERS = (
     'xmmintrin.h', 'emmintrin.h', 'pmmintrin.h', 'tmmintrin.h',
     'smmintrin.h', 'avxintrin.h', 'avx2intrin.h', 'crc32intrin.h',
-    'avx512fintrin.h',
+    'avx512fintrin.h', 'avx512vlintrin.h',
 )
 TOKEN = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|[^\s]', re.S)
 PUBLIC = re.compile(r'(?:_mm(?:256|512)?_|_k)\w+\Z')
@@ -72,7 +72,7 @@ def inventory(reference: Path, owned: Path) -> dict:
         }
     return {
         'contract': 'Public wrapper names only; presence does not establish semantic, signature, immediate, feature, or ABI compatibility.',
-        'exclusions': ['MMX values and state', 'AVX-512 extensions beyond AVX512F', 'AMX', 'C++ overloads', '32-bit x86', 'unlisted headers'],
+        'exclusions': ['MMX values and state', 'AVX-512 extensions beyond AVX512F/VL', 'AMX', 'C++ overloads', '32-bit x86', 'unlisted headers'],
         'headers': headers,
     }
 

@@ -291,12 +291,12 @@ python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
 ```
 
 The checker reports definitions and macros in the seven SSE–AVX2 headers,
-`crc32intrin.h` and `avx512fintrin.h`, and compares them with compiler-owned
-headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
+`crc32intrin.h`, `avx512fintrin.h` and `avx512vlintrin.h`, and compares them
+with compiler-owned headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
 and AVX512F inventories have no missing candidates. This is a name check,
 not proof of signature, feature, immediate, ABI or semantic conformance. MMX
-entries are reported separately.
-C++ overloads, 32-bit x86, AVX-512 extensions beyond AVX512F, AMX and unlisted
+entries are reported separately. The VL inventory lists missing interfaces.
+C++ overloads, 32-bit x86, AVX-512 extensions beyond F/VL, AMX and unlisted
 headers are outside the inventory.
 
 ### Function permissions and runtime CPU queries
@@ -1062,6 +1062,33 @@ retain their constant-folding behavior. Pointer-only broadcast and insert
 helpers use compiler-owned `__keel_mm512_mask_load_...` names. Extract stores
 use `__keel_mm512_mask_store_extract...`. These helpers retain the native
 memory contracts above and evaluate each argument once.
+
+## AVX512VL masked core
+
+AVX512VL adds packed 128- and 256-bit masked add/subtract, unaligned memory
+loads/stores and comparisons for dword, qword, float and double lanes.
+These operations require both `avx512f` and `avx512vl` in the enclosing
+function. Header inclusion does not enable either feature. Scalar EVEX and
+special 128-bit F-only instructions retain their separate feature rules.
+
+Typed names use `x86_avx512vl_` followed by the operation and `128` or `256`.
+Binary arithmetic takes a merge vector, `i8` mask and two inputs. Memory
+loads take a pointer, merge vector and mask; stores take a pointer, value
+and mask. Comparisons take two vectors, execution mask and constant predicate,
+then return an `i8` mask. Integer predicates are in 0..7; floating predicates
+are in 0..31. These narrow packed forms have no embedded rounding or SAE.
+
+Only the low bit for each existing lane is used. Higher input mask bits do
+not enable additional lanes, and comparison results zero unused bits.
+Inactive lanes retain their merge bits and suppress memory accesses or
+floating exceptions. Loads, stores, spills and copies retain the exact
+16- or 32-byte value width. Raw floating operations remain pinned relative
+to MXCSR and retain ordered/unordered and signaling predicate distinctions.
+
+`immintrin.h` exposes standard `_mm_mask_*` and `_mm256_mask_*` arithmetic,
+load/store and comparison wrappers, plus mask-zero arithmetic and loads.
+The compiler uses one physical SIMD allocation index for XMM, YMM and ZMM
+views, including functions that mix these widths.
 
 ## SHA-256
 

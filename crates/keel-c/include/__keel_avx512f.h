@@ -999,4 +999,5 @@ static __inline__ __attribute__((always_inline)) unsigned char _kortestc_mask16_
 #include <__keel_avx512_compat.h>
 #include <__keel_avx512_reduce_integer.h>
 #include <__keel_avx512_reduce_float.h>
+#include <__keel_avx512_vl.h>
 #endif
