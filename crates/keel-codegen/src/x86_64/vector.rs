@@ -221,6 +221,7 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
         }
         if avx512_float::keep(func, data, features)
             || avx512::keep(func, data, features)
+            || avx512_reduce::keep(func, data, features)
             || avx256::keep(func, data, features)
         {
             return true;

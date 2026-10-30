@@ -870,3 +870,9 @@ mod x86_avx512_mask;
 mod x86_avx512_float_mask;
 #[path = "vector_x86/x86_avx512_shuffle.rs"]
 mod x86_avx512_shuffle;
+
+#[path = "vector_x86/x86_avx512_reduce.rs"]
+mod x86_avx512_reduce;
+
+#[path = "vector_x86/x86_avx512_convert.rs"]
+mod x86_avx512_convert;

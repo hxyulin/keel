@@ -62,11 +62,26 @@ scalar operations, including subtraction and division. Negation, absolute
 value and copy-sign operate on sign bits, preserving NaN payloads. Ceiling,
 floor, truncation and ties-to-even rounding use fixed rounding controls.
 
+Portable 512-bit floating minimum and maximum propagate NaNs. Minimum
+selects negative zero on a zero tie; maximum selects positive zero. Comparisons
+produce canonical all-ones or zero integer lanes. Floating selects treat any
+nonzero integer mask lane as true and preserve the selected value's bits.
+These recipes use AVX512F without AVX512DQ or AVX2 permission.
+
 Explicit 512-bit `fma` uses AVX512F and rounds once. It does not require the
 independent FMA permission used by scalar, 128-bit and 256-bit instructions.
 Ordinary multiply and add remain separate. Other floating operations use
 portable lane lowering. C accepts `float` and `double` vectors with
 `vector_size(64)`; `immintrin.h` defines `__m512` and `__m512d`.
+
+Signed and unsigned dword widening from `i32x8` or `i32x16` to `i64x8`
+selects the low or high eight source lanes. Qword narrowing from `i64x8` to
+`i32x8` or `i32x16` truncates each lane; unused `i32x16` lanes become zero.
+These conversions require AVX512F without AVX2 or AVX512VL.
+
+Integer `i32x16` and `i64x8` reductions use full-width shuffle trees for
+wrapping addition, bitwise AND/OR/XOR, and signed/unsigned minimum/maximum.
+Every lane contributes; these recipes require AVX512F without AVX2.
 
 ## Shuffles
 

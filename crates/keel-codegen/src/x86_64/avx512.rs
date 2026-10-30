@@ -36,6 +36,29 @@ pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86:
         }
         InstData::VectorExtract { arg, .. } => lane512(ty(*arg)),
         InstData::Convert {
+            op:
+                ConvertOp::SwidenLow
+                | ConvertOp::UwidenLow
+                | ConvertOp::SwidenHigh
+                | ConvertOp::UwidenHigh,
+            ty: result,
+            arg,
+        } => {
+            *result == Type::Vector(VectorType::I64x8)
+                && matches!(
+                    ty(*arg),
+                    Type::Vector(VectorType::I32x8 | VectorType::I32x16)
+                )
+        }
+        InstData::Convert {
+            op: ConvertOp::NarrowLow,
+            ty: result,
+            arg,
+        } => {
+            ty(*arg) == Type::Vector(VectorType::I64x8)
+                && matches!(result, Type::Vector(VectorType::I32x8 | VectorType::I32x16))
+        }
+        InstData::Convert {
             op: ConvertOp::Bitcast,
             ty: result,
             arg,
@@ -306,6 +329,61 @@ impl FunctionCompiler<'_> {
                 self.emit(
                     Opcode::parse(name).expect("AVX512F broadcast"),
                     [asm_arg(simd_width(d, 512)), asm_arg(xmm(FS1))],
+                );
+                self.def_done(result, d);
+            }
+            InstData::Convert {
+                op:
+                    operation @ (ConvertOp::SwidenLow
+                    | ConvertOp::UwidenLow
+                    | ConvertOp::SwidenHigh
+                    | ConvertOp::UwidenHigh),
+                arg,
+                ..
+            } => {
+                let a = self.use_freg(arg, FS0);
+                let high = matches!(operation, ConvertOp::SwidenHigh | ConvertOp::UwidenHigh);
+                let source = if high && self.ty(arg).bytes() == Some(64) {
+                    self.emit(
+                        Opcode::parse("vextracti64x4").expect("AVX512F half extract"),
+                        [
+                            asm_arg(simd_width(FS1, 256)),
+                            asm_arg(simd_width(a, 512)),
+                            asm_arg(1),
+                        ],
+                    );
+                    FS1
+                } else {
+                    a
+                };
+                let d = self.def_freg(result);
+                let opcode = if matches!(operation, ConvertOp::SwidenLow | ConvertOp::SwidenHigh) {
+                    "vpmovsxdq"
+                } else {
+                    "vpmovzxdq"
+                };
+                self.emit(
+                    Opcode::parse(opcode).expect("AVX512F dword widening"),
+                    [
+                        asm_arg(simd_width(d, 512)),
+                        asm_arg(simd_width(source, 256)),
+                    ],
+                );
+                self.def_done(result, d);
+            }
+            InstData::Convert {
+                op: ConvertOp::NarrowLow,
+                arg,
+                ..
+            } => {
+                let a = self.use_freg(arg, FS0);
+                let d = self.def_freg(result);
+                // The EVEX512 source form writes eight truncated dwords and
+                // clears all upper ZMM bits. A 512-bit result therefore has its
+                // unused eight lanes initialized to zero without AVX512VL.
+                self.emit(
+                    Opcode::parse("vpmovqd").expect("AVX512F qword narrowing"),
+                    [asm_arg(simd_width(d, 256)), asm_arg(simd_width(a, 512))],
                 );
                 self.def_done(result, d);
             }

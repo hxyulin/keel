@@ -133,6 +133,7 @@ mod avx512;
 mod avx512_float;
 mod avx512_float_mask;
 mod avx512_mask;
+mod avx512_reduce;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -2539,6 +2540,9 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if self.avx512_float(func.inst_data(inst), result) {
+            return;
+        }
+        if self.avx512_reduce(func.inst_data(inst), result) {
             return;
         }
         if self.avx512(func.inst_data(inst), result) {
