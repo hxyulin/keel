@@ -1183,6 +1183,21 @@ above. Immediate rotation wrappers require constants in 0..255. C exposes
 masked and mask-zero forms throughout, plus unmasked rotations and narrow
 qword arithmetic-right shifts where these have no legacy interface.
 
+VL permutations and shuffles share the foundation register recipes at
+128 and 256 bits. Whole-vector single-source indexed permutes are available
+only at 256 bits; two-table I2/T2 forms are available at both widths.
+Local permutes, unpacking and duplicate operations retain 128-bit block
+boundaries. Alignment uses the low selector bits modulo the vector lane
+count. Two-table operations keep the merge value separate from every table
+and index input. The C mask2 interfaces merge the original index bits,
+including for floating result types.
+
+These pure operations require F plus VL and use `i8` destination masks.
+Raw typed immediate controls accept 0..255. Standard C VPERMILPD and
+VSHUFPD wrappers accept only 0..3 at 128 bits and 0..15 at 256 bits.
+The 256-bit block-shuffle wrappers accept 0..3. Separate reviewed C bindings
+enforce those limits without narrowing the raw typed controls.
+
 ## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
@@ -1248,6 +1263,32 @@ All require F plus DQ, adding VL only for encoded widths below 512. A
 Memory-only broadcast encodings stage their SSA input in compiler-owned
 scratch with exact 16- or 32-byte stores. C exposes unmasked, masked and
 mask-zero forms while retaining existing F-only lane aliases.
+
+DQ floating specials cover RANGE, REDUCE and FPCLASS for packed float/double
+at all three widths and scalar `ss`/`sd`. All require F plus DQ. Packed
+128-/256-bit forms also require VL; scalar XMM forms do not. RANGE takes
+`(merge, mask, a, b, i32 immediate)`; packed REDUCE takes
+`(merge, mask, input, i32 immediate)`. Their 512-bit forms append SAE control
+4 or 8. Narrow packed forms have no SAE operand. RANGE immediates are 0..15;
+REDUCE immediates are 0..255. REDUCE's immediate selects the scale and
+rounding and can suppress precision independently of SAE.
+
+Scalar RANGE and REDUCE both take
+`(merge, i8 mask, a, b, i32 immediate, i32 sae)`. RANGE computes its active
+low lane from the original `a` and `b`; REDUCE computes from `b.low`.
+Both copy upper XMM lanes from the original `a`, regardless of mask bit zero.
+Only an inactive low lane comes from `merge`. SAE is 4 or 8 and does not
+provide embedded rounding. Inactive arithmetic suppresses exceptions.
+
+FPCLASS takes `(input, execution_mask, i32 immediate)` and returns a scalar
+mask. Its immediate is 0..255 and selects floating categories. Scalar forms
+inspect only the low element and mask bit zero. Inactive and unused result
+bits are zero. Register classification raises no SIMD floating exceptions,
+but it observes MXCSR.DAZ when classifying subnormals, as specified by
+[Intel's instruction pseudocode](https://cdrdv2-public.intel.com/835748/252046-sdm-change-document.pdf).
+All three families retain MXCSR ordering through optimization. C supplies
+unmasked, masked and mask-zero RANGE/REDUCE interfaces and masked/unmasked
+FPCLASS interfaces, including the supported scalar/512-bit SAE forms.
 
 ## AVX512CD conflict and leading-zero count
 
@@ -1517,3 +1558,17 @@ inactive merge bits and require F plus BW, adding VL for narrow widths.
 C provides masked and mask-zero forms at every width and the corresponding
 512-bit unmasked forms. Existing narrow unmasked interfaces keep their
 prior feature contracts.
+
+BW `packsswb`/`packuswb` narrow signed words to signed or unsigned bytes;
+`packssdw`/`packusdw` narrow signed dwords to signed or unsigned words.
+Values saturate at the destination's bounds. Within each 128-bit block,
+the narrowed `a` lanes precede the narrowed `b` lanes. `unpcklbw`/`unpckhbw`
+and `unpcklwd`/`unpckhwd` interleave the low or high halves of each input
+block. No pack or unpack moves elements between 128-bit blocks.
+
+Names end in 128, 256 or 512. Each takes `(merge, mask, a, b)` and returns
+the result vector. Masks follow destination lanes: byte results use
+`i16`/`i32`/`i64`, and word results use `i8`/`i16`/`i32`. These pure operations
+require F plus BW, adding VL for narrow forms. C exposes masked and
+mask-zero forms at every width and 512-bit unmasked forms. Existing narrow
+unmasked APIs retain their legacy feature contracts.

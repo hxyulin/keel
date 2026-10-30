@@ -2,6 +2,7 @@ import copy
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import generate
@@ -25,7 +26,7 @@ class VendorBindingTests(unittest.TestCase):
         self.assertEqual({family: sum(row['family'] == family for row in rows)
                           for family in vendor_bindings.FAMILIES},
                          {'aes': 6, 'packed_shift': 32, 'saturating': 8,
-                          'packed_conversion': 3, 'value': 1268})
+                          'packed_conversion': 3, 'value': 1390})
         source = vendor_bindings.generate(self.schema, generate.ROOT)
         self.assertEqual(source.count(' => Binding::'), len(names))
         self.assertIn('pub(crate) fn recognized(', source)
@@ -126,3 +127,29 @@ class VendorBindingTests(unittest.TestCase):
             with self.subTest(control=control):
                 with self.assertRaisesRegex(ValueError, f'i32 parameter at index {index}'):
                     vendor_bindings.validate(schema, generate.ROOT)
+
+    def test_reviewed_c_alias_controls_cannot_replace_raw_controls(self):
+        alias = next(row for row in self.schema['bindings']
+                     if row['builtin'] == 'keel_avx512vl_c_vpermilpdimm128')
+        raw = next(row for row in self.schema['bindings']
+                   if row['builtin'] == 'keel_avx512vl_vpermilpdimm128')
+        for name, control in [(alias['builtin'], raw['control']),
+                              (raw['builtin'], alias['control'])]:
+            schema = copy.deepcopy(self.schema)
+            next(row for row in schema['bindings'] if row['builtin'] == name)['control'] = control
+            with self.subTest(builtin=name):
+                with self.assertRaisesRegex(ValueError, 'value control differs'):
+                    vendor_bindings.validate(schema, generate.ROOT)
+        schema = copy.deepcopy(self.schema)
+        other = next(row for row in schema['bindings']
+                     if row['builtin'] == 'keel_avx512vl_vpermilpdimm256')
+        changed = next(row for row in schema['bindings'] if row['builtin'] == alias['builtin'])
+        changed['intrinsic'] = other['intrinsic']
+        changed['intrinsic_id'] = other['intrinsic_id']
+        with self.assertRaisesRegex(ValueError, 'value control alias differs'):
+            vendor_bindings.validate(schema, generate.ROOT)
+
+    def test_control_declaration_order_does_not_rebind_reviewed_aliases(self):
+        reversed_controls = dict(reversed(list(vendor_bindings.VALUE_CONTROLS.items())))
+        with patch.object(vendor_bindings, 'VALUE_CONTROLS', reversed_controls):
+            vendor_bindings.validate(self.schema, generate.ROOT)

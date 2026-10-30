@@ -1678,3 +1678,11 @@ mod x86_avx512_vl_shift;
 
 #[path = "x86_intrinsics/x86_avx512_dq_lane.rs"]
 mod x86_avx512_dq_lane;
+
+#[path = "x86_intrinsics/x86_avx512_bw_pack.rs"]
+mod x86_avx512_bw_pack;
+#[path = "x86_intrinsics/x86_avx512_dq_special.rs"]
+mod x86_avx512_dq_special;
+
+#[path = "x86_intrinsics/x86_avx512_vl_permute.rs"]
+mod x86_avx512_vl_permute;

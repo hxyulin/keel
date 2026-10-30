@@ -113,7 +113,38 @@ VALUE_CONTROLS['avx512dq_lane_3_3'] = ({'X86Avx512DqExtractf64x2512', 'X86Avx512
 VALUE_CONTROLS['avx512dq_lane_4_1'] = ({'X86Avx512DqInsertf64x2256', 'X86Avx512DqInserti64x2256', 'X86Avx512DqInsertf32x8512', 'X86Avx512DqInserti32x8512'}, 4, 1, 1, 'AVX512DQ lane index must be a supported integer constant')
 VALUE_CONTROLS['avx512dq_lane_4_3'] = ({'X86Avx512DqInsertf64x2512', 'X86Avx512DqInserti64x2512'}, 4, 3, 3, 'AVX512DQ lane index must be a supported integer constant')
 VALUE_CONTROLS['avx512vl_shift_imm8'] = ({'X86Avx512Vl' + stem + lane + str(width) for stem in ['Slli', 'Srli', 'Srai', 'Rol', 'Ror'] for lane in ['d', 'q'] for width in [128, 256]}, 3, 255, 255, 'AVX512VL shift or rotation immediate must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512dq_special_imm_4_15'] = ({'X86Avx512DqRangeps128', 'X86Avx512DqRangepd128', 'X86Avx512DqRangeps256', 'X86Avx512DqRangepd256'}, 4, 15, 15, 'AVX512 immediate must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_special_imm_3_255'] = ({'X86Avx512DqReduceps128', 'X86Avx512DqReducepd128', 'X86Avx512DqReduceps256', 'X86Avx512DqReducepd256'}, 3, 255, 255, 'AVX512 immediate must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_special_imm_2_255'] = ({'X86Avx512DqFpclassps128', 'X86Avx512DqFpclasspd128', 'X86Avx512DqFpclassps256', 'X86Avx512DqFpclasspd256', 'X86Avx512DqFpclassps512', 'X86Avx512DqFpclasspd512', 'X86Avx512DqFpclassss', 'X86Avx512DqFpclasssd'}, 2, 255, 255, 'AVX512 immediate must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_special_sae_5_4_15'] = ({'X86Avx512DqRangeps512', 'X86Avx512DqRangepd512', 'X86Avx512DqRangess', 'X86Avx512DqRangesd'}, 5, 8, 15, 'AVX512DQ SAE control must be an integer constant equal to 4 or 8')
+CONTROL_ALLOWED_VALUES['avx512dq_special_sae_5_4_15'] = [4, 8]
+VALUE_EXTRA_CONTROLS['avx512dq_special_sae_5_4_15'] = [(4, 15, 15, 'AVX512DQ immediate must be a supported integer constant', [])]
+VALUE_CONTROLS['avx512dq_special_sae_4_3_255'] = ({'X86Avx512DqReduceps512', 'X86Avx512DqReducepd512'}, 4, 8, 15, 'AVX512DQ SAE control must be an integer constant equal to 4 or 8')
+CONTROL_ALLOWED_VALUES['avx512dq_special_sae_4_3_255'] = [4, 8]
+VALUE_EXTRA_CONTROLS['avx512dq_special_sae_4_3_255'] = [(3, 255, 255, 'AVX512DQ immediate must be a supported integer constant', [])]
+VALUE_CONTROLS['avx512dq_special_sae_5_4_255'] = ({'X86Avx512DqReducess', 'X86Avx512DqReducesd'}, 5, 8, 15, 'AVX512DQ SAE control must be an integer constant equal to 4 or 8')
+CONTROL_ALLOWED_VALUES['avx512dq_special_sae_5_4_255'] = [4, 8]
+VALUE_EXTRA_CONTROLS['avx512dq_special_sae_5_4_255'] = [(4, 255, 255, 'AVX512DQ immediate must be a supported integer constant', [])]
+VALUE_CONTROLS['avx512vl_permute_imm_3_255'] = ({'X86Avx512VlVpermilpsImm128', 'X86Avx512VlVpermilpdImm128', 'X86Avx512VlVpshufd128', 'X86Avx512VlVpermilpsImm256', 'X86Avx512VlVpermilpdImm256', 'X86Avx512VlVpermqImm256', 'X86Avx512VlVpermpdImm256', 'X86Avx512VlVpshufd256'}, 3, 255, 255, 'AVX512 immediate must be a supported integer constant')
+VALUE_CONTROLS['avx512vl_permute_imm_4_255'] = ({'X86Avx512VlVshufps128', 'X86Avx512VlVshufpd128', 'X86Avx512VlValignd128', 'X86Avx512VlValignq128', 'X86Avx512VlVshufps256', 'X86Avx512VlVshufpd256', 'X86Avx512VlVshufi32x4256', 'X86Avx512VlVshufi64x2256', 'X86Avx512VlVshuff32x4256', 'X86Avx512VlVshuff64x2256', 'X86Avx512VlValignd256', 'X86Avx512VlValignq256'}, 4, 255, 255, 'AVX512 immediate must be a supported integer constant')
+VALUE_CONTROLS['avx512vl_c_permute_imm_3_3'] = ({'X86Avx512VlVpermilpdImm128'}, 3, 3, 3, 'AVX512VL C immediate must be an integer constant in 0..3')
+VALUE_CONTROLS['avx512vl_c_permute_imm_3_15'] = ({'X86Avx512VlVpermilpdImm256'}, 3, 15, 15, 'AVX512VL C immediate must be an integer constant in 0..15')
+VALUE_CONTROLS['avx512vl_c_permute_imm_4_3'] = ({'X86Avx512VlVshufpd128', 'X86Avx512VlVshufi32x4256', 'X86Avx512VlVshufi64x2256', 'X86Avx512VlVshuff32x4256', 'X86Avx512VlVshuff64x2256'}, 4, 3, 3, 'AVX512VL C immediate must be an integer constant in 0..3')
+VALUE_CONTROLS['avx512vl_c_permute_imm_4_15'] = ({'X86Avx512VlVshufpd256'}, 4, 15, 15, 'AVX512VL C immediate must be an integer constant in 0..15')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
+
+# Reviewed C wrappers can have stricter controls than their raw typed operation.
+VALUE_CONTROL_ALIASES = {
+    'keel_avx512vl_c_vpermilpdimm128': ('X86Avx512VlVpermilpdImm128', 'avx512vl_c_permute_imm_3_3'),
+    'keel_avx512vl_c_vpermilpdimm256': ('X86Avx512VlVpermilpdImm256', 'avx512vl_c_permute_imm_3_15'),
+    'keel_avx512vl_c_vshufpd128': ('X86Avx512VlVshufpd128', 'avx512vl_c_permute_imm_4_3'),
+    'keel_avx512vl_c_vshufpd256': ('X86Avx512VlVshufpd256', 'avx512vl_c_permute_imm_4_15'),
+    'keel_avx512vl_c_vshufi32x4256': ('X86Avx512VlVshufi32x4256', 'avx512vl_c_permute_imm_4_3'),
+    'keel_avx512vl_c_vshufi64x2256': ('X86Avx512VlVshufi64x2256', 'avx512vl_c_permute_imm_4_3'),
+    'keel_avx512vl_c_vshuff32x4256': ('X86Avx512VlVshuff32x4256', 'avx512vl_c_permute_imm_4_3'),
+    'keel_avx512vl_c_vshuff64x2256': ('X86Avx512VlVshuff64x2256', 'avx512vl_c_permute_imm_4_3'),
+}
+
 
 
 def ir_type(ty, first=None):
@@ -163,6 +194,7 @@ def validate(schema, root):
     registry = {r['variant']: r['id'] for r in json.loads((root / 'intrinsic-registry.json').read_text())['intrinsics']}
     fields = {r['field'] for r in json.loads((root / 'feature-fields.json').read_text())}
     seen = set()
+    alias_controls = {control for _, control in VALUE_CONTROL_ALIASES.values()}
     rows = schema['bindings']
     if not isinstance(rows, list) or not rows:
         raise ValueError('empty binding inventory')
@@ -209,7 +241,11 @@ def validate(schema, root):
             raise ValueError('invalid conversion signature')
         if family == 'value':
             expected = next((name for name, (intrinsics, *_) in VALUE_CONTROLS.items()
-                             if row['intrinsic'] in intrinsics), 'none')
+                             if row['intrinsic'] in intrinsics and name not in alias_controls), 'none')
+            if name in VALUE_CONTROL_ALIASES:
+                intrinsic, expected = VALUE_CONTROL_ALIASES[name]
+                if row['intrinsic'] != intrinsic:
+                    raise ValueError('value control alias differs from reviewed intrinsic')
             if control != expected:
                 raise ValueError('value control differs from semantic parser recipe')
             if control != 'none':

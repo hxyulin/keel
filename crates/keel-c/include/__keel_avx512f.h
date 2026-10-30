@@ -1017,4 +1017,7 @@ static __inline__ __attribute__((always_inline)) unsigned char _kortestc_mask16_
 #include <__keel_avx512_dq_lane.h>
 #include <__keel_avx512_vl_shift.h>
 #include <__keel_avx512_bw_mul.h>
+#include <__keel_avx512_dq_special.h>
+#include <__keel_avx512_vl_permute.h>
+#include <__keel_avx512_bw_pack.h>
 #endif
