@@ -51,8 +51,9 @@ AVX512F lowers `i32x16` and `i64x8` add, subtract, bitwise AND/OR/XOR,
 scalar splats and 512-bit vector bitcasts directly to ZMM instructions.
 Dword multiplication, dword/qword signed and unsigned min/max, and variable
 shifts also use native AVX512F instructions. Shift counts are masked per lane
-to retain the IR modulo-width semantics. Qword multiplication uses lane lowering. These
-recipes require no AVX2 permission. Three-operand arithmetic accepts overlapping
+to retain the IR modulo-width semantics. Qword multiplication uses native
+`vpmullq` with AVX512DQ and lane lowering with AVX512F alone. These recipes
+require no AVX2 permission. Three-operand arithmetic accepts overlapping
 inputs and destinations; forced spills use separate reload scratch registers.
 Byte and word arithmetic continues through portable lane lowering.
 

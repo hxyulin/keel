@@ -2124,10 +2124,256 @@ pub enum Intrinsic {
     X86Avx512VlVcvtps2ph128 = 1399,
     #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
     X86Avx512VlVcvtps2ph256 = 1400,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictd128 = 1401,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictq128 = 1402,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntd128 = 1403,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntq128 = 1404,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictd256 = 1405,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictq256 = 1406,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntd256 = 1407,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntq256 = 1408,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictd512 = 1409,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskConflictq512 = 1410,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntd512 = 1411,
+    #[doc = "Masked AVX512CD operation. Narrow widths additionally require AVX512VL. Conflict compares all earlier input lanes regardless of the output mask."]
+    X86Avx512CdMaskLzcntq512 = 1412,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqMulloq128 = 1413,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndps128 = 1414,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndpd128 = 1415,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnps128 = 1416,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnpd128 = 1417,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrps128 = 1418,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrpd128 = 1419,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorps128 = 1420,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorpd128 = 1421,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqMulloq256 = 1422,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndps256 = 1423,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndpd256 = 1424,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnps256 = 1425,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnpd256 = 1426,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrps256 = 1427,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrpd256 = 1428,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorps256 = 1429,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorpd256 = 1430,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqMulloq512 = 1431,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndps512 = 1432,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndpd512 = 1433,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnps512 = 1434,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqAndnpd512 = 1435,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrps512 = 1436,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqOrpd512 = 1437,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorps512 = 1438,
+    #[doc = "Pure masked AVX512DQ operation. Floating bitwise forms preserve exact payloads without observing MXCSR. Narrow packed forms additionally require AVX512VL."]
+    X86Avx512DqXorpd512 = 1439,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddb128 = 1440,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubb128 = 1441,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsb128 = 1442,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsb128 = 1443,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusb128 = 1444,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusb128 = 1445,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsb128 = 1446,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinub128 = 1447,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsb128 = 1448,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxub128 = 1449,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMoveb128 = 1450,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadb128 = 1451,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStoreb128 = 1452,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddw128 = 1453,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubw128 = 1454,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsw128 = 1455,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsw128 = 1456,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusw128 = 1457,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusw128 = 1458,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsw128 = 1459,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinuw128 = 1460,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsw128 = 1461,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxuw128 = 1462,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMovew128 = 1463,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadw128 = 1464,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStorew128 = 1465,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddb256 = 1466,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubb256 = 1467,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsb256 = 1468,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsb256 = 1469,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusb256 = 1470,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusb256 = 1471,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsb256 = 1472,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinub256 = 1473,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsb256 = 1474,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxub256 = 1475,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMoveb256 = 1476,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadb256 = 1477,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStoreb256 = 1478,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddw256 = 1479,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubw256 = 1480,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsw256 = 1481,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsw256 = 1482,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusw256 = 1483,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusw256 = 1484,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsw256 = 1485,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinuw256 = 1486,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsw256 = 1487,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxuw256 = 1488,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMovew256 = 1489,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadw256 = 1490,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStorew256 = 1491,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddb512 = 1492,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubb512 = 1493,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsb512 = 1494,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsb512 = 1495,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusb512 = 1496,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusb512 = 1497,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsb512 = 1498,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinub512 = 1499,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsb512 = 1500,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxub512 = 1501,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMoveb512 = 1502,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadb512 = 1503,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStoreb512 = 1504,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddw512 = 1505,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubw512 = 1506,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddsw512 = 1507,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubsw512 = 1508,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwAddusw512 = 1509,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwSubusw512 = 1510,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinsw512 = 1511,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMinuw512 = 1512,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxsw512 = 1513,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMaxuw512 = 1514,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwMovew512 = 1515,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwLoadw512 = 1516,
+    #[doc = "Masked AVX512BW byte/word operation. Narrow forms require AVX512VL. Masks retain every lane; masked memory suppresses inactive lane accesses."]
+    X86Avx512BwStorew512 = 1517,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmb128 = 1518,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmw128 = 1519,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmb256 = 1520,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmw256 = 1521,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmb512 = 1522,
+    #[doc = "AVX512CD mask-source broadcast. Broadcast the zero-extended low byte or word to every qword or dword lane; narrow widths require AVX512VL."]
+    X86Avx512CdBroadcastmw512 = 1523,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1401] = [
+    pub const ALL: [Intrinsic; 1524] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3529,6 +3775,129 @@ impl Intrinsic {
         Intrinsic::X86Avx512VlVcvtph2ps256,
         Intrinsic::X86Avx512VlVcvtps2ph128,
         Intrinsic::X86Avx512VlVcvtps2ph256,
+        Intrinsic::X86Avx512CdMaskConflictd128,
+        Intrinsic::X86Avx512CdMaskConflictq128,
+        Intrinsic::X86Avx512CdMaskLzcntd128,
+        Intrinsic::X86Avx512CdMaskLzcntq128,
+        Intrinsic::X86Avx512CdMaskConflictd256,
+        Intrinsic::X86Avx512CdMaskConflictq256,
+        Intrinsic::X86Avx512CdMaskLzcntd256,
+        Intrinsic::X86Avx512CdMaskLzcntq256,
+        Intrinsic::X86Avx512CdMaskConflictd512,
+        Intrinsic::X86Avx512CdMaskConflictq512,
+        Intrinsic::X86Avx512CdMaskLzcntd512,
+        Intrinsic::X86Avx512CdMaskLzcntq512,
+        Intrinsic::X86Avx512DqMulloq128,
+        Intrinsic::X86Avx512DqAndps128,
+        Intrinsic::X86Avx512DqAndpd128,
+        Intrinsic::X86Avx512DqAndnps128,
+        Intrinsic::X86Avx512DqAndnpd128,
+        Intrinsic::X86Avx512DqOrps128,
+        Intrinsic::X86Avx512DqOrpd128,
+        Intrinsic::X86Avx512DqXorps128,
+        Intrinsic::X86Avx512DqXorpd128,
+        Intrinsic::X86Avx512DqMulloq256,
+        Intrinsic::X86Avx512DqAndps256,
+        Intrinsic::X86Avx512DqAndpd256,
+        Intrinsic::X86Avx512DqAndnps256,
+        Intrinsic::X86Avx512DqAndnpd256,
+        Intrinsic::X86Avx512DqOrps256,
+        Intrinsic::X86Avx512DqOrpd256,
+        Intrinsic::X86Avx512DqXorps256,
+        Intrinsic::X86Avx512DqXorpd256,
+        Intrinsic::X86Avx512DqMulloq512,
+        Intrinsic::X86Avx512DqAndps512,
+        Intrinsic::X86Avx512DqAndpd512,
+        Intrinsic::X86Avx512DqAndnps512,
+        Intrinsic::X86Avx512DqAndnpd512,
+        Intrinsic::X86Avx512DqOrps512,
+        Intrinsic::X86Avx512DqOrpd512,
+        Intrinsic::X86Avx512DqXorps512,
+        Intrinsic::X86Avx512DqXorpd512,
+        Intrinsic::X86Avx512BwAddb128,
+        Intrinsic::X86Avx512BwSubb128,
+        Intrinsic::X86Avx512BwAddsb128,
+        Intrinsic::X86Avx512BwSubsb128,
+        Intrinsic::X86Avx512BwAddusb128,
+        Intrinsic::X86Avx512BwSubusb128,
+        Intrinsic::X86Avx512BwMinsb128,
+        Intrinsic::X86Avx512BwMinub128,
+        Intrinsic::X86Avx512BwMaxsb128,
+        Intrinsic::X86Avx512BwMaxub128,
+        Intrinsic::X86Avx512BwMoveb128,
+        Intrinsic::X86Avx512BwLoadb128,
+        Intrinsic::X86Avx512BwStoreb128,
+        Intrinsic::X86Avx512BwAddw128,
+        Intrinsic::X86Avx512BwSubw128,
+        Intrinsic::X86Avx512BwAddsw128,
+        Intrinsic::X86Avx512BwSubsw128,
+        Intrinsic::X86Avx512BwAddusw128,
+        Intrinsic::X86Avx512BwSubusw128,
+        Intrinsic::X86Avx512BwMinsw128,
+        Intrinsic::X86Avx512BwMinuw128,
+        Intrinsic::X86Avx512BwMaxsw128,
+        Intrinsic::X86Avx512BwMaxuw128,
+        Intrinsic::X86Avx512BwMovew128,
+        Intrinsic::X86Avx512BwLoadw128,
+        Intrinsic::X86Avx512BwStorew128,
+        Intrinsic::X86Avx512BwAddb256,
+        Intrinsic::X86Avx512BwSubb256,
+        Intrinsic::X86Avx512BwAddsb256,
+        Intrinsic::X86Avx512BwSubsb256,
+        Intrinsic::X86Avx512BwAddusb256,
+        Intrinsic::X86Avx512BwSubusb256,
+        Intrinsic::X86Avx512BwMinsb256,
+        Intrinsic::X86Avx512BwMinub256,
+        Intrinsic::X86Avx512BwMaxsb256,
+        Intrinsic::X86Avx512BwMaxub256,
+        Intrinsic::X86Avx512BwMoveb256,
+        Intrinsic::X86Avx512BwLoadb256,
+        Intrinsic::X86Avx512BwStoreb256,
+        Intrinsic::X86Avx512BwAddw256,
+        Intrinsic::X86Avx512BwSubw256,
+        Intrinsic::X86Avx512BwAddsw256,
+        Intrinsic::X86Avx512BwSubsw256,
+        Intrinsic::X86Avx512BwAddusw256,
+        Intrinsic::X86Avx512BwSubusw256,
+        Intrinsic::X86Avx512BwMinsw256,
+        Intrinsic::X86Avx512BwMinuw256,
+        Intrinsic::X86Avx512BwMaxsw256,
+        Intrinsic::X86Avx512BwMaxuw256,
+        Intrinsic::X86Avx512BwMovew256,
+        Intrinsic::X86Avx512BwLoadw256,
+        Intrinsic::X86Avx512BwStorew256,
+        Intrinsic::X86Avx512BwAddb512,
+        Intrinsic::X86Avx512BwSubb512,
+        Intrinsic::X86Avx512BwAddsb512,
+        Intrinsic::X86Avx512BwSubsb512,
+        Intrinsic::X86Avx512BwAddusb512,
+        Intrinsic::X86Avx512BwSubusb512,
+        Intrinsic::X86Avx512BwMinsb512,
+        Intrinsic::X86Avx512BwMinub512,
+        Intrinsic::X86Avx512BwMaxsb512,
+        Intrinsic::X86Avx512BwMaxub512,
+        Intrinsic::X86Avx512BwMoveb512,
+        Intrinsic::X86Avx512BwLoadb512,
+        Intrinsic::X86Avx512BwStoreb512,
+        Intrinsic::X86Avx512BwAddw512,
+        Intrinsic::X86Avx512BwSubw512,
+        Intrinsic::X86Avx512BwAddsw512,
+        Intrinsic::X86Avx512BwSubsw512,
+        Intrinsic::X86Avx512BwAddusw512,
+        Intrinsic::X86Avx512BwSubusw512,
+        Intrinsic::X86Avx512BwMinsw512,
+        Intrinsic::X86Avx512BwMinuw512,
+        Intrinsic::X86Avx512BwMaxsw512,
+        Intrinsic::X86Avx512BwMaxuw512,
+        Intrinsic::X86Avx512BwMovew512,
+        Intrinsic::X86Avx512BwLoadw512,
+        Intrinsic::X86Avx512BwStorew512,
+        Intrinsic::X86Avx512CdBroadcastmb128,
+        Intrinsic::X86Avx512CdBroadcastmw128,
+        Intrinsic::X86Avx512CdBroadcastmb256,
+        Intrinsic::X86Avx512CdBroadcastmw256,
+        Intrinsic::X86Avx512CdBroadcastmb512,
+        Intrinsic::X86Avx512CdBroadcastmw512,
     ];
 }
 
@@ -4926,5 +5295,128 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512VlVcvtph2ps256
             | $crate::Intrinsic::X86Avx512VlVcvtps2ph128
             | $crate::Intrinsic::X86Avx512VlVcvtps2ph256
+            | $crate::Intrinsic::X86Avx512CdMaskConflictd128
+            | $crate::Intrinsic::X86Avx512CdMaskConflictq128
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntd128
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntq128
+            | $crate::Intrinsic::X86Avx512CdMaskConflictd256
+            | $crate::Intrinsic::X86Avx512CdMaskConflictq256
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntd256
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntq256
+            | $crate::Intrinsic::X86Avx512CdMaskConflictd512
+            | $crate::Intrinsic::X86Avx512CdMaskConflictq512
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntd512
+            | $crate::Intrinsic::X86Avx512CdMaskLzcntq512
+            | $crate::Intrinsic::X86Avx512DqMulloq128
+            | $crate::Intrinsic::X86Avx512DqAndps128
+            | $crate::Intrinsic::X86Avx512DqAndpd128
+            | $crate::Intrinsic::X86Avx512DqAndnps128
+            | $crate::Intrinsic::X86Avx512DqAndnpd128
+            | $crate::Intrinsic::X86Avx512DqOrps128
+            | $crate::Intrinsic::X86Avx512DqOrpd128
+            | $crate::Intrinsic::X86Avx512DqXorps128
+            | $crate::Intrinsic::X86Avx512DqXorpd128
+            | $crate::Intrinsic::X86Avx512DqMulloq256
+            | $crate::Intrinsic::X86Avx512DqAndps256
+            | $crate::Intrinsic::X86Avx512DqAndpd256
+            | $crate::Intrinsic::X86Avx512DqAndnps256
+            | $crate::Intrinsic::X86Avx512DqAndnpd256
+            | $crate::Intrinsic::X86Avx512DqOrps256
+            | $crate::Intrinsic::X86Avx512DqOrpd256
+            | $crate::Intrinsic::X86Avx512DqXorps256
+            | $crate::Intrinsic::X86Avx512DqXorpd256
+            | $crate::Intrinsic::X86Avx512DqMulloq512
+            | $crate::Intrinsic::X86Avx512DqAndps512
+            | $crate::Intrinsic::X86Avx512DqAndpd512
+            | $crate::Intrinsic::X86Avx512DqAndnps512
+            | $crate::Intrinsic::X86Avx512DqAndnpd512
+            | $crate::Intrinsic::X86Avx512DqOrps512
+            | $crate::Intrinsic::X86Avx512DqOrpd512
+            | $crate::Intrinsic::X86Avx512DqXorps512
+            | $crate::Intrinsic::X86Avx512DqXorpd512
+            | $crate::Intrinsic::X86Avx512BwAddb128
+            | $crate::Intrinsic::X86Avx512BwSubb128
+            | $crate::Intrinsic::X86Avx512BwAddsb128
+            | $crate::Intrinsic::X86Avx512BwSubsb128
+            | $crate::Intrinsic::X86Avx512BwAddusb128
+            | $crate::Intrinsic::X86Avx512BwSubusb128
+            | $crate::Intrinsic::X86Avx512BwMinsb128
+            | $crate::Intrinsic::X86Avx512BwMinub128
+            | $crate::Intrinsic::X86Avx512BwMaxsb128
+            | $crate::Intrinsic::X86Avx512BwMaxub128
+            | $crate::Intrinsic::X86Avx512BwMoveb128
+            | $crate::Intrinsic::X86Avx512BwLoadb128
+            | $crate::Intrinsic::X86Avx512BwStoreb128
+            | $crate::Intrinsic::X86Avx512BwAddw128
+            | $crate::Intrinsic::X86Avx512BwSubw128
+            | $crate::Intrinsic::X86Avx512BwAddsw128
+            | $crate::Intrinsic::X86Avx512BwSubsw128
+            | $crate::Intrinsic::X86Avx512BwAddusw128
+            | $crate::Intrinsic::X86Avx512BwSubusw128
+            | $crate::Intrinsic::X86Avx512BwMinsw128
+            | $crate::Intrinsic::X86Avx512BwMinuw128
+            | $crate::Intrinsic::X86Avx512BwMaxsw128
+            | $crate::Intrinsic::X86Avx512BwMaxuw128
+            | $crate::Intrinsic::X86Avx512BwMovew128
+            | $crate::Intrinsic::X86Avx512BwLoadw128
+            | $crate::Intrinsic::X86Avx512BwStorew128
+            | $crate::Intrinsic::X86Avx512BwAddb256
+            | $crate::Intrinsic::X86Avx512BwSubb256
+            | $crate::Intrinsic::X86Avx512BwAddsb256
+            | $crate::Intrinsic::X86Avx512BwSubsb256
+            | $crate::Intrinsic::X86Avx512BwAddusb256
+            | $crate::Intrinsic::X86Avx512BwSubusb256
+            | $crate::Intrinsic::X86Avx512BwMinsb256
+            | $crate::Intrinsic::X86Avx512BwMinub256
+            | $crate::Intrinsic::X86Avx512BwMaxsb256
+            | $crate::Intrinsic::X86Avx512BwMaxub256
+            | $crate::Intrinsic::X86Avx512BwMoveb256
+            | $crate::Intrinsic::X86Avx512BwLoadb256
+            | $crate::Intrinsic::X86Avx512BwStoreb256
+            | $crate::Intrinsic::X86Avx512BwAddw256
+            | $crate::Intrinsic::X86Avx512BwSubw256
+            | $crate::Intrinsic::X86Avx512BwAddsw256
+            | $crate::Intrinsic::X86Avx512BwSubsw256
+            | $crate::Intrinsic::X86Avx512BwAddusw256
+            | $crate::Intrinsic::X86Avx512BwSubusw256
+            | $crate::Intrinsic::X86Avx512BwMinsw256
+            | $crate::Intrinsic::X86Avx512BwMinuw256
+            | $crate::Intrinsic::X86Avx512BwMaxsw256
+            | $crate::Intrinsic::X86Avx512BwMaxuw256
+            | $crate::Intrinsic::X86Avx512BwMovew256
+            | $crate::Intrinsic::X86Avx512BwLoadw256
+            | $crate::Intrinsic::X86Avx512BwStorew256
+            | $crate::Intrinsic::X86Avx512BwAddb512
+            | $crate::Intrinsic::X86Avx512BwSubb512
+            | $crate::Intrinsic::X86Avx512BwAddsb512
+            | $crate::Intrinsic::X86Avx512BwSubsb512
+            | $crate::Intrinsic::X86Avx512BwAddusb512
+            | $crate::Intrinsic::X86Avx512BwSubusb512
+            | $crate::Intrinsic::X86Avx512BwMinsb512
+            | $crate::Intrinsic::X86Avx512BwMinub512
+            | $crate::Intrinsic::X86Avx512BwMaxsb512
+            | $crate::Intrinsic::X86Avx512BwMaxub512
+            | $crate::Intrinsic::X86Avx512BwMoveb512
+            | $crate::Intrinsic::X86Avx512BwLoadb512
+            | $crate::Intrinsic::X86Avx512BwStoreb512
+            | $crate::Intrinsic::X86Avx512BwAddw512
+            | $crate::Intrinsic::X86Avx512BwSubw512
+            | $crate::Intrinsic::X86Avx512BwAddsw512
+            | $crate::Intrinsic::X86Avx512BwSubsw512
+            | $crate::Intrinsic::X86Avx512BwAddusw512
+            | $crate::Intrinsic::X86Avx512BwSubusw512
+            | $crate::Intrinsic::X86Avx512BwMinsw512
+            | $crate::Intrinsic::X86Avx512BwMinuw512
+            | $crate::Intrinsic::X86Avx512BwMaxsw512
+            | $crate::Intrinsic::X86Avx512BwMaxuw512
+            | $crate::Intrinsic::X86Avx512BwMovew512
+            | $crate::Intrinsic::X86Avx512BwLoadw512
+            | $crate::Intrinsic::X86Avx512BwStorew512
+            | $crate::Intrinsic::X86Avx512CdBroadcastmb128
+            | $crate::Intrinsic::X86Avx512CdBroadcastmw128
+            | $crate::Intrinsic::X86Avx512CdBroadcastmb256
+            | $crate::Intrinsic::X86Avx512CdBroadcastmw256
+            | $crate::Intrinsic::X86Avx512CdBroadcastmb512
+            | $crate::Intrinsic::X86Avx512CdBroadcastmw512
     };
 }

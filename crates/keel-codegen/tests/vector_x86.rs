@@ -929,3 +929,12 @@ mod x86_avx512_vl_integer_move;
 
 #[path = "vector_x86/x86_avx512_vl_convert.rs"]
 mod x86_avx512_vl_convert;
+
+#[path = "vector_x86/x86_avx512_dq_bits.rs"]
+mod x86_avx512_dq_bits;
+
+#[path = "vector_x86/x86_avx512_cd.rs"]
+mod x86_avx512_cd;
+
+#[path = "vector_x86/x86_avx512_bw.rs"]
+mod x86_avx512_bw;

@@ -956,6 +956,130 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512BwAddb128
+                | Intrinsic::X86Avx512BwSubb128
+                | Intrinsic::X86Avx512BwAddsb128
+                | Intrinsic::X86Avx512BwSubsb128
+                | Intrinsic::X86Avx512BwAddusb128
+                | Intrinsic::X86Avx512BwSubusb128
+                | Intrinsic::X86Avx512BwMinsb128
+                | Intrinsic::X86Avx512BwMinub128
+                | Intrinsic::X86Avx512BwMaxsb128
+                | Intrinsic::X86Avx512BwMaxub128
+                | Intrinsic::X86Avx512BwMoveb128
+                | Intrinsic::X86Avx512BwAddw128
+                | Intrinsic::X86Avx512BwSubw128
+                | Intrinsic::X86Avx512BwAddsw128
+                | Intrinsic::X86Avx512BwSubsw128
+                | Intrinsic::X86Avx512BwAddusw128
+                | Intrinsic::X86Avx512BwSubusw128
+                | Intrinsic::X86Avx512BwMinsw128
+                | Intrinsic::X86Avx512BwMinuw128
+                | Intrinsic::X86Avx512BwMaxsw128
+                | Intrinsic::X86Avx512BwMaxuw128
+                | Intrinsic::X86Avx512BwMovew128
+                | Intrinsic::X86Avx512BwAddb256
+                | Intrinsic::X86Avx512BwSubb256
+                | Intrinsic::X86Avx512BwAddsb256
+                | Intrinsic::X86Avx512BwSubsb256
+                | Intrinsic::X86Avx512BwAddusb256
+                | Intrinsic::X86Avx512BwSubusb256
+                | Intrinsic::X86Avx512BwMinsb256
+                | Intrinsic::X86Avx512BwMinub256
+                | Intrinsic::X86Avx512BwMaxsb256
+                | Intrinsic::X86Avx512BwMaxub256
+                | Intrinsic::X86Avx512BwMoveb256
+                | Intrinsic::X86Avx512BwAddw256
+                | Intrinsic::X86Avx512BwSubw256
+                | Intrinsic::X86Avx512BwAddsw256
+                | Intrinsic::X86Avx512BwSubsw256
+                | Intrinsic::X86Avx512BwAddusw256
+                | Intrinsic::X86Avx512BwSubusw256
+                | Intrinsic::X86Avx512BwMinsw256
+                | Intrinsic::X86Avx512BwMinuw256
+                | Intrinsic::X86Avx512BwMaxsw256
+                | Intrinsic::X86Avx512BwMaxuw256
+                | Intrinsic::X86Avx512BwMovew256
+                | Intrinsic::X86Avx512BwAddb512
+                | Intrinsic::X86Avx512BwSubb512
+                | Intrinsic::X86Avx512BwAddsb512
+                | Intrinsic::X86Avx512BwSubsb512
+                | Intrinsic::X86Avx512BwAddusb512
+                | Intrinsic::X86Avx512BwSubusb512
+                | Intrinsic::X86Avx512BwMinsb512
+                | Intrinsic::X86Avx512BwMinub512
+                | Intrinsic::X86Avx512BwMaxsb512
+                | Intrinsic::X86Avx512BwMaxub512
+                | Intrinsic::X86Avx512BwMoveb512
+                | Intrinsic::X86Avx512BwAddw512
+                | Intrinsic::X86Avx512BwSubw512
+                | Intrinsic::X86Avx512BwAddsw512
+                | Intrinsic::X86Avx512BwSubsw512
+                | Intrinsic::X86Avx512BwAddusw512
+                | Intrinsic::X86Avx512BwSubusw512
+                | Intrinsic::X86Avx512BwMinsw512
+                | Intrinsic::X86Avx512BwMinuw512
+                | Intrinsic::X86Avx512BwMaxsw512
+                | Intrinsic::X86Avx512BwMaxuw512
+                | Intrinsic::X86Avx512BwMovew512 => None,
+                Intrinsic::X86Avx512BwLoadb128
+                | Intrinsic::X86Avx512BwLoadw128
+                | Intrinsic::X86Avx512BwLoadb256
+                | Intrinsic::X86Avx512BwLoadw256
+                | Intrinsic::X86Avx512BwLoadb512
+                | Intrinsic::X86Avx512BwLoadw512 => Read,
+                Intrinsic::X86Avx512BwStoreb128
+                | Intrinsic::X86Avx512BwStorew128
+                | Intrinsic::X86Avx512BwStoreb256
+                | Intrinsic::X86Avx512BwStorew256
+                | Intrinsic::X86Avx512BwStoreb512
+                | Intrinsic::X86Avx512BwStorew512 => Write,
+
+                Intrinsic::X86Avx512CdBroadcastmb128
+                | Intrinsic::X86Avx512CdBroadcastmw128
+                | Intrinsic::X86Avx512CdBroadcastmb256
+                | Intrinsic::X86Avx512CdBroadcastmw256
+                | Intrinsic::X86Avx512CdBroadcastmb512
+                | Intrinsic::X86Avx512CdBroadcastmw512 => None,
+                Intrinsic::X86Avx512CdMaskConflictd128
+                | Intrinsic::X86Avx512CdMaskConflictq128
+                | Intrinsic::X86Avx512CdMaskLzcntd128
+                | Intrinsic::X86Avx512CdMaskLzcntq128
+                | Intrinsic::X86Avx512CdMaskConflictd256
+                | Intrinsic::X86Avx512CdMaskConflictq256
+                | Intrinsic::X86Avx512CdMaskLzcntd256
+                | Intrinsic::X86Avx512CdMaskLzcntq256
+                | Intrinsic::X86Avx512CdMaskConflictd512
+                | Intrinsic::X86Avx512CdMaskConflictq512
+                | Intrinsic::X86Avx512CdMaskLzcntd512
+                | Intrinsic::X86Avx512CdMaskLzcntq512 => None,
+                Intrinsic::X86Avx512DqMulloq128
+                | Intrinsic::X86Avx512DqAndps128
+                | Intrinsic::X86Avx512DqAndpd128
+                | Intrinsic::X86Avx512DqAndnps128
+                | Intrinsic::X86Avx512DqAndnpd128
+                | Intrinsic::X86Avx512DqOrps128
+                | Intrinsic::X86Avx512DqOrpd128
+                | Intrinsic::X86Avx512DqXorps128
+                | Intrinsic::X86Avx512DqXorpd128
+                | Intrinsic::X86Avx512DqMulloq256
+                | Intrinsic::X86Avx512DqAndps256
+                | Intrinsic::X86Avx512DqAndpd256
+                | Intrinsic::X86Avx512DqAndnps256
+                | Intrinsic::X86Avx512DqAndnpd256
+                | Intrinsic::X86Avx512DqOrps256
+                | Intrinsic::X86Avx512DqOrpd256
+                | Intrinsic::X86Avx512DqXorps256
+                | Intrinsic::X86Avx512DqXorpd256
+                | Intrinsic::X86Avx512DqMulloq512
+                | Intrinsic::X86Avx512DqAndps512
+                | Intrinsic::X86Avx512DqAndpd512
+                | Intrinsic::X86Avx512DqAndnps512
+                | Intrinsic::X86Avx512DqAndnpd512
+                | Intrinsic::X86Avx512DqOrps512
+                | Intrinsic::X86Avx512DqOrpd512
+                | Intrinsic::X86Avx512DqXorps512
+                | Intrinsic::X86Avx512DqXorpd512 => None,
                 Intrinsic::X86Avx512MaskTernlogd
                 | Intrinsic::X86Avx512MaskTernlogq
                 | Intrinsic::X86Avx512MaskRold
@@ -2341,7 +2465,8 @@ impl InstData {
             | Self::Trap => true,
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
-                !((id.is_x86_avx512_scalar_move() && id.info().pure)
+                !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || (id.is_x86_avx512_scalar_move() && id.info().pure)
                     || (id.x86_avx512_packed_opcode().is_some() && id.info().pure)
                     || (id.is_x86_avx512_integer_convert() && id.info().pure)
                     || (id.is_x86_avx512_lane() && id.info().pure)

@@ -18,6 +18,18 @@ pub(super) fn validate(
             "masked vector operation requires AVX512F and, for 128/256-bit packed forms, AVX512VL",
         );
     }
+    if id
+        .x86_avx512_dq_opcode()
+        .is_some_and(|(_, shape)| !features.avx512dq || (shape.bytes() < 64 && !features.avx512vl))
+    {
+        return Err("DQ vector operation requires AVX512DQ and narrow forms require AVX512VL");
+    }
+    if id
+        .x86_avx512_cd()
+        .is_some_and(|(_, shape)| !features.avx512cd || (shape.bytes() < 64 && !features.avx512vl))
+    {
+        return Err("CD vector operation requires AVX512CD and narrow forms require AVX512VL");
+    }
     if args.len() != id.info().params.len()
         || args
             .iter()
@@ -93,7 +105,8 @@ impl FunctionCompiler<'_> {
             .params
             .iter()
             .find(|ty| ty.is_vector())
-            .expect("masked vector operand");
+            .or_else(|| info.returns.iter().find(|ty| ty.is_vector()))
+            .expect("vector operand or result");
         let width = (ty.bytes().expect("vector width") * 8) as u16;
         let name = id.x86_avx512_mask_opcode().expect("masked vector opcode");
         let compare = name.starts_with("vcmp") || name.starts_with("vpcmp");
@@ -129,7 +142,15 @@ impl FunctionCompiler<'_> {
             self.def_done(result, destination);
             return;
         }
-        if info.params[0] == Type::Ptr {
+        if args.len() == 1 {
+            // The instruction zero-extends its low eight or sixteen K-source bits.
+            // KMOVW preserves the live scalar input and requires no DQ permission.
+            self.avx512_stage_mask(args[0]);
+            self.emit(
+                opcode(name, false),
+                [asm_arg(simd_width(FS0, width)), asm_arg(k1())],
+            );
+        } else if info.params[0] == Type::Ptr {
             self.avx512_stage_vector(args[1], FS0);
             self.avx512_stage_mask(args[2]);
             let base = self.use_reg(args[0], S1);

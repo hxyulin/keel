@@ -28,7 +28,8 @@ pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86:
                         | V::Shl
                         | V::Ushr
                         | V::Sshr
-                ) || *op == V::Imul && ty(args[0]) == Type::Vector(VectorType::I32x16))
+                ) || *op == V::Imul
+                    && (ty(args[0]) == Type::Vector(VectorType::I32x16) || features.avx512dq))
         }
         InstData::VectorSplat { ty, .. } => integer(*ty),
         InstData::VectorShuffle { args, .. } | InstData::VectorInsert { args, .. } => {
@@ -122,6 +123,7 @@ impl FunctionCompiler<'_> {
                     (V::Isub, false) => "vpsubd",
                     (V::Isub, true) => "vpsubq",
                     (V::Imul, false) => "vpmulld",
+                    (V::Imul, true) => "vpmullq",
                     (V::Smin, false) => "vpminsd",
                     (V::Smin, true) => "vpminsq",
                     (V::Smax, false) => "vpmaxsd",
