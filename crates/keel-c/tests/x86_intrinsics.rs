@@ -1670,3 +1670,11 @@ mod x86_avx512_bw_shift;
 mod x86_avx512_dq_mask;
 #[path = "x86_intrinsics/x86_avx512_vl_special.rs"]
 mod x86_avx512_vl_special;
+
+#[path = "x86_intrinsics/x86_avx512_bw_mul.rs"]
+mod x86_avx512_bw_mul;
+#[path = "x86_intrinsics/x86_avx512_vl_shift.rs"]
+mod x86_avx512_vl_shift;
+
+#[path = "x86_intrinsics/x86_avx512_dq_lane.rs"]
+mod x86_avx512_dq_lane;

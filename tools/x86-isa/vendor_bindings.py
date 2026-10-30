@@ -108,6 +108,11 @@ VALUE_CONTROLS['avx512vl_mant_imm4'] = ({'X86Avx512VlGetmant' + suffix + str(wid
 VALUE_CONTROLS['avx512vl_roundscale_imm8'] = ({'X86Avx512VlRoundscale' + suffix + str(width) for suffix in ['ps', 'pd'] for width in [128, 256]}, 3, 255, 255, 'AVX512VL rounding immediate must be an integer constant in 0..255')
 VALUE_CONTROLS['avx512vl_fixup_imm8'] = ({'X86Avx512VlFixupimm' + suffix + str(width) for suffix in ['ps', 'pd'] for width in [128, 256]}, 5, 255, 255, 'AVX512VL fixup immediate must be an integer constant in 0..255')
 VALUE_CONTROLS['avx512bw_shift_imm8'] = ({'X86Avx512Bw' + op + str(width) for op in ['Slliw', 'Srliw', 'Sraiw'] for width in [128, 256, 512]}, 3, 255, 255, 'AVX512BW shift immediate must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512dq_lane_3_1'] = ({'X86Avx512DqExtractf64x2256', 'X86Avx512DqExtracti64x2256', 'X86Avx512DqExtractf32x8512', 'X86Avx512DqExtracti32x8512'}, 3, 1, 1, 'AVX512DQ lane index must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_lane_3_3'] = ({'X86Avx512DqExtractf64x2512', 'X86Avx512DqExtracti64x2512'}, 3, 3, 3, 'AVX512DQ lane index must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_lane_4_1'] = ({'X86Avx512DqInsertf64x2256', 'X86Avx512DqInserti64x2256', 'X86Avx512DqInsertf32x8512', 'X86Avx512DqInserti32x8512'}, 4, 1, 1, 'AVX512DQ lane index must be a supported integer constant')
+VALUE_CONTROLS['avx512dq_lane_4_3'] = ({'X86Avx512DqInsertf64x2512', 'X86Avx512DqInserti64x2512'}, 4, 3, 3, 'AVX512DQ lane index must be a supported integer constant')
+VALUE_CONTROLS['avx512vl_shift_imm8'] = ({'X86Avx512Vl' + stem + lane + str(width) for stem in ['Slli', 'Srli', 'Srai', 'Rol', 'Ror'] for lane in ['d', 'q'] for width in [128, 256]}, 3, 255, 255, 'AVX512VL shift or rotation immediate must be an integer constant in 0..255')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 

@@ -1068,7 +1068,7 @@ with a zero mask or mask bits outside the inserted block. Extract masks
 preserve inactive destination elements but do not make inaccessible parts
 of the tuple safe to reference. All transfers preserve
 floating bit patterns and require AVX512F without AVX512DQ, BW, VL or AVX2.
-The DQ `extract/insert{i,f}64x2` forms are outside this instruction set.
+The DQ `extract/insert{i,f}64x2` forms use the separate DQ family below.
 
 The C header provides unmasked, masked and mask-zero immediate/shared shifts,
 scalar and block broadcasts, and quarter/half extract/insert wrappers. Masked
@@ -1167,6 +1167,22 @@ inactive lanes retain the independent merge value. The C mask-zero interface
 preserves this distinction. Standard C unmasked, merge and mask-zero
 interfaces are provided for all seven families at both widths.
 
+Narrow dword/qword shifts and rotations use `x86_avx512vl_` names with a
+`d`/`q` lane suffix and 128/256 width suffix. They take
+`(merge, i8 mask, input, count)` and return the same vector shape. Immediate
+shifts and rotations take an `i32` constant in 0..255. Shared shifts take
+an `i64x2` count, use its unsigned low qword and ignore the upper qword.
+Per-lane shifts and rotations take a vector of unsigned counts with the
+same shape as the data. Shifts saturate at 32 or 64; logical shifts produce
+zero and arithmetic shifts fill with the sign. Rotations reduce counts
+modulo the lane width. All operations are pure and require F plus VL.
+
+The C scalar-count shift wrappers accept runtime unsigned counts through
+the shared-count path, including the 32-bit argument conversion described
+above. Immediate rotation wrappers require constants in 0..255. C exposes
+masked and mask-zero forms throughout, plus unmasked rotations and narrow
+qword arithmetic-right shifts where these have no legacy interface.
+
 ## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
@@ -1214,6 +1230,24 @@ and narrow forms also require VL. The scalar mask is `i8`, except 512-bit
 dword forms use `i16`. Extraction clears unused mask bits; expansion ignores
 bits beyond the lane count. C exposes `_mm{,256,512}_movepi{32,64}_mask`
 and `_mm{,256,512}_movm_epi{32,64}`.
+
+DQ lane names use `x86_avx512dq_` followed by the operation and an underscore
+before the encoded width, such as `broadcasti32x2_128` or `extractf64x2_512`.
+Broadcasts repeat two-dword/two-float, two-qword/two-double or eight-dword/
+eight-float blocks where the ISA provides them. Extraction and insertion
+cover the DQ two-qword/two-double and eight-dword/eight-float blocks.
+Broadcasts take `(merge, mask, block)`; extracts take
+`(merge, mask, whole, i32 lane)`; inserts take
+`(merge, mask, whole, block, i32 lane)`. Lane indices are 0..1 or 0..3
+according to the number of blocks in the whole vector.
+
+These operations preserve all bits and do not observe MXCSR. Masks follow
+destination lanes: `i16` for 512-bit dword/float results and `i8` otherwise.
+All require F plus DQ, adding VL only for encoded widths below 512. A
+512-bit extract returning an XMM or YMM value therefore needs no VL.
+Memory-only broadcast encodings stage their SSA input in compiler-owned
+scratch with exact 16- or 32-byte stores. C exposes unmasked, masked and
+mask-zero forms while retaining existing F-only lane aliases.
 
 ## AVX512CD conflict and leading-zero count
 
@@ -1466,3 +1500,20 @@ Standard C `slli`, `srli` and `srai` wrappers accept runtime unsigned scalar
 counts through the shared-count form, with the same 32-bit conversion rule
 as the foundation dword/qword wrappers. Direct typed immediate operations
 still require constants in 0..255.
+
+BW multiplication names are `mullw`, `mulhw`, `mulhuw` and `mulhrsw`, followed
+by 128, 256 or 512. They take `(merge, mask, a, b)` with word vectors.
+MULLW keeps the low 16 product bits. MULHW and MULHUW keep the high bits of
+signed or unsigned products. MULHRSW rounds the signed product with
+`(product + 0x4000) >> 15` and keeps the low 16 bits; the
+`-32768 * -32768` case produces `0x8000`.
+
+`maddwd` multiplies signed word pairs and adds each adjacent pair modulo
+2^32, returning dword vectors. `maddubsw` multiplies unsigned bytes from
+`a` by signed bytes from `b`, adds adjacent products and saturates to signed
+words. Their masks follow the result lanes. `avgb` and `avgw` compute the
+rounded-up unsigned byte or word average. These operations are pure, retain
+inactive merge bits and require F plus BW, adding VL for narrow widths.
+C provides masked and mask-zero forms at every width and the corresponding
+512-bit unmasked forms. Existing narrow unmasked interfaces keep their
+prior feature contracts.
