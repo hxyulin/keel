@@ -1638,3 +1638,6 @@ mod x86_avx512_reduce_float;
 
 #[path = "x86_intrinsics/x86_avx512_vl.rs"]
 mod x86_avx512_vl;
+
+#[path = "x86_intrinsics/x86_avx512_vl_float.rs"]
+mod x86_avx512_vl_float;

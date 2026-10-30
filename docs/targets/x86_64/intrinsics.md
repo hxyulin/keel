@@ -1084,6 +1084,16 @@ and mask. Comparisons take two vectors, execution mask and constant predicate,
 then return an `i8` mask. Integer predicates are in 0..7; floating predicates
 are in 0..31. These narrow packed forms have no embedded rounding or SAE.
 
+Masked float and double arithmetic also includes multiply, divide, square
+root and raw min/max at both widths. Square root takes a merge vector, mask
+and one input. Min/max preserve the instruction's second-source selection
+for NaNs and zero ties, independently of portable IEEE minimum/maximum.
+With DAZ enabled, denormal inputs become signed zero before selection,
+including a selected second input after a NaN comparison.
+Active lanes observe MXCSR rounding, DAZ and FTZ; inactive lanes suppress
+exceptions even when invalid-operation exceptions are unmasked. The C
+wrappers provide both merge and mask-zero forms, with no ER/SAE argument.
+
 Only the low bit for each existing lane is used. Higher input mask bits do
 not enable additional lanes, and comparison results zero unused bits.
 Inactive lanes retain their merge bits and suppress memory accesses or

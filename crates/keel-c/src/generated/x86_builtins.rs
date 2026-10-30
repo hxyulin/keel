@@ -812,6 +812,26 @@ fn lookup(base: &str) -> Option<Binding> {
         "keel_avx512vl_maskstorepd256" => Binding::Value(Intrinsic::X86Avx512VlMaskStorepd256, &[]),
         "keel_avx512vl_cmpps256" => Binding::Value(Intrinsic::X86Avx512VlCmpps256, &[ImmediateControl { allowed_values: &[], index: 3, maximum: 31, mask: 31, diagnostic: "AVX512 floating comparison predicate must be an integer constant expression in 0..31" }]),
         "keel_avx512vl_cmppd256" => Binding::Value(Intrinsic::X86Avx512VlCmppd256, &[ImmediateControl { allowed_values: &[], index: 3, maximum: 31, mask: 31, diagnostic: "AVX512 floating comparison predicate must be an integer constant expression in 0..31" }]),
+        "keel_avx512vl_maskmulps128" => Binding::Value(Intrinsic::X86Avx512VlMaskMulps128, &[]),
+        "keel_avx512vl_maskmulpd128" => Binding::Value(Intrinsic::X86Avx512VlMaskMulpd128, &[]),
+        "keel_avx512vl_maskdivps128" => Binding::Value(Intrinsic::X86Avx512VlMaskDivps128, &[]),
+        "keel_avx512vl_maskdivpd128" => Binding::Value(Intrinsic::X86Avx512VlMaskDivpd128, &[]),
+        "keel_avx512vl_masksqrtps128" => Binding::Value(Intrinsic::X86Avx512VlMaskSqrtps128, &[]),
+        "keel_avx512vl_masksqrtpd128" => Binding::Value(Intrinsic::X86Avx512VlMaskSqrtpd128, &[]),
+        "keel_avx512vl_maskminps128" => Binding::Value(Intrinsic::X86Avx512VlMaskMinps128, &[]),
+        "keel_avx512vl_maskminpd128" => Binding::Value(Intrinsic::X86Avx512VlMaskMinpd128, &[]),
+        "keel_avx512vl_maskmaxps128" => Binding::Value(Intrinsic::X86Avx512VlMaskMaxps128, &[]),
+        "keel_avx512vl_maskmaxpd128" => Binding::Value(Intrinsic::X86Avx512VlMaskMaxpd128, &[]),
+        "keel_avx512vl_maskmulps256" => Binding::Value(Intrinsic::X86Avx512VlMaskMulps256, &[]),
+        "keel_avx512vl_maskmulpd256" => Binding::Value(Intrinsic::X86Avx512VlMaskMulpd256, &[]),
+        "keel_avx512vl_maskdivps256" => Binding::Value(Intrinsic::X86Avx512VlMaskDivps256, &[]),
+        "keel_avx512vl_maskdivpd256" => Binding::Value(Intrinsic::X86Avx512VlMaskDivpd256, &[]),
+        "keel_avx512vl_masksqrtps256" => Binding::Value(Intrinsic::X86Avx512VlMaskSqrtps256, &[]),
+        "keel_avx512vl_masksqrtpd256" => Binding::Value(Intrinsic::X86Avx512VlMaskSqrtpd256, &[]),
+        "keel_avx512vl_maskminps256" => Binding::Value(Intrinsic::X86Avx512VlMaskMinps256, &[]),
+        "keel_avx512vl_maskminpd256" => Binding::Value(Intrinsic::X86Avx512VlMaskMinpd256, &[]),
+        "keel_avx512vl_maskmaxps256" => Binding::Value(Intrinsic::X86Avx512VlMaskMaxps256, &[]),
+        "keel_avx512vl_maskmaxpd256" => Binding::Value(Intrinsic::X86Avx512VlMaskMaxpd256, &[]),
         _ => return None,
     })
 }
@@ -1631,6 +1651,26 @@ const _: () = {
     assert!(Intrinsic::X86Avx512VlMaskStorepd256 as u16 == 1304);
     assert!(Intrinsic::X86Avx512VlCmpps256 as u16 == 1305);
     assert!(Intrinsic::X86Avx512VlCmppd256 as u16 == 1306);
+    assert!(Intrinsic::X86Avx512VlMaskMulps128 as u16 == 1307);
+    assert!(Intrinsic::X86Avx512VlMaskMulpd128 as u16 == 1308);
+    assert!(Intrinsic::X86Avx512VlMaskDivps128 as u16 == 1309);
+    assert!(Intrinsic::X86Avx512VlMaskDivpd128 as u16 == 1310);
+    assert!(Intrinsic::X86Avx512VlMaskSqrtps128 as u16 == 1311);
+    assert!(Intrinsic::X86Avx512VlMaskSqrtpd128 as u16 == 1312);
+    assert!(Intrinsic::X86Avx512VlMaskMinps128 as u16 == 1313);
+    assert!(Intrinsic::X86Avx512VlMaskMinpd128 as u16 == 1314);
+    assert!(Intrinsic::X86Avx512VlMaskMaxps128 as u16 == 1315);
+    assert!(Intrinsic::X86Avx512VlMaskMaxpd128 as u16 == 1316);
+    assert!(Intrinsic::X86Avx512VlMaskMulps256 as u16 == 1317);
+    assert!(Intrinsic::X86Avx512VlMaskMulpd256 as u16 == 1318);
+    assert!(Intrinsic::X86Avx512VlMaskDivps256 as u16 == 1319);
+    assert!(Intrinsic::X86Avx512VlMaskDivpd256 as u16 == 1320);
+    assert!(Intrinsic::X86Avx512VlMaskSqrtps256 as u16 == 1321);
+    assert!(Intrinsic::X86Avx512VlMaskSqrtpd256 as u16 == 1322);
+    assert!(Intrinsic::X86Avx512VlMaskMinps256 as u16 == 1323);
+    assert!(Intrinsic::X86Avx512VlMaskMinpd256 as u16 == 1324);
+    assert!(Intrinsic::X86Avx512VlMaskMaxps256 as u16 == 1325);
+    assert!(Intrinsic::X86Avx512VlMaskMaxpd256 as u16 == 1326);
 };
 
 #[cfg(test)]
@@ -2431,6 +2471,26 @@ mod tests {
             (Intrinsic::X86Avx512VlMaskStorepd256, &[Type::Ptr, Type::Vector(VectorType::F64x4), Type::I8], &[]),
             (Intrinsic::X86Avx512VlCmpps256, &[Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8), Type::I8, Type::I32], &[Type::I8]),
             (Intrinsic::X86Avx512VlCmppd256, &[Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4), Type::I8, Type::I32], &[Type::I8]),
+            (Intrinsic::X86Avx512VlMaskMulps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlMaskMulpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlMaskDivps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlMaskDivpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlMaskSqrtps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlMaskSqrtpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlMaskMinps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlMaskMinpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlMaskMaxps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512VlMaskMaxpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512VlMaskMulps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlMaskMulpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlMaskDivps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlMaskDivpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlMaskSqrtps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlMaskSqrtpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlMaskMinps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlMaskMinpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512VlMaskMaxps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512VlMaskMaxpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
         ];
         for &(intrinsic, params, result) in signatures {
             assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");
