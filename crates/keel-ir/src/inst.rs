@@ -956,6 +956,105 @@ impl InstData {
             }
             Self::VaArg { .. } | Self::AggregateVaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
+                Intrinsic::X86Avx512DqBroadcasti32x2128
+                | Intrinsic::X86Avx512DqBroadcastf32x2256
+                | Intrinsic::X86Avx512DqBroadcastf64x2256
+                | Intrinsic::X86Avx512DqBroadcasti32x2256
+                | Intrinsic::X86Avx512DqBroadcasti64x2256
+                | Intrinsic::X86Avx512DqExtractf64x2256
+                | Intrinsic::X86Avx512DqExtracti64x2256
+                | Intrinsic::X86Avx512DqInsertf64x2256
+                | Intrinsic::X86Avx512DqInserti64x2256
+                | Intrinsic::X86Avx512DqBroadcastf32x2512
+                | Intrinsic::X86Avx512DqBroadcastf32x8512
+                | Intrinsic::X86Avx512DqBroadcastf64x2512
+                | Intrinsic::X86Avx512DqBroadcasti32x2512
+                | Intrinsic::X86Avx512DqBroadcasti32x8512
+                | Intrinsic::X86Avx512DqBroadcasti64x2512
+                | Intrinsic::X86Avx512DqExtractf32x8512
+                | Intrinsic::X86Avx512DqExtractf64x2512
+                | Intrinsic::X86Avx512DqExtracti32x8512
+                | Intrinsic::X86Avx512DqExtracti64x2512
+                | Intrinsic::X86Avx512DqInsertf32x8512
+                | Intrinsic::X86Avx512DqInsertf64x2512
+                | Intrinsic::X86Avx512DqInserti32x8512
+                | Intrinsic::X86Avx512DqInserti64x2512 => None,
+                Intrinsic::X86Avx512BwMullw128
+                | Intrinsic::X86Avx512BwMulhw128
+                | Intrinsic::X86Avx512BwMulhuw128
+                | Intrinsic::X86Avx512BwMulhrsw128
+                | Intrinsic::X86Avx512BwMaddwd128
+                | Intrinsic::X86Avx512BwMaddubsw128
+                | Intrinsic::X86Avx512BwAvgb128
+                | Intrinsic::X86Avx512BwAvgw128
+                | Intrinsic::X86Avx512BwMullw256
+                | Intrinsic::X86Avx512BwMulhw256
+                | Intrinsic::X86Avx512BwMulhuw256
+                | Intrinsic::X86Avx512BwMulhrsw256
+                | Intrinsic::X86Avx512BwMaddwd256
+                | Intrinsic::X86Avx512BwMaddubsw256
+                | Intrinsic::X86Avx512BwAvgb256
+                | Intrinsic::X86Avx512BwAvgw256
+                | Intrinsic::X86Avx512BwMullw512
+                | Intrinsic::X86Avx512BwMulhw512
+                | Intrinsic::X86Avx512BwMulhuw512
+                | Intrinsic::X86Avx512BwMulhrsw512
+                | Intrinsic::X86Avx512BwMaddwd512
+                | Intrinsic::X86Avx512BwMaddubsw512
+                | Intrinsic::X86Avx512BwAvgb512
+                | Intrinsic::X86Avx512BwAvgw512 => None,
+                Intrinsic::X86Avx512VlSllid128
+                | Intrinsic::X86Avx512VlSlliq128
+                | Intrinsic::X86Avx512VlSrlid128
+                | Intrinsic::X86Avx512VlSrliq128
+                | Intrinsic::X86Avx512VlSraid128
+                | Intrinsic::X86Avx512VlSraiq128
+                | Intrinsic::X86Avx512VlSlld128
+                | Intrinsic::X86Avx512VlSllq128
+                | Intrinsic::X86Avx512VlSrld128
+                | Intrinsic::X86Avx512VlSrlq128
+                | Intrinsic::X86Avx512VlSrad128
+                | Intrinsic::X86Avx512VlSraq128
+                | Intrinsic::X86Avx512VlSllvd128
+                | Intrinsic::X86Avx512VlSllvq128
+                | Intrinsic::X86Avx512VlSrlvd128
+                | Intrinsic::X86Avx512VlSrlvq128
+                | Intrinsic::X86Avx512VlSravd128
+                | Intrinsic::X86Avx512VlSravq128
+                | Intrinsic::X86Avx512VlRold128
+                | Intrinsic::X86Avx512VlRolq128
+                | Intrinsic::X86Avx512VlRord128
+                | Intrinsic::X86Avx512VlRorq128
+                | Intrinsic::X86Avx512VlRolvd128
+                | Intrinsic::X86Avx512VlRolvq128
+                | Intrinsic::X86Avx512VlRorvd128
+                | Intrinsic::X86Avx512VlRorvq128
+                | Intrinsic::X86Avx512VlSllid256
+                | Intrinsic::X86Avx512VlSlliq256
+                | Intrinsic::X86Avx512VlSrlid256
+                | Intrinsic::X86Avx512VlSrliq256
+                | Intrinsic::X86Avx512VlSraid256
+                | Intrinsic::X86Avx512VlSraiq256
+                | Intrinsic::X86Avx512VlSlld256
+                | Intrinsic::X86Avx512VlSllq256
+                | Intrinsic::X86Avx512VlSrld256
+                | Intrinsic::X86Avx512VlSrlq256
+                | Intrinsic::X86Avx512VlSrad256
+                | Intrinsic::X86Avx512VlSraq256
+                | Intrinsic::X86Avx512VlSllvd256
+                | Intrinsic::X86Avx512VlSllvq256
+                | Intrinsic::X86Avx512VlSrlvd256
+                | Intrinsic::X86Avx512VlSrlvq256
+                | Intrinsic::X86Avx512VlSravd256
+                | Intrinsic::X86Avx512VlSravq256
+                | Intrinsic::X86Avx512VlRold256
+                | Intrinsic::X86Avx512VlRolq256
+                | Intrinsic::X86Avx512VlRord256
+                | Intrinsic::X86Avx512VlRorq256
+                | Intrinsic::X86Avx512VlRolvd256
+                | Intrinsic::X86Avx512VlRolvq256
+                | Intrinsic::X86Avx512VlRorvd256
+                | Intrinsic::X86Avx512VlRorvq256 => None,
                 Intrinsic::X86Avx512BwSlliw128
                 | Intrinsic::X86Avx512BwSllw128
                 | Intrinsic::X86Avx512BwSllvw128
@@ -2677,9 +2776,12 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !((id.x86_avx512_bw_core().is_some() && id.info().pure)
+                    || id.x86_avx512_dq_lane().is_some()
                     || id.x86_avx512_dq_bridge().is_some()
                     || id.x86_avx512_bw_mask().is_some()
+                    || id.x86_avx512_vl_shift().is_some()
                     || id.x86_avx512_bw_shift().is_some()
+                    || id.x86_avx512_bw_mul().is_some()
                     || (id.is_x86_avx512_scalar_move() && id.info().pure)
                     || (id.x86_avx512_packed_opcode().is_some() && id.info().pure)
                     || (id.is_x86_avx512_integer_convert() && id.info().pure)

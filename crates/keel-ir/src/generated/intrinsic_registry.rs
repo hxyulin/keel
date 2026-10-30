@@ -2792,10 +2792,208 @@ pub enum Intrinsic {
     X86Avx512BwSraw512 = 1733,
     #[doc = "Masked AVX512BW word shift with unsigned saturating immediate, low-qword shared, or per-lane word counts. Narrow forms require AVX512VL; shared upper-qword bits are ignored."]
     X86Avx512BwSravw512 = 1734,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti32x2128 = 1735,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcastf32x2256 = 1736,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcastf64x2256 = 1737,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti32x2256 = 1738,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti64x2256 = 1739,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtractf64x2256 = 1740,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtracti64x2256 = 1741,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInsertf64x2256 = 1742,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInserti64x2256 = 1743,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcastf32x2512 = 1744,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcastf32x8512 = 1745,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcastf64x2512 = 1746,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti32x2512 = 1747,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti32x8512 = 1748,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqBroadcasti64x2512 = 1749,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtractf32x8512 = 1750,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtractf64x2512 = 1751,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtracti32x8512 = 1752,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqExtracti64x2512 = 1753,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInsertf32x8512 = 1754,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInsertf64x2512 = 1755,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInserti32x8512 = 1756,
+    #[doc = "Pure AVX512DQ block broadcast, extraction or insertion. Feature legality follows encoded width; memory-only broadcasts stage exact-width SSA values in compiler-owned scratch."]
+    X86Avx512DqInserti64x2512 = 1757,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllid128 = 1758,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSlliq128 = 1759,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlid128 = 1760,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrliq128 = 1761,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraid128 = 1762,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraiq128 = 1763,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSlld128 = 1764,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllq128 = 1765,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrld128 = 1766,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlq128 = 1767,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrad128 = 1768,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraq128 = 1769,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllvd128 = 1770,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllvq128 = 1771,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlvd128 = 1772,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlvq128 = 1773,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSravd128 = 1774,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSravq128 = 1775,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRold128 = 1776,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolq128 = 1777,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRord128 = 1778,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorq128 = 1779,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolvd128 = 1780,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolvq128 = 1781,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorvd128 = 1782,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorvq128 = 1783,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllid256 = 1784,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSlliq256 = 1785,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlid256 = 1786,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrliq256 = 1787,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraid256 = 1788,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraiq256 = 1789,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSlld256 = 1790,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllq256 = 1791,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrld256 = 1792,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlq256 = 1793,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrad256 = 1794,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSraq256 = 1795,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllvd256 = 1796,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSllvq256 = 1797,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlvd256 = 1798,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSrlvq256 = 1799,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSravd256 = 1800,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlSravq256 = 1801,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRold256 = 1802,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolq256 = 1803,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRord256 = 1804,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorq256 = 1805,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolvd256 = 1806,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRolvq256 = 1807,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorvd256 = 1808,
+    #[doc = "Pure narrow dword/qword shift or rotation with independent masked merge. Shifts saturate unsigned counts; rotations reduce modulo lane width. Requires AVX512F and AVX512VL."]
+    X86Avx512VlRorvq256 = 1809,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMullw128 = 1810,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhw128 = 1811,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhuw128 = 1812,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhrsw128 = 1813,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddwd128 = 1814,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddubsw128 = 1815,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgb128 = 1816,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgw128 = 1817,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMullw256 = 1818,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhw256 = 1819,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhuw256 = 1820,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhrsw256 = 1821,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddwd256 = 1822,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddubsw256 = 1823,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgb256 = 1824,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgw256 = 1825,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMullw512 = 1826,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhw512 = 1827,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhuw512 = 1828,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMulhrsw512 = 1829,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddwd512 = 1830,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwMaddubsw512 = 1831,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgb512 = 1832,
+    #[doc = "Pure masked AVX512BW multiply, adjacent-pair multiply-add or unsigned rounded average. The mask follows result lanes; narrow forms require AVX512VL."]
+    X86Avx512BwAvgw512 = 1833,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1735] = [
+    pub const ALL: [Intrinsic; 1834] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -4531,6 +4729,105 @@ impl Intrinsic {
         Intrinsic::X86Avx512BwSraiw512,
         Intrinsic::X86Avx512BwSraw512,
         Intrinsic::X86Avx512BwSravw512,
+        Intrinsic::X86Avx512DqBroadcasti32x2128,
+        Intrinsic::X86Avx512DqBroadcastf32x2256,
+        Intrinsic::X86Avx512DqBroadcastf64x2256,
+        Intrinsic::X86Avx512DqBroadcasti32x2256,
+        Intrinsic::X86Avx512DqBroadcasti64x2256,
+        Intrinsic::X86Avx512DqExtractf64x2256,
+        Intrinsic::X86Avx512DqExtracti64x2256,
+        Intrinsic::X86Avx512DqInsertf64x2256,
+        Intrinsic::X86Avx512DqInserti64x2256,
+        Intrinsic::X86Avx512DqBroadcastf32x2512,
+        Intrinsic::X86Avx512DqBroadcastf32x8512,
+        Intrinsic::X86Avx512DqBroadcastf64x2512,
+        Intrinsic::X86Avx512DqBroadcasti32x2512,
+        Intrinsic::X86Avx512DqBroadcasti32x8512,
+        Intrinsic::X86Avx512DqBroadcasti64x2512,
+        Intrinsic::X86Avx512DqExtractf32x8512,
+        Intrinsic::X86Avx512DqExtractf64x2512,
+        Intrinsic::X86Avx512DqExtracti32x8512,
+        Intrinsic::X86Avx512DqExtracti64x2512,
+        Intrinsic::X86Avx512DqInsertf32x8512,
+        Intrinsic::X86Avx512DqInsertf64x2512,
+        Intrinsic::X86Avx512DqInserti32x8512,
+        Intrinsic::X86Avx512DqInserti64x2512,
+        Intrinsic::X86Avx512VlSllid128,
+        Intrinsic::X86Avx512VlSlliq128,
+        Intrinsic::X86Avx512VlSrlid128,
+        Intrinsic::X86Avx512VlSrliq128,
+        Intrinsic::X86Avx512VlSraid128,
+        Intrinsic::X86Avx512VlSraiq128,
+        Intrinsic::X86Avx512VlSlld128,
+        Intrinsic::X86Avx512VlSllq128,
+        Intrinsic::X86Avx512VlSrld128,
+        Intrinsic::X86Avx512VlSrlq128,
+        Intrinsic::X86Avx512VlSrad128,
+        Intrinsic::X86Avx512VlSraq128,
+        Intrinsic::X86Avx512VlSllvd128,
+        Intrinsic::X86Avx512VlSllvq128,
+        Intrinsic::X86Avx512VlSrlvd128,
+        Intrinsic::X86Avx512VlSrlvq128,
+        Intrinsic::X86Avx512VlSravd128,
+        Intrinsic::X86Avx512VlSravq128,
+        Intrinsic::X86Avx512VlRold128,
+        Intrinsic::X86Avx512VlRolq128,
+        Intrinsic::X86Avx512VlRord128,
+        Intrinsic::X86Avx512VlRorq128,
+        Intrinsic::X86Avx512VlRolvd128,
+        Intrinsic::X86Avx512VlRolvq128,
+        Intrinsic::X86Avx512VlRorvd128,
+        Intrinsic::X86Avx512VlRorvq128,
+        Intrinsic::X86Avx512VlSllid256,
+        Intrinsic::X86Avx512VlSlliq256,
+        Intrinsic::X86Avx512VlSrlid256,
+        Intrinsic::X86Avx512VlSrliq256,
+        Intrinsic::X86Avx512VlSraid256,
+        Intrinsic::X86Avx512VlSraiq256,
+        Intrinsic::X86Avx512VlSlld256,
+        Intrinsic::X86Avx512VlSllq256,
+        Intrinsic::X86Avx512VlSrld256,
+        Intrinsic::X86Avx512VlSrlq256,
+        Intrinsic::X86Avx512VlSrad256,
+        Intrinsic::X86Avx512VlSraq256,
+        Intrinsic::X86Avx512VlSllvd256,
+        Intrinsic::X86Avx512VlSllvq256,
+        Intrinsic::X86Avx512VlSrlvd256,
+        Intrinsic::X86Avx512VlSrlvq256,
+        Intrinsic::X86Avx512VlSravd256,
+        Intrinsic::X86Avx512VlSravq256,
+        Intrinsic::X86Avx512VlRold256,
+        Intrinsic::X86Avx512VlRolq256,
+        Intrinsic::X86Avx512VlRord256,
+        Intrinsic::X86Avx512VlRorq256,
+        Intrinsic::X86Avx512VlRolvd256,
+        Intrinsic::X86Avx512VlRolvq256,
+        Intrinsic::X86Avx512VlRorvd256,
+        Intrinsic::X86Avx512VlRorvq256,
+        Intrinsic::X86Avx512BwMullw128,
+        Intrinsic::X86Avx512BwMulhw128,
+        Intrinsic::X86Avx512BwMulhuw128,
+        Intrinsic::X86Avx512BwMulhrsw128,
+        Intrinsic::X86Avx512BwMaddwd128,
+        Intrinsic::X86Avx512BwMaddubsw128,
+        Intrinsic::X86Avx512BwAvgb128,
+        Intrinsic::X86Avx512BwAvgw128,
+        Intrinsic::X86Avx512BwMullw256,
+        Intrinsic::X86Avx512BwMulhw256,
+        Intrinsic::X86Avx512BwMulhuw256,
+        Intrinsic::X86Avx512BwMulhrsw256,
+        Intrinsic::X86Avx512BwMaddwd256,
+        Intrinsic::X86Avx512BwMaddubsw256,
+        Intrinsic::X86Avx512BwAvgb256,
+        Intrinsic::X86Avx512BwAvgw256,
+        Intrinsic::X86Avx512BwMullw512,
+        Intrinsic::X86Avx512BwMulhw512,
+        Intrinsic::X86Avx512BwMulhuw512,
+        Intrinsic::X86Avx512BwMulhrsw512,
+        Intrinsic::X86Avx512BwMaddwd512,
+        Intrinsic::X86Avx512BwMaddubsw512,
+        Intrinsic::X86Avx512BwAvgb512,
+        Intrinsic::X86Avx512BwAvgw512,
     ];
 }
 
@@ -6262,5 +6559,104 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512BwSraiw512
             | $crate::Intrinsic::X86Avx512BwSraw512
             | $crate::Intrinsic::X86Avx512BwSravw512
+            | $crate::Intrinsic::X86Avx512DqBroadcasti32x2128
+            | $crate::Intrinsic::X86Avx512DqBroadcastf32x2256
+            | $crate::Intrinsic::X86Avx512DqBroadcastf64x2256
+            | $crate::Intrinsic::X86Avx512DqBroadcasti32x2256
+            | $crate::Intrinsic::X86Avx512DqBroadcasti64x2256
+            | $crate::Intrinsic::X86Avx512DqExtractf64x2256
+            | $crate::Intrinsic::X86Avx512DqExtracti64x2256
+            | $crate::Intrinsic::X86Avx512DqInsertf64x2256
+            | $crate::Intrinsic::X86Avx512DqInserti64x2256
+            | $crate::Intrinsic::X86Avx512DqBroadcastf32x2512
+            | $crate::Intrinsic::X86Avx512DqBroadcastf32x8512
+            | $crate::Intrinsic::X86Avx512DqBroadcastf64x2512
+            | $crate::Intrinsic::X86Avx512DqBroadcasti32x2512
+            | $crate::Intrinsic::X86Avx512DqBroadcasti32x8512
+            | $crate::Intrinsic::X86Avx512DqBroadcasti64x2512
+            | $crate::Intrinsic::X86Avx512DqExtractf32x8512
+            | $crate::Intrinsic::X86Avx512DqExtractf64x2512
+            | $crate::Intrinsic::X86Avx512DqExtracti32x8512
+            | $crate::Intrinsic::X86Avx512DqExtracti64x2512
+            | $crate::Intrinsic::X86Avx512DqInsertf32x8512
+            | $crate::Intrinsic::X86Avx512DqInsertf64x2512
+            | $crate::Intrinsic::X86Avx512DqInserti32x8512
+            | $crate::Intrinsic::X86Avx512DqInserti64x2512
+            | $crate::Intrinsic::X86Avx512VlSllid128
+            | $crate::Intrinsic::X86Avx512VlSlliq128
+            | $crate::Intrinsic::X86Avx512VlSrlid128
+            | $crate::Intrinsic::X86Avx512VlSrliq128
+            | $crate::Intrinsic::X86Avx512VlSraid128
+            | $crate::Intrinsic::X86Avx512VlSraiq128
+            | $crate::Intrinsic::X86Avx512VlSlld128
+            | $crate::Intrinsic::X86Avx512VlSllq128
+            | $crate::Intrinsic::X86Avx512VlSrld128
+            | $crate::Intrinsic::X86Avx512VlSrlq128
+            | $crate::Intrinsic::X86Avx512VlSrad128
+            | $crate::Intrinsic::X86Avx512VlSraq128
+            | $crate::Intrinsic::X86Avx512VlSllvd128
+            | $crate::Intrinsic::X86Avx512VlSllvq128
+            | $crate::Intrinsic::X86Avx512VlSrlvd128
+            | $crate::Intrinsic::X86Avx512VlSrlvq128
+            | $crate::Intrinsic::X86Avx512VlSravd128
+            | $crate::Intrinsic::X86Avx512VlSravq128
+            | $crate::Intrinsic::X86Avx512VlRold128
+            | $crate::Intrinsic::X86Avx512VlRolq128
+            | $crate::Intrinsic::X86Avx512VlRord128
+            | $crate::Intrinsic::X86Avx512VlRorq128
+            | $crate::Intrinsic::X86Avx512VlRolvd128
+            | $crate::Intrinsic::X86Avx512VlRolvq128
+            | $crate::Intrinsic::X86Avx512VlRorvd128
+            | $crate::Intrinsic::X86Avx512VlRorvq128
+            | $crate::Intrinsic::X86Avx512VlSllid256
+            | $crate::Intrinsic::X86Avx512VlSlliq256
+            | $crate::Intrinsic::X86Avx512VlSrlid256
+            | $crate::Intrinsic::X86Avx512VlSrliq256
+            | $crate::Intrinsic::X86Avx512VlSraid256
+            | $crate::Intrinsic::X86Avx512VlSraiq256
+            | $crate::Intrinsic::X86Avx512VlSlld256
+            | $crate::Intrinsic::X86Avx512VlSllq256
+            | $crate::Intrinsic::X86Avx512VlSrld256
+            | $crate::Intrinsic::X86Avx512VlSrlq256
+            | $crate::Intrinsic::X86Avx512VlSrad256
+            | $crate::Intrinsic::X86Avx512VlSraq256
+            | $crate::Intrinsic::X86Avx512VlSllvd256
+            | $crate::Intrinsic::X86Avx512VlSllvq256
+            | $crate::Intrinsic::X86Avx512VlSrlvd256
+            | $crate::Intrinsic::X86Avx512VlSrlvq256
+            | $crate::Intrinsic::X86Avx512VlSravd256
+            | $crate::Intrinsic::X86Avx512VlSravq256
+            | $crate::Intrinsic::X86Avx512VlRold256
+            | $crate::Intrinsic::X86Avx512VlRolq256
+            | $crate::Intrinsic::X86Avx512VlRord256
+            | $crate::Intrinsic::X86Avx512VlRorq256
+            | $crate::Intrinsic::X86Avx512VlRolvd256
+            | $crate::Intrinsic::X86Avx512VlRolvq256
+            | $crate::Intrinsic::X86Avx512VlRorvd256
+            | $crate::Intrinsic::X86Avx512VlRorvq256
+            | $crate::Intrinsic::X86Avx512BwMullw128
+            | $crate::Intrinsic::X86Avx512BwMulhw128
+            | $crate::Intrinsic::X86Avx512BwMulhuw128
+            | $crate::Intrinsic::X86Avx512BwMulhrsw128
+            | $crate::Intrinsic::X86Avx512BwMaddwd128
+            | $crate::Intrinsic::X86Avx512BwMaddubsw128
+            | $crate::Intrinsic::X86Avx512BwAvgb128
+            | $crate::Intrinsic::X86Avx512BwAvgw128
+            | $crate::Intrinsic::X86Avx512BwMullw256
+            | $crate::Intrinsic::X86Avx512BwMulhw256
+            | $crate::Intrinsic::X86Avx512BwMulhuw256
+            | $crate::Intrinsic::X86Avx512BwMulhrsw256
+            | $crate::Intrinsic::X86Avx512BwMaddwd256
+            | $crate::Intrinsic::X86Avx512BwMaddubsw256
+            | $crate::Intrinsic::X86Avx512BwAvgb256
+            | $crate::Intrinsic::X86Avx512BwAvgw256
+            | $crate::Intrinsic::X86Avx512BwMullw512
+            | $crate::Intrinsic::X86Avx512BwMulhw512
+            | $crate::Intrinsic::X86Avx512BwMulhuw512
+            | $crate::Intrinsic::X86Avx512BwMulhrsw512
+            | $crate::Intrinsic::X86Avx512BwMaddwd512
+            | $crate::Intrinsic::X86Avx512BwMaddubsw512
+            | $crate::Intrinsic::X86Avx512BwAvgb512
+            | $crate::Intrinsic::X86Avx512BwAvgw512
     };
 }

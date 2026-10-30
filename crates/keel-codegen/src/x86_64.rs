@@ -132,10 +132,12 @@ mod avx256;
 mod avx512;
 mod avx512_bw;
 mod avx512_bw_mask;
+mod avx512_bw_mul;
 mod avx512_bw_shift;
 mod avx512_convert;
 mod avx512_dq_bridge;
 mod avx512_dq_convert;
+mod avx512_dq_lane;
 mod avx512_float;
 mod avx512_fma;
 mod avx512_indexed;
@@ -154,6 +156,7 @@ mod avx512_scalar_fma;
 mod avx512_scalar_move;
 mod avx512_special;
 mod avx512_vl_convert;
+mod avx512_vl_shift;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -1192,6 +1195,14 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if id.x86_avx512_bw_mul().is_some() {
+                    avx512_bw_mul::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|message| err(message.into()))?;
+                }
+                if id.x86_avx512_vl_shift().is_some() {
+                    avx512_vl_shift::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|message| err(message.into()))?;
+                }
                 if id.x86_avx512_bw_shift().is_some() {
                     avx512_bw_shift::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
@@ -1269,6 +1280,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
                     avx512_fma::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_dq_lane().is_some() {
+                    avx512_dq_lane::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_dq_bridge().is_some() {
@@ -3239,6 +3254,12 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
             }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mul().is_some() => {
+                self.native_avx512_bw_mul(id, args, result);
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_shift().is_some() => {
+                self.native_avx512_vl_shift(id, args, result);
+            }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_shift().is_some() => {
                 self.native_avx512_bw_shift(id, args, result);
             }
@@ -3286,6 +3307,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_dq_lane().is_some() => {
+                self.native_avx512_dq_lane(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_dq_bridge().is_some() => {
                 self.native_avx512_dq_bridge(id, args, result)

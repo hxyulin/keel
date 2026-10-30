@@ -956,3 +956,12 @@ mod x86_avx512_vl_special;
 
 #[path = "vector_x86/x86_avx512_bw_shift.rs"]
 mod x86_avx512_bw_shift;
+
+#[path = "vector_x86/x86_avx512_vl_shift.rs"]
+mod x86_avx512_vl_shift;
+
+#[path = "vector_x86/x86_avx512_bw_mul.rs"]
+mod x86_avx512_bw_mul;
+
+#[path = "vector_x86/x86_avx512_dq_lane.rs"]
+mod x86_avx512_dq_lane;
