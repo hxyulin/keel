@@ -7,7 +7,7 @@ use keel_asm_ir::{Directive, Program};
 use std::fmt::{self, Write};
 
 pub(crate) enum Output {
-    Text(crate::text::Text),
+    Text(crate::text::Text, Vec<keel_asm_ir::X86Source>),
     Structured(Program),
 }
 impl Output {
@@ -15,7 +15,7 @@ impl Output {
         if structured {
             Self::Structured(Program::new())
         } else {
-            Self::Text(Default::default())
+            Self::Text(Default::default(), Vec::new())
         }
     }
     pub(super) fn instruction<const N: usize>(
@@ -26,7 +26,7 @@ impl Output {
     ) {
         match self {
             // Text only formats the instruction, straight from its parts.
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 s.push('\t');
                 keel_asm_ir::x86::write_instruction(s, opcode, &operands, lock).unwrap();
                 s.push('\n');
@@ -40,15 +40,61 @@ impl Output {
     }
     /// Keep the fragment in the enclosing assembly stream for directives,
     /// numeric local labels and relocations. Restore compiler syntax afterward.
-    pub(super) fn inline_assembly(&mut self, text: &str) {
+    pub(super) fn inline_assembly(
+        &mut self,
+        text: &str,
+        features: keel_asm_ir::x86::Features,
+        owner: &str,
+    ) {
         let text = format!(".att_syntax prefix\n{text}\n.intel_syntax noprefix\n");
+        self.scoped_source(keel_asm_ir::X86Source {
+            text,
+            features,
+            owner: owner.into(),
+        });
+    }
+    fn scoped_source(&mut self, source: keel_asm_ir::X86Source) {
         match self {
-            Self::Text(out) => out.push_str(&text),
-            Self::Structured(out) => out.text(&text),
+            Self::Text(out, sources) => {
+                out.push_str(&source.text);
+                sources.push(source);
+            }
+            Self::Structured(out) => out.items.push(keel_asm_ir::Item::X86Source(source)),
         }
     }
+    pub(super) fn validate_sources(
+        &mut self,
+        validator: &mut keel_asm::x86::SourceValidator,
+        from: &mut usize,
+    ) -> Result<(), crate::CodegenError> {
+        let sources: Vec<_> = match self {
+            Self::Text(_, sources) => std::mem::take(sources),
+            Self::Structured(program) => {
+                let sources = program.items[*from..]
+                    .iter()
+                    .filter_map(|item| match item {
+                        keel_asm_ir::Item::X86Source(source) => Some(source.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                *from = program.items.len();
+                sources
+            }
+        };
+        for source in sources {
+            validator.push(&source).map_err(|e| crate::CodegenError {
+                func: source.owner,
+                message: e.to_string(),
+            })?;
+        }
+        Ok(())
+    }
     /// Basic asm keeps literal percent signs and shares one source stream.
-    pub(super) fn module_assembly(&mut self, fragments: &[String]) {
+    pub(super) fn module_assembly(
+        &mut self,
+        fragments: &[String],
+        features: keel_asm_ir::x86::Features,
+    ) {
         if fragments.is_empty() {
             return;
         }
@@ -58,16 +104,17 @@ impl Output {
             text.push('\n');
         }
         text.push_str(".text\n.intel_syntax noprefix\n");
-        match self {
-            Self::Text(out) => out.push_str(&text),
-            Self::Structured(out) => out.text(&text),
-        }
+        self.scoped_source(keel_asm_ir::X86Source {
+            text,
+            features,
+            owner: "<module asm>".into(),
+        });
     }
     /// Append the already resource-checked raw region identically in both paths.
     pub(super) fn checked_region(&mut self, program: Program) {
         match self {
             Self::Structured(out) => out.append(program),
-            Self::Text(out) => {
+            Self::Text(out, _) => {
                 for item in program.items {
                     match item {
                         keel_asm_ir::Item::Label(label) => {
@@ -90,9 +137,10 @@ impl Output {
     /// its own string and copying it over. Gives where the function begins.
     /// Structured functions keep their own program until [`Self::end_function`].
     pub(super) fn begin_function(&mut self, module: &mut Self) -> usize {
-        if let (Self::Text(own), Self::Text(text)) = (&mut *self, module) {
+        if let (Self::Text(own, sources), Self::Text(text, module_sources)) = (&mut *self, module) {
             debug_assert!(own.is_empty());
             std::mem::swap(own, text);
+            std::mem::swap(sources, module_sources);
             return own.len();
         }
         0
@@ -100,13 +148,19 @@ impl Output {
     /// Hands the module's output, now ending with this function, back.
     pub(super) fn end_function(self, module: &mut Self) {
         match (self, module) {
-            (Self::Text(own), Self::Text(text)) => *text = own,
+            (Self::Text(own, sources), Self::Text(text, module_sources)) => {
+                *text = own;
+                *module_sources = sources;
+            }
             (own, module) => module.append(own),
         }
     }
     pub(super) fn append(&mut self, other: Self) {
         match (self, other) {
-            (Self::Text(s), Self::Text(t)) => s.push_str(&t),
+            (Self::Text(s, sources), Self::Text(t, more)) => {
+                s.push_str(&t);
+                sources.extend(more);
+            }
             (Self::Structured(p), Self::Structured(q)) => p.append(q),
             _ => unreachable!(),
         }
@@ -115,7 +169,7 @@ impl Output {
     /// written straight into text. `bare` is [`bare_label`]`(function)`.
     pub(super) fn block_label(&mut self, function: &str, bare: bool, block: keel_ir::Block) {
         match self {
-            Self::Text(s) if bare => {
+            Self::Text(s, _) if bare => {
                 write_block_label(s, function, block);
                 s.push_str(":\n");
             }
@@ -133,7 +187,7 @@ impl Output {
         block: keel_ir::Block,
     ) {
         match self {
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 s.push('\t');
                 // The mnemonic alone: no operands.
                 keel_asm_ir::x86::write_instruction(s, opcode, &[], false).unwrap();
@@ -157,7 +211,7 @@ impl Output {
     /// [`Self::instruction`] would write it.
     pub(super) fn branch_to_function(&mut self, opcode: Opcode, name: &str, plt: bool) {
         match self {
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 s.push('\t');
                 keel_asm_ir::x86::write_instruction(s, opcode, &[], false).unwrap();
                 s.push_str("\t\"");
@@ -172,7 +226,7 @@ impl Output {
     }
     /// The instruction's IR text as a comment, written without `fmt::write`.
     pub(super) fn inst_comment(&mut self, func: &keel_ir::Function, inst: keel_ir::Inst) {
-        if let Self::Text(s) = self {
+        if let Self::Text(s, _) = self {
             s.push_str("\t# ");
             func.write_inst_to(s, inst).unwrap();
             s.push('\n');
@@ -182,14 +236,14 @@ impl Output {
 impl Write for Output {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         match self {
-            Self::Text(t) => t.push_str(s),
+            Self::Text(t, _) => t.push_str(s),
             Self::Structured(_) => panic!("compiler-generated x86 text must use typed emission"),
         };
         Ok(())
     }
     fn write_char(&mut self, c: char) -> fmt::Result {
         match self {
-            Self::Text(t) => t.push(c),
+            Self::Text(t, _) => t.push(c),
             Self::Structured(_) => panic!("compiler-generated x86 text must use typed emission"),
         };
         Ok(())
@@ -198,7 +252,7 @@ impl Write for Output {
 impl Sink for Output {
     fn label(&mut self, name: String) {
         match self {
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 if name.starts_with(".L") && bare_label(&name) {
                     s.push_str(&name);
                     s.push_str(":\n");
@@ -212,7 +266,7 @@ impl Sink for Output {
     }
     fn directive(&mut self, d: Directive) {
         match self {
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 use crate::text::write_decimal;
                 match &d {
                     Directive::Cfi(keel_asm_ir::Cfi::Offset { register, offset }) => {
@@ -264,7 +318,7 @@ impl Sink for Output {
             return;
         }
         match self {
-            Self::Text(s) => {
+            Self::Text(s, _) => {
                 write_bytes(s, bytes);
                 s.push('\n');
             }

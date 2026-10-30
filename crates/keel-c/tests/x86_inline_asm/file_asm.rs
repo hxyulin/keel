@@ -75,9 +75,19 @@ fn basic_asm_is_literal_and_invalid_source_is_diagnosed() {
         );
     }
     let module = compile("asm(\"this_is_not_an_instruction %eax\");");
-    let text = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
-    assert!(text.contains("this_is_not_an_instruction %eax"));
-    assert!(keel_asm::x86::assemble_object(&text).is_err());
+    assert_eq!(module.assembly, ["this_is_not_an_instruction %eax"]);
+    // Stateful source validation now diagnoses malformed literal instructions
+    // before either text or structured codegen publishes the module.
+    for error in [
+        keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap_err(),
+        keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap_err(),
+    ] {
+        assert_eq!(error.func, "<module asm>");
+        assert!(
+            error.message.contains("this_is_not_an_instruction"),
+            "{error}"
+        );
+    }
     for target in [
         Target::Aarch64AppleDarwin,
         Target::Aarch64LinuxGnu,

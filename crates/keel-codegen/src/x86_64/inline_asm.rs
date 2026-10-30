@@ -294,9 +294,9 @@ pub(super) fn plan(
     if saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
         bytes = 0;
     }
-    // The shared object assembler owns instruction/directive validation and
-    // feature checks. Parsing fragments here would bypass GNU preprocessing
-    // (numeric local labels and macros in particular).
+    // Common output validates scoped source with the assembler's stateful
+    // frontend before publication. Parsing fragments here would bypass shared
+    // GNU preprocessing, numeric local labels and macros.
     Ok(Plan {
         regs,
         initializers,
@@ -494,7 +494,8 @@ impl FunctionCompiler<'_> {
             .remove(&inst)
             .expect("asm checked before emission");
         if plan.bytes == 0 {
-            self.out.inline_assembly(&plan.text);
+            self.out
+                .inline_assembly(&plan.text, self.features, &self.func.name);
             return;
         }
         let home = self.inline_asm_home.expect("asm frame prepared");
@@ -589,7 +590,8 @@ impl FunctionCompiler<'_> {
                 [asm_arg(mem(self, plan.outputs[i])), asm_arg(0i64)],
             );
         }
-        self.out.inline_assembly(&plan.text);
+        self.out
+            .inline_assembly(&plan.text, self.features, &self.func.name);
         for &(i, cc) in &plan.flags {
             self.emit(
                 Opcode::Setcc(cc),

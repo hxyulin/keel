@@ -30,6 +30,15 @@ impl Instruction {
     }
 }
 
+/// Trusted permissions and ownership for an x86 source fragment.
+/// Macro expansions use the permissions of the invocation fragment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct X86Source {
+    pub text: String,
+    pub features: x86::Features,
+    pub owner: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     /// AArch64 instruction, preserving the original shared API.
@@ -46,6 +55,8 @@ pub enum Item {
     /// An explicit user source fragment, scanned only when consumed by an assembler.
     /// Statement boundaries do not continue across item boundaries.
     Text(String),
+    /// Source whose feature permissions do not inherit the assembler union.
+    X86Source(X86Source),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,6 +118,7 @@ impl Program {
                 Item::Label(_) => stats.labels += 1,
                 Item::Directive(_) => {}
                 Item::Text(text) => stats.text_bytes += text.len(),
+                Item::X86Source(source) => stats.text_bytes += source.text.len(),
             }
         }
         stats

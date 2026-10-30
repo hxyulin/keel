@@ -34,6 +34,17 @@ and YMM VPCLMULQDQ (`avx,vpclmulqdq`). These optional forms have generated
 public `ExtensionOpcode` adapters. They do not add compiler intrinsics or
 instruction-selection rules. See the [extension coverage and feature rules](../../../tools/x86-isa/README.md#optional-legacyvex-extensions).
 
+Compiler-owned raw fragments carry `keel_asm_ir::X86Source` metadata with
+permissions and an owner for diagnostics. This metadata stays outside source
+text. Instructions must satisfy both these local permissions and the assembler
+API feature set. The assembler checks expanded instruction forms before encoding-cache
+lookup and before retaining symbolic instructions for later layout. Ordinary
+`Item::Text` uses the assembler's supplied feature set. `SourceValidator` shares
+the same parser and preprocessing state across scoped fragments, including
+macros, syntax, aliases and numeric local labels. A macro or conditional block
+must close within its fragment; named forward symbols remain available for
+final object assembly.
+
 ## AMX assembly
 
 The assembler and decoder expose the imported AMX-TILE, AMX-INT8, AMX-BF16

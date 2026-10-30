@@ -373,11 +373,51 @@ pub fn assemble_program_object_with_binary_inputs(
     for (index, item) in program.items.iter().enumerate() {
         match item {
             Item::Text(source) => items.parse(source, index + 1, resolver)?,
+            Item::X86Source(source) => items.scoped_source(source, index + 1, resolver)?,
             Item::X86Instruction(i) => items.x86_instruction(i, index + 1),
             item => items.item(item.clone(), index + 1),
         }
     }
     assemble_items(items.finish()?)
+}
+
+/// Stateful validation of compiler-owned scoped source fragments.
+/// Shares GNU preprocessing, syntax, register aliases and numeric labels across
+/// fragments; forward symbols remain symbolic until final object assembly.
+pub struct SourceValidator {
+    items: Items,
+}
+impl fmt::Debug for SourceValidator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SourceValidator").finish_non_exhaustive()
+    }
+}
+impl SourceValidator {
+    pub fn new() -> Self {
+        let mut items = Items::new(x86::Features::all_known());
+        items.source_validation = true;
+        Self { items }
+    }
+    /// Validate expanded instructions under this fragment's permissions.
+    ///
+    /// # Errors
+    /// Returns syntax, preprocessing, or instruction feature errors.
+    pub fn push(&mut self, source: &keel_asm_ir::X86Source) -> Result<(), Error> {
+        self.items
+            .scoped_source(source, 1, &mut inputs::unavailable)
+    }
+    /// Finish numeric-local-label validation after the last fragment.
+    ///
+    /// # Errors
+    /// Returns unresolved numeric-local-label errors.
+    pub fn finish(self) -> Result<(), Error> {
+        self.items.finish().map(|_| ())
+    }
+}
+impl Default for SourceValidator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Incremental form of [`assemble_program_object_with_features`]: programs
@@ -439,6 +479,12 @@ impl ProgramAssembler {
                     } else {
                         items.parse(&source, line, resolver)
                     } {
+                        self.error = Some(e);
+                        return;
+                    }
+                }
+                Item::X86Source(source) => {
+                    if let Err(e) = items.scoped_source(&source, line, resolver) {
                         self.error = Some(e);
                         return;
                     }
@@ -580,9 +626,11 @@ struct Items {
     // Parse errors anywhere take precedence over feature errors.
     unsupported: Option<Error>,
     parsed: usize,
+    source_validation: bool,
+    source_features: Option<x86::Features>,
     /// Byte ranges in `encoded` of symbol-free instructions already encoded.
-    /// The encoding depends only on the instruction value and `features`,
-    /// which is fixed for the whole input.
+    /// Permissions are checked before lookup; the bytes depend only on the
+    /// instruction value, including its selected encoding form.
     encodings: FxHashMap<x86::Instruction, (u32, u32)>,
 }
 impl Items {
@@ -605,8 +653,30 @@ impl Items {
             preprocessor: crate::parser::preprocess::Processor::default(),
             unsupported: None,
             parsed: 0,
+            source_validation: false,
+            source_features: None,
             encodings: FxHashMap::default(),
         }
+    }
+    fn scoped_source(
+        &mut self,
+        source: &keel_asm_ir::X86Source,
+        line: usize,
+        resolver: &mut BinaryInputResolver<'_>,
+    ) -> Result<(), Error> {
+        source
+            .features
+            .validate()
+            .map_err(|e| Error::new(line, e))?;
+        let previous = self.source_features.replace(source.features);
+        let result = self.parse(&source.text, line, resolver);
+        self.source_features = previous;
+        result.map_err(|e| Error::new(e.line, format!("{}: {}", source.owner, e.message)))?;
+        if let Some(error) = &mut self.unsupported {
+            error.message = format!("{}: {}", source.owner, error.message);
+            return Err(error.clone());
+        }
+        Ok(())
     }
     fn parse(
         &mut self,
@@ -652,6 +722,13 @@ impl Items {
                             })
                         }
                         x86::SourceItem::Text(text) => {
+                            // Binary contents do not carry instruction permissions.
+                            // Resolution and range validation belong to object assembly.
+                            if self.source_validation
+                                && text.split_whitespace().next() == Some(".incbin")
+                            {
+                                return;
+                            }
                             match self.binary_inputs.include(text, resolver) {
                                 Ok(Some(bytes)) => {
                                     self.item(Item::Directive(Directive::Bytes(bytes)), line);
@@ -734,16 +811,6 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
-        if self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(i)
-        {
-            self.encoded
-                .extend_from_within(start as usize..end as usize);
-            self.extend_run(line);
-            return;
-        }
-        let start = index32(self.encoded.len());
-        let original = i;
         let opcode = x86::evex::promote(i.opcode, &i.operands);
         let promoted;
         let i = if opcode != i.opcode {
@@ -755,9 +822,19 @@ impl Items {
         } else {
             i
         };
+        self.check_features(i, line);
+        if self.unsupported.is_none()
+            && let Some(&(start, end)) = self.encodings.get(i)
+        {
+            self.encoded
+                .extend_from_within(start as usize..end as usize);
+            self.extend_run(line);
+            return;
+        }
+        let start = index32(self.encoded.len());
         if self.encode(i, line) {
             let end = index32(self.encoded.len());
-            self.encodings.insert(original.clone(), (start, end));
+            self.encodings.insert(i.clone(), (start, end));
         } else {
             let index = self.symbolic.push(i, &mut self.symbols);
             self.push(Entry::Symbolic {
@@ -766,11 +843,26 @@ impl Items {
             });
         }
     }
-    /// Encode a symbol-free instruction into the current run, if possible.
-    /// Otherwise the caller retains it for per-pass layout.
-    fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
-        let required = i.required_features();
-        if !self.features.contains(required) {
+    fn check_features(&mut self, i: &x86::Instruction, line: usize) {
+        let required = if matches!(i.opcode, x86::Opcode::Evex(_)) {
+            let Some(form) = x86::evex::form(i) else {
+                self.unsupported.get_or_insert_with(|| {
+                    Error::new(
+                        line,
+                        format!("{} has no supported x86 operand form", i.opcode),
+                    )
+                });
+                return;
+            };
+            form.requirements()
+        } else {
+            i.required_features()
+        };
+        if !self.features.contains(required)
+            || self
+                .source_features
+                .is_some_and(|features| !features.contains(required))
+        {
             self.unsupported.get_or_insert_with(|| {
                 Error::new(
                     line,
@@ -781,8 +873,11 @@ impl Items {
                     ),
                 )
             });
-            return false;
         }
+    }
+    /// Encode a symbol-free instruction into the current run, if possible.
+    /// Otherwise the caller retains it for per-pass layout.
+    fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
         if self.unsupported.is_some()
             || !i.operands.iter().all(|o| match o {
                 x86::Operand::Register(_) => true,

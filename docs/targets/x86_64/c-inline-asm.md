@@ -35,12 +35,13 @@ and C/IR clobbers, including registers 16–31 when the function enables AVX512F
 Explicit fixed SIMD operands are available through the shared IR; C `x`/`v`
 operands keep the low-register allocation policy. A 256-bit operand requires
 AVX; a 512-bit operand or high SIMD register requires AVX512F. These permissions
-are resolved per function. Instruction-specific requirements, including AVX512VL
-for narrow EVEX instructions, remain checked by the assembler. Literal template
-instructions are checked against the final assembly feature set, which can be
-the union of several functions' permissions. That check does not establish
-per-function legality for literal instruction text. The local checks described
-here cover typed operands and explicit register constraints and clobbers.
+are resolved per function. Literal template instructions also use that function's
+permissions, including AVX512VL for narrow EVEX forms. A neighboring function
+cannot grant permission through the final module feature set or an encoding
+cache hit. Shared macros use the permissions of the invocation, and inactive
+conditional branches emit no instructions to check. Module basic asm uses the
+compilation baseline. These checks run before text output returns or a structured
+function chunk reaches its sink.
 
 Compiler-generated transport for an explicit high XMM/YMM operand uses its
 ZMM alias and a padded 64-byte staging home, so transport needs AVX512F without

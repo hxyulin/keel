@@ -41,7 +41,7 @@ impl<'a> ItemRef<'a> {
             Item::Directive(d) => Self::Directive(d),
             Item::Instruction(i) => Self::Instruction(i),
             Item::Text(s) => Self::Text(s),
-            Item::X86Instruction(_) => Self::X86Instruction,
+            Item::X86Instruction(_) | Item::X86Source(_) => Self::X86Instruction,
         }
     }
 }

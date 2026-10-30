@@ -402,3 +402,136 @@ fn invalid_manual_feature_sets_are_rejected_on_both_entry_points() {
         assert!(assemble_object(source).is_err(), "{source}");
     }
 }
+
+#[test]
+fn scoped_x86_sources_do_not_inherit_union_or_cached_permissions() {
+    use keel_asm::x86::{ProgramAssembler, SourceValidator, assemble_program_object_with_features};
+    use keel_asm_ir::{Item, X86Source};
+    let enabled = Features::parse("avx512dq,avx512vl").unwrap();
+    let scoped = |text: &str, features, owner: &str| X86Source {
+        text: text.into(),
+        features,
+        owner: owner.into(),
+    };
+    for (instruction, denied, missing) in [
+        ("vpxord zmm0,zmm0,zmm0", Features::NONE, "avx512f"),
+        (
+            "vpmullq zmm0,zmm0,zmm0",
+            Features::parse("avx512f").unwrap(),
+            "avx512dq",
+        ),
+        (
+            "vpmullq xmm0,xmm0,xmm0",
+            Features::parse("avx512dq").unwrap(),
+            "avx512vl",
+        ),
+        // This source is deferred for relocation/layout instead of using the
+        // symbol-free encoding cache. Its permissions must still be local.
+        (
+            "vpmullq zmm0,zmm0,zmmword ptr [rip+external]",
+            Features::parse("avx512f").unwrap(),
+            "avx512dq",
+        ),
+    ] {
+        let first = scoped(instruction, enabled, "enabled");
+        let bad = scoped(instruction, denied, "bad");
+        let mut program = Program::new();
+        program.items.push(Item::X86Source(first.clone()));
+        program.items.push(Item::X86Source(bad.clone()));
+        let error = assemble_program_object_with_features(&program, enabled).unwrap_err();
+        assert!(
+            error.message.contains("bad") && error.message.contains(missing),
+            "{error}"
+        );
+        let mut streaming = ProgramAssembler::new(enabled);
+        for item in program.items {
+            let mut chunk = Program::new();
+            chunk.items.push(item);
+            streaming.push(chunk);
+        }
+        let error = streaming.finish().unwrap_err();
+        assert!(
+            error.message.contains("bad") && error.message.contains(missing),
+            "{error}"
+        );
+        let mut validator = SourceValidator::new();
+        validator.push(&first).unwrap();
+        let error = validator.push(&bad).unwrap_err();
+        assert!(
+            error.message.contains("bad") && error.message.contains(missing),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn scoped_x86_sources_preserve_preprocessing_syntax_and_forward_labels() {
+    use keel_asm::x86::{ProgramAssembler, SourceValidator};
+    use keel_asm_ir::{Item, X86Source};
+    let enabled = Features::parse("avx512f").unwrap();
+    let mut validator = SourceValidator::new();
+    let mut streaming = ProgramAssembler::new(enabled);
+    for (owner, features, text) in [
+        (
+            "module",
+            Features::NONE,
+            ".macro wide\nvpxord %zmm0,%zmm0,%zmm0\n.endm\n.if 0\nvpmullq zmm0,zmm0,zmm0\n.endif\n.att_syntax prefix",
+        ),
+        (
+            "enabled",
+            enabled,
+            "wide\njmp 1f\ncall external\n.intel_syntax noprefix",
+        ),
+        ("baseline", Features::NONE, "1: nop"),
+    ] {
+        let source = X86Source {
+            text: text.into(),
+            features,
+            owner: owner.into(),
+        };
+        validator.push(&source).unwrap();
+        let mut chunk = Program::new();
+        chunk.items.push(Item::X86Source(source));
+        streaming.push(chunk);
+    }
+    validator.finish().unwrap();
+    streaming.finish().unwrap();
+    for source in [".if 1\nnop", ".macro broken\nnop"] {
+        let mut validator = SourceValidator::new();
+        assert!(
+            validator
+                .push(&X86Source {
+                    text: source.into(),
+                    features: Features::NONE,
+                    owner: "bad".into()
+                })
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn scoped_x86_source_permissions_also_require_assembler_capabilities() {
+    use keel_asm::x86::{ProgramAssembler, assemble_program_object_with_features};
+    use keel_asm_ir::{Item, X86Source};
+    let enabled = Features::parse("avx512f").unwrap();
+    for instruction in [
+        "vpxord zmm0,zmm0,zmm0",
+        "vpxord zmm0,zmm0,zmmword ptr [rip+external]",
+    ] {
+        let mut program = Program::new();
+        for _ in 0..2 {
+            program.items.push(Item::X86Source(X86Source {
+                text: instruction.into(),
+                features: enabled,
+                owner: "enabled".into(),
+            }));
+        }
+        assemble_program_object_with_features(&program, enabled).unwrap();
+        let error = assemble_program_object_with_features(&program, Features::NONE).unwrap_err();
+        assert!(error.message.contains("avx512f"), "{error}");
+        let mut streaming = ProgramAssembler::new(Features::NONE);
+        streaming.push(program);
+        assert!(streaming.finish().unwrap_err().message.contains("avx512f"));
+    }
+}

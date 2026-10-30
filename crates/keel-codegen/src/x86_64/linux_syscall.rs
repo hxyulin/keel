@@ -38,7 +38,7 @@ pub fn program() -> Program {
 /// The same adapter as GNU-compatible Intel assembly, including unwind metadata.
 pub fn assembly() -> String {
     match emit(false) {
-        Output::Text(text) => text.into_string(),
+        Output::Text(text, _) => text.into_string(),
         _ => unreachable!(),
     }
 }

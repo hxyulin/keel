@@ -70,7 +70,7 @@ pub(crate) fn compile(
                 structured,
                 sink,
             )? {
-                x86_64::Output::Text(text) => Ok(Output::Text(text.into_string())),
+                x86_64::Output::Text(text, _) => Ok(Output::Text(text.into_string())),
                 x86_64::Output::Structured(program) => Ok(Output::Program(program)),
             }
         }

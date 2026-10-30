@@ -295,7 +295,7 @@ pub fn compile_with_pipeline_and_code_model(
     pipeline: &crate::CodegenPipeline<'_>,
     code_model: CodeModel,
 ) -> Result<String, CodegenError> {
-    let Output::Text(text) = compile_output(
+    let Output::Text(text, _) = compile_output(
         module,
         pools,
         pipeline,
@@ -464,7 +464,10 @@ pub(crate) fn compile_output(
             });
         }
     }
-    out.module_assembly(&module.assembly);
+    let mut source_validator = keel_asm::x86::SourceValidator::new();
+    let mut validated_items = 0;
+    out.module_assembly(&module.assembly, pipeline.selector.x86_features());
+    out.validate_sources(&mut source_validator, &mut validated_items)?;
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
@@ -503,6 +506,7 @@ pub(crate) fn compile_output(
         };
         let frame_register = compiler.frame_register;
         let scope_marks = compiler.compile(&mut out)?;
+        out.validate_sources(&mut source_validator, &mut validated_items)?;
         frames.push(FrameDebug {
             slots,
             scope_marks,
@@ -510,6 +514,7 @@ pub(crate) fn compile_output(
         });
         if let (Some(sink), Output::Structured(program)) = (&mut sink, &mut out) {
             sink(std::mem::take(program));
+            validated_items = 0;
         }
     }
     for f in &module.functions {
@@ -550,6 +555,10 @@ pub(crate) fn compile_output(
         flags: 0,
         nobits: false,
     });
+    source_validator.finish().map_err(|e| CodegenError {
+        func: "<module asm>".into(),
+        message: e.to_string(),
+    })?;
     Ok(out)
 }
 

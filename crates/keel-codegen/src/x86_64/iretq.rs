@@ -93,7 +93,7 @@ pub fn program() -> Program {
 /// GNU-compatible Intel syntax for exactly the same transport.
 pub fn assembly() -> String {
     match emit(false) {
-        Output::Text(text) => text.into_string(),
+        Output::Text(text, _) => text.into_string(),
         _ => unreachable!(),
     }
 }

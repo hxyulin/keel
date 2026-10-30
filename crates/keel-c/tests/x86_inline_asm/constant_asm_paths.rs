@@ -90,8 +90,12 @@ fn incoming_goto_and_runtime_conditions_keep_asm_paths_reachable() {
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
-        let assembly = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
-        let error = keel_asm::x86::assemble_object(&assembly).unwrap_err();
-        assert!(error.to_string().contains("32-bit register"), "{error}");
+        for error in [
+            keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap_err(),
+            keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap_err(),
+        ] {
+            assert_eq!(error.func, "f");
+            assert!(error.to_string().contains("32-bit register"), "{error}");
+        }
     }
 }

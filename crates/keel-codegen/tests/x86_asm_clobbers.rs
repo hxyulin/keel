@@ -533,3 +533,126 @@ fn zmm_inline_asm_rejects_feature_and_register_alias_conflicts() {
     let source = zmm_source().replace("target_features(\"avx512f\")", "");
     assert!(keel_codegen::x86_64::compile(&keel_ir::parse(&source).unwrap()).is_err());
 }
+
+#[test]
+fn literal_asm_features_are_local_on_every_output_route() {
+    use keel_codegen::x86_features::{FeatureSelector, Features};
+    for (allowed, denied, baseline, instruction, missing) in [
+        ("avx512f", "", "", "vpxord %%zmm0,%%zmm0,%%zmm0", "avx512f"),
+        (
+            "avx512dq",
+            "avx512f",
+            "",
+            "vpmullq %%zmm0,%%zmm0,%%zmm0",
+            "avx512dq",
+        ),
+        (
+            "avx512dq,avx512vl",
+            "avx512dq",
+            "",
+            "vpmullq %%xmm0,%%xmm0,%%xmm0",
+            "avx512vl",
+        ),
+        (
+            "avx512f",
+            "-avx512f",
+            "avx512f",
+            "vpxord %%zmm0,%%zmm0,%%zmm0",
+            "avx512f",
+        ),
+    ] {
+        let function = |name: &str, features: &str| {
+            let attrs = if features.is_empty() {
+                String::new()
+            } else {
+                format!("target_features(\"{features}\")")
+            };
+            format!(
+                "func @{name}() {attrs} {{\nentry:\n asm \"{instruction}\", \"~{{xmm0}}\"()\n return\n}}\n"
+            )
+        };
+        let module =
+            keel_ir::parse(&(function("enabled", allowed) + &function("bad", denied))).unwrap();
+        let selector = FeatureSelector {
+            inner: &SelectionTier::Full,
+            features: Features::parse(baseline).unwrap(),
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &AllocationTier::Full,
+        };
+        let text = keel_codegen::x86_64::compile_with_pipeline(
+            &module,
+            &keel_codegen::x86_64::REGISTERS,
+            &pipeline,
+        )
+        .unwrap_err();
+        let typed = keel_codegen::x86_64::compile_program_with_pipeline(
+            &module,
+            &keel_codegen::x86_64::REGISTERS,
+            &pipeline,
+        )
+        .unwrap_err();
+        let mut chunks = Vec::new();
+        let streamed = keel_codegen::x86_64::compile_program_chunks_with_pipeline(
+            &module,
+            &keel_codegen::x86_64::REGISTERS,
+            &pipeline,
+            &mut |p| chunks.push(p),
+        )
+        .unwrap_err();
+        for error in [text, typed, streamed] {
+            assert_eq!(error.func, "bad");
+            assert!(error.message.contains(missing), "{error:?}");
+        }
+        assert_eq!(chunks.len(), 1, "bad function must fail before publication");
+    }
+}
+
+#[test]
+fn literal_asm_shared_macros_use_invocation_permissions() {
+    let mut module = keel_ir::parse(
+        r#"
+func @enabled() target_features("avx512f") {
+entry:
+ asm "wide_macro", "~{xmm0}"()
+ return
+}
+func @bad() {
+entry:
+ asm "wide_macro", "~{xmm0}"()
+ return
+}
+"#,
+    )
+    .unwrap();
+    module
+        .assembly
+        .push(".macro wide_macro\n vpxord %zmm0,%zmm0,%zmm0\n.endm".into());
+    let error = keel_codegen::x86_64::compile(&module).unwrap_err();
+    assert_eq!(error.func, "bad");
+    assert!(error.message.contains("avx512f"));
+    module.functions.pop();
+    keel_codegen::x86_64::compile(&module).unwrap();
+    // Macro definitions and inactive branches grant no instruction permissions.
+    module
+        .assembly
+        .push(".if 0\n vpmullq %zmm0,%zmm0,%zmm0\n.endif".into());
+    let program = keel_codegen::x86_64::compile_program_with_pipeline(
+        &module,
+        &keel_codegen::x86_64::REGISTERS,
+        &CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Full,
+        },
+    )
+    .unwrap();
+    keel_asm::x86::assemble_program_object_with_features(
+        &program,
+        keel_codegen::x86_features::Features::parse("avx512f").unwrap(),
+    )
+    .unwrap();
+    module.assembly.push("vpxord %zmm0,%zmm0,%zmm0".into());
+    let error = keel_codegen::x86_64::compile(&module).unwrap_err();
+    assert_eq!(error.func, "<module asm>");
+}

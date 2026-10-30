@@ -12,12 +12,12 @@ backend-profile = []
 profile-with-tracy = ["profiling/profile-with-tracy"]
 
 [dependencies]
+keel-asm = { path = "../keel-asm" }
 keel-asm-ir = { path = "../keel-asm-ir" }
 profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
 
 [dev-dependencies]
-keel-asm = { path = "../keel-asm" }
 keel-opt = { path = "../keel-opt" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 
