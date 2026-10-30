@@ -1848,10 +1848,98 @@ pub enum Intrinsic {
     X86Avx512CmpRoundps = 1261,
     #[doc = "Packed AVX512F comparison with predicate 0..31 and SAE control 4 or 8."]
     X86Avx512CmpRoundpd = 1262,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddd128 = 1263,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddq128 = 1264,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubd128 = 1265,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubq128 = 1266,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadd128 = 1267,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadq128 = 1268,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStored128 = 1269,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStoreq128 = 1270,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpd128 = 1271,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpq128 = 1272,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpud128 = 1273,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpuq128 = 1274,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddps128 = 1275,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddpd128 = 1276,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubps128 = 1277,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubpd128 = 1278,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadps128 = 1279,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadpd128 = 1280,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStoreps128 = 1281,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStorepd128 = 1282,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpps128 = 1283,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmppd128 = 1284,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddd256 = 1285,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddq256 = 1286,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubd256 = 1287,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubq256 = 1288,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadd256 = 1289,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadq256 = 1290,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStored256 = 1291,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStoreq256 = 1292,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpd256 = 1293,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpq256 = 1294,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpud256 = 1295,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpuq256 = 1296,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddps256 = 1297,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskAddpd256 = 1298,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubps256 = 1299,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskSubpd256 = 1300,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadps256 = 1301,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskLoadpd256 = 1302,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStoreps256 = 1303,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlMaskStorepd256 = 1304,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmpps256 = 1305,
+    #[doc = "Masked AVX512F plus AVX512VL operation at its exact XMM or YMM width. Unused mask bits are ignored; comparisons clear unused result bits. Inactive lanes suppress memory access and floating exceptions."]
+    X86Avx512VlCmppd256 = 1306,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1263] = [
+    pub const ALL: [Intrinsic; 1307] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3115,6 +3203,50 @@ impl Intrinsic {
         Intrinsic::X86Avx512MaskStoresd,
         Intrinsic::X86Avx512CmpRoundps,
         Intrinsic::X86Avx512CmpRoundpd,
+        Intrinsic::X86Avx512VlMaskAddd128,
+        Intrinsic::X86Avx512VlMaskAddq128,
+        Intrinsic::X86Avx512VlMaskSubd128,
+        Intrinsic::X86Avx512VlMaskSubq128,
+        Intrinsic::X86Avx512VlMaskLoadd128,
+        Intrinsic::X86Avx512VlMaskLoadq128,
+        Intrinsic::X86Avx512VlMaskStored128,
+        Intrinsic::X86Avx512VlMaskStoreq128,
+        Intrinsic::X86Avx512VlCmpd128,
+        Intrinsic::X86Avx512VlCmpq128,
+        Intrinsic::X86Avx512VlCmpud128,
+        Intrinsic::X86Avx512VlCmpuq128,
+        Intrinsic::X86Avx512VlMaskAddps128,
+        Intrinsic::X86Avx512VlMaskAddpd128,
+        Intrinsic::X86Avx512VlMaskSubps128,
+        Intrinsic::X86Avx512VlMaskSubpd128,
+        Intrinsic::X86Avx512VlMaskLoadps128,
+        Intrinsic::X86Avx512VlMaskLoadpd128,
+        Intrinsic::X86Avx512VlMaskStoreps128,
+        Intrinsic::X86Avx512VlMaskStorepd128,
+        Intrinsic::X86Avx512VlCmpps128,
+        Intrinsic::X86Avx512VlCmppd128,
+        Intrinsic::X86Avx512VlMaskAddd256,
+        Intrinsic::X86Avx512VlMaskAddq256,
+        Intrinsic::X86Avx512VlMaskSubd256,
+        Intrinsic::X86Avx512VlMaskSubq256,
+        Intrinsic::X86Avx512VlMaskLoadd256,
+        Intrinsic::X86Avx512VlMaskLoadq256,
+        Intrinsic::X86Avx512VlMaskStored256,
+        Intrinsic::X86Avx512VlMaskStoreq256,
+        Intrinsic::X86Avx512VlCmpd256,
+        Intrinsic::X86Avx512VlCmpq256,
+        Intrinsic::X86Avx512VlCmpud256,
+        Intrinsic::X86Avx512VlCmpuq256,
+        Intrinsic::X86Avx512VlMaskAddps256,
+        Intrinsic::X86Avx512VlMaskAddpd256,
+        Intrinsic::X86Avx512VlMaskSubps256,
+        Intrinsic::X86Avx512VlMaskSubpd256,
+        Intrinsic::X86Avx512VlMaskLoadps256,
+        Intrinsic::X86Avx512VlMaskLoadpd256,
+        Intrinsic::X86Avx512VlMaskStoreps256,
+        Intrinsic::X86Avx512VlMaskStorepd256,
+        Intrinsic::X86Avx512VlCmpps256,
+        Intrinsic::X86Avx512VlCmppd256,
     ];
 }
 
@@ -4374,5 +4506,49 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512MaskStoresd
             | $crate::Intrinsic::X86Avx512CmpRoundps
             | $crate::Intrinsic::X86Avx512CmpRoundpd
+            | $crate::Intrinsic::X86Avx512VlMaskAddd128
+            | $crate::Intrinsic::X86Avx512VlMaskAddq128
+            | $crate::Intrinsic::X86Avx512VlMaskSubd128
+            | $crate::Intrinsic::X86Avx512VlMaskSubq128
+            | $crate::Intrinsic::X86Avx512VlMaskLoadd128
+            | $crate::Intrinsic::X86Avx512VlMaskLoadq128
+            | $crate::Intrinsic::X86Avx512VlMaskStored128
+            | $crate::Intrinsic::X86Avx512VlMaskStoreq128
+            | $crate::Intrinsic::X86Avx512VlCmpd128
+            | $crate::Intrinsic::X86Avx512VlCmpq128
+            | $crate::Intrinsic::X86Avx512VlCmpud128
+            | $crate::Intrinsic::X86Avx512VlCmpuq128
+            | $crate::Intrinsic::X86Avx512VlMaskAddps128
+            | $crate::Intrinsic::X86Avx512VlMaskAddpd128
+            | $crate::Intrinsic::X86Avx512VlMaskSubps128
+            | $crate::Intrinsic::X86Avx512VlMaskSubpd128
+            | $crate::Intrinsic::X86Avx512VlMaskLoadps128
+            | $crate::Intrinsic::X86Avx512VlMaskLoadpd128
+            | $crate::Intrinsic::X86Avx512VlMaskStoreps128
+            | $crate::Intrinsic::X86Avx512VlMaskStorepd128
+            | $crate::Intrinsic::X86Avx512VlCmpps128
+            | $crate::Intrinsic::X86Avx512VlCmppd128
+            | $crate::Intrinsic::X86Avx512VlMaskAddd256
+            | $crate::Intrinsic::X86Avx512VlMaskAddq256
+            | $crate::Intrinsic::X86Avx512VlMaskSubd256
+            | $crate::Intrinsic::X86Avx512VlMaskSubq256
+            | $crate::Intrinsic::X86Avx512VlMaskLoadd256
+            | $crate::Intrinsic::X86Avx512VlMaskLoadq256
+            | $crate::Intrinsic::X86Avx512VlMaskStored256
+            | $crate::Intrinsic::X86Avx512VlMaskStoreq256
+            | $crate::Intrinsic::X86Avx512VlCmpd256
+            | $crate::Intrinsic::X86Avx512VlCmpq256
+            | $crate::Intrinsic::X86Avx512VlCmpud256
+            | $crate::Intrinsic::X86Avx512VlCmpuq256
+            | $crate::Intrinsic::X86Avx512VlMaskAddps256
+            | $crate::Intrinsic::X86Avx512VlMaskAddpd256
+            | $crate::Intrinsic::X86Avx512VlMaskSubps256
+            | $crate::Intrinsic::X86Avx512VlMaskSubpd256
+            | $crate::Intrinsic::X86Avx512VlMaskLoadps256
+            | $crate::Intrinsic::X86Avx512VlMaskLoadpd256
+            | $crate::Intrinsic::X86Avx512VlMaskStoreps256
+            | $crate::Intrinsic::X86Avx512VlMaskStorepd256
+            | $crate::Intrinsic::X86Avx512VlCmpps256
+            | $crate::Intrinsic::X86Avx512VlCmppd256
     };
 }

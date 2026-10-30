@@ -1879,6 +1879,28 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if id.is_x86_avx512_vl_core() && id.info().returns == [Type::I8] {
+                    let maximum = if id
+                        .x86_avx512_mask_opcode()
+                        .is_some_and(|name| name.starts_with("vpcmp"))
+                    {
+                        7
+                    } else {
+                        31
+                    };
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|value| (0..=maximum).contains(&value)) {
+                        self.inst_error(inst, "invalid AVX512VL comparison predicate".into());
+                    }
+                }
                 if id.is_x86_avx512_compare() {
                     let control =
                         args.get(2)

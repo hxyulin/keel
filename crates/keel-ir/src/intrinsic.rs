@@ -71,7 +71,8 @@ impl Intrinsic {
 
     /// AVX512F operations with scalar i8/i16 lane masks.
     pub fn is_x86_avx512_mask(self) -> bool {
-        self.is_x86_avx512_float_mask()
+        self.is_x86_avx512_vl_core()
+            || self.is_x86_avx512_float_mask()
             || matches!(
                 self,
                 Self::X86Avx512Cmpd
@@ -956,6 +957,138 @@ impl Intrinsic {
                 | Self::X86Avx512MaskStoress
                 | Self::X86Avx512MaskStoresd
         )
+    }
+
+    /// The 128- and 256-bit masked core requires both AVX512F and AVX512VL.
+    pub fn is_x86_avx512_vl_core(self) -> bool {
+        matches!(
+            self,
+            Self::X86Avx512VlMaskAddd128
+                | Self::X86Avx512VlMaskAddq128
+                | Self::X86Avx512VlMaskSubd128
+                | Self::X86Avx512VlMaskSubq128
+                | Self::X86Avx512VlMaskLoadd128
+                | Self::X86Avx512VlMaskLoadq128
+                | Self::X86Avx512VlMaskStored128
+                | Self::X86Avx512VlMaskStoreq128
+                | Self::X86Avx512VlCmpd128
+                | Self::X86Avx512VlCmpq128
+                | Self::X86Avx512VlCmpud128
+                | Self::X86Avx512VlCmpuq128
+                | Self::X86Avx512VlMaskAddps128
+                | Self::X86Avx512VlMaskAddpd128
+                | Self::X86Avx512VlMaskSubps128
+                | Self::X86Avx512VlMaskSubpd128
+                | Self::X86Avx512VlMaskLoadps128
+                | Self::X86Avx512VlMaskLoadpd128
+                | Self::X86Avx512VlMaskStoreps128
+                | Self::X86Avx512VlMaskStorepd128
+                | Self::X86Avx512VlCmpps128
+                | Self::X86Avx512VlCmppd128
+                | Self::X86Avx512VlMaskAddd256
+                | Self::X86Avx512VlMaskAddq256
+                | Self::X86Avx512VlMaskSubd256
+                | Self::X86Avx512VlMaskSubq256
+                | Self::X86Avx512VlMaskLoadd256
+                | Self::X86Avx512VlMaskLoadq256
+                | Self::X86Avx512VlMaskStored256
+                | Self::X86Avx512VlMaskStoreq256
+                | Self::X86Avx512VlCmpd256
+                | Self::X86Avx512VlCmpq256
+                | Self::X86Avx512VlCmpud256
+                | Self::X86Avx512VlCmpuq256
+                | Self::X86Avx512VlMaskAddps256
+                | Self::X86Avx512VlMaskAddpd256
+                | Self::X86Avx512VlMaskSubps256
+                | Self::X86Avx512VlMaskSubpd256
+                | Self::X86Avx512VlMaskLoadps256
+                | Self::X86Avx512VlMaskLoadpd256
+                | Self::X86Avx512VlMaskStoreps256
+                | Self::X86Avx512VlMaskStorepd256
+                | Self::X86Avx512VlCmpps256
+                | Self::X86Avx512VlCmppd256
+        )
+    }
+
+    /// Shared masked opcode. Operand types determine the physical vector width.
+    pub fn x86_avx512_mask_opcode(self) -> Option<&'static str> {
+        Some(match self {
+            Self::X86Avx512Cmpd => "vpcmpd",
+            Self::X86Avx512Cmpq => "vpcmpq",
+            Self::X86Avx512Cmpud => "vpcmpud",
+            Self::X86Avx512Cmpuq => "vpcmpuq",
+            Self::X86Avx512MaskAddd => "vpaddd",
+            Self::X86Avx512MaskSubd => "vpsubd",
+            Self::X86Avx512MaskLoadd => "vmovdqu32",
+            Self::X86Avx512MaskStored => "vmovdqu32",
+            Self::X86Avx512MaskAddq => "vpaddq",
+            Self::X86Avx512MaskSubq => "vpsubq",
+            Self::X86Avx512MaskLoadq => "vmovdqu64",
+            Self::X86Avx512MaskStoreq => "vmovdqu64",
+            Self::X86Avx512MaskAddps => "vaddps",
+            Self::X86Avx512MaskSubps => "vsubps",
+            Self::X86Avx512MaskLoadps => "vmovups",
+            Self::X86Avx512MaskStoreps => "vmovups",
+            Self::X86Avx512MaskAddpd => "vaddpd",
+            Self::X86Avx512MaskSubpd => "vsubpd",
+            Self::X86Avx512MaskLoadpd => "vmovupd",
+            Self::X86Avx512MaskStorepd => "vmovupd",
+            Self::X86Avx512MaskMulps => "vmulps",
+            Self::X86Avx512MaskDivps => "vdivps",
+            Self::X86Avx512MaskSqrtps => "vsqrtps",
+            Self::X86Avx512Cmpps => "vcmpps",
+            Self::X86Avx512CmpRoundps => "vcmpps",
+            Self::X86Avx512MaskMulpd => "vmulpd",
+            Self::X86Avx512MaskDivpd => "vdivpd",
+            Self::X86Avx512MaskSqrtpd => "vsqrtpd",
+            Self::X86Avx512Cmppd => "vcmppd",
+            Self::X86Avx512CmpRoundpd => "vcmppd",
+            Self::X86Avx512VlMaskAddd128 => "vpaddd",
+            Self::X86Avx512VlMaskAddq128 => "vpaddq",
+            Self::X86Avx512VlMaskSubd128 => "vpsubd",
+            Self::X86Avx512VlMaskSubq128 => "vpsubq",
+            Self::X86Avx512VlMaskLoadd128 => "vmovdqu32",
+            Self::X86Avx512VlMaskLoadq128 => "vmovdqu64",
+            Self::X86Avx512VlMaskStored128 => "vmovdqu32",
+            Self::X86Avx512VlMaskStoreq128 => "vmovdqu64",
+            Self::X86Avx512VlCmpd128 => "vpcmpd",
+            Self::X86Avx512VlCmpq128 => "vpcmpq",
+            Self::X86Avx512VlCmpud128 => "vpcmpud",
+            Self::X86Avx512VlCmpuq128 => "vpcmpuq",
+            Self::X86Avx512VlMaskAddps128 => "vaddps",
+            Self::X86Avx512VlMaskAddpd128 => "vaddpd",
+            Self::X86Avx512VlMaskSubps128 => "vsubps",
+            Self::X86Avx512VlMaskSubpd128 => "vsubpd",
+            Self::X86Avx512VlMaskLoadps128 => "vmovups",
+            Self::X86Avx512VlMaskLoadpd128 => "vmovupd",
+            Self::X86Avx512VlMaskStoreps128 => "vmovups",
+            Self::X86Avx512VlMaskStorepd128 => "vmovupd",
+            Self::X86Avx512VlCmpps128 => "vcmpps",
+            Self::X86Avx512VlCmppd128 => "vcmppd",
+            Self::X86Avx512VlMaskAddd256 => "vpaddd",
+            Self::X86Avx512VlMaskAddq256 => "vpaddq",
+            Self::X86Avx512VlMaskSubd256 => "vpsubd",
+            Self::X86Avx512VlMaskSubq256 => "vpsubq",
+            Self::X86Avx512VlMaskLoadd256 => "vmovdqu32",
+            Self::X86Avx512VlMaskLoadq256 => "vmovdqu64",
+            Self::X86Avx512VlMaskStored256 => "vmovdqu32",
+            Self::X86Avx512VlMaskStoreq256 => "vmovdqu64",
+            Self::X86Avx512VlCmpd256 => "vpcmpd",
+            Self::X86Avx512VlCmpq256 => "vpcmpq",
+            Self::X86Avx512VlCmpud256 => "vpcmpud",
+            Self::X86Avx512VlCmpuq256 => "vpcmpuq",
+            Self::X86Avx512VlMaskAddps256 => "vaddps",
+            Self::X86Avx512VlMaskAddpd256 => "vaddpd",
+            Self::X86Avx512VlMaskSubps256 => "vsubps",
+            Self::X86Avx512VlMaskSubpd256 => "vsubpd",
+            Self::X86Avx512VlMaskLoadps256 => "vmovups",
+            Self::X86Avx512VlMaskLoadpd256 => "vmovupd",
+            Self::X86Avx512VlMaskStoreps256 => "vmovups",
+            Self::X86Avx512VlMaskStorepd256 => "vmovupd",
+            Self::X86Avx512VlCmpps256 => "vcmpps",
+            Self::X86Avx512VlCmppd256 => "vcmppd",
+            _ => return None,
+        })
     }
 
     pub fn info(self) -> IntrinsicInfo {
@@ -2446,6 +2579,410 @@ impl Intrinsic {
                 "x86_avx512_maskstoresd",
                 &[Type::Ptr, Type::Vector(VectorType::F64x2), Type::I8],
                 &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskAddd128 => (
+                "x86_avx512vl_maskaddd128",
+                &[
+                    Type::Vector(VectorType::I32x4),
+                    Type::I8,
+                    Type::Vector(VectorType::I32x4),
+                    Type::Vector(VectorType::I32x4),
+                ],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskAddq128 => (
+                "x86_avx512vl_maskaddq128",
+                &[
+                    Type::Vector(VectorType::I64x2),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x2),
+                    Type::Vector(VectorType::I64x2),
+                ],
+                &[Type::Vector(VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskSubd128 => (
+                "x86_avx512vl_masksubd128",
+                &[
+                    Type::Vector(VectorType::I32x4),
+                    Type::I8,
+                    Type::Vector(VectorType::I32x4),
+                    Type::Vector(VectorType::I32x4),
+                ],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskSubq128 => (
+                "x86_avx512vl_masksubq128",
+                &[
+                    Type::Vector(VectorType::I64x2),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x2),
+                    Type::Vector(VectorType::I64x2),
+                ],
+                &[Type::Vector(VectorType::I64x2)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadd128 => (
+                "x86_avx512vl_maskloadd128",
+                &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::I8],
+                &[Type::Vector(VectorType::I32x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadq128 => (
+                "x86_avx512vl_maskloadq128",
+                &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::I8],
+                &[Type::Vector(VectorType::I64x2)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStored128 => (
+                "x86_avx512vl_maskstored128",
+                &[Type::Ptr, Type::Vector(VectorType::I32x4), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStoreq128 => (
+                "x86_avx512vl_maskstoreq128",
+                &[Type::Ptr, Type::Vector(VectorType::I64x2), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmpd128 => (
+                "x86_avx512vl_cmpd128",
+                &[
+                    Type::Vector(VectorType::I32x4),
+                    Type::Vector(VectorType::I32x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpq128 => (
+                "x86_avx512vl_cmpq128",
+                &[
+                    Type::Vector(VectorType::I64x2),
+                    Type::Vector(VectorType::I64x2),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpud128 => (
+                "x86_avx512vl_cmpud128",
+                &[
+                    Type::Vector(VectorType::I32x4),
+                    Type::Vector(VectorType::I32x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpuq128 => (
+                "x86_avx512vl_cmpuq128",
+                &[
+                    Type::Vector(VectorType::I64x2),
+                    Type::Vector(VectorType::I64x2),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskAddps128 => (
+                "x86_avx512vl_maskaddps128",
+                &[
+                    Type::Vector(VectorType::F32x4),
+                    Type::I8,
+                    Type::Vector(VectorType::F32x4),
+                    Type::Vector(VectorType::F32x4),
+                ],
+                &[Type::Vector(VectorType::F32x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskAddpd128 => (
+                "x86_avx512vl_maskaddpd128",
+                &[
+                    Type::Vector(VectorType::F64x2),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x2),
+                    Type::Vector(VectorType::F64x2),
+                ],
+                &[Type::Vector(VectorType::F64x2)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskSubps128 => (
+                "x86_avx512vl_masksubps128",
+                &[
+                    Type::Vector(VectorType::F32x4),
+                    Type::I8,
+                    Type::Vector(VectorType::F32x4),
+                    Type::Vector(VectorType::F32x4),
+                ],
+                &[Type::Vector(VectorType::F32x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskSubpd128 => (
+                "x86_avx512vl_masksubpd128",
+                &[
+                    Type::Vector(VectorType::F64x2),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x2),
+                    Type::Vector(VectorType::F64x2),
+                ],
+                &[Type::Vector(VectorType::F64x2)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadps128 => (
+                "x86_avx512vl_maskloadps128",
+                &[Type::Ptr, Type::Vector(VectorType::F32x4), Type::I8],
+                &[Type::Vector(VectorType::F32x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadpd128 => (
+                "x86_avx512vl_maskloadpd128",
+                &[Type::Ptr, Type::Vector(VectorType::F64x2), Type::I8],
+                &[Type::Vector(VectorType::F64x2)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStoreps128 => (
+                "x86_avx512vl_maskstoreps128",
+                &[Type::Ptr, Type::Vector(VectorType::F32x4), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStorepd128 => (
+                "x86_avx512vl_maskstorepd128",
+                &[Type::Ptr, Type::Vector(VectorType::F64x2), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmpps128 => (
+                "x86_avx512vl_cmpps128",
+                &[
+                    Type::Vector(VectorType::F32x4),
+                    Type::Vector(VectorType::F32x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmppd128 => (
+                "x86_avx512vl_cmppd128",
+                &[
+                    Type::Vector(VectorType::F64x2),
+                    Type::Vector(VectorType::F64x2),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskAddd256 => (
+                "x86_avx512vl_maskaddd256",
+                &[
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I32x8),
+                ],
+                &[Type::Vector(VectorType::I32x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskAddq256 => (
+                "x86_avx512vl_maskaddq256",
+                &[
+                    Type::Vector(VectorType::I64x4),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x4),
+                    Type::Vector(VectorType::I64x4),
+                ],
+                &[Type::Vector(VectorType::I64x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskSubd256 => (
+                "x86_avx512vl_masksubd256",
+                &[
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I32x8),
+                ],
+                &[Type::Vector(VectorType::I32x8)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskSubq256 => (
+                "x86_avx512vl_masksubq256",
+                &[
+                    Type::Vector(VectorType::I64x4),
+                    Type::I8,
+                    Type::Vector(VectorType::I64x4),
+                    Type::Vector(VectorType::I64x4),
+                ],
+                &[Type::Vector(VectorType::I64x4)],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadd256 => (
+                "x86_avx512vl_maskloadd256",
+                &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::I8],
+                &[Type::Vector(VectorType::I32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadq256 => (
+                "x86_avx512vl_maskloadq256",
+                &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::I8],
+                &[Type::Vector(VectorType::I64x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStored256 => (
+                "x86_avx512vl_maskstored256",
+                &[Type::Ptr, Type::Vector(VectorType::I32x8), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStoreq256 => (
+                "x86_avx512vl_maskstoreq256",
+                &[Type::Ptr, Type::Vector(VectorType::I64x4), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmpd256 => (
+                "x86_avx512vl_cmpd256",
+                &[
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpq256 => (
+                "x86_avx512vl_cmpq256",
+                &[
+                    Type::Vector(VectorType::I64x4),
+                    Type::Vector(VectorType::I64x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpud256 => (
+                "x86_avx512vl_cmpud256",
+                &[
+                    Type::Vector(VectorType::I32x8),
+                    Type::Vector(VectorType::I32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlCmpuq256 => (
+                "x86_avx512vl_cmpuq256",
+                &[
+                    Type::Vector(VectorType::I64x4),
+                    Type::Vector(VectorType::I64x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                true,
+            ),
+            Intrinsic::X86Avx512VlMaskAddps256 => (
+                "x86_avx512vl_maskaddps256",
+                &[
+                    Type::Vector(VectorType::F32x8),
+                    Type::I8,
+                    Type::Vector(VectorType::F32x8),
+                    Type::Vector(VectorType::F32x8),
+                ],
+                &[Type::Vector(VectorType::F32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskAddpd256 => (
+                "x86_avx512vl_maskaddpd256",
+                &[
+                    Type::Vector(VectorType::F64x4),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x4),
+                    Type::Vector(VectorType::F64x4),
+                ],
+                &[Type::Vector(VectorType::F64x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskSubps256 => (
+                "x86_avx512vl_masksubps256",
+                &[
+                    Type::Vector(VectorType::F32x8),
+                    Type::I8,
+                    Type::Vector(VectorType::F32x8),
+                    Type::Vector(VectorType::F32x8),
+                ],
+                &[Type::Vector(VectorType::F32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskSubpd256 => (
+                "x86_avx512vl_masksubpd256",
+                &[
+                    Type::Vector(VectorType::F64x4),
+                    Type::I8,
+                    Type::Vector(VectorType::F64x4),
+                    Type::Vector(VectorType::F64x4),
+                ],
+                &[Type::Vector(VectorType::F64x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadps256 => (
+                "x86_avx512vl_maskloadps256",
+                &[Type::Ptr, Type::Vector(VectorType::F32x8), Type::I8],
+                &[Type::Vector(VectorType::F32x8)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskLoadpd256 => (
+                "x86_avx512vl_maskloadpd256",
+                &[Type::Ptr, Type::Vector(VectorType::F64x4), Type::I8],
+                &[Type::Vector(VectorType::F64x4)],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStoreps256 => (
+                "x86_avx512vl_maskstoreps256",
+                &[Type::Ptr, Type::Vector(VectorType::F32x8), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlMaskStorepd256 => (
+                "x86_avx512vl_maskstorepd256",
+                &[Type::Ptr, Type::Vector(VectorType::F64x4), Type::I8],
+                &[],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmpps256 => (
+                "x86_avx512vl_cmpps256",
+                &[
+                    Type::Vector(VectorType::F32x8),
+                    Type::Vector(VectorType::F32x8),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
+                false,
+            ),
+            Intrinsic::X86Avx512VlCmppd256 => (
+                "x86_avx512vl_cmppd256",
+                &[
+                    Type::Vector(VectorType::F64x4),
+                    Type::Vector(VectorType::F64x4),
+                    Type::I8,
+                    Type::I32,
+                ],
+                &[Type::I8],
                 false,
             ),
             Intrinsic::X86Avx512MaskMulld => (

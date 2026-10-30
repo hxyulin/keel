@@ -1087,6 +1087,60 @@ impl InstData {
                 | Intrinsic::X86Avx512MaskStoreExtractf64x4 => Write,
                 crate::x86_system_intrinsics!(all) => id.generated_system_memory_effects(),
                 crate::x86_query_intrinsics!(all) => id.generated_query_memory_effects(),
+                id @ (Intrinsic::X86Avx512VlMaskAddd128
+                | Intrinsic::X86Avx512VlMaskAddq128
+                | Intrinsic::X86Avx512VlMaskSubd128
+                | Intrinsic::X86Avx512VlMaskSubq128
+                | Intrinsic::X86Avx512VlMaskLoadd128
+                | Intrinsic::X86Avx512VlMaskLoadq128
+                | Intrinsic::X86Avx512VlMaskStored128
+                | Intrinsic::X86Avx512VlMaskStoreq128
+                | Intrinsic::X86Avx512VlCmpd128
+                | Intrinsic::X86Avx512VlCmpq128
+                | Intrinsic::X86Avx512VlCmpud128
+                | Intrinsic::X86Avx512VlCmpuq128
+                | Intrinsic::X86Avx512VlMaskAddps128
+                | Intrinsic::X86Avx512VlMaskAddpd128
+                | Intrinsic::X86Avx512VlMaskSubps128
+                | Intrinsic::X86Avx512VlMaskSubpd128
+                | Intrinsic::X86Avx512VlMaskLoadps128
+                | Intrinsic::X86Avx512VlMaskLoadpd128
+                | Intrinsic::X86Avx512VlMaskStoreps128
+                | Intrinsic::X86Avx512VlMaskStorepd128
+                | Intrinsic::X86Avx512VlCmpps128
+                | Intrinsic::X86Avx512VlCmppd128
+                | Intrinsic::X86Avx512VlMaskAddd256
+                | Intrinsic::X86Avx512VlMaskAddq256
+                | Intrinsic::X86Avx512VlMaskSubd256
+                | Intrinsic::X86Avx512VlMaskSubq256
+                | Intrinsic::X86Avx512VlMaskLoadd256
+                | Intrinsic::X86Avx512VlMaskLoadq256
+                | Intrinsic::X86Avx512VlMaskStored256
+                | Intrinsic::X86Avx512VlMaskStoreq256
+                | Intrinsic::X86Avx512VlCmpd256
+                | Intrinsic::X86Avx512VlCmpq256
+                | Intrinsic::X86Avx512VlCmpud256
+                | Intrinsic::X86Avx512VlCmpuq256
+                | Intrinsic::X86Avx512VlMaskAddps256
+                | Intrinsic::X86Avx512VlMaskAddpd256
+                | Intrinsic::X86Avx512VlMaskSubps256
+                | Intrinsic::X86Avx512VlMaskSubpd256
+                | Intrinsic::X86Avx512VlMaskLoadps256
+                | Intrinsic::X86Avx512VlMaskLoadpd256
+                | Intrinsic::X86Avx512VlMaskStoreps256
+                | Intrinsic::X86Avx512VlMaskStorepd256
+                | Intrinsic::X86Avx512VlCmpps256
+                | Intrinsic::X86Avx512VlCmppd256) => {
+                    if id.info().pure {
+                        None
+                    } else if id.info().returns.is_empty() {
+                        Write
+                    } else if id.info().params.first() == Some(&Type::Ptr) {
+                        Read
+                    } else {
+                        Barrier
+                    }
+                }
                 Intrinsic::X86Avx512MaskMovess | Intrinsic::X86Avx512MaskMovesd => None,
                 Intrinsic::X86Avx512MaskLoadss | Intrinsic::X86Avx512MaskLoadsd => Read,
                 Intrinsic::X86Avx512MaskStoress | Intrinsic::X86Avx512MaskStoresd => Write,

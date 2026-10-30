@@ -132,7 +132,6 @@ mod avx256;
 mod avx512;
 mod avx512_convert;
 mod avx512_float;
-mod avx512_float_mask;
 mod avx512_fma;
 mod avx512_indexed;
 mod avx512_integer_convert;
