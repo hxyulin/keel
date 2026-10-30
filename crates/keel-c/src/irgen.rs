@@ -4813,12 +4813,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.b.function().inst_results(inst)[0]
                 }
             }
-            Builtin::Pclmulqdq(control) => {
+            Builtin::Pclmulqdq(id, control) => {
                 let mode = ins.iconst(Type::I32, i64::from(control));
-                let inst = self
-                    .b
-                    .ins()
-                    .intrinsic(Intrinsic::X86Pclmulqdq128, &[vals[0], vals[1], mode]);
+                let inst = self.b.ins().intrinsic(id, &[vals[0], vals[1], mode]);
                 self.b.function().inst_results(inst)[0]
             }
             Builtin::X86Aes(id)

@@ -1605,7 +1605,12 @@ impl InstData {
                 | Intrinsic::X86Sse42Crc32b
                 | Intrinsic::X86Sse42Crc32w
                 | Intrinsic::X86Sse42Crc32d
+                | Intrinsic::X86Sha256msg1
+                | Intrinsic::X86Sha256msg2
+                | Intrinsic::X86Sha256rnds2
                 | Intrinsic::X86Pclmulqdq128
+                | Intrinsic::X86Vpclmulqdq256
+                | Intrinsic::X86Vpclmulqdq512
                 | Intrinsic::X86Sse42Crc32q => None,
                 Intrinsic::X86Sse42PcmpistriIndex
                 | Intrinsic::X86Sse42Pcmpistri64Index
@@ -1750,11 +1755,12 @@ impl InstData {
             Self::Neon { .. } => true,
             Self::Intrinsic { id, .. } => {
                 !(id.is_x86_bmi()
+                    || id.is_x86_sha256()
                     || id.x86_aes_opcode().is_some()
                     || id.is_x86_pure_bits()
                     || id.is_x86_legacy_sign_mask()
                     || id.is_x86_legacy_ptest()
-                    || *id == Intrinsic::X86Pclmulqdq128
+                    || id.is_x86_pclmul()
                     || id.is_x86_crc32()
                     || id.is_x86_string())
                     && !matches!(

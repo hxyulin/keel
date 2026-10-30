@@ -271,3 +271,32 @@ fn pclmul_c_single_evaluation_and_independent_values() {
         }
     }
 }
+
+#[test]
+fn sha256_headers_have_typed_vector_signatures() {
+    let m = parse("#include <immintrin.h>\n__m128i f(__m128i a,__m128i b,__m128i c){return _mm_sha256rnds2_epu32(_mm_sha256msg1_epu32(a,b),_mm_sha256msg2_epu32(b,a),c);}",Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let ir = m.to_string();
+    for name in ["x86_sha256msg1", "x86_sha256msg2", "x86_sha256rnds2"] {
+        assert!(ir.contains(name), "{ir}");
+    }
+    assert!(parse("typedef long long V __attribute__((vector_size(16)));V f(V a){return __builtin_ia32_sha256msg1(a,a);}",Target::X86_64LinuxGnu).is_err());
+}
+
+#[test]
+fn typed_wide_pclmul_signature_and_control() {
+    for (width, shape) in [(256, "i64x4"), (512, "i64x8")] {
+        let source = format!(
+            "#include <immintrin.h>\nvoid f(__m{width}i*a,__m{width}i*b,__m{width}i*r){{*r=_mm{width}_clmulepi64_epi128(*a,*b,17);}}\n"
+        );
+        let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert!(
+            module
+                .to_string()
+                .contains(&format!("intrinsic x86_vpclmulqdq{width}"))
+        );
+        assert!(module.to_string().contains(shape));
+        assert!(parse(&source.replace(",17)", ",256)"), Target::X86_64LinuxGnu).is_err());
+    }
+}

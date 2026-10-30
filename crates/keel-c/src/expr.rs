@@ -1884,15 +1884,32 @@ impl<'a> Parser<'a> {
                 loc,
             ));
         }
-        if base == "ia32_pclmulqdq128" {
+        if matches!(
+            base,
+            "ia32_pclmulqdq128" | "ia32_pclmulqdq256" | "ia32_pclmulqdq512"
+        ) {
+            let (id, shape) = match base {
+                "ia32_pclmulqdq256" => (
+                    keel_ir::Intrinsic::X86Vpclmulqdq256,
+                    keel_ir::VectorType::I64x4,
+                ),
+                "ia32_pclmulqdq512" => (
+                    keel_ir::Intrinsic::X86Vpclmulqdq512,
+                    keel_ir::VectorType::I64x8,
+                ),
+                _ => (
+                    keel_ir::Intrinsic::X86Pclmulqdq128,
+                    keel_ir::VectorType::I64x2,
+                ),
+            };
             let args = self.builtin_args(3, loc)?;
             if self.target != Target::X86_64LinuxGnu
-                || !matches!(args[0].ty, Ty::Vector(_, keel_ir::VectorType::I64x2))
+                || !matches!(args[0].ty, Ty::Vector(Ty::Int(_), v) if v == shape)
                 || args[0].ty != args[1].ty
             {
                 return Err(Error::new(
                     loc,
-                    "PCLMULQDQ requires matching i64x2 integer vectors on x86-64",
+                    "PCLMULQDQ requires matching integer vectors of the requested width on x86-64",
                 ));
             }
             let Some(n) = integer_constant_control(&args[2], self.c_layout) else {
@@ -1905,7 +1922,30 @@ impl<'a> Parser<'a> {
                 return Err(Error::new(loc, "PCLMULQDQ control must be in0..=255"));
             }
             return Ok(mk(
-                ExprKind::Builtin(Builtin::Pclmulqdq(n as u8), self.slice(&args[..2])),
+                ExprKind::Builtin(Builtin::Pclmulqdq(id, n as u8), self.slice(&args[..2])),
+                args[0].ty,
+                loc,
+            ));
+        }
+        if let Some(id) = match base {
+            "ia32_sha256msg1" => Some(keel_ir::Intrinsic::X86Sha256msg1),
+            "ia32_sha256msg2" => Some(keel_ir::Intrinsic::X86Sha256msg2),
+            "ia32_sha256rnds2" => Some(keel_ir::Intrinsic::X86Sha256rnds2),
+            _ => None,
+        } {
+            let args = self.builtin_args(id.info().params.len(), loc)?;
+            if self.target != Target::X86_64LinuxGnu
+                || args.iter().any(|arg| {
+                    !matches!(arg.ty, Ty::Vector(Ty::Int(_), keel_ir::VectorType::I32x4))
+                })
+            {
+                return Err(Error::new(
+                    loc,
+                    "SHA-256 requires i32x4 integer vectors on x86-64",
+                ));
+            }
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::X86Value(id), self.slice(&args)),
                 args[0].ty,
                 loc,
             ));

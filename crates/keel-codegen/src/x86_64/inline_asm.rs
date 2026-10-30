@@ -35,7 +35,7 @@ pub(super) fn plan(
     args: &[Value],
     frame: Option<u8>,
     unique: u64,
-    wide_vectors: bool,
+    simd_bits: u16,
 ) -> Result<Plan, String> {
     for (&constraint, &arg) in asm.inputs.iter().zip(args) {
         if constraint == Constraint::Imm
@@ -256,7 +256,6 @@ pub(super) fn plan(
     }
     let saved_regs: Vec<_> = (0..16).filter(|&r| overwritten[0][r as usize]).collect();
     let saved_simd: Vec<_> = (0..16).filter(|&r| overwritten[1][r as usize]).collect();
-    let simd_bits = if wide_vectors { 256 } else { 128 };
     let simd_home = saved_regs.len() * 8;
     let mut bytes = simd_home + saved_simd.len() * usize::from(simd_bits / 8);
     let mut home = |ty: Type| {

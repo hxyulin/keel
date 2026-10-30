@@ -36,6 +36,16 @@ FS1 before the result is written. VEX integer instructions read both sources
 before writing, so either source may share the destination when its lifetime
 allows. Strict v1 and v2 reject wide SSA transport.
 
+## 512-bit integer transport
+
+With `avx512f`, `i8x64`, `i16x32`, `i32x16` and `i64x8` are 64-byte
+SSA values. XMM, YMM and ZMM views share physical registers. Loads, stores,
+spills and reloads preserve all 64 bytes, including unaligned addresses.
+Frames containing 64-byte aligned slots use a stable, realigned frame base.
+Per-function target features determine legality during optimization and codegen.
+Accepting a 512-bit value does not enable every AVX-512 arithmetic operation;
+portable operations without a native recipe use lane legalization.
+
 ## Shuffles
 
 The 128-bit shuffle selector uses SSE2 encodings for:

@@ -31,10 +31,17 @@ impl VectorCapabilities {
             effective_x86_features,
         }
     }
+    /// Enable 512-bit value transport without claiming a native reduction recipe.
+    pub const fn with_512_bit_values(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.value_bits = 512;
+        }
+        self
+    }
     /// Explicit library profitability experiment; never adds accepted operations.
     /// An unsupported preference is conservatively normalized to 128 bits.
     pub const fn with_wide_preference(mut self, prefer256: bool) -> Self {
-        self.preferred_bits = if prefer256 && self.value_bits == 256 {
+        self.preferred_bits = if prefer256 && self.value_bits >= 256 {
             256
         } else {
             128

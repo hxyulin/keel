@@ -251,11 +251,11 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
     }
     // Flatten exactly one level, only through unshared shuffles. This cannot
     // duplicate a live permutation. At most two source vectors are expressible.
-    // Fixed-width IR has at most 32 lanes. Do not allocate scratch vectors on
+    // Fixed-width IR has at most 64 lanes. Do not allocate scratch vectors on
     // every visit, especially for shuffles that will remain unchanged.
     let mut sources = [args[0]; 2];
     let mut source_count = 0;
-    let mut storage = [0u8; 32];
+    let mut storage = [0u8; 64];
     let indices = &mut storage[..lanes.len()];
     let mut composed = false;
     for (&index, output) in lanes.iter().zip(indices.iter_mut()) {

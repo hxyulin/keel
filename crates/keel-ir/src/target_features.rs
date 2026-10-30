@@ -120,7 +120,8 @@ impl X86TargetFeatures {
             features.avx2,
             baseline.preferred_bits() == 256,
             features.fingerprint(),
-        ))
+        )
+        .with_512_bit_values(features.avx512f))
     }
 
     /// Whether copying `callee` into this function is safe for every module

@@ -821,6 +821,11 @@
     {"id": 818, "variant": "X86Swapgs", "inventory": 818, "metadata": "x86_system"},
     {"id": 819, "variant": "LifetimeStart", "inventory": 819, "metadata": "handwritten", "doc": "`lifetime_start(ptr)`: starts or restarts accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."},
     {"id": 820, "variant": "LifetimeEnd", "inventory": 820, "metadata": "handwritten", "doc": "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."},
-    {"id": 821, "variant": "X86CpuXcr0", "inventory": 821, "metadata": "handwritten", "doc": "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."}
+    {"id": 821, "variant": "X86CpuXcr0", "inventory": 821, "metadata": "handwritten", "doc": "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."},
+    {"id": 822, "variant": "X86Sha256msg1", "inventory": 822, "metadata": "handwritten", "doc": "Typed SHA-256 vector operation."},
+    {"id": 823, "variant": "X86Sha256msg2", "inventory": 823, "metadata": "handwritten", "doc": "Typed SHA-256 vector operation."},
+    {"id": 824, "variant": "X86Sha256rnds2", "inventory": 824, "metadata": "handwritten", "doc": "Typed SHA-256 vector operation."},
+    {"id": 825, "variant": "X86Vpclmulqdq256", "inventory": 825, "metadata": "handwritten", "doc": "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."},
+    {"id": 826, "variant": "X86Vpclmulqdq512", "inventory": 826, "metadata": "handwritten", "doc": "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."}
   ]
 }

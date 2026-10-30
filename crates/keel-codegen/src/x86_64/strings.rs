@@ -10,7 +10,7 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Movups, [asm_arg(xmm(scratch)), asm_arg(xmm(r))]);
             }
         }
-        let save_width = if self.wide_vectors { 256 } else { 128 };
+        let save_width = self.simd_bits;
         let save_op = if self.wide_vectors {
             Opcode::Vmovups
         } else {

@@ -17,7 +17,7 @@ fn own(source: &str, syntax: Syntax) -> Vec<u8> {
         &keel_asm::x86::assemble_object_with_syntax_and_features(
             source,
             syntax,
-            Features::parse("avx512vl").unwrap(),
+            Features::parse("avx512vl,vpclmulqdq").unwrap(),
         )
         .unwrap_or_else(|e| panic!("{source}: {e}")),
     )
@@ -113,7 +113,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
         let source = fields[2];
         let object = match keel_asm::x86::assemble_object_with_features(
             source,
-            Features::parse("avx512vl").unwrap(),
+            Features::parse("avx512vl,vpclmulqdq").unwrap(),
         ) {
             Ok(o) => o,
             Err(e) => {
@@ -132,7 +132,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
         }
         let encoded = keel_asm::x86::assemble_object_with_features(
             &i.assembly(),
-            Features::parse("avx512vl").unwrap(),
+            Features::parse("avx512vl,vpclmulqdq").unwrap(),
         );
         match encoded {
             Ok(o) if text(&o) == bytes => {}
@@ -150,7 +150,7 @@ fn generated_binding_smoke_assembles_and_roundtrips() {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    assert_eq!(count, 2423);
+    assert_eq!(count, 2425);
 }
 
 fn oracle(source: &str, tag: &str, gnu: bool) -> Vec<u8> {

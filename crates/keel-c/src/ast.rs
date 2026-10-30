@@ -171,7 +171,7 @@ pub enum GenericAtomicOp {
 pub enum Builtin {
     /// Two equal vector inputs followed by constant lane indices.
     VectorShuffle,
-    Pclmulqdq(u8),
+    Pclmulqdq(keel_ir::Intrinsic, u8),
     /// Checked legacy AES-NI builtin with canonical i64x2 operands.
     X86Aes(Intrinsic),
     /// Checked 128-bit SSE2 saturating integer binary operation.

@@ -4,7 +4,7 @@
 
 Keel owns `xmmintrin.h`, `emmintrin.h`, `pmmintrin.h`, `smmintrin.h`, `avxintrin.h`,
 `avx2intrin.h`, `tmmintrin.h`, `fmaintrin.h`, `f16cintrin.h`,
-`wmmintrin.h`, `nmmintrin.h`, `crc32intrin.h` and `immintrin.h`. They are
+`wmmintrin.h`, `shaintrin.h`, `nmmintrin.h`, `crc32intrin.h` and `immintrin.h`. They are
 embedded in the compiler, so no Clang resource directory is needed, and they
 target `x86_64-unknown-linux-gnu`. They form a finite subset, not complete
 `immintrin.h` compatibility. Other vendor headers and intrinsics are
@@ -620,6 +620,23 @@ The codegen test checks all six operations against an independent GF(256)
 software oracle and the FIPS 197 AES-128 example. Native execution needs an
 AES-capable x86-64 Linux host; on macOS arm64 the tests cover encoding,
 frontend and feature diagnostics only.
+
+## SHA-256
+
+`shaintrin.h`, also included by `immintrin.h`, exposes
+`_mm_sha256msg1_epu32`, `_mm_sha256msg2_epu32` and `_mm_sha256rnds2_epu32`.
+The wrappers accept and return `__m128i`; the typed builtins use `i32x4`.
+
+| IR intrinsic | Signature |
+| --- | --- |
+| `x86_sha256msg1` | `i32x4, i32x4 → i32x4` |
+| `x86_sha256msg2` | `i32x4, i32x4 → i32x4` |
+| `x86_sha256rnds2` | `i32x4, i32x4, i32x4 → i32x4` |
+
+These pure operations require the independent `sha` feature in the enclosing
+function. Header inclusion grants no feature permission. The backend stages
+explicit operands before loading SHA256RNDS2's implicit XMM0 operand, and
+preserves other live values in XMM0, including its upper YMM/ZMM lanes.
 
 ## Optional legacy PCLMULQDQ
 

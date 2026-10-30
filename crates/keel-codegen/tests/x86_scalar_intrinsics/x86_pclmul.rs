@@ -251,3 +251,135 @@ int main(void){
         );
     }
 }
+
+#[test]
+fn wide_pclmul_lanes_live_inputs_and_spills() {
+    let f = Features::for_level(CpuLevel::V3)
+        .with_features("avx512f,vpclmulqdq")
+        .unwrap();
+    let mut source = String::from("decl @clobber()\n");
+    let mut harness = String::from(
+        "#include <stdint.h>\n#include <string.h>\nvoid clobber(void){}\nstatic void product(uint64_t a,uint64_t b,uint64_t*r){r[0]=r[1]=0;for(unsigned i=0;i<64;i++)if((b>>i)&1){r[0]^=a<<i;if(i)r[1]^=a>>(64-i);}}\n",
+    );
+    for (width, lanes) in [(256, 4), (512, 8)] {
+        for c in CONTROLS {
+            for same in 0..2 {
+                source += &format!(
+                    "func @wide_{width}_{c}_{same}(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i64x{lanes} align 1 v0\n v4 = load.i64x{lanes} align 1 v1\n v5 = iconst.i32 {c}\n v6 = intrinsic x86_vpclmulqdq{width}(v3,{},v5)\n call @clobber()\n store align 1 v6,v2\n v7 = iconst.i64 {}\n v8 = ptradd v2,v7\n store align 1 v3,v8\n v9 = ptradd v8,v7\n store align 1 v4,v9\n return\n}}\n",
+                    if same == 1 { "v3" } else { "v4" },
+                    width / 8
+                );
+                harness += &format!("extern void wide_{width}_{c}_{same}(void*,void*,void*);\n");
+            }
+        }
+    }
+    harness += "int main(void){uint64_t x[8],y[8],z[24],expect[24];for(unsigned n=0;n<128;n++){for(unsigned i=0;i<8;i++){x[i]=(0x9e3779b97f4a7c15ULL*(n+1))^(1ULL<<((i+n)%64));y[i]=(0x123456789abcdefULL*(i+1))^n;}\n";
+    for (width, lanes) in [(256, 4), (512, 8)] {
+        for c in CONTROLS {
+            for same in 0..2 {
+                harness += &format!(
+                    "for(unsigned lane=0;lane<{lanes}/2;lane++)product(x[2*lane+{}],{}[2*lane+{}],expect+2*lane);memcpy(expect+{lanes},x,{});memcpy(expect+{},y,{});wide_{width}_{c}_{same}(x,y,z);if(memcmp(z,expect,{}))return 1;\n",
+                    c & 1,
+                    if same == 1 { "x" } else { "y" },
+                    (c >> 4) & 1,
+                    width / 8,
+                    lanes * 2,
+                    width / 8,
+                    width / 8 * 3
+                );
+            }
+        }
+    }
+    harness += "}return 0;}\n";
+    let original = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&original).unwrap();
+    let dir = std::env::temp_dir().join(format!("keel-wide-pclmul-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("harness.c"), harness).unwrap();
+    for (tier, alloc, pools, opt) in [
+        (
+            SelectionTier::Baseline,
+            AllocationTier::Fast,
+            &keel_codegen::x86_64::REGISTERS,
+            false,
+        ),
+        (
+            SelectionTier::Full,
+            AllocationTier::Full,
+            &keel_codegen::x86_64::REGISTERS,
+            true,
+        ),
+        (SelectionTier::Full, AllocationTier::Full, &EMPTY, true),
+    ] {
+        let mut module = original.clone();
+        if opt {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        let selector = FeatureSelector {
+            inner: &tier,
+            features: f,
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &alloc,
+        };
+        let program =
+            keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+        let object = keel_asm::x86::assemble_program_object_with_features(&program, f).unwrap();
+        fs::write(dir.join("wide.o"), object).unwrap();
+        if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+            #[cfg(target_arch = "x86_64")]
+            if !std::is_x86_feature_detected!("avx512f")
+                || !std::is_x86_feature_detected!("vpclmulqdq")
+            {
+                continue;
+            }
+            let output = Command::new("cc")
+                .arg(dir.join("harness.c"))
+                .arg(dir.join("wide.o"))
+                .arg("-o")
+                .arg(dir.join("run"))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(Command::new(dir.join("run")).status().unwrap().success());
+        }
+    }
+}
+
+#[test]
+fn wide_pclmul_rejects_missing_features_and_nonconstant_controls() {
+    for (width, lanes) in [(256, 4), (512, 8)] {
+        let text = format!(
+            "func @f(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i64x{lanes} align 1 v0\n v4 = load.i64x{lanes} align 1 v1\n v5 = iconst.i32 17\n v6 = intrinsic x86_vpclmulqdq{width}(v3,v4,v5)\n store align 1 v6,v2\n return\n}}\n"
+        );
+        let m = keel_ir::parse(&text).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        for additions in ["avx512f", "vpclmulqdq"] {
+            if width == 256 && additions == "vpclmulqdq" {
+                continue;
+            }
+            let selector = FeatureSelector {
+                inner: &SelectionTier::Full,
+                features: Features::for_level(CpuLevel::V3)
+                    .with_features(additions)
+                    .unwrap(),
+            };
+            let p = CodegenPipeline {
+                selector: &selector,
+                allocator: &AllocationTier::Full,
+            };
+            assert!(keel_codegen::x86_64::compile_program_with_pipeline(&m, &EMPTY, &p).is_err());
+        }
+        for control in ["-1", "256"] {
+            let m =
+                keel_ir::parse(&text.replace("iconst.i32 17", &format!("iconst.i32 {control}")))
+                    .unwrap();
+            assert!(keel_ir::verify_module(&m).is_err());
+        }
+    }
+}

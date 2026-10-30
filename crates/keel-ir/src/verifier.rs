@@ -756,11 +756,11 @@ impl Verifier<'_> {
             );
         }
         for (ss, data) in func.stack_slots() {
-            if !data.align.is_power_of_two() || data.align > 32 {
+            if !data.align.is_power_of_two() || data.align > 64 {
                 self.error(
                     ss.to_string(),
                     format!(
-                        "alignment must be a power of two up to 32, got {}",
+                        "alignment must be a power of two up to 64, got {}",
                         data.align
                     ),
                 );
@@ -1661,7 +1661,7 @@ impl Verifier<'_> {
                         );
                     }
                 }
-                if *id == Intrinsic::X86Pclmulqdq128 || id.has_x86_dot_control() {
+                if id.is_x86_pclmul() || id.has_x86_dot_control() {
                     let mode = args
                         .get(2)
                         .and_then(|&a| match func.value_def(func.resolve(a)) {
@@ -1674,7 +1674,7 @@ impl Verifier<'_> {
                     if !mode.is_some_and(|n| (0..256).contains(&n)) {
                         self.inst_error(
                             inst,
-                            if *id == Intrinsic::X86Pclmulqdq128 {
+                            if id.is_x86_pclmul() {
                                 "PCLMULQDQ control must be iconst.i32 in0..=255".into()
                             } else {
                                 "AVX dot control must be iconst.i32 in0..=255".into()

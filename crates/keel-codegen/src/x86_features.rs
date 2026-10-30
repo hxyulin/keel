@@ -131,5 +131,5 @@ pub fn vector_capabilities(
     let f = selector.x86_features();
     f.validate()?;
     let bits = f.fingerprint();
-    Ok(keel_ir::VectorCapabilities::new(f.avx, f.avx2, false, bits))
+    Ok(keel_ir::VectorCapabilities::new(f.avx, f.avx2, false, bits).with_512_bit_values(f.avx512f))
 }

@@ -966,10 +966,20 @@ pub enum Intrinsic {
     LifetimeEnd = 820,
     #[doc = "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."]
     X86CpuXcr0 = 821,
+    #[doc = "Typed SHA-256 vector operation."]
+    X86Sha256msg1 = 822,
+    #[doc = "Typed SHA-256 vector operation."]
+    X86Sha256msg2 = 823,
+    #[doc = "Typed SHA-256 vector operation."]
+    X86Sha256rnds2 = 824,
+    #[doc = "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."]
+    X86Vpclmulqdq256 = 825,
+    #[doc = "Independent 128-bit lane carryless products selected by imm8 bits 0 and 4."]
+    X86Vpclmulqdq512 = 826,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 822] = [
+    pub const ALL: [Intrinsic; 827] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -1792,6 +1802,11 @@ impl Intrinsic {
         Intrinsic::LifetimeStart,
         Intrinsic::LifetimeEnd,
         Intrinsic::X86CpuXcr0,
+        Intrinsic::X86Sha256msg1,
+        Intrinsic::X86Sha256msg2,
+        Intrinsic::X86Sha256rnds2,
+        Intrinsic::X86Vpclmulqdq256,
+        Intrinsic::X86Vpclmulqdq512,
     ];
 }
 
@@ -2610,5 +2625,10 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86StiHlt
             | $crate::Intrinsic::X86Swapgs
             | $crate::Intrinsic::X86CpuXcr0
+            | $crate::Intrinsic::X86Sha256msg1
+            | $crate::Intrinsic::X86Sha256msg2
+            | $crate::Intrinsic::X86Sha256rnds2
+            | $crate::Intrinsic::X86Vpclmulqdq256
+            | $crate::Intrinsic::X86Vpclmulqdq512
     };
 }

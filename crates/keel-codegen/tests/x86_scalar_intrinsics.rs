@@ -12,3 +12,6 @@ mod x86_crc32;
 mod x86_cx16;
 #[path = "x86_scalar_intrinsics/x86_pclmul.rs"]
 mod x86_pclmul;
+
+#[path = "x86_scalar_intrinsics/x86_sha256.rs"]
+mod x86_sha256;

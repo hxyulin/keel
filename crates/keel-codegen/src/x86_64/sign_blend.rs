@@ -23,7 +23,7 @@ impl FunctionCompiler<'_> {
         if tier == 0 {
             // The dedicated parallel-copy temporary is not an SSA spill home.
             // Save all YMM0 bits in wide functions, even for a 128-bit blend.
-            let width = if self.wide_vectors { 256 } else { 128 };
+            let width = self.simd_bits;
             let save = if self.wide_vectors {
                 Opcode::Vmovups
             } else {

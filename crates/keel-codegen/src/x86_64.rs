@@ -96,6 +96,7 @@ mod raw_div;
 mod raw_rflags;
 mod rflags_region;
 mod selector_queries;
+mod sha256;
 mod sign_blend;
 mod string_port_io;
 mod system_lowering;
@@ -391,7 +392,15 @@ pub(crate) fn compile_output(
         8,
         |name, attrs| {
             crate::x86_features::function_features(name, attrs, pipeline.selector.x86_features())
-                .map(|features| if features.avx { 32 } else { 16 })
+                .map(|features| {
+                    if features.avx512f {
+                        64
+                    } else if features.avx {
+                        32
+                    } else {
+                        16
+                    }
+                })
         },
         |producer, layout, unnamed| {
             producer.and_then(|p| sysv::producer_aggregate(layout,p)).is_some_and(|policy| {
@@ -890,6 +899,7 @@ struct FunctionCompiler<'a> {
     /// Full-copy capacities, independent of a slot's currently live type.
     vector_spills: HashMap<u32, u16>,
     wide_vectors: bool,
+    simd_bits: u16,
     frame_align: usize,
     frame_register: Option<u8>,
     copy_temp: Option<u32>,
@@ -1038,21 +1048,27 @@ impl<'a> FunctionCompiler<'a> {
             .chain(func.signatures().map(|(_, s)| wrappers(s)))
             .max()
             .unwrap_or(0);
-        let wide_vectors = func
+        let simd_bytes = func
             .blocks()
             .flat_map(|block| func.block_params(block))
             .chain(
                 func.layout_insts()
                     .flat_map(|(_, inst)| func.inst_results(inst)),
             )
-            .any(|&value| func.value_type(func.resolve(value)).bytes() == Some(32))
-            || wrapper_bytes == 32;
+            .filter_map(|&value| func.value_type(func.resolve(value)).vector())
+            .map(|shape| shape.bytes())
+            .max()
+            .unwrap_or(16)
+            .max(wrapper_bytes)
+            .max(16);
+        let simd_bits = (simd_bytes * 8) as u16;
+        let wide_vectors = simd_bytes >= 32;
         let frame_align = func
             .stack_slots()
             .map(|(_, s)| s.align as usize)
             .max()
             .unwrap_or(16)
-            .max(if wide_vectors { 32 } else { 16 })
+            .max(simd_bytes as usize)
             .max(abi_align);
         let frame_register = (frame_align > 16).then_some(15);
         let saved_pool = pools
@@ -1133,8 +1149,8 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
-                if *id == Intrinsic::X86Pclmulqdq128 {
-                    pclmul::validate(func, args, pipeline.selector.x86_features())
+                if id.is_x86_pclmul() {
+                    pclmul::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if *id == Intrinsic::X86RflagsSwap {
@@ -1230,6 +1246,19 @@ impl<'a> FunctionCompiler<'a> {
                     return Err(err(
                         "legacy SSE compare predicate must be iconst.i32 in0..=7".into(),
                     ));
+                }
+                if id.is_x86_sha256() {
+                    if !pipeline.selector.x86_features().sha {
+                        return Err(err(format!("{id} requires SHA")));
+                    }
+                    if args.len() != id.info().params.len()
+                        || args
+                            .iter()
+                            .zip(id.info().params)
+                            .any(|(&v, &ty)| func.value_type(func.resolve(v)) != ty)
+                    {
+                        return Err(err(format!("{id} operand types or arity mismatch")));
+                    }
                 }
                 if id.x86_aes_opcode().is_some() {
                     if !pipeline.selector.x86_features().aes {
@@ -1575,7 +1604,10 @@ impl<'a> FunctionCompiler<'a> {
                     matches!(
                         func.value_type(func.resolve(v)),
                         Type::F80 | Type::Vector(keel_ir::VectorType::F64x1)
-                    ) || func.value_type(func.resolve(v)).bytes() == Some(32)
+                    ) || func
+                        .value_type(func.resolve(v))
+                        .bytes()
+                        .is_some_and(|bytes| bytes >= 32)
                 })
             {
                 continue;
@@ -1742,14 +1774,15 @@ impl<'a> FunctionCompiler<'a> {
                     .any(|(_, i)| matches!(func.inst_data(i), InstData::Intrinsic { .. })));
         let copy_temp = needs_copy_temp.then_some(alloc.spill_slots + staging as u32);
         if let Some(slot) = copy_temp {
-            vector_spills.insert(slot, if wide_vectors { 256 } else { 128 });
+            vector_spills.insert(slot, simd_bits);
         }
-        let spill_base = offset.next_multiple_of(if wide_vectors { 32 } else { 8 });
+        let spill_base =
+            offset.next_multiple_of(if wide_vectors { simd_bytes as usize } else { 8 });
         let offset = spill_base
             + 8 * (alloc.spill_slots as usize
                 + staging
                 + if needs_copy_temp {
-                    if wide_vectors { 4 } else { 2 }
+                    simd_bytes as usize / 8
                 } else {
                     0
                 });
@@ -1846,7 +1879,7 @@ impl<'a> FunctionCompiler<'a> {
                     args,
                     frame_register,
                     (function_index << 32) | inst.index() as u64,
-                    wide_vectors,
+                    simd_bits,
                 )
                 .map_err(err)?;
                 inline_asm_plans.insert(inst, plan);
@@ -1975,6 +2008,7 @@ impl<'a> FunctionCompiler<'a> {
             spill_base,
             vector_spills,
             wide_vectors,
+            simd_bits,
             frame_align,
             frame_register,
             copy_temp,
@@ -3048,10 +3082,12 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
             }
-            InstData::Intrinsic {
-                id: Intrinsic::X86Pclmulqdq128,
-                ref args,
-            } => self.native_pclmul(args, result),
+            InstData::Intrinsic { id, ref args } if id.is_x86_pclmul() => {
+                self.native_pclmul(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.is_x86_sha256() => {
+                self.native_sha256(id, args, result)
+            }
             InstData::Intrinsic { id, ref args } if id.x86_aes_opcode().is_some() => {
                 self.native_aes(id, args, result)
             }
@@ -3439,13 +3475,13 @@ impl<'a> FunctionCompiler<'a> {
                     matches!(p.purpose, Purpose::Sret(_))
                         && p.layout()
                             .and_then(sysv::register_vector)
-                            .is_some_and(|t| t.bytes() == Some(32))
+                            .is_some_and(|t| t.bytes().is_some_and(|bytes| bytes >= 32))
                 });
                 if self.wide_vectors
                     && !wide_wrapper_return
                     && !args
                         .first()
-                        .is_some_and(|&v| self.ty(v).bytes() == Some(32))
+                        .is_some_and(|&v| self.ty(v).bytes().is_some_and(|bytes| bytes >= 32))
                 {
                     self.emit(Opcode::Vzeroupper, []);
                 }
@@ -3484,7 +3520,9 @@ impl<'a> FunctionCompiler<'a> {
     /// offset is below 48 for general ones, 176 for vector ones), then from
     /// the stack, 8 bytes each. Its address ends up in rax.
     fn va_arg(&mut self, inst: Inst, ty: Type, list: Value, result: Option<Value>) {
-        if ty.bytes() == Some(32) || ty == Type::Vector(keel_ir::VectorType::F64x1) {
+        if ty.bytes().is_some_and(|bytes| bytes >= 32)
+            || ty == Type::Vector(keel_ir::VectorType::F64x1)
+        {
             // __m256 and explicitly proven producer f64x1 are overflow-only.
             // Preflight requires explicit matching local va_start provenance.
             let bytes = ty.bytes().expect("sized overflow vector");
@@ -3493,9 +3531,12 @@ impl<'a> FunctionCompiler<'a> {
                 Opcode::Mov,
                 [asm_arg(r64(S0)), asm_arg(sized(memory(p, 8), 64))],
             );
-            if bytes == 32 {
-                self.emit(Opcode::Add, [asm_arg(r64(S0)), asm_arg(31)]);
-                self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(-32)]);
+            if bytes >= 32 {
+                self.emit(
+                    Opcode::Add,
+                    [asm_arg(r64(S0)), asm_arg(i64::from(bytes - 1))],
+                );
+                self.emit(Opcode::And, [asm_arg(r64(S0)), asm_arg(-i64::from(bytes))]);
             }
             self.emit(
                 Opcode::Lea,
@@ -4101,7 +4142,11 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         // Live wide values crossing a call have spill homes. Keep upper halves
         // intact whenever an argument still needs its YMM source.
-        if self.wide_vectors && !args.iter().any(|&v| self.ty(v).bytes() == Some(32)) {
+        if self.wide_vectors
+            && !args
+                .iter()
+                .any(|&v| self.ty(v).bytes().is_some_and(|bytes| bytes >= 32))
+        {
             self.emit(Opcode::Vzeroupper, []);
         }
         let kind = |i: usize, arg: Value| arg_kind(func, sig, args, i, arg);
@@ -5884,8 +5929,8 @@ impl<'a> FunctionCompiler<'a> {
                     Opcode::Movaps
                 },
                 [
-                    asm_arg(simd_width(d, if self.wide_vectors { 256 } else { 128 })),
-                    asm_arg(simd_width(s, if self.wide_vectors { 256 } else { 128 })),
+                    asm_arg(simd_width(d, self.simd_bits)),
+                    asm_arg(simd_width(s, self.simd_bits)),
                 ],
             ),
             (Loc::Reg(d), Loc::FReg(s)) => {
@@ -6310,7 +6355,8 @@ fn arg_kind<'s>(
         && let Some(p) = args.abi(i)
         && let Purpose::ByVal(layout) = &p.purpose
     {
-        if sysv::register_vector(layout).is_some_and(|t| t.bytes() == Some(32)) {
+        if sysv::register_vector(layout).is_some_and(|t| t.bytes().is_some_and(|bytes| bytes >= 32))
+        {
             return ArgKind::MemoryByVal(layout);
         }
         return sysv::signature_param_kind(sig, p);
@@ -6319,7 +6365,7 @@ fn arg_kind<'s>(
         Some(p) => sysv::signature_param_kind(sig, p),
         None => {
             let ty = func.value_type(func.resolve(arg));
-            if ty.bytes() == Some(32) {
+            if ty.bytes().is_some_and(|bytes| bytes >= 32) {
                 ArgKind::StackValue(ty)
             } else {
                 ArgKind::Value(ty)
@@ -6367,11 +6413,15 @@ fn wide(n: u8, ty: Type) -> Register {
 }
 
 fn simd_width(n: u8, bits: u16) -> Register {
-    if bits == 256 {
+    if bits >= 256 {
         Register {
-            class: RegisterClass::Ymm,
+            class: if bits == 512 {
+                RegisterClass::Zmm
+            } else {
+                RegisterClass::Ymm
+            },
             number: n,
-            width: 256,
+            width: bits,
             high_byte: false,
         }
     } else {
@@ -6408,7 +6458,7 @@ fn movs(ty: Type) -> Opcode {
         return match v.bytes() {
             8 => Opcode::Movq,
             16 => Opcode::Movups,
-            32 => Opcode::Vmovups,
+            32 | 64 => Opcode::Vmovups,
             _ => unreachable!(),
         };
     }
@@ -6535,7 +6585,7 @@ fn packed(op: Opcode, ty: Type) -> Opcode {
 
 fn move_bits(bits: u16) -> Opcode {
     match bits {
-        256 => Opcode::Vmovups,
+        256 | 512 => Opcode::Vmovups,
         128 => Opcode::Movups,
         _ => Opcode::Movsd,
     }

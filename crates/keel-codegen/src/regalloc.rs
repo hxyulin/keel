@@ -854,7 +854,7 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     let mut count = 0;
     // Separate pools keep each reused home's width stable. Vector homes take
     // two eight-byte units; the bitset still tracks one home per live vector.
-    for units in [1, 2, 4] {
+    for units in [1, 2, 4, 8] {
         let base = count;
         let mut slots = SpillSlots::default();
         for iv in spilled.iter().filter(|iv| iv.spill_units == units) {
@@ -1839,7 +1839,7 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
     let mut count = 0;
     // Separate pools keep each reused home's width stable. Vector homes take
     // two eight-byte units; the bitset still tracks one home per live vector.
-    for units in [1, 2, 4] {
+    for units in [1, 2, 4, 8] {
         let base = count;
         let mut slots = SpillSlots::default();
         for iv in spilled.iter().filter(|iv| iv.spill_units == units) {
@@ -1972,6 +1972,43 @@ mod tests {
                 }
             }
             assert!(a.float_callee_saved_used.is_empty());
+        }
+    }
+
+    #[test]
+    fn zmm_ymm_and_xmm_spill_homes_preserve_every_byte() {
+        let func = function(
+            "decl @clobber()\nfunc @f(ptr) {\nblock0(v0:ptr):\n v1 = load.i64x8 v0\n v2 = load.i32x8 v0\n v3 = load.i32x4 v0\n call @clobber()\n store v1,v0\n store v2,v0\n store v3,v0\n return\n}",
+        );
+        let pools = Pools {
+            caller_saved: &[],
+            callee_saved: &[],
+            float_caller_saved: &[0],
+            float_callee_saved: &[],
+        };
+        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+            let allocation = allocate_tier(
+                &func,
+                &pools,
+                |data| matches!(data, InstData::Call { .. }),
+                |_| false,
+                &crate::select::Selection::default(),
+                tier,
+            );
+            let homes = [1, 2, 3].map(|v| match allocation.loc(Value::new(v)).unwrap() {
+                Loc::Stack(slot) => slot,
+                other => panic!("cross-call SIMD value in {other:?}"),
+            });
+            let widths = [8, 4, 2];
+            for i in 0..homes.len() {
+                assert!(homes[i] + widths[i] <= allocation.spill_slots);
+                for j in 0..i {
+                    assert!(
+                        homes[i] + widths[i] <= homes[j] || homes[j] + widths[j] <= homes[i],
+                        "overlapping SIMD spill homes"
+                    );
+                }
+            }
         }
     }
 

@@ -2779,10 +2779,10 @@ impl<'a> Parser<'a> {
                         self.expect("(")?;
                         let n = self.const_int()?;
                         self.expect(")")?;
-                        if n != 16 && n != 32 {
+                        if n != 16 && n != 32 && n != 64 {
                             return Err(Error::new(
                                 loc,
-                                "vector_size supports only 16- and 32-byte vectors",
+                                "vector_size supports only 16-, 32- and 64-byte vectors",
                             ));
                         }
                         attrs.vector_size = Some((n as u64, loc));
@@ -3366,26 +3366,24 @@ impl<'a> Parser<'a> {
         self.require_native_layout(loc, "C vector types")?;
         // Declaration-specifier attributes have already changed the base type.
         // A final declarator attribute requires a scalar subject, like Clang.
-        if bytes == 32 && self.target != keel_ir::Target::X86_64LinuxGnu {
-            return Err(Error::new(
-                loc,
-                "32-byte C vectors require the x86-64 target and AVX/AVX2 code generation",
-            ));
+        if bytes >= 32 && self.target != keel_ir::Target::X86_64LinuxGnu {
+            return Err(Error::new(loc, "wide C vectors require the x86-64 target"));
         }
         match ty {
             Ty::Int(IntKind::Bool | IntKind::Int128 | IntKind::UInt128) => {
                 Err(Error::new(loc, "unsupported vector_size element type"))
             }
             t if t.is_integer() || matches!(t, Ty::Float | Ty::Double) => {
-                let shapes = if bytes == 32 {
-                    keel_ir::VectorType::ALL_256
-                } else {
-                    keel_ir::VectorType::ALL_128
+                let shapes: &[_] = match bytes {
+                    64 => &keel_ir::VectorType::ALL_512,
+                    32 => &keel_ir::VectorType::ALL_256,
+                    _ => &keel_ir::VectorType::ALL_128,
                 };
                 let shape = shapes
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .find(|shape| shape.lane_type() == t.ir())
-                    .unwrap();
+                    .ok_or_else(|| Error::new(loc, "unsupported vector_size element type"))?;
                 Ok(Ty::Vector(self.type_ref(t), shape))
             }
             _ => Err(Error::new(

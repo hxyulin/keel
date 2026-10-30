@@ -32,11 +32,64 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
+    /// Whether this is a typed SHA-256 operation.
+    pub fn is_x86_sha256(self) -> bool {
+        matches!(
+            self,
+            Self::X86Sha256msg1 | Self::X86Sha256msg2 | Self::X86Sha256rnds2
+        )
+    }
+
+    pub fn is_x86_pclmul(self) -> bool {
+        matches!(
+            self,
+            Self::X86Pclmulqdq128 | Self::X86Vpclmulqdq256 | Self::X86Vpclmulqdq512
+        )
+    }
+
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
             x86_system_intrinsics!(all) => return self.generated_system_info().unwrap(),
             x86_query_intrinsics!(all) => return self.generated_query_info().unwrap(),
+            Intrinsic::X86Sha256msg1 => (
+                "x86_sha256msg1",
+                &[Type::Vector(VectorType::I32x4); 2],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Sha256msg2 => (
+                "x86_sha256msg2",
+                &[Type::Vector(VectorType::I32x4); 2],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Sha256rnds2 => (
+                "x86_sha256rnds2",
+                &[Type::Vector(VectorType::I32x4); 3],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::X86Vpclmulqdq256 => (
+                "x86_vpclmulqdq256",
+                &[
+                    Type::Vector(VectorType::I64x4),
+                    Type::Vector(VectorType::I64x4),
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I64x4)],
+                true,
+            ),
+            Intrinsic::X86Vpclmulqdq512 => (
+                "x86_vpclmulqdq512",
+                &[
+                    Type::Vector(VectorType::I64x8),
+                    Type::Vector(VectorType::I64x8),
+                    Type::I32,
+                ],
+                &[Type::Vector(VectorType::I64x8)],
+                true,
+            ),
             Intrinsic::X86Pclmulqdq128 => (
                 "x86_pclmulqdq128",
                 &[
@@ -5414,6 +5467,7 @@ impl Intrinsic {
             || self.is_x86_masked_mem()
             || self.is_x86_raw_fp_convert()
             || self.is_x86_fp_compare()
+            || self.is_x86_sha256()
             || self.x86_aes_opcode().is_some()
             || self.is_x86_pure_bits()
             || self.is_x86_fp_misc()
@@ -5424,7 +5478,7 @@ impl Intrinsic {
             || self.is_x86_legacy_sign_mask()
             || self == Self::X86SseMaskmovdqu
             || self.is_x86_legacy_fp_v2()
-            || self == Self::X86Pclmulqdq128
+            || self.is_x86_pclmul()
             || self.is_x86_crc32()
             || self.is_x86_legacy_ptest()
             || self.is_x86_string()
