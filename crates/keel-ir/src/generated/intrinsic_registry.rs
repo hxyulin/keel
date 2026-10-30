@@ -1976,10 +1976,158 @@ pub enum Intrinsic {
     X86Avx512VlMaskMaxps256 = 1325,
     #[doc = "Raw packed floating AVX512F plus AVX512VL operation with exact XMM/YMM merge semantics. Inactive lanes suppress exceptions; min/max retain source-order NaN and signed-zero selection. No embedded rounding or SAE control."]
     X86Avx512VlMaskMaxpd256 = 1326,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMulld128 = 1327,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinsd128 = 1328,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinud128 = 1329,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxsd128 = 1330,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxud128 = 1331,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndd128 = 1332,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndnd128 = 1333,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskOrd128 = 1334,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskXord128 = 1335,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinsq128 = 1336,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinuq128 = 1337,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxsq128 = 1338,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxuq128 = 1339,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndq128 = 1340,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndnq128 = 1341,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskOrq128 = 1342,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskXorq128 = 1343,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoved128 = 1344,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoveq128 = 1345,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoveps128 = 1346,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMovepd128 = 1347,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMulld256 = 1348,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinsd256 = 1349,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinud256 = 1350,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxsd256 = 1351,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxud256 = 1352,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndd256 = 1353,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndnd256 = 1354,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskOrd256 = 1355,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskXord256 = 1356,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinsq256 = 1357,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMinuq256 = 1358,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxsq256 = 1359,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMaxuq256 = 1360,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndq256 = 1361,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskAndnq256 = 1362,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskOrq256 = 1363,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskXorq256 = 1364,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoved256 = 1365,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoveq256 = 1366,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMoveps256 = 1367,
+    #[doc = "Pure masked AVX512F plus AVX512VL integer arithmetic or exact bit transfer. High mask bits are ignored. Floating containers transfer NaN and zero bits without observing MXCSR."]
+    X86Avx512VlMaskMovepd256 = 1368,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtdq2ps128 = 1369,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtdq2ps256 = 1370,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtudq2ps128 = 1371,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtudq2ps256 = 1372,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtdq2pd128 = 1373,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtdq2pd256 = 1374,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtudq2pd128 = 1375,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtudq2pd256 = 1376,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2dq128 = 1377,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2dq256 = 1378,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2udq128 = 1379,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2udq256 = 1380,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttps2dq128 = 1381,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttps2dq256 = 1382,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttps2udq128 = 1383,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttps2udq256 = 1384,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2dq128 = 1385,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2dq256 = 1386,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2udq128 = 1387,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2udq256 = 1388,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttpd2dq128 = 1389,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttpd2dq256 = 1390,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttpd2udq128 = 1391,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvttpd2udq256 = 1392,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2pd128 = 1393,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2pd256 = 1394,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2ps128 = 1395,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtpd2ps256 = 1396,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtph2ps128 = 1397,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtph2ps256 = 1398,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2ph128 = 1399,
+    #[doc = "Raw masked AVX512F plus AVX512VL conversion. MXCSR, native indefinite values and inactive exception suppression follow hardware. Short-result tails are zero regardless of merge and mask."]
+    X86Avx512VlVcvtps2ph256 = 1400,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 1327] = [
+    pub const ALL: [Intrinsic; 1401] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -3307,6 +3455,80 @@ impl Intrinsic {
         Intrinsic::X86Avx512VlMaskMinpd256,
         Intrinsic::X86Avx512VlMaskMaxps256,
         Intrinsic::X86Avx512VlMaskMaxpd256,
+        Intrinsic::X86Avx512VlMaskMulld128,
+        Intrinsic::X86Avx512VlMaskMinsd128,
+        Intrinsic::X86Avx512VlMaskMinud128,
+        Intrinsic::X86Avx512VlMaskMaxsd128,
+        Intrinsic::X86Avx512VlMaskMaxud128,
+        Intrinsic::X86Avx512VlMaskAndd128,
+        Intrinsic::X86Avx512VlMaskAndnd128,
+        Intrinsic::X86Avx512VlMaskOrd128,
+        Intrinsic::X86Avx512VlMaskXord128,
+        Intrinsic::X86Avx512VlMaskMinsq128,
+        Intrinsic::X86Avx512VlMaskMinuq128,
+        Intrinsic::X86Avx512VlMaskMaxsq128,
+        Intrinsic::X86Avx512VlMaskMaxuq128,
+        Intrinsic::X86Avx512VlMaskAndq128,
+        Intrinsic::X86Avx512VlMaskAndnq128,
+        Intrinsic::X86Avx512VlMaskOrq128,
+        Intrinsic::X86Avx512VlMaskXorq128,
+        Intrinsic::X86Avx512VlMaskMoved128,
+        Intrinsic::X86Avx512VlMaskMoveq128,
+        Intrinsic::X86Avx512VlMaskMoveps128,
+        Intrinsic::X86Avx512VlMaskMovepd128,
+        Intrinsic::X86Avx512VlMaskMulld256,
+        Intrinsic::X86Avx512VlMaskMinsd256,
+        Intrinsic::X86Avx512VlMaskMinud256,
+        Intrinsic::X86Avx512VlMaskMaxsd256,
+        Intrinsic::X86Avx512VlMaskMaxud256,
+        Intrinsic::X86Avx512VlMaskAndd256,
+        Intrinsic::X86Avx512VlMaskAndnd256,
+        Intrinsic::X86Avx512VlMaskOrd256,
+        Intrinsic::X86Avx512VlMaskXord256,
+        Intrinsic::X86Avx512VlMaskMinsq256,
+        Intrinsic::X86Avx512VlMaskMinuq256,
+        Intrinsic::X86Avx512VlMaskMaxsq256,
+        Intrinsic::X86Avx512VlMaskMaxuq256,
+        Intrinsic::X86Avx512VlMaskAndq256,
+        Intrinsic::X86Avx512VlMaskAndnq256,
+        Intrinsic::X86Avx512VlMaskOrq256,
+        Intrinsic::X86Avx512VlMaskXorq256,
+        Intrinsic::X86Avx512VlMaskMoved256,
+        Intrinsic::X86Avx512VlMaskMoveq256,
+        Intrinsic::X86Avx512VlMaskMoveps256,
+        Intrinsic::X86Avx512VlMaskMovepd256,
+        Intrinsic::X86Avx512VlVcvtdq2ps128,
+        Intrinsic::X86Avx512VlVcvtdq2ps256,
+        Intrinsic::X86Avx512VlVcvtudq2ps128,
+        Intrinsic::X86Avx512VlVcvtudq2ps256,
+        Intrinsic::X86Avx512VlVcvtdq2pd128,
+        Intrinsic::X86Avx512VlVcvtdq2pd256,
+        Intrinsic::X86Avx512VlVcvtudq2pd128,
+        Intrinsic::X86Avx512VlVcvtudq2pd256,
+        Intrinsic::X86Avx512VlVcvtps2dq128,
+        Intrinsic::X86Avx512VlVcvtps2dq256,
+        Intrinsic::X86Avx512VlVcvtps2udq128,
+        Intrinsic::X86Avx512VlVcvtps2udq256,
+        Intrinsic::X86Avx512VlVcvttps2dq128,
+        Intrinsic::X86Avx512VlVcvttps2dq256,
+        Intrinsic::X86Avx512VlVcvttps2udq128,
+        Intrinsic::X86Avx512VlVcvttps2udq256,
+        Intrinsic::X86Avx512VlVcvtpd2dq128,
+        Intrinsic::X86Avx512VlVcvtpd2dq256,
+        Intrinsic::X86Avx512VlVcvtpd2udq128,
+        Intrinsic::X86Avx512VlVcvtpd2udq256,
+        Intrinsic::X86Avx512VlVcvttpd2dq128,
+        Intrinsic::X86Avx512VlVcvttpd2dq256,
+        Intrinsic::X86Avx512VlVcvttpd2udq128,
+        Intrinsic::X86Avx512VlVcvttpd2udq256,
+        Intrinsic::X86Avx512VlVcvtps2pd128,
+        Intrinsic::X86Avx512VlVcvtps2pd256,
+        Intrinsic::X86Avx512VlVcvtpd2ps128,
+        Intrinsic::X86Avx512VlVcvtpd2ps256,
+        Intrinsic::X86Avx512VlVcvtph2ps128,
+        Intrinsic::X86Avx512VlVcvtph2ps256,
+        Intrinsic::X86Avx512VlVcvtps2ph128,
+        Intrinsic::X86Avx512VlVcvtps2ph256,
     ];
 }
 
@@ -4630,5 +4852,79 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512VlMaskMinpd256
             | $crate::Intrinsic::X86Avx512VlMaskMaxps256
             | $crate::Intrinsic::X86Avx512VlMaskMaxpd256
+            | $crate::Intrinsic::X86Avx512VlMaskMulld128
+            | $crate::Intrinsic::X86Avx512VlMaskMinsd128
+            | $crate::Intrinsic::X86Avx512VlMaskMinud128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxsd128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxud128
+            | $crate::Intrinsic::X86Avx512VlMaskAndd128
+            | $crate::Intrinsic::X86Avx512VlMaskAndnd128
+            | $crate::Intrinsic::X86Avx512VlMaskOrd128
+            | $crate::Intrinsic::X86Avx512VlMaskXord128
+            | $crate::Intrinsic::X86Avx512VlMaskMinsq128
+            | $crate::Intrinsic::X86Avx512VlMaskMinuq128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxsq128
+            | $crate::Intrinsic::X86Avx512VlMaskMaxuq128
+            | $crate::Intrinsic::X86Avx512VlMaskAndq128
+            | $crate::Intrinsic::X86Avx512VlMaskAndnq128
+            | $crate::Intrinsic::X86Avx512VlMaskOrq128
+            | $crate::Intrinsic::X86Avx512VlMaskXorq128
+            | $crate::Intrinsic::X86Avx512VlMaskMoved128
+            | $crate::Intrinsic::X86Avx512VlMaskMoveq128
+            | $crate::Intrinsic::X86Avx512VlMaskMoveps128
+            | $crate::Intrinsic::X86Avx512VlMaskMovepd128
+            | $crate::Intrinsic::X86Avx512VlMaskMulld256
+            | $crate::Intrinsic::X86Avx512VlMaskMinsd256
+            | $crate::Intrinsic::X86Avx512VlMaskMinud256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxsd256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxud256
+            | $crate::Intrinsic::X86Avx512VlMaskAndd256
+            | $crate::Intrinsic::X86Avx512VlMaskAndnd256
+            | $crate::Intrinsic::X86Avx512VlMaskOrd256
+            | $crate::Intrinsic::X86Avx512VlMaskXord256
+            | $crate::Intrinsic::X86Avx512VlMaskMinsq256
+            | $crate::Intrinsic::X86Avx512VlMaskMinuq256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxsq256
+            | $crate::Intrinsic::X86Avx512VlMaskMaxuq256
+            | $crate::Intrinsic::X86Avx512VlMaskAndq256
+            | $crate::Intrinsic::X86Avx512VlMaskAndnq256
+            | $crate::Intrinsic::X86Avx512VlMaskOrq256
+            | $crate::Intrinsic::X86Avx512VlMaskXorq256
+            | $crate::Intrinsic::X86Avx512VlMaskMoved256
+            | $crate::Intrinsic::X86Avx512VlMaskMoveq256
+            | $crate::Intrinsic::X86Avx512VlMaskMoveps256
+            | $crate::Intrinsic::X86Avx512VlMaskMovepd256
+            | $crate::Intrinsic::X86Avx512VlVcvtdq2ps128
+            | $crate::Intrinsic::X86Avx512VlVcvtdq2ps256
+            | $crate::Intrinsic::X86Avx512VlVcvtudq2ps128
+            | $crate::Intrinsic::X86Avx512VlVcvtudq2ps256
+            | $crate::Intrinsic::X86Avx512VlVcvtdq2pd128
+            | $crate::Intrinsic::X86Avx512VlVcvtdq2pd256
+            | $crate::Intrinsic::X86Avx512VlVcvtudq2pd128
+            | $crate::Intrinsic::X86Avx512VlVcvtudq2pd256
+            | $crate::Intrinsic::X86Avx512VlVcvtps2dq128
+            | $crate::Intrinsic::X86Avx512VlVcvtps2dq256
+            | $crate::Intrinsic::X86Avx512VlVcvtps2udq128
+            | $crate::Intrinsic::X86Avx512VlVcvtps2udq256
+            | $crate::Intrinsic::X86Avx512VlVcvttps2dq128
+            | $crate::Intrinsic::X86Avx512VlVcvttps2dq256
+            | $crate::Intrinsic::X86Avx512VlVcvttps2udq128
+            | $crate::Intrinsic::X86Avx512VlVcvttps2udq256
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2dq128
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2dq256
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2udq128
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2udq256
+            | $crate::Intrinsic::X86Avx512VlVcvttpd2dq128
+            | $crate::Intrinsic::X86Avx512VlVcvttpd2dq256
+            | $crate::Intrinsic::X86Avx512VlVcvttpd2udq128
+            | $crate::Intrinsic::X86Avx512VlVcvttpd2udq256
+            | $crate::Intrinsic::X86Avx512VlVcvtps2pd128
+            | $crate::Intrinsic::X86Avx512VlVcvtps2pd256
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2ps128
+            | $crate::Intrinsic::X86Avx512VlVcvtpd2ps256
+            | $crate::Intrinsic::X86Avx512VlVcvtph2ps128
+            | $crate::Intrinsic::X86Avx512VlVcvtph2ps256
+            | $crate::Intrinsic::X86Avx512VlVcvtps2ph128
+            | $crate::Intrinsic::X86Avx512VlVcvtps2ph256
     };
 }

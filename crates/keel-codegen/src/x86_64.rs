@@ -148,6 +148,7 @@ mod avx512_scalar_convert;
 mod avx512_scalar_fma;
 mod avx512_scalar_move;
 mod avx512_special;
+mod avx512_vl_convert;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -1251,6 +1252,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 if id.x86_avx512_fma_opcode().is_some() {
                     avx512_fma::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_vl_convert().is_some() {
+                    avx512_vl_convert::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|s| err(s.into()))?;
                 }
                 if id.is_x86_avx512_convert() {
@@ -3245,6 +3250,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_fma_opcode().is_some() => {
                 self.native_avx512_fma(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_convert().is_some() => {
+                self.native_avx512_vl_convert(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.is_x86_avx512_convert() => {
                 self.native_avx512_convert(id, args, result)

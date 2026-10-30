@@ -923,3 +923,9 @@ mod x86_avx512_vl;
 
 #[path = "vector_x86/x86_avx512_vl_float.rs"]
 mod x86_avx512_vl_float;
+
+#[path = "vector_x86/x86_avx512_vl_integer_move.rs"]
+mod x86_avx512_vl_integer_move;
+
+#[path = "vector_x86/x86_avx512_vl_convert.rs"]
+mod x86_avx512_vl_convert;

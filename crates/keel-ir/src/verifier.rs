@@ -1825,6 +1825,23 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if id
+                    .x86_avx512_vl_convert()
+                    .is_some_and(|(op, _, _, _)| op == "vcvtps2ph")
+                {
+                    let control =
+                        args.get(3)
+                            .and_then(|&arg| match func.value_def(func.resolve(arg)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !control.is_some_and(|n| (0..=255).contains(&n)) {
+                        self.inst_error(inst, "AVX512VL half conversion requires an imm8".into());
+                    }
+                }
                 if id.is_x86_avx512_convert() {
                     let control =
                         args.get(3)

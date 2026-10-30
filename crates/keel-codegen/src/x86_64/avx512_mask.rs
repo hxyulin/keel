@@ -9,7 +9,9 @@ pub(super) fn validate(
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), &'static str> {
     if !features.avx512f
-        || (id.is_x86_avx512_vl_core() || id.x86_avx512_vl_float_arithmetic().is_some())
+        || (id.is_x86_avx512_vl_core()
+            || id.x86_avx512_vl_float_arithmetic().is_some()
+            || id.x86_avx512_vl_integer_move().is_some())
             && !features.avx512vl
     {
         return Err(

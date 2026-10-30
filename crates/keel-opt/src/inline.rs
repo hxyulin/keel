@@ -824,6 +824,7 @@ fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
         || id.is_x86_avx512_mask()
         || id.is_x86_avx512_indexed()
         || id.x86_avx512_special().is_some()
+        || id.x86_avx512_vl_convert().is_some()
         || id.is_x86_avx512_convert()
         || id.is_x86_avx512_scalar_move()
         || id.x86_avx512_packed_opcode().is_some()
