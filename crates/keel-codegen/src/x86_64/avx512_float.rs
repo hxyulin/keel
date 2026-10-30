@@ -1,6 +1,6 @@
 //! Unmasked packed floating arithmetic, with source order matching scalar IR.
 use super::*;
-use keel_ir::{VectorBinaryOp as V, VectorType};
+use keel_ir::{FloatCC, VectorBinaryOp as V, VectorType};
 fn floating(ty: Type) -> bool {
     matches!(ty, Type::Vector(VectorType::F32x16 | VectorType::F64x8))
 }
@@ -12,8 +12,13 @@ pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86:
     match data {
         InstData::VectorBinary { op, args } => {
             floating(ty(args[0]))
-                && matches!(op, V::Fadd | V::Fsub | V::Fmul | V::Fdiv | V::Fcopysign)
+                && matches!(
+                    op,
+                    V::Fadd | V::Fsub | V::Fmul | V::Fdiv | V::Fcopysign | V::Fmin | V::Fmax
+                )
         }
+        InstData::VectorFcmp { args, .. } => floating(ty(args[0])),
+        InstData::VectorSelect { args } => floating(ty(args[1])),
         InstData::VectorUnary { op, arg } => {
             floating(ty(*arg))
                 && matches!(
@@ -33,7 +38,61 @@ pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86:
 fn opcode(name: &str) -> Opcode {
     Opcode::parse(name).expect("AVX512F floating opcode")
 }
+fn k1() -> Register {
+    Register {
+        class: RegisterClass::Mask,
+        number: 1,
+        high_byte: false,
+        width: 64,
+    }
+}
+fn masked_move(double: bool) -> Opcode {
+    let mut op =
+        keel_asm_ir::x86::evex::EvexOpcode::parse(if double { "vmovdqu64" } else { "vmovdqu32" })
+            .expect("AVX512F masked move");
+    op.options.mask = Some(1);
+    Opcode::Evex(op)
+}
 impl FunctionCompiler<'_> {
+    fn float512_stage(&mut self, value: Value, scratch: u8) {
+        let source = self.use_freg(value, scratch);
+        if source != scratch {
+            self.emit(
+                movs(self.ty(value)),
+                [
+                    asm_arg(simd_width(scratch, 512)),
+                    asm_arg(simd_width(source, 512)),
+                ],
+            );
+        }
+    }
+    fn float512_compare(&mut self, name: &str, a: u8, b: u8, predicate: i32) {
+        self.emit(
+            Opcode::Evex(
+                keel_asm_ir::x86::evex::EvexOpcode::parse(name).expect("AVX512F comparison"),
+            ),
+            [
+                asm_arg(k1()),
+                asm_arg(simd_width(a, 512)),
+                asm_arg(simd_width(b, 512)),
+                asm_arg(predicate),
+            ],
+        );
+    }
+    fn float512_finish(&mut self, result: Option<Value>, source: u8) {
+        let d = self.def_freg(result);
+        if d != source {
+            self.emit(
+                Opcode::Vmovups,
+                [
+                    asm_arg(simd_width(d, 512)),
+                    asm_arg(simd_width(source, 512)),
+                ],
+            );
+        }
+        self.def_done(result, d);
+    }
+
     fn float512_constant(&mut self, double: bool, bits: u64) {
         self.emit(Opcode::Movabs, [asm_arg(r64(S0)), asm_arg(bits)]);
         self.emit(Opcode::Movq, [asm_arg(xmm(FS2)), asm_arg(r64(S0))]);
@@ -60,6 +119,49 @@ impl FunctionCompiler<'_> {
         if !keep(self.func, data, self.features) {
             return false;
         }
+        if let InstData::VectorSelect { args } = *data {
+            let double = self.ty(args[1]) == Type::Vector(VectorType::F64x8);
+            self.float512_stage(args[0], FS0);
+            self.float512_bits("vpxord", FS1, FS1, FS1);
+            self.float512_compare(if double { "vpcmpq" } else { "vpcmpd" }, FS0, FS1, 4);
+            self.float512_stage(args[1], FS1);
+            self.float512_stage(args[2], FS2);
+            self.emit(
+                masked_move(double),
+                [asm_arg(simd_width(FS2, 512)), asm_arg(simd_width(FS1, 512))],
+            );
+            self.float512_finish(result, FS2);
+            return true;
+        }
+        if let InstData::VectorFcmp { cond, args } = *data {
+            let double = self.ty(args[0]) == Type::Vector(VectorType::F64x8);
+            self.float512_stage(args[0], FS0);
+            self.float512_stage(args[1], FS1);
+            let predicate = match cond {
+                FloatCC::Eq => 0,
+                FloatCC::Ne => 4,
+                FloatCC::Lt => 1,
+                FloatCC::Le => 2,
+                FloatCC::Gt => 14,
+                FloatCC::Ge => 13,
+                FloatCC::Ord => 7,
+                FloatCC::Uno => 3,
+            };
+            self.float512_compare(
+                if double { "vcmppd" } else { "vcmpps" },
+                FS0,
+                FS1,
+                predicate,
+            );
+            self.float512_constant(double, u64::MAX);
+            self.float512_bits("vpxord", FS0, FS0, FS0);
+            self.emit(
+                masked_move(double),
+                [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(FS2, 512))],
+            );
+            self.float512_finish(result, FS0);
+            return true;
+        }
         let (a, b) = match *data {
             InstData::VectorBinary { args, .. } => (args[0], Some(args[1])),
             InstData::VectorUnary { arg, .. } => (arg, None),
@@ -84,6 +186,31 @@ impl FunctionCompiler<'_> {
         }
         let sign = 1u64 << if double { 63 } else { 31 };
         match *data {
+            InstData::VectorBinary {
+                op: V::Fmin | V::Fmax,
+                ..
+            } => {
+                let minimum = matches!(data, InstData::VectorBinary { op: V::Fmin, .. });
+                self.float512_compare(&format!("vcmp{suffix}"), FS0, FS1, 3);
+                let name = format!("v{}{suffix}", if minimum { "min" } else { "max" });
+                self.float512_bits(&name, FS2, FS0, FS1);
+                self.float512_bits(&name, FS0, FS1, FS0);
+                // Both source orders choose opposite zero signs on ties. OR
+                // selects -0 for minimum; AND selects +0 for maximum.
+                self.float512_bits(if minimum { "vpord" } else { "vpandd" }, FS0, FS0, FS2);
+                self.float512_constant(
+                    double,
+                    if double {
+                        0x7ff8000000000000
+                    } else {
+                        0x7fc00000
+                    },
+                );
+                self.emit(
+                    masked_move(double),
+                    [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(FS2, 512))],
+                );
+            }
             InstData::VectorBinary {
                 op: V::Fcopysign, ..
             } => {

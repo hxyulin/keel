@@ -38,6 +38,8 @@ fn floating512_arithmetic_and_sqrt_preserve_live_sources() {
             ("vfneg", ""),
             ("vfabs", ""),
             ("vfcopysign", ""),
+            ("vfmin", "min"),
+            ("vfmax", "max"),
             ("vfceil", ""),
             ("vffloor", ""),
             ("vftrunc", ""),
@@ -55,6 +57,17 @@ fn floating512_arithmetic_and_sqrt_preserve_live_sources() {
             harness += &format!("extern void {name}(void*,void*,void*);\n");
             let scalar = if ctype == "float" { "f" } else { "" };
             let expected = match operation {
+                "vfmin" | "vfmax" => {
+                    let compare = if operation == "vfmin" { "<" } else { ">" };
+                    let zeros = if operation == "vfmin" {
+                        "signbit(a[i])||signbit(b[i])"
+                    } else {
+                        "signbit(a[i])&&signbit(b[i])"
+                    };
+                    format!(
+                        "(isnan(a[i])||isnan(b[i]))?NAN:((a[i]==0 && b[i]==0)?(({zeros})?-0.0:0.0):(a[i]{compare}b[i]?a[i]:b[i]))"
+                    )
+                }
                 "vfsqrt" => format!("{sqrt}(a[i])"),
                 "vfneg" => "-a[i]".into(),
                 "vfabs" => format!("fabs{scalar}(a[i])"),
@@ -72,6 +85,30 @@ fn floating512_arithmetic_and_sqrt_preserve_live_sources() {
             };
             cases += &format!(
                 "{{{uint} bits[16]={{{bits}}};{ctype} a[{lanes}],b[{lanes}],out[3*{lanes}];for(unsigned shift=0;shift<16;shift++){{for(unsigned i=0;i<{lanes};i++){{memcpy(a+i,bits+((i+shift)%16),sizeof(*a));memcpy(b+i,bits+((i+shift*3)%16),sizeof(*b));}}{name}(a,b,out);if(memcmp(out+{lanes},a,64)||memcmp(out+2*{lanes},b,64))return 1;for(unsigned i=0;i<{lanes};i++){{{ctype} want={expected};if(isnan(want)){{{nan}}}else if(memcmp(&want,out+i,sizeof(want)))return 3;}}}}}}\n"
+            );
+        }
+    }
+    for (shape, mask, ctype, uint, lanes) in [
+        ("f32x16", "i32x16", "float", "uint32_t", 16),
+        ("f64x8", "i64x8", "double", "uint64_t", 8),
+    ] {
+        for (cond, oracle) in [
+            ("eq", "a[i]==b[i]"),
+            ("ne", "a[i]!=b[i]"),
+            ("lt", "a[i]<b[i]"),
+            ("le", "a[i]<=b[i]"),
+            ("gt", "a[i]>b[i]"),
+            ("ge", "a[i]>=b[i]"),
+            ("ord", "!isnan(a[i])&&!isnan(b[i])"),
+            ("uno", "isnan(a[i])||isnan(b[i])"),
+        ] {
+            let name = format!("compare_select_{shape}_{cond}");
+            source += &format!(
+                "func @{name}(ptr,ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr,v3:ptr):\n v4 = load.{mask} align 1 v0\n v5 = load.{shape} align 1 v1\n v6 = load.{shape} align 1 v2\n v7 = vfcmp.{cond} v5,v6\n v8 = vselect v4,v5,v6\n store align 1 v7,v3\n v9 = iconst.i64 64\n v10 = ptradd v3,v9\n store align 1 v8,v10\n v11 = ptradd v10,v9\n store align 1 v5,v11\n v12 = ptradd v11,v9\n store align 1 v6,v12\n return\n}}\n"
+            );
+            harness += &format!("extern void {name}(void*,void*,void*,void*);\n");
+            cases += &format!(
+                "{{{ctype} a[{lanes}],b[{lanes}];{uint} mask[{lanes}],out[4*{lanes}];for(unsigned i=0;i<{lanes};i++){{a[i]=i%3==0?NAN:(i%3==1?-0.0:(double)i-7);b[i]=i%4==0?NAN:(i%4==1?0.0:8-(double)i);mask[i]=i%3==0?0:(i%3==1?1:(({uint})1<<(sizeof({uint})*8-1)));}}{name}(mask,a,b,out);for(unsigned i=0;i<{lanes};i++){{{uint} want=({oracle})?~({uint})0:0;if(out[i]!=want)return 8;if(memcmp(out+{lanes}+i,mask[i]?a+i:b+i,sizeof(*a)))return 9;}}if(memcmp(out+2*{lanes},a,64)||memcmp(out+3*{lanes},b,64))return 10;}}\n"
             );
         }
     }
