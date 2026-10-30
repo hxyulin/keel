@@ -4591,7 +4591,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let queried = self.cpu_cpuid(feature.leaf);
         let register = self.cpu_register(queried, feature.register.shift());
         let mut supported = self.cpu_mask(register, feature.mask);
-        if feature.avx {
+        if let Some(state_mask) = feature.state.xcr0_mask() {
             let leaf1 = if feature.leaf == 1 {
                 queried
             } else {
@@ -4599,9 +4599,16 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             };
             let ecx = self.cpu_register(leaf1, 64);
             let avx = self.cpu_mask(ecx, crate::x86_cpu::AVX_CPUID);
+            // Keep XGETBV behind all CPU prerequisites, even though the query
+            // intrinsic independently checks CPU/OS XSAVE permission.
+            let executable = self.b.ins().and(supported, avx);
+            let state = self.new_block();
+            self.b.ins().brif(executable, state, &[], done, &[absent]);
+            self.b.seal_block(state);
+            self.switch_to(state);
             let xcr0_inst = self.b.ins().intrinsic(Intrinsic::X86CpuXcr0, &[]);
             let xcr0 = self.b.function().inst_results(xcr0_inst)[0];
-            let mask = self.b.ins().iconst(Type::I64, 6);
+            let mask = self.b.ins().iconst(Type::I64, state_mask as i64);
             let enabled = self.b.ins().and(xcr0, mask);
             let enabled = self.b.ins().icmp(IntCC::Eq, enabled, mask);
             supported = self.b.ins().and(supported, avx);

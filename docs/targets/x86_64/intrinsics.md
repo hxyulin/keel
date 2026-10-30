@@ -327,15 +327,20 @@ feature disables, and their operations are checked against that context.
 `__builtin_cpu_supports("avx2")` returns an `int`, zero or one. Its argument must
 be a supported string literal. Supported names are `sse`, `sse2`, `sse3`,
 `ssse3`, `sse4.1`, `sse4.2`, `avx`, `avx2`, `aes`, `pclmul`, `popcnt`, `bmi`,
-`bmi2`, `cx16`, `movbe`, `lzcnt`, `xsave`, `fma`, `f16c` and `monitor`.
+`bmi2`, `cx16`, `movbe`, `lzcnt`, `xsave`, `fma`, `f16c`, `monitor`,
+`avx512f` and `avx512vl`.
 Unknown names, runtime strings and non-x86 targets diagnose. Recognition queries
 for `__builtin_cpu_supports` and `__builtin_cpu_init` are independent of the
 selected baseline.
 
 Each call checks the maximum CPUID leaf before reading the selected feature
 bits. `avx`, `avx2`, `fma` and `f16c` also require CPUID's XSAVE, OSXSAVE and AVX
-bits and XCR0 bits 1 and 2. The guarded XCR0 intrinsic executes XGETBV only after
-checking CPUID leaf availability and CPU/OS XSAVE permission. `xsave` requires
+bits and XCR0 bits 1 and 2. `avx512f` additionally requires CPUID leaf 7 EBX
+bit 16 and XCR0 mask `0xe6`: XMM, YMM, opmask, ZMM high 256 bits and high ZMM
+register state. `avx512vl` also requires leaf 7 EBX bit 31 and foundation support.
+Vector queries reach XGETBV only after their feature bits and CPUID's XSAVE,
+OSXSAVE and AVX prerequisites pass. The guarded XCR0 intrinsic independently
+checks CPUID leaf availability and CPU/OS XSAVE permission. `xsave` requires
 both XSAVE and OSXSAVE. `monitor` reports its CPU feature bit; it does not prove
 OS enablement or privilege to execute MONITOR/MWAIT.
 
@@ -358,7 +363,8 @@ void add(int *out, const int *a, const int *b) {
 Library users keep the baseline `FeatureSelector` for codegen and pass
 `keel_codegen::x86_features::module_features(&module, baseline)` to object
 assembly. Automatic multiversion resolvers, `target_clones`, `__builtin_cpu_is`,
-C++ compatibility and AVX-512/AMX runtime queries remain outside this interface.
+C++ compatibility, other AVX-512 extension queries and AMX runtime queries
+remain outside this interface.
 
 ### Reviewed builtin inventory
 

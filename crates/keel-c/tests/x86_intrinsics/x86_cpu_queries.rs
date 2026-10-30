@@ -41,7 +41,7 @@ fn command(cmd: &mut Command) {
 fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
     for argument in [
         "name",
-        "\"avx512f\"",
+        "\"avx512dq\"",
         "\"unknown\"",
         "\"avx\\0suffix\"",
         "L\"avx\"",
@@ -67,13 +67,15 @@ fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
         Target::Aarch64AppleDarwin,
         Target::Wasm32UnknownUnknown,
     ] {
-        assert!(
-            frontend(
-                "int f(void){return __builtin_cpu_supports(\"avx\");}",
-                target
-            )
-            .is_err()
-        );
+        for feature in ["avx", "avx512f", "avx512vl"] {
+            assert!(
+                frontend(
+                    &format!("int f(void){{return __builtin_cpu_supports(\"{feature}\");}}"),
+                    target
+                )
+                .is_err()
+            );
+        }
     }
     let module=frontend("#if !__has_builtin(__builtin_cpu_supports) || !__has_builtin(__builtin_cpu_init)\n#error missing runtime queries\n#endif\nvoid init(void){__builtin_cpu_init();}\nint f(void){return __builtin_cpu_supports(\"av\" \"x\");}",Target::X86_64LinuxGnu).unwrap();
     keel_ir::verify_module(&module).unwrap();
@@ -100,14 +102,14 @@ fn runtime_queries_reject_unknown_nonliteral_and_foreign_names() {
 #[test]
 fn safe_xcr0_queries_do_not_enable_unguarded_xgetbv() {
     let mut module = frontend(
-        "int f(void){return __builtin_cpu_supports(\"avx\");}",
+        "int avx(void){return __builtin_cpu_supports(\"avx\");} int foundation(void){return __builtin_cpu_supports(\"avx512f\");} int vl(void){return __builtin_cpu_supports(\"avx512vl\");}",
         Target::X86_64LinuxGnu,
     )
     .unwrap();
     let baseline = Features::for_level(CpuLevel::V1);
     let encoding = module_features(&module, baseline).unwrap();
     assert!(!baseline.xsave && !baseline.avx);
-    assert!(encoding.xsave && !encoding.avx);
+    assert!(encoding.xsave && !encoding.avx && !encoding.avx512f && !encoding.avx512vl);
     let selector = FeatureSelector {
         inner: &SelectionTier::Baseline,
         features: baseline,
@@ -227,4 +229,46 @@ fn baseline_queries_and_explicit_dispatch_match_native_capabilities() {
         "native runtime CPU execution skipped: requires x86-64 Linux; artifacts: {}",
         directory.display()
     );
+}
+
+#[test]
+fn runtime_avx512_queries_do_not_grant_branch_permissions() {
+    let baseline = Features::for_level(CpuLevel::V1);
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Baseline,
+        features: baseline,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    for (name, operation) in [
+        (
+            "avx512f",
+            "void f(__m512i*out,__m512i*a,__m512i*b){if(__builtin_cpu_supports(\"avx512f\"))*out=_mm512_add_epi32(*a,*b);}",
+        ),
+        (
+            "avx512vl",
+            "void f(__m128i*out,__m128i*a,__m128i*b){if(__builtin_cpu_supports(\"avx512vl\"))*out=_mm_mask_add_epi32(*a,15,*a,*b);}",
+        ),
+    ] {
+        let source = format!("#include <immintrin.h>\n{operation}\n");
+        let mut module = frontend(&source, Target::X86_64LinuxGnu).unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            let encoding = module_features(&module, baseline).unwrap();
+            assert!(!encoding.avx512f && !encoding.avx512vl, "{name}");
+            assert!(
+                keel_codegen::compile_program_with_pipeline(
+                    &module,
+                    Target::X86_64LinuxGnu,
+                    &pipeline
+                )
+                .is_err(),
+                "{name}, optimized={optimize}"
+            );
+        }
+    }
 }

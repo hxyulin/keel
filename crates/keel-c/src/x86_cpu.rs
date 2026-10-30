@@ -14,13 +14,29 @@ impl Register {
         }
     }
 }
+/// Executable vector state required in addition to the queried CPUID bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VectorState {
+    None,
+    Avx,
+    Avx512,
+}
+impl VectorState {
+    pub(crate) const fn xcr0_mask(self) -> Option<u64> {
+        match self {
+            Self::None => None,
+            Self::Avx => Some(0x06),
+            Self::Avx512 => Some(0xe6),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Feature {
     pub(crate) name: &'static str,
     pub(crate) leaf: u32,
     pub(crate) register: Register,
     pub(crate) mask: u32,
-    pub(crate) avx: bool,
+    pub(crate) state: VectorState,
 }
 /// CPUID leaf1 ECX must admit saving and executing AVX before XCR0 can grant it.
 pub(crate) const AVX_CPUID: u32 = (1 << 26) | (1 << 27) | (1 << 28);
@@ -30,140 +46,154 @@ pub(crate) const FEATURES: &[Feature] = &[
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 3,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "sse",
         leaf: 1,
         register: Register::Edx,
         mask: 1 << 25,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "sse2",
         leaf: 1,
         register: Register::Edx,
         mask: 1 << 26,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "sse3",
         leaf: 1,
         register: Register::Ecx,
         mask: 1,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "ssse3",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 9,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "sse4.1",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 19,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "sse4.2",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 20,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "avx",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 28,
-        avx: true,
+        state: VectorState::Avx,
     },
     Feature {
         name: "avx2",
         leaf: 7,
         register: Register::Ebx,
         mask: 1 << 5,
-        avx: true,
+        state: VectorState::Avx,
+    },
+    Feature {
+        name: "avx512f",
+        leaf: 7,
+        register: Register::Ebx,
+        mask: 1 << 16,
+        state: VectorState::Avx512,
+    },
+    Feature {
+        name: "avx512vl",
+        leaf: 7,
+        register: Register::Ebx,
+        mask: (1 << 16) | (1 << 31),
+        state: VectorState::Avx512,
     },
     Feature {
         name: "aes",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 25,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "pclmul",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 1,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "popcnt",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 23,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "bmi",
         leaf: 7,
         register: Register::Ebx,
         mask: 1 << 3,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "bmi2",
         leaf: 7,
         register: Register::Ebx,
         mask: 1 << 8,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "cx16",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 13,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "movbe",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 22,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "lzcnt",
         leaf: 0x8000_0001,
         register: Register::Ecx,
         mask: 1 << 5,
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "xsave",
         leaf: 1,
         register: Register::Ecx,
         mask: (1 << 26) | (1 << 27),
-        avx: false,
+        state: VectorState::None,
     },
     Feature {
         name: "fma",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 12,
-        avx: true,
+        state: VectorState::Avx,
     },
     Feature {
         name: "f16c",
         leaf: 1,
         register: Register::Ecx,
         mask: 1 << 29,
-        avx: true,
+        state: VectorState::Avx,
     },
 ];
 pub(crate) fn lookup(name: &str) -> Option<&'static Feature> {
@@ -204,10 +234,11 @@ mod tests {
                 Register::Edx => 3,
             };
             row[register] & feature.mask == feature.mask
-                && (!feature.avx
-                    || (self.basic_max >= 1
+                && feature.state.xcr0_mask().is_none_or(|mask| {
+                    self.basic_max >= 1
                         && self.leaf1[2] & AVX_CPUID == AVX_CPUID
-                        && self.xcr0 & 6 == 6))
+                        && self.xcr0 & mask == mask
+                })
         }
     }
     fn all() -> Snapshot {
@@ -217,7 +248,7 @@ mod tests {
             leaf1: [u32::MAX; 4],
             leaf7: [u32::MAX; 4],
             extended: [u32::MAX; 4],
-            xcr0: 6,
+            xcr0: 0xe6,
         }
     }
     #[test]
@@ -273,7 +304,45 @@ mod tests {
                 feature.name
             );
         }
-        assert!(lookup("avx512f").is_none());
+        assert_eq!(lookup("avx512f").unwrap().state, VectorState::Avx512);
+        assert_eq!(lookup("avx512vl").unwrap().state, VectorState::Avx512);
         assert!(lookup("arbitrary").is_none());
+    }
+    #[test]
+    fn foundation_and_vl_require_every_vector_state_component() {
+        for name in ["avx512f", "avx512vl"] {
+            assert!(all().supports(name));
+            for bit in [1, 2, 5, 6, 7] {
+                let mut snapshot = all();
+                snapshot.xcr0 &= !(1 << bit);
+                assert!(!snapshot.supports(name), "{name}: missing XCR0 bit {bit}");
+            }
+            for bit in [26, 27, 28] {
+                let mut snapshot = all();
+                snapshot.leaf1[2] &= !(1 << bit);
+                assert!(
+                    !snapshot.supports(name),
+                    "{name}: missing CPUID.1 ECX bit {bit}"
+                );
+            }
+            let mut snapshot = all();
+            snapshot.xcr0 = 6;
+            assert!(snapshot.supports("avx2"));
+            assert!(
+                !snapshot.supports(name),
+                "AVX state alone cannot grant AVX-512"
+            );
+        }
+        let mut snapshot = all();
+        snapshot.leaf7[1] &= !(1 << 16);
+        assert!(!snapshot.supports("avx512f"));
+        assert!(
+            !snapshot.supports("avx512vl"),
+            "VL also requires foundation"
+        );
+        let mut snapshot = all();
+        snapshot.leaf7[1] &= !(1 << 31);
+        assert!(snapshot.supports("avx512f"));
+        assert!(!snapshot.supports("avx512vl"));
     }
 }
