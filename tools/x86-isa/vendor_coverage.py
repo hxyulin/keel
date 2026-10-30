@@ -1,4 +1,4 @@
-"""Compare public C wrapper names against the pinned SSE–AVX2 reference headers.
+"""Compare public C wrapper names against the pinned SSE–AVX512F reference headers.
 
 This is a declaration inventory, not a semantic or feature conformance claim.
 Only function definitions and preprocessor definitions count. References inside
@@ -15,9 +15,10 @@ from pathlib import Path
 HEADERS = (
     'xmmintrin.h', 'emmintrin.h', 'pmmintrin.h', 'tmmintrin.h',
     'smmintrin.h', 'avxintrin.h', 'avx2intrin.h', 'crc32intrin.h',
+    'avx512fintrin.h',
 )
 TOKEN = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|[^\s]', re.S)
-PUBLIC = re.compile(r'_mm(?:256)?_\w+\Z')
+PUBLIC = re.compile(r'(?:_mm(?:256|512)?_|_k)\w+\Z')
 
 
 def definitions(source: str) -> dict[str, bool]:
@@ -27,7 +28,7 @@ def definitions(source: str) -> dict[str, bool]:
                             if match[0].startswith(('/*', '//')) else match[0], source)
     logical = uncommented.replace('\\\n', '')
     result = {name: '__m64' in body or bool(re.search(r'_pi(?:8|16|32)\b', name))
-              for name, body in re.findall(r'^\s*#\s*define\s+(_mm(?:256)?_\w+)\b([^\n]*)', logical, re.M)}
+              for name, body in re.findall(r'^\s*#\s*define\s+((?:_mm(?:256|512)?_|_k)\w+)\b([^\n]*)', logical, re.M)}
     tokens = [token for token in TOKEN.findall(source)
               if not token.startswith(('/*', '//'))]
     boundary = 0
@@ -71,7 +72,7 @@ def inventory(reference: Path, owned: Path) -> dict:
         }
     return {
         'contract': 'Public wrapper names only; presence does not establish semantic, signature, immediate, feature, or ABI compatibility.',
-        'exclusions': ['MMX values and state', 'AVX-512', 'AMX', 'C++ overloads', '32-bit x86', 'unlisted headers'],
+        'exclusions': ['MMX values and state', 'AVX-512 extensions beyond AVX512F', 'AMX', 'C++ overloads', '32-bit x86', 'unlisted headers'],
         'headers': headers,
     }
 

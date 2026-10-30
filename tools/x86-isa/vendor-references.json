@@ -26,7 +26,8 @@
         "pmmintrin.h": "d339fc33b62cad78adcdf359c662c293e2e6c562d56104b1a9d5806dda9b85ca",
         "avxintrin.h": "368a9905c25ccf46014444fc88c54a15f9a5de3be31cef8e159ed9b58f7efbc6",
         "nmmintrin.h": "cd7b51a1c33c7e7d710f070315e7bc034757ea6be9e6804864cf159c79f48d54",
-        "crc32intrin.h": "0f73e381b39e4718f70159158faa3da510769bb16120ec23f35bdcff14d34cb1"
+        "crc32intrin.h": "0f73e381b39e4718f70159158faa3da510769bb16120ec23f35bdcff14d34cb1",
+        "avx512fintrin.h": "ae3f2f75e4f73a7527b0082669068e922551f36998a1c2b18a37d13cae5248f8"
       }
     }
   }
