@@ -1198,6 +1198,21 @@ VSHUFPD wrappers accept only 0..3 at 128 bits and 0..15 at 256 bits.
 The 256-bit block-shuffle wrappers accept 0..3. Separate reviewed C bindings
 enforce those limits without narrowing the raw typed controls.
 
+VL compression and expansion cover dword, qword, float and double vectors
+at 128 and 256 bits, with `i8` masks. Register forms take
+`(merge, mask, input)` and are pure bit transfers. Compression selects source
+lanes and places them in a contiguous low result prefix; merge lanes above
+that prefix remain intact. Expansion selects destination positions and
+consumes consecutive low source elements. Unused high mask bits are ignored.
+
+Compressed stores take `(ptr, input, mask)`; expanding loads take
+`(ptr, merge, mask)`. Memory forms access exactly
+`popcount(valid mask) * lane_bytes` contiguous bytes, with no access for zero
+or high-only masks. They support unaligned and partially accessible prefixes
+without touching the nominal whole vector. All forms require F plus VL,
+without BW or DQ. C exposes masked and mask-zero register forms, compressed
+stores and masked/mask-zero expanding loads.
+
 ## AVX512DQ operations
 
 Typed `x86_avx512dq_` operations provide low qword multiplication and
@@ -1289,6 +1304,22 @@ but it observes MXCSR.DAZ when classifying subnormals, as specified by
 All three families retain MXCSR ordering through optimization. C supplies
 unmasked, masked and mask-zero RANGE/REDUCE interfaces and masked/unmasked
 FPCLASS interfaces, including the supported scalar/512-bit SAE forms.
+
+DQ scalar-mask operations use `x86_avx512dq_kandb`, `kandnb`, `korb`,
+`kxorb`, `kxnorb`, `knotb`, `kshiftlb`, `kshiftrb`, `ktestb`, `kortestb`,
+`kaddb` and `kaddw`. Byte operations use scalar `i8`; word addition uses
+`i16`. They are pure and require F plus DQ, without VL or BW. Addition wraps
+at the mask width; byte complements stay within eight bits. Byte shift
+controls are constant `i32` values in 0..255, with counts of eight or more
+producing zero.
+
+Byte KTEST and KORTEST return an `i8` with ZF in bit zero, CF in bit one and
+all other bits zero. KTEST tests `(a & b) == 0` for ZF and
+`((~a & b) & 255) == 0` for CF. KORTEST tests `(a | b) == 0` and
+`(a | b) == 255`. Combined C wrappers return ZF and write CF through an
+`unsigned char *`, accessing exactly one byte. The separate `z` and `c`
+wrappers return the corresponding boolean. Existing F-only word-mask
+wrappers, including emulated KTESTW, retain their prior feature contracts.
 
 ## AVX512CD conflict and leading-zero count
 
@@ -1572,3 +1603,25 @@ the result vector. Masks follow destination lanes: byte results use
 require F plus BW, adding VL for narrow forms. C exposes masked and
 mask-zero forms at every width and 512-bit unmasked forms. Existing narrow
 unmasked APIs retain their legacy feature contracts.
+
+BW byte/word conversions use signed or zero-extending byte-to-word forms,
+and truncating, signed-saturating or unsigned-saturating word-to-byte forms.
+Register forms take `(merge, mask, input)`. Widening memory forms take
+`(ptr, merge, mask)`; narrowing stores take `(ptr, input, mask)` and return
+void. Mask types are `i8`, `i16` and `i32` for encoded widths 128, 256 and
+512. Feature legality follows encoded width: 512-bit conversions need F
+plus BW even when their source or result is a YMM value; narrow encodings
+also need VL.
+
+The conversions produce 8, 16 or 32 elements. Register narrowing at 128 bits
+returns `i8x16` with its upper eight bytes zero, including with a zero mask
+and nonzero merge tail. Inactive low result bytes retain their merge values.
+Unsigned-saturating VPMOVUSWB interprets source words as unsigned, unlike
+PACKUSWB. Memory operations read or write one byte per active produced
+element, at its indexed byte position. Full-active footprints are 8, 16 or
+32 bytes; inactive positions remain unread or untouched.
+
+C exposes register conversions and narrowing stores. Existing narrow
+unmasked widening APIs keep their legacy requirements. Direct masked
+widening loads use compiler-owned `__keel_mm{,256,512}_mask_load_cvtepi8_epi16`
+and `...cvtepu8_epi16` names, with corresponding mask-zero forms.

@@ -1686,3 +1686,10 @@ mod x86_avx512_dq_special;
 
 #[path = "x86_intrinsics/x86_avx512_vl_permute.rs"]
 mod x86_avx512_vl_permute;
+
+#[path = "x86_intrinsics/x86_avx512_bw_convert.rs"]
+mod x86_avx512_bw_convert;
+#[path = "x86_intrinsics/x86_avx512_dq_mask_alu.rs"]
+mod x86_avx512_dq_mask_alu;
+#[path = "x86_intrinsics/x86_avx512_vl_pack.rs"]
+mod x86_avx512_vl_pack;

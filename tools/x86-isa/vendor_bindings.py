@@ -131,6 +131,7 @@ VALUE_CONTROLS['avx512vl_c_permute_imm_3_3'] = ({'X86Avx512VlVpermilpdImm128'}, 
 VALUE_CONTROLS['avx512vl_c_permute_imm_3_15'] = ({'X86Avx512VlVpermilpdImm256'}, 3, 15, 15, 'AVX512VL C immediate must be an integer constant in 0..15')
 VALUE_CONTROLS['avx512vl_c_permute_imm_4_3'] = ({'X86Avx512VlVshufpd128', 'X86Avx512VlVshufi32x4256', 'X86Avx512VlVshufi64x2256', 'X86Avx512VlVshuff32x4256', 'X86Avx512VlVshuff64x2256'}, 4, 3, 3, 'AVX512VL C immediate must be an integer constant in 0..3')
 VALUE_CONTROLS['avx512vl_c_permute_imm_4_15'] = ({'X86Avx512VlVshufpd256'}, 4, 15, 15, 'AVX512VL C immediate must be an integer constant in 0..15')
+VALUE_CONTROLS['avx512dq_mask_shift_imm8'] = ({'X86Avx512DqKshiftlb', 'X86Avx512DqKshiftrb'}, 1, 255, 255, 'AVX512DQ byte mask shift requires an integer constant in 0..255')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 # Reviewed C wrappers can have stricter controls than their raw typed operation.
