@@ -81,6 +81,17 @@ fn integer512_transport_preserves_features_and_exact_spill_widths() {
             "func @copy_{shape}(ptr,ptr) target_features(\"avx512f\") {{\nblock0(v0:ptr,v1:ptr):\n v2 = load.{shape} align 1 v0\n call @clobber()\n store align 1 v2,v1\n return\n}}\n"
         );
     }
+    let signature = std::iter::repeat_n("i64x8", 9)
+        .collect::<Vec<_>>()
+        .join(",");
+    let parameters = (0..9)
+        .map(|i| format!("v{i}:i64x8"))
+        .collect::<Vec<_>>()
+        .join(",");
+    source += &format!(
+        "func @ninth512({signature}) -> i64x8 noinline target_features(\"avx512f\") {{\nblock0({parameters}):\n return v8\n}}\n"
+    );
+    source += "func @copy_call512(ptr,ptr) target_features(\"avx512f\") {\nblock0(v0:ptr,v1:ptr):\n v2 = load.i64x8 align 1 v0\n v3 = iconst.i64 0\n v4 = vsplat.i64x8 v3\n v5 = call @ninth512(v4,v4,v4,v4,v4,v4,v4,v4,v2)\n store align 1 v5,v1\n return\n}\n";
     let mut module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     keel_opt::optimize(&mut module).unwrap();
@@ -109,16 +120,16 @@ fn integer512_transport_preserves_features_and_exact_spill_widths() {
 #include <sys/mman.h>
 #include <unistd.h>
 #include <string.h>
-extern void copy_i8x64(void*,void*),copy_i16x32(void*,void*),copy_i32x16(void*,void*),copy_i64x8(void*,void*);
+extern void copy_i8x64(void*,void*),copy_i16x32(void*,void*),copy_i32x16(void*,void*),copy_i64x8(void*,void*),copy_call512(void*,void*);
 void clobber(void) { __asm__ volatile("vzeroall" ::: "xmm0","xmm1","xmm2","xmm3","xmm4","xmm5","xmm6","xmm7","xmm8","xmm9","xmm10","xmm11","xmm12","xmm13","xmm14","xmm15"); }
 int main(void) {
  long p=sysconf(_SC_PAGESIZE);
  unsigned char *a=mmap(0,p*2,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
  unsigned char *b=mmap(0,p*2,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
  if(a==MAP_FAILED||b==MAP_FAILED||mprotect(a,p,PROT_READ|PROT_WRITE)||mprotect(b,p,PROT_READ|PROT_WRITE))return 1;
- void(*ops[])(void*,void*)={copy_i8x64,copy_i16x32,copy_i32x16,copy_i64x8};
+ void(*ops[])(void*,void*)={copy_i8x64,copy_i16x32,copy_i32x16,copy_i64x8,copy_call512};
  for(unsigned i=0;i<64;i++)a[p-64+i]=(unsigned char)(i*7+1);
- for(unsigned i=0;i<4;i++) { memset(b,0xa5,p);ops[i](a+p-64,b+p-64);if(memcmp(a+p-64,b+p-64,64)||b[p-65]!=0xa5)return 2; }
+ for(unsigned i=0;i<5;i++) { memset(b,0xa5,p);ops[i](a+p-64,b+p-64);if(memcmp(a+p-64,b+p-64,64)||b[p-65]!=0xa5)return 2; }
  return 0;
 }
 "#;
