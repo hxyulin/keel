@@ -28,7 +28,13 @@
         "nmmintrin.h": "cd7b51a1c33c7e7d710f070315e7bc034757ea6be9e6804864cf159c79f48d54",
         "crc32intrin.h": "0f73e381b39e4718f70159158faa3da510769bb16120ec23f35bdcff14d34cb1",
         "avx512fintrin.h": "ae3f2f75e4f73a7527b0082669068e922551f36998a1c2b18a37d13cae5248f8",
-        "avx512vlintrin.h": "43f8d7215141c5c27a9c82fce3d5c00285e6f4477924f8d18654ddf21b157b45"
+        "avx512vlintrin.h": "43f8d7215141c5c27a9c82fce3d5c00285e6f4477924f8d18654ddf21b157b45",
+        "avx512cdintrin.h": "6f7d017bc978245c089c8caaa994156723fa5c49375ada07a221814cab6eb80f",
+        "avx512vlcdintrin.h": "cd14d673844dc0c1ff75df14029352dc7dc350b137f90156822ad53befe8e3c4",
+        "avx512dqintrin.h": "1d8d0ebf7276a50deee5bbb608cf7bbe4f0051902c07b907f0057eaff433cf2e",
+        "avx512vldqintrin.h": "30dedffcf21153addb581959e6f2ddf5f2a2e360719a8971bd48382dc1aa67d9",
+        "avx512bwintrin.h": "394ee7f037ea129f9c363a88d73a091a15bca1d3b07476ceca0e562f8ab20c9b",
+        "avx512vlbwintrin.h": "3ab5091ec9f6ed3d39dc617373678165e47d71c1288752a24980292c7c659543"
       }
     }
   }

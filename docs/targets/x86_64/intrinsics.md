@@ -291,12 +291,12 @@ python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
 ```
 
 The checker reports definitions and macros in the seven SSE–AVX2 headers,
-`crc32intrin.h`, `avx512fintrin.h` and `avx512vlintrin.h`, and compares them
-with compiler-owned headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
+`crc32intrin.h` and the pinned AVX512F/VL, DQ, BW and CD headers. It compares
+them with compiler-owned headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
 and AVX512F inventories have no missing candidates. This is a name check,
 not proof of signature, feature, immediate, ABI or semantic conformance. MMX
-entries are reported separately. The VL inventory lists missing interfaces.
-C++ overloads, 32-bit x86, AVX-512 extensions beyond F/VL, AMX and unlisted
+entries are reported separately. Extension inventories list missing interfaces.
+C++ overloads, 32-bit x86, AVX-512 extensions beyond F/VL/DQ/BW/CD, AMX and unlisted
 headers are outside the inventory.
 
 ### Function permissions and runtime CPU queries
@@ -1135,6 +1135,56 @@ exceptions. Inactive converted lanes preserve merge bits and suppress native
 floating exceptions, including where a vendor header uses an unmasked
 conversion followed by a selection. All conversions remain pinned to MXCSR.
 
+## AVX512DQ multiply and floating bitwise operations
+
+Typed `x86_avx512dq_` operations provide low qword multiplication and
+`andps`, `andpd`, `andnps`, `andnpd`, `orps`, `orpd`, `xorps` and `xorpd`
+at 128, 256 and 512 bits. The name ends in its vector width. Each takes
+`(merge, mask, a, b)` and returns that vector type. The mask is `i8`, except
+512-bit float bitwise operations use `i16`. These pure operations preserve
+all active payload bits, ignore higher mask bits and retain inactive merge
+bits. AND-NOT computes `~a & b`; multiplication wraps modulo 2^64. Floating
+bitwise operations do not inspect MXCSR or raise floating exceptions,
+including for signaling NaNs with invalid exceptions unmasked.
+
+All typed forms require `avx512f` and `avx512dq`; 128- and 256-bit forms also
+require `avx512vl`. C exposes narrow masked and mask-zero bitwise wrappers,
+plus masked, mask-zero and unmasked `_mm*_mullo_epi64` at every width.
+Existing 512-bit floating bitwise standard aliases retain their F-only
+integer-bitcast implementation. Their equivalent bit semantics do not
+require DQ. Direct DQ builtins expose the separately gated native operations.
+Portable `vimul` on `i64x8` uses native `vpmullq` when DQ is enabled and retains
+its scalar wrapping implementation with F alone. The `mullox_epi64`
+compatibility wrappers retain their F-only contract.
+
+## AVX512CD conflict and leading-zero count
+
+Typed names use `x86_avx512cd_maskconflictd`, `maskconflictq`, `masklzcntd`
+and `masklzcntq`, followed by `128`, `256` or `512`. Each takes a merge
+vector, scalar mask and input vector. Dword shapes are `i32x4`, `i32x8`
+and `i32x16`; qword shapes are `i64x2`, `i64x4` and `i64x8`. Masks are `i8`
+except 512-bit dword operations, which use `i16`.
+
+All forms require `avx512f` and `avx512cd`; 128- and 256-bit forms also
+require `avx512vl`. Packed leading-zero count does not require scalar LZCNT.
+A zero input produces 32 or 64, according to the lane width. Conflict lane
+`i` contains bit `j` when input lanes `i` and `j` match and `j < i`.
+The comparison includes earlier source lanes whose output mask bits are
+clear. Only the destination lanes are masked. Unused result bits are zero;
+inactive lanes retain their merge bits. These operations are pure and do
+not observe or change MXCSR.
+
+Mask-source broadcasts use `x86_avx512cd_broadcastmb128/256/512` with an
+`i8` source and qword result lanes, or `broadcastmw128/256/512` with an
+`i16` source and dword result lanes. Every lane receives the zero-extended
+source byte or word. There is no destination mask or merge operand.
+These forms use the same CD and narrow VL permissions and leave MXCSR unchanged.
+
+`immintrin.h` exposes all 42 public names from the pinned CD headers:
+conflict and lzcnt wrappers with merge, mask-zero and unmasked forms, plus
+mask-source broadcasts at each width. High destination mask bits beyond the
+vector's lane count are ignored.
+
 ## SHA-256
 
 `shaintrin.h`, also included by `immintrin.h`, exposes
@@ -1300,3 +1350,26 @@ controls is not validated. The x87 unmasked path is the
 [bounded x87 execution region](f80/README.md#unmasked-execution-region); the
 other raw x87 intrinsics require all exceptions masked. Arbitrary nonempty x87
 entry and signal-context restart are outside these contracts.
+
+## AVX512BW byte and word operations
+
+The typed `x86_avx512bw_` family provides byte and word wrapping addition and
+subtraction, signed and unsigned saturating addition and subtraction, signed
+and unsigned minimum and maximum, register moves, and unaligned masked loads
+and stores. Each operation has 128-, 256- and 512-bit forms. Every form requires
+AVX512F plus AVX512BW; 128- and 256-bit forms also require AVX512VL.
+
+Binary operations take `(merge, mask, a, b)`, and register moves take
+`(merge, mask, a)`. Loads take `(ptr, merge, mask)` and stores take
+`(ptr, value, mask)`. Scalar mask types match the lane count: `i8`, `i16`,
+`i32` or `i64`. Bit 63 controls the last byte in a 512-bit vector. Masked-off
+register and load lanes retain the merge value; masked-off stores leave memory
+untouched. Memory operations access only active byte or word lanes, including
+suppressing all accesses for a zero mask. Byte and word lanes may be unaligned; every byte
+of an active word lane must be accessible. Inputs and masks remain immutable SSA values.
+
+`immintrin.h` exposes the corresponding `_mm`, `_mm256` and `_mm512` masked
+and zero-masked arithmetic, move and unaligned memory interfaces. New 512-bit
+unmasked arithmetic and unaligned memory interfaces use the same typed forms
+with all lane bits set. Existing SSE/AVX2 unmasked interfaces keep their prior
+contracts. `__mmask32` and `__mmask64` retain all 32 or 64 mask bits.

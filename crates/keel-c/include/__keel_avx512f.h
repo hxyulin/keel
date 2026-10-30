@@ -4,6 +4,8 @@
 /* Included after the 512-bit vector aliases in immintrin.h. */
 typedef unsigned char __mmask8;
 typedef unsigned short __mmask16;
+typedef unsigned int __mmask32;
+typedef unsigned long long __mmask64;
 typedef int __keel_avx512_i32x16 __attribute__((vector_size(64)));
 #define _mm512_cmp_epi32_mask(a,b,p) ((__mmask16)__builtin_keel_avx512_cmpd((__keel_avx512_i32x16)(a),(__keel_avx512_i32x16)(b),(p)))
 #define _mm512_cmp_epu32_mask(a,b,p) ((__mmask16)__builtin_keel_avx512_cmpud((__keel_avx512_i32x16)(a),(__keel_avx512_i32x16)(b),(p)))
@@ -1003,4 +1005,7 @@ static __inline__ __attribute__((always_inline)) unsigned char _kortestc_mask16_
 #include <__keel_avx512_vl_float.h>
 #include <__keel_avx512_vl_integer_move.h>
 #include <__keel_avx512_vl_convert.h>
+#include <__keel_avx512_cd.h>
+#include <__keel_avx512_dq_bits.h>
+#include <__keel_avx512_bw.h>
 #endif

@@ -49,6 +49,9 @@ pub fn get(name: &Path) -> Option<&'static str> {
             include_str!("../include/__keel_avx512_vl_integer_move.h")
         }
         "__keel_avx512_vl_convert.h" => include_str!("../include/__keel_avx512_vl_convert.h"),
+        "__keel_avx512_cd.h" => include_str!("../include/__keel_avx512_cd.h"),
+        "__keel_avx512_dq_bits.h" => include_str!("../include/__keel_avx512_dq_bits.h"),
+        "__keel_avx512_bw.h" => include_str!("../include/__keel_avx512_bw.h"),
         "shaintrin.h" => include_str!("../include/shaintrin.h"),
         "__keel_aes.h" => include_str!("../include/__keel_aes.h"),
         "fmaintrin.h" => include_str!("../include/fmaintrin.h"),

@@ -906,6 +906,129 @@ fn lookup(base: &str) -> Option<Binding> {
         "keel_avx512vl_vcvtph2ps256" => Binding::Value(Intrinsic::X86Avx512VlVcvtph2ps256, &[]),
         "keel_avx512vl_vcvtps2ph128" => Binding::Value(Intrinsic::X86Avx512VlVcvtps2ph128, &[ImmediateControl { allowed_values: &[], index: 3, maximum: 255, mask: 255, diagnostic: "AVX512VL half rounding immediate must be an integer constant in 0..255" }]),
         "keel_avx512vl_vcvtps2ph256" => Binding::Value(Intrinsic::X86Avx512VlVcvtps2ph256, &[ImmediateControl { allowed_values: &[], index: 3, maximum: 255, mask: 255, diagnostic: "AVX512VL half rounding immediate must be an integer constant in 0..255" }]),
+        "keel_avx512cd_maskconflictd128" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictd128, &[]),
+        "keel_avx512cd_maskconflictq128" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictq128, &[]),
+        "keel_avx512cd_masklzcntd128" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntd128, &[]),
+        "keel_avx512cd_masklzcntq128" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntq128, &[]),
+        "keel_avx512cd_maskconflictd256" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictd256, &[]),
+        "keel_avx512cd_maskconflictq256" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictq256, &[]),
+        "keel_avx512cd_masklzcntd256" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntd256, &[]),
+        "keel_avx512cd_masklzcntq256" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntq256, &[]),
+        "keel_avx512cd_maskconflictd512" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictd512, &[]),
+        "keel_avx512cd_maskconflictq512" => Binding::Value(Intrinsic::X86Avx512CdMaskConflictq512, &[]),
+        "keel_avx512cd_masklzcntd512" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntd512, &[]),
+        "keel_avx512cd_masklzcntq512" => Binding::Value(Intrinsic::X86Avx512CdMaskLzcntq512, &[]),
+        "keel_avx512dq_mulloq128" => Binding::Value(Intrinsic::X86Avx512DqMulloq128, &[]),
+        "keel_avx512dq_andps128" => Binding::Value(Intrinsic::X86Avx512DqAndps128, &[]),
+        "keel_avx512dq_andpd128" => Binding::Value(Intrinsic::X86Avx512DqAndpd128, &[]),
+        "keel_avx512dq_andnps128" => Binding::Value(Intrinsic::X86Avx512DqAndnps128, &[]),
+        "keel_avx512dq_andnpd128" => Binding::Value(Intrinsic::X86Avx512DqAndnpd128, &[]),
+        "keel_avx512dq_orps128" => Binding::Value(Intrinsic::X86Avx512DqOrps128, &[]),
+        "keel_avx512dq_orpd128" => Binding::Value(Intrinsic::X86Avx512DqOrpd128, &[]),
+        "keel_avx512dq_xorps128" => Binding::Value(Intrinsic::X86Avx512DqXorps128, &[]),
+        "keel_avx512dq_xorpd128" => Binding::Value(Intrinsic::X86Avx512DqXorpd128, &[]),
+        "keel_avx512dq_mulloq256" => Binding::Value(Intrinsic::X86Avx512DqMulloq256, &[]),
+        "keel_avx512dq_andps256" => Binding::Value(Intrinsic::X86Avx512DqAndps256, &[]),
+        "keel_avx512dq_andpd256" => Binding::Value(Intrinsic::X86Avx512DqAndpd256, &[]),
+        "keel_avx512dq_andnps256" => Binding::Value(Intrinsic::X86Avx512DqAndnps256, &[]),
+        "keel_avx512dq_andnpd256" => Binding::Value(Intrinsic::X86Avx512DqAndnpd256, &[]),
+        "keel_avx512dq_orps256" => Binding::Value(Intrinsic::X86Avx512DqOrps256, &[]),
+        "keel_avx512dq_orpd256" => Binding::Value(Intrinsic::X86Avx512DqOrpd256, &[]),
+        "keel_avx512dq_xorps256" => Binding::Value(Intrinsic::X86Avx512DqXorps256, &[]),
+        "keel_avx512dq_xorpd256" => Binding::Value(Intrinsic::X86Avx512DqXorpd256, &[]),
+        "keel_avx512dq_mulloq512" => Binding::Value(Intrinsic::X86Avx512DqMulloq512, &[]),
+        "keel_avx512dq_andps512" => Binding::Value(Intrinsic::X86Avx512DqAndps512, &[]),
+        "keel_avx512dq_andpd512" => Binding::Value(Intrinsic::X86Avx512DqAndpd512, &[]),
+        "keel_avx512dq_andnps512" => Binding::Value(Intrinsic::X86Avx512DqAndnps512, &[]),
+        "keel_avx512dq_andnpd512" => Binding::Value(Intrinsic::X86Avx512DqAndnpd512, &[]),
+        "keel_avx512dq_orps512" => Binding::Value(Intrinsic::X86Avx512DqOrps512, &[]),
+        "keel_avx512dq_orpd512" => Binding::Value(Intrinsic::X86Avx512DqOrpd512, &[]),
+        "keel_avx512dq_xorps512" => Binding::Value(Intrinsic::X86Avx512DqXorps512, &[]),
+        "keel_avx512dq_xorpd512" => Binding::Value(Intrinsic::X86Avx512DqXorpd512, &[]),
+        "keel_avx512bw_addb128" => Binding::Value(Intrinsic::X86Avx512BwAddb128, &[]),
+        "keel_avx512bw_subb128" => Binding::Value(Intrinsic::X86Avx512BwSubb128, &[]),
+        "keel_avx512bw_addsb128" => Binding::Value(Intrinsic::X86Avx512BwAddsb128, &[]),
+        "keel_avx512bw_subsb128" => Binding::Value(Intrinsic::X86Avx512BwSubsb128, &[]),
+        "keel_avx512bw_addusb128" => Binding::Value(Intrinsic::X86Avx512BwAddusb128, &[]),
+        "keel_avx512bw_subusb128" => Binding::Value(Intrinsic::X86Avx512BwSubusb128, &[]),
+        "keel_avx512bw_minsb128" => Binding::Value(Intrinsic::X86Avx512BwMinsb128, &[]),
+        "keel_avx512bw_minub128" => Binding::Value(Intrinsic::X86Avx512BwMinub128, &[]),
+        "keel_avx512bw_maxsb128" => Binding::Value(Intrinsic::X86Avx512BwMaxsb128, &[]),
+        "keel_avx512bw_maxub128" => Binding::Value(Intrinsic::X86Avx512BwMaxub128, &[]),
+        "keel_avx512bw_moveb128" => Binding::Value(Intrinsic::X86Avx512BwMoveb128, &[]),
+        "keel_avx512bw_loadb128" => Binding::Value(Intrinsic::X86Avx512BwLoadb128, &[]),
+        "keel_avx512bw_storeb128" => Binding::Value(Intrinsic::X86Avx512BwStoreb128, &[]),
+        "keel_avx512bw_addw128" => Binding::Value(Intrinsic::X86Avx512BwAddw128, &[]),
+        "keel_avx512bw_subw128" => Binding::Value(Intrinsic::X86Avx512BwSubw128, &[]),
+        "keel_avx512bw_addsw128" => Binding::Value(Intrinsic::X86Avx512BwAddsw128, &[]),
+        "keel_avx512bw_subsw128" => Binding::Value(Intrinsic::X86Avx512BwSubsw128, &[]),
+        "keel_avx512bw_addusw128" => Binding::Value(Intrinsic::X86Avx512BwAddusw128, &[]),
+        "keel_avx512bw_subusw128" => Binding::Value(Intrinsic::X86Avx512BwSubusw128, &[]),
+        "keel_avx512bw_minsw128" => Binding::Value(Intrinsic::X86Avx512BwMinsw128, &[]),
+        "keel_avx512bw_minuw128" => Binding::Value(Intrinsic::X86Avx512BwMinuw128, &[]),
+        "keel_avx512bw_maxsw128" => Binding::Value(Intrinsic::X86Avx512BwMaxsw128, &[]),
+        "keel_avx512bw_maxuw128" => Binding::Value(Intrinsic::X86Avx512BwMaxuw128, &[]),
+        "keel_avx512bw_movew128" => Binding::Value(Intrinsic::X86Avx512BwMovew128, &[]),
+        "keel_avx512bw_loadw128" => Binding::Value(Intrinsic::X86Avx512BwLoadw128, &[]),
+        "keel_avx512bw_storew128" => Binding::Value(Intrinsic::X86Avx512BwStorew128, &[]),
+        "keel_avx512bw_addb256" => Binding::Value(Intrinsic::X86Avx512BwAddb256, &[]),
+        "keel_avx512bw_subb256" => Binding::Value(Intrinsic::X86Avx512BwSubb256, &[]),
+        "keel_avx512bw_addsb256" => Binding::Value(Intrinsic::X86Avx512BwAddsb256, &[]),
+        "keel_avx512bw_subsb256" => Binding::Value(Intrinsic::X86Avx512BwSubsb256, &[]),
+        "keel_avx512bw_addusb256" => Binding::Value(Intrinsic::X86Avx512BwAddusb256, &[]),
+        "keel_avx512bw_subusb256" => Binding::Value(Intrinsic::X86Avx512BwSubusb256, &[]),
+        "keel_avx512bw_minsb256" => Binding::Value(Intrinsic::X86Avx512BwMinsb256, &[]),
+        "keel_avx512bw_minub256" => Binding::Value(Intrinsic::X86Avx512BwMinub256, &[]),
+        "keel_avx512bw_maxsb256" => Binding::Value(Intrinsic::X86Avx512BwMaxsb256, &[]),
+        "keel_avx512bw_maxub256" => Binding::Value(Intrinsic::X86Avx512BwMaxub256, &[]),
+        "keel_avx512bw_moveb256" => Binding::Value(Intrinsic::X86Avx512BwMoveb256, &[]),
+        "keel_avx512bw_loadb256" => Binding::Value(Intrinsic::X86Avx512BwLoadb256, &[]),
+        "keel_avx512bw_storeb256" => Binding::Value(Intrinsic::X86Avx512BwStoreb256, &[]),
+        "keel_avx512bw_addw256" => Binding::Value(Intrinsic::X86Avx512BwAddw256, &[]),
+        "keel_avx512bw_subw256" => Binding::Value(Intrinsic::X86Avx512BwSubw256, &[]),
+        "keel_avx512bw_addsw256" => Binding::Value(Intrinsic::X86Avx512BwAddsw256, &[]),
+        "keel_avx512bw_subsw256" => Binding::Value(Intrinsic::X86Avx512BwSubsw256, &[]),
+        "keel_avx512bw_addusw256" => Binding::Value(Intrinsic::X86Avx512BwAddusw256, &[]),
+        "keel_avx512bw_subusw256" => Binding::Value(Intrinsic::X86Avx512BwSubusw256, &[]),
+        "keel_avx512bw_minsw256" => Binding::Value(Intrinsic::X86Avx512BwMinsw256, &[]),
+        "keel_avx512bw_minuw256" => Binding::Value(Intrinsic::X86Avx512BwMinuw256, &[]),
+        "keel_avx512bw_maxsw256" => Binding::Value(Intrinsic::X86Avx512BwMaxsw256, &[]),
+        "keel_avx512bw_maxuw256" => Binding::Value(Intrinsic::X86Avx512BwMaxuw256, &[]),
+        "keel_avx512bw_movew256" => Binding::Value(Intrinsic::X86Avx512BwMovew256, &[]),
+        "keel_avx512bw_loadw256" => Binding::Value(Intrinsic::X86Avx512BwLoadw256, &[]),
+        "keel_avx512bw_storew256" => Binding::Value(Intrinsic::X86Avx512BwStorew256, &[]),
+        "keel_avx512bw_addb512" => Binding::Value(Intrinsic::X86Avx512BwAddb512, &[]),
+        "keel_avx512bw_subb512" => Binding::Value(Intrinsic::X86Avx512BwSubb512, &[]),
+        "keel_avx512bw_addsb512" => Binding::Value(Intrinsic::X86Avx512BwAddsb512, &[]),
+        "keel_avx512bw_subsb512" => Binding::Value(Intrinsic::X86Avx512BwSubsb512, &[]),
+        "keel_avx512bw_addusb512" => Binding::Value(Intrinsic::X86Avx512BwAddusb512, &[]),
+        "keel_avx512bw_subusb512" => Binding::Value(Intrinsic::X86Avx512BwSubusb512, &[]),
+        "keel_avx512bw_minsb512" => Binding::Value(Intrinsic::X86Avx512BwMinsb512, &[]),
+        "keel_avx512bw_minub512" => Binding::Value(Intrinsic::X86Avx512BwMinub512, &[]),
+        "keel_avx512bw_maxsb512" => Binding::Value(Intrinsic::X86Avx512BwMaxsb512, &[]),
+        "keel_avx512bw_maxub512" => Binding::Value(Intrinsic::X86Avx512BwMaxub512, &[]),
+        "keel_avx512bw_moveb512" => Binding::Value(Intrinsic::X86Avx512BwMoveb512, &[]),
+        "keel_avx512bw_loadb512" => Binding::Value(Intrinsic::X86Avx512BwLoadb512, &[]),
+        "keel_avx512bw_storeb512" => Binding::Value(Intrinsic::X86Avx512BwStoreb512, &[]),
+        "keel_avx512bw_addw512" => Binding::Value(Intrinsic::X86Avx512BwAddw512, &[]),
+        "keel_avx512bw_subw512" => Binding::Value(Intrinsic::X86Avx512BwSubw512, &[]),
+        "keel_avx512bw_addsw512" => Binding::Value(Intrinsic::X86Avx512BwAddsw512, &[]),
+        "keel_avx512bw_subsw512" => Binding::Value(Intrinsic::X86Avx512BwSubsw512, &[]),
+        "keel_avx512bw_addusw512" => Binding::Value(Intrinsic::X86Avx512BwAddusw512, &[]),
+        "keel_avx512bw_subusw512" => Binding::Value(Intrinsic::X86Avx512BwSubusw512, &[]),
+        "keel_avx512bw_minsw512" => Binding::Value(Intrinsic::X86Avx512BwMinsw512, &[]),
+        "keel_avx512bw_minuw512" => Binding::Value(Intrinsic::X86Avx512BwMinuw512, &[]),
+        "keel_avx512bw_maxsw512" => Binding::Value(Intrinsic::X86Avx512BwMaxsw512, &[]),
+        "keel_avx512bw_maxuw512" => Binding::Value(Intrinsic::X86Avx512BwMaxuw512, &[]),
+        "keel_avx512bw_movew512" => Binding::Value(Intrinsic::X86Avx512BwMovew512, &[]),
+        "keel_avx512bw_loadw512" => Binding::Value(Intrinsic::X86Avx512BwLoadw512, &[]),
+        "keel_avx512bw_storew512" => Binding::Value(Intrinsic::X86Avx512BwStorew512, &[]),
+        "keel_avx512cd_broadcastmb128" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmb128, &[]),
+        "keel_avx512cd_broadcastmw128" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmw128, &[]),
+        "keel_avx512cd_broadcastmb256" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmb256, &[]),
+        "keel_avx512cd_broadcastmw256" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmw256, &[]),
+        "keel_avx512cd_broadcastmb512" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmb512, &[]),
+        "keel_avx512cd_broadcastmw512" => Binding::Value(Intrinsic::X86Avx512CdBroadcastmw512, &[]),
         _ => return None,
     })
 }
@@ -1819,6 +1942,129 @@ const _: () = {
     assert!(Intrinsic::X86Avx512VlVcvtph2ps256 as u16 == 1398);
     assert!(Intrinsic::X86Avx512VlVcvtps2ph128 as u16 == 1399);
     assert!(Intrinsic::X86Avx512VlVcvtps2ph256 as u16 == 1400);
+    assert!(Intrinsic::X86Avx512CdMaskConflictd128 as u16 == 1401);
+    assert!(Intrinsic::X86Avx512CdMaskConflictq128 as u16 == 1402);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntd128 as u16 == 1403);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntq128 as u16 == 1404);
+    assert!(Intrinsic::X86Avx512CdMaskConflictd256 as u16 == 1405);
+    assert!(Intrinsic::X86Avx512CdMaskConflictq256 as u16 == 1406);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntd256 as u16 == 1407);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntq256 as u16 == 1408);
+    assert!(Intrinsic::X86Avx512CdMaskConflictd512 as u16 == 1409);
+    assert!(Intrinsic::X86Avx512CdMaskConflictq512 as u16 == 1410);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntd512 as u16 == 1411);
+    assert!(Intrinsic::X86Avx512CdMaskLzcntq512 as u16 == 1412);
+    assert!(Intrinsic::X86Avx512DqMulloq128 as u16 == 1413);
+    assert!(Intrinsic::X86Avx512DqAndps128 as u16 == 1414);
+    assert!(Intrinsic::X86Avx512DqAndpd128 as u16 == 1415);
+    assert!(Intrinsic::X86Avx512DqAndnps128 as u16 == 1416);
+    assert!(Intrinsic::X86Avx512DqAndnpd128 as u16 == 1417);
+    assert!(Intrinsic::X86Avx512DqOrps128 as u16 == 1418);
+    assert!(Intrinsic::X86Avx512DqOrpd128 as u16 == 1419);
+    assert!(Intrinsic::X86Avx512DqXorps128 as u16 == 1420);
+    assert!(Intrinsic::X86Avx512DqXorpd128 as u16 == 1421);
+    assert!(Intrinsic::X86Avx512DqMulloq256 as u16 == 1422);
+    assert!(Intrinsic::X86Avx512DqAndps256 as u16 == 1423);
+    assert!(Intrinsic::X86Avx512DqAndpd256 as u16 == 1424);
+    assert!(Intrinsic::X86Avx512DqAndnps256 as u16 == 1425);
+    assert!(Intrinsic::X86Avx512DqAndnpd256 as u16 == 1426);
+    assert!(Intrinsic::X86Avx512DqOrps256 as u16 == 1427);
+    assert!(Intrinsic::X86Avx512DqOrpd256 as u16 == 1428);
+    assert!(Intrinsic::X86Avx512DqXorps256 as u16 == 1429);
+    assert!(Intrinsic::X86Avx512DqXorpd256 as u16 == 1430);
+    assert!(Intrinsic::X86Avx512DqMulloq512 as u16 == 1431);
+    assert!(Intrinsic::X86Avx512DqAndps512 as u16 == 1432);
+    assert!(Intrinsic::X86Avx512DqAndpd512 as u16 == 1433);
+    assert!(Intrinsic::X86Avx512DqAndnps512 as u16 == 1434);
+    assert!(Intrinsic::X86Avx512DqAndnpd512 as u16 == 1435);
+    assert!(Intrinsic::X86Avx512DqOrps512 as u16 == 1436);
+    assert!(Intrinsic::X86Avx512DqOrpd512 as u16 == 1437);
+    assert!(Intrinsic::X86Avx512DqXorps512 as u16 == 1438);
+    assert!(Intrinsic::X86Avx512DqXorpd512 as u16 == 1439);
+    assert!(Intrinsic::X86Avx512BwAddb128 as u16 == 1440);
+    assert!(Intrinsic::X86Avx512BwSubb128 as u16 == 1441);
+    assert!(Intrinsic::X86Avx512BwAddsb128 as u16 == 1442);
+    assert!(Intrinsic::X86Avx512BwSubsb128 as u16 == 1443);
+    assert!(Intrinsic::X86Avx512BwAddusb128 as u16 == 1444);
+    assert!(Intrinsic::X86Avx512BwSubusb128 as u16 == 1445);
+    assert!(Intrinsic::X86Avx512BwMinsb128 as u16 == 1446);
+    assert!(Intrinsic::X86Avx512BwMinub128 as u16 == 1447);
+    assert!(Intrinsic::X86Avx512BwMaxsb128 as u16 == 1448);
+    assert!(Intrinsic::X86Avx512BwMaxub128 as u16 == 1449);
+    assert!(Intrinsic::X86Avx512BwMoveb128 as u16 == 1450);
+    assert!(Intrinsic::X86Avx512BwLoadb128 as u16 == 1451);
+    assert!(Intrinsic::X86Avx512BwStoreb128 as u16 == 1452);
+    assert!(Intrinsic::X86Avx512BwAddw128 as u16 == 1453);
+    assert!(Intrinsic::X86Avx512BwSubw128 as u16 == 1454);
+    assert!(Intrinsic::X86Avx512BwAddsw128 as u16 == 1455);
+    assert!(Intrinsic::X86Avx512BwSubsw128 as u16 == 1456);
+    assert!(Intrinsic::X86Avx512BwAddusw128 as u16 == 1457);
+    assert!(Intrinsic::X86Avx512BwSubusw128 as u16 == 1458);
+    assert!(Intrinsic::X86Avx512BwMinsw128 as u16 == 1459);
+    assert!(Intrinsic::X86Avx512BwMinuw128 as u16 == 1460);
+    assert!(Intrinsic::X86Avx512BwMaxsw128 as u16 == 1461);
+    assert!(Intrinsic::X86Avx512BwMaxuw128 as u16 == 1462);
+    assert!(Intrinsic::X86Avx512BwMovew128 as u16 == 1463);
+    assert!(Intrinsic::X86Avx512BwLoadw128 as u16 == 1464);
+    assert!(Intrinsic::X86Avx512BwStorew128 as u16 == 1465);
+    assert!(Intrinsic::X86Avx512BwAddb256 as u16 == 1466);
+    assert!(Intrinsic::X86Avx512BwSubb256 as u16 == 1467);
+    assert!(Intrinsic::X86Avx512BwAddsb256 as u16 == 1468);
+    assert!(Intrinsic::X86Avx512BwSubsb256 as u16 == 1469);
+    assert!(Intrinsic::X86Avx512BwAddusb256 as u16 == 1470);
+    assert!(Intrinsic::X86Avx512BwSubusb256 as u16 == 1471);
+    assert!(Intrinsic::X86Avx512BwMinsb256 as u16 == 1472);
+    assert!(Intrinsic::X86Avx512BwMinub256 as u16 == 1473);
+    assert!(Intrinsic::X86Avx512BwMaxsb256 as u16 == 1474);
+    assert!(Intrinsic::X86Avx512BwMaxub256 as u16 == 1475);
+    assert!(Intrinsic::X86Avx512BwMoveb256 as u16 == 1476);
+    assert!(Intrinsic::X86Avx512BwLoadb256 as u16 == 1477);
+    assert!(Intrinsic::X86Avx512BwStoreb256 as u16 == 1478);
+    assert!(Intrinsic::X86Avx512BwAddw256 as u16 == 1479);
+    assert!(Intrinsic::X86Avx512BwSubw256 as u16 == 1480);
+    assert!(Intrinsic::X86Avx512BwAddsw256 as u16 == 1481);
+    assert!(Intrinsic::X86Avx512BwSubsw256 as u16 == 1482);
+    assert!(Intrinsic::X86Avx512BwAddusw256 as u16 == 1483);
+    assert!(Intrinsic::X86Avx512BwSubusw256 as u16 == 1484);
+    assert!(Intrinsic::X86Avx512BwMinsw256 as u16 == 1485);
+    assert!(Intrinsic::X86Avx512BwMinuw256 as u16 == 1486);
+    assert!(Intrinsic::X86Avx512BwMaxsw256 as u16 == 1487);
+    assert!(Intrinsic::X86Avx512BwMaxuw256 as u16 == 1488);
+    assert!(Intrinsic::X86Avx512BwMovew256 as u16 == 1489);
+    assert!(Intrinsic::X86Avx512BwLoadw256 as u16 == 1490);
+    assert!(Intrinsic::X86Avx512BwStorew256 as u16 == 1491);
+    assert!(Intrinsic::X86Avx512BwAddb512 as u16 == 1492);
+    assert!(Intrinsic::X86Avx512BwSubb512 as u16 == 1493);
+    assert!(Intrinsic::X86Avx512BwAddsb512 as u16 == 1494);
+    assert!(Intrinsic::X86Avx512BwSubsb512 as u16 == 1495);
+    assert!(Intrinsic::X86Avx512BwAddusb512 as u16 == 1496);
+    assert!(Intrinsic::X86Avx512BwSubusb512 as u16 == 1497);
+    assert!(Intrinsic::X86Avx512BwMinsb512 as u16 == 1498);
+    assert!(Intrinsic::X86Avx512BwMinub512 as u16 == 1499);
+    assert!(Intrinsic::X86Avx512BwMaxsb512 as u16 == 1500);
+    assert!(Intrinsic::X86Avx512BwMaxub512 as u16 == 1501);
+    assert!(Intrinsic::X86Avx512BwMoveb512 as u16 == 1502);
+    assert!(Intrinsic::X86Avx512BwLoadb512 as u16 == 1503);
+    assert!(Intrinsic::X86Avx512BwStoreb512 as u16 == 1504);
+    assert!(Intrinsic::X86Avx512BwAddw512 as u16 == 1505);
+    assert!(Intrinsic::X86Avx512BwSubw512 as u16 == 1506);
+    assert!(Intrinsic::X86Avx512BwAddsw512 as u16 == 1507);
+    assert!(Intrinsic::X86Avx512BwSubsw512 as u16 == 1508);
+    assert!(Intrinsic::X86Avx512BwAddusw512 as u16 == 1509);
+    assert!(Intrinsic::X86Avx512BwSubusw512 as u16 == 1510);
+    assert!(Intrinsic::X86Avx512BwMinsw512 as u16 == 1511);
+    assert!(Intrinsic::X86Avx512BwMinuw512 as u16 == 1512);
+    assert!(Intrinsic::X86Avx512BwMaxsw512 as u16 == 1513);
+    assert!(Intrinsic::X86Avx512BwMaxuw512 as u16 == 1514);
+    assert!(Intrinsic::X86Avx512BwMovew512 as u16 == 1515);
+    assert!(Intrinsic::X86Avx512BwLoadw512 as u16 == 1516);
+    assert!(Intrinsic::X86Avx512BwStorew512 as u16 == 1517);
+    assert!(Intrinsic::X86Avx512CdBroadcastmb128 as u16 == 1518);
+    assert!(Intrinsic::X86Avx512CdBroadcastmw128 as u16 == 1519);
+    assert!(Intrinsic::X86Avx512CdBroadcastmb256 as u16 == 1520);
+    assert!(Intrinsic::X86Avx512CdBroadcastmw256 as u16 == 1521);
+    assert!(Intrinsic::X86Avx512CdBroadcastmb512 as u16 == 1522);
+    assert!(Intrinsic::X86Avx512CdBroadcastmw512 as u16 == 1523);
 };
 
 #[cfg(test)]
@@ -2713,6 +2959,129 @@ mod tests {
             (Intrinsic::X86Avx512VlVcvtph2ps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::F32x8)]),
             (Intrinsic::X86Avx512VlVcvtps2ph128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::F32x4), Type::I32], &[Type::Vector(VectorType::I16x8)]),
             (Intrinsic::X86Avx512VlVcvtps2ph256, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::F32x8), Type::I32], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512CdMaskConflictd128, &[Type::Vector(VectorType::I32x4), Type::I8, Type::Vector(VectorType::I32x4)], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512CdMaskConflictq128, &[Type::Vector(VectorType::I64x2), Type::I8, Type::Vector(VectorType::I64x2)], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512CdMaskLzcntd128, &[Type::Vector(VectorType::I32x4), Type::I8, Type::Vector(VectorType::I32x4)], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512CdMaskLzcntq128, &[Type::Vector(VectorType::I64x2), Type::I8, Type::Vector(VectorType::I64x2)], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512CdMaskConflictd256, &[Type::Vector(VectorType::I32x8), Type::I8, Type::Vector(VectorType::I32x8)], &[Type::Vector(VectorType::I32x8)]),
+            (Intrinsic::X86Avx512CdMaskConflictq256, &[Type::Vector(VectorType::I64x4), Type::I8, Type::Vector(VectorType::I64x4)], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512CdMaskLzcntd256, &[Type::Vector(VectorType::I32x8), Type::I8, Type::Vector(VectorType::I32x8)], &[Type::Vector(VectorType::I32x8)]),
+            (Intrinsic::X86Avx512CdMaskLzcntq256, &[Type::Vector(VectorType::I64x4), Type::I8, Type::Vector(VectorType::I64x4)], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512CdMaskConflictd512, &[Type::Vector(VectorType::I32x16), Type::I16, Type::Vector(VectorType::I32x16)], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512CdMaskConflictq512, &[Type::Vector(VectorType::I64x8), Type::I8, Type::Vector(VectorType::I64x8)], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512CdMaskLzcntd512, &[Type::Vector(VectorType::I32x16), Type::I16, Type::Vector(VectorType::I32x16)], &[Type::Vector(VectorType::I32x16)]),
+            (Intrinsic::X86Avx512CdMaskLzcntq512, &[Type::Vector(VectorType::I64x8), Type::I8, Type::Vector(VectorType::I64x8)], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512DqMulloq128, &[Type::Vector(VectorType::I64x2), Type::I8, Type::Vector(VectorType::I64x2), Type::Vector(VectorType::I64x2)], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512DqAndps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512DqAndpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512DqAndnps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512DqAndnpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512DqOrps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512DqOrpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512DqXorps128, &[Type::Vector(VectorType::F32x4), Type::I8, Type::Vector(VectorType::F32x4), Type::Vector(VectorType::F32x4)], &[Type::Vector(VectorType::F32x4)]),
+            (Intrinsic::X86Avx512DqXorpd128, &[Type::Vector(VectorType::F64x2), Type::I8, Type::Vector(VectorType::F64x2), Type::Vector(VectorType::F64x2)], &[Type::Vector(VectorType::F64x2)]),
+            (Intrinsic::X86Avx512DqMulloq256, &[Type::Vector(VectorType::I64x4), Type::I8, Type::Vector(VectorType::I64x4), Type::Vector(VectorType::I64x4)], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512DqAndps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512DqAndpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512DqAndnps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512DqAndnpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512DqOrps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512DqOrpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512DqXorps256, &[Type::Vector(VectorType::F32x8), Type::I8, Type::Vector(VectorType::F32x8), Type::Vector(VectorType::F32x8)], &[Type::Vector(VectorType::F32x8)]),
+            (Intrinsic::X86Avx512DqXorpd256, &[Type::Vector(VectorType::F64x4), Type::I8, Type::Vector(VectorType::F64x4), Type::Vector(VectorType::F64x4)], &[Type::Vector(VectorType::F64x4)]),
+            (Intrinsic::X86Avx512DqMulloq512, &[Type::Vector(VectorType::I64x8), Type::I8, Type::Vector(VectorType::I64x8), Type::Vector(VectorType::I64x8)], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512DqAndps512, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16), Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512DqAndpd512, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8), Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512DqAndnps512, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16), Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512DqAndnpd512, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8), Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512DqOrps512, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16), Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512DqOrpd512, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8), Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512DqXorps512, &[Type::Vector(VectorType::F32x16), Type::I16, Type::Vector(VectorType::F32x16), Type::Vector(VectorType::F32x16)], &[Type::Vector(VectorType::F32x16)]),
+            (Intrinsic::X86Avx512DqXorpd512, &[Type::Vector(VectorType::F64x8), Type::I8, Type::Vector(VectorType::F64x8), Type::Vector(VectorType::F64x8)], &[Type::Vector(VectorType::F64x8)]),
+            (Intrinsic::X86Avx512BwAddb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwSubb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwAddsb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwSubsb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwAddusb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwSubusb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwMinsb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwMinub128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwMaxsb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwMaxub128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16), Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwMoveb128, &[Type::Vector(VectorType::I8x16), Type::I16, Type::Vector(VectorType::I8x16)], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwLoadb128, &[Type::Ptr, Type::Vector(VectorType::I8x16), Type::I16], &[Type::Vector(VectorType::I8x16)]),
+            (Intrinsic::X86Avx512BwStoreb128, &[Type::Ptr, Type::Vector(VectorType::I8x16), Type::I16], &[]),
+            (Intrinsic::X86Avx512BwAddw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwSubw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwAddsw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwSubsw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwAddusw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwSubusw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwMinsw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwMinuw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwMaxsw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwMaxuw128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8), Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwMovew128, &[Type::Vector(VectorType::I16x8), Type::I8, Type::Vector(VectorType::I16x8)], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwLoadw128, &[Type::Ptr, Type::Vector(VectorType::I16x8), Type::I8], &[Type::Vector(VectorType::I16x8)]),
+            (Intrinsic::X86Avx512BwStorew128, &[Type::Ptr, Type::Vector(VectorType::I16x8), Type::I8], &[]),
+            (Intrinsic::X86Avx512BwAddb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwSubb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwAddsb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwSubsb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwAddusb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwSubusb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwMinsb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwMinub256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwMaxsb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwMaxub256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32), Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwMoveb256, &[Type::Vector(VectorType::I8x32), Type::I32, Type::Vector(VectorType::I8x32)], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwLoadb256, &[Type::Ptr, Type::Vector(VectorType::I8x32), Type::I32], &[Type::Vector(VectorType::I8x32)]),
+            (Intrinsic::X86Avx512BwStoreb256, &[Type::Ptr, Type::Vector(VectorType::I8x32), Type::I32], &[]),
+            (Intrinsic::X86Avx512BwAddw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwSubw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwAddsw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwSubsw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwAddusw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwSubusw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwMinsw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwMinuw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwMaxsw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwMaxuw256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16), Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwMovew256, &[Type::Vector(VectorType::I16x16), Type::I16, Type::Vector(VectorType::I16x16)], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwLoadw256, &[Type::Ptr, Type::Vector(VectorType::I16x16), Type::I16], &[Type::Vector(VectorType::I16x16)]),
+            (Intrinsic::X86Avx512BwStorew256, &[Type::Ptr, Type::Vector(VectorType::I16x16), Type::I16], &[]),
+            (Intrinsic::X86Avx512BwAddb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwSubb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwAddsb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwSubsb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwAddusb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwSubusb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwMinsb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwMinub512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwMaxsb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwMaxub512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64), Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwMoveb512, &[Type::Vector(VectorType::I8x64), Type::I64, Type::Vector(VectorType::I8x64)], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwLoadb512, &[Type::Ptr, Type::Vector(VectorType::I8x64), Type::I64], &[Type::Vector(VectorType::I8x64)]),
+            (Intrinsic::X86Avx512BwStoreb512, &[Type::Ptr, Type::Vector(VectorType::I8x64), Type::I64], &[]),
+            (Intrinsic::X86Avx512BwAddw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwSubw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwAddsw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwSubsw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwAddusw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwSubusw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwMinsw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwMinuw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwMaxsw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwMaxuw512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32), Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwMovew512, &[Type::Vector(VectorType::I16x32), Type::I32, Type::Vector(VectorType::I16x32)], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwLoadw512, &[Type::Ptr, Type::Vector(VectorType::I16x32), Type::I32], &[Type::Vector(VectorType::I16x32)]),
+            (Intrinsic::X86Avx512BwStorew512, &[Type::Ptr, Type::Vector(VectorType::I16x32), Type::I32], &[]),
+            (Intrinsic::X86Avx512CdBroadcastmb128, &[Type::I8], &[Type::Vector(VectorType::I64x2)]),
+            (Intrinsic::X86Avx512CdBroadcastmw128, &[Type::I16], &[Type::Vector(VectorType::I32x4)]),
+            (Intrinsic::X86Avx512CdBroadcastmb256, &[Type::I8], &[Type::Vector(VectorType::I64x4)]),
+            (Intrinsic::X86Avx512CdBroadcastmw256, &[Type::I16], &[Type::Vector(VectorType::I32x8)]),
+            (Intrinsic::X86Avx512CdBroadcastmb512, &[Type::I8], &[Type::Vector(VectorType::I64x8)]),
+            (Intrinsic::X86Avx512CdBroadcastmw512, &[Type::I16], &[Type::Vector(VectorType::I32x16)]),
         ];
         for &(intrinsic, params, result) in signatures {
             assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");

@@ -1647,3 +1647,12 @@ mod x86_avx512_vl_integer_move;
 
 #[path = "x86_intrinsics/x86_avx512_vl_convert.rs"]
 mod x86_avx512_vl_convert;
+
+#[path = "x86_intrinsics/x86_avx512_cd.rs"]
+mod x86_avx512_cd;
+
+#[path = "x86_intrinsics/x86_avx512_dq_bits.rs"]
+mod x86_avx512_dq_bits;
+
+#[path = "x86_intrinsics/x86_avx512_bw.rs"]
+mod x86_avx512_bw;
