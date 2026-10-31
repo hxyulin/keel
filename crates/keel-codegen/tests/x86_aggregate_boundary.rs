@@ -118,3 +118,6 @@ int main(void) {
 
 #[path = "x86_aggregate_boundary/x86_zmm_wrappers.rs"]
 mod x86_zmm_wrappers;
+
+#[path = "x86_aggregate_boundary/x86_mixed_simd_abi.rs"]
+mod x86_mixed_simd_abi;

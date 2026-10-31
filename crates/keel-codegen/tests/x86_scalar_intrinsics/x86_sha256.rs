@@ -103,3 +103,175 @@ fn sha256_types_features_aliases_and_spills() {
         }
     }
 }
+
+/// Pin only the unrelated wide SSA value, leaving every SHA operand spilled.
+/// This makes the implicit XMM0 staging conflict independent of spill costs.
+struct PinWideSimd0(AllocationTier);
+impl keel_codegen::regalloc::RegisterAllocator for PinWideSimd0 {
+    fn name(&self) -> &'static str {
+        "sha-wide-simd0"
+    }
+    fn allocate(
+        &self,
+        input: &keel_codegen::regalloc::AllocationInput<'_>,
+    ) -> keel_codegen::regalloc::Allocation {
+        use keel_codegen::regalloc::Loc;
+        use keel_ir::{EntityRef, InstData};
+        let spilled = keel_codegen::regalloc::AllocationInput {
+            pools: &EMPTY,
+            ..*input
+        };
+        let mut allocation = self.0.allocate(&spilled);
+        let load = input
+            .func
+            .layout_insts()
+            .find_map(|(_, inst)| match input.func.inst_data(inst) {
+                InstData::Load { ty, .. } if ty.is_vector() && ty.bytes().unwrap() >= 32 => {
+                    Some(inst)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let value = input.func.inst_results(load)[0];
+        assert!(
+            !allocation.locs[0]
+                .iter()
+                .any(|loc| *loc == Some(Loc::FReg(0)))
+        );
+        allocation.locs[0][value.index()] = Some(Loc::FReg(0));
+        assert_eq!(allocation.loc(value), Some(Loc::FReg(0)));
+        allocation
+    }
+}
+
+#[test]
+fn sha256_rounds_preserve_pinned_ymm0_zmm0_and_every_third_input_alias() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let mut source = String::new();
+    let mut harness = String::from(
+        "#include <immintrin.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n",
+    );
+    let mut checks = String::new();
+    for (kind, shape, bytes) in [("ymm", "i32x8", 32), ("zmm", "i32x16", 64)] {
+        for alias in 0..4 {
+            let (second, third) = match alias {
+                0 => ("v8", "v9"),
+                1 => ("v8", "v7"),
+                2 => ("v8", "v8"),
+                _ => ("v7", "v7"),
+            };
+            let name = format!("sha_pin_{kind}_{alias}");
+            source += &format!(
+                "func @{name}(ptr,ptr) target_features(\"avx512f,sha\") {{\nentry(v0:ptr,v1:ptr):\n v2=load.{shape} align 1 v0\n v3=iconst.i64 64\n v4=ptradd v0,v3\n v5=iconst.i64 16\n v6=ptradd v4,v5\n v7=load.i32x4 align 1 v4\n v8=load.i32x4 align 1 v6\n v10=ptradd v6,v5\n v9=load.i32x4 align 1 v10\n v11=intrinsic x86_sha256rnds2(v7,{second},{third})\n store align 1 v11,v1\n v12=ptradd v1,v5\n store align 1 v7,v12\n v13=ptradd v12,v5\n store align 1 v8,v13\n v14=ptradd v13,v5\n store align 1 v9,v14\n v15=ptradd v1,v3\n store align 1 v2,v15\n return\n}}\n"
+            );
+            harness += &format!("extern void {name}(const void*,void*);\n");
+            let (second, third) = match alias {
+                0 => ("b", "c"),
+                1 => ("b", "a"),
+                2 => ("b", "b"),
+                _ => ("a", "a"),
+            };
+            checks += &format!(
+                "{{unsigned char out[160];memset(out,0xa5,sizeof out);__m128i wanted=_mm_sha256rnds2_epu32(a,{second},{third});{name}(data,out);if(memcmp(out,&wanted,16)||memcmp(out+16,data+64,48)||memcmp(out+64,data,{bytes})){{fprintf(stderr,\"{name} mismatch\\n\");return 1;}}for(unsigned i=64+{bytes};i<sizeof out;i++)if(out[i]!=0xa5)return 2;}}\n"
+            );
+        }
+    }
+    harness += &format!(
+        "int main(void){{unsigned char data[112],original[112];for(unsigned sample=0;sample<37;sample++){{for(unsigned i=0;i<sizeof data;i++)data[i]=(unsigned char)(sample*31+i*13+(i/16)*67);memcpy(original,data,sizeof data);__m128i a=_mm_loadu_si128((const void*)(data+64)),b=_mm_loadu_si128((const void*)(data+80)),c=_mm_loadu_si128((const void*)(data+96));{checks}if(memcmp(data,original,sizeof data))return 3;}}return 0;}}\n"
+    );
+    let original = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&original).unwrap();
+    let features = Features::NONE.with_features("avx512f,sha").unwrap();
+    assert!(!features.avx2 && !features.avx512vl);
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "keel-sha-pin-wide0-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("oracle.c"), harness).unwrap();
+    let native = cfg!(all(target_arch = "x86_64", target_os = "linux"));
+    #[cfg(target_arch = "x86_64")]
+    let native =
+        native && std::is_x86_feature_detected!("sha") && std::is_x86_feature_detected!("avx512f");
+    if native {
+        let result = Command::new("cc")
+            .args(["-O2", "-msha", "-mavx512f", "-c"])
+            .arg(dir.join("oracle.c"))
+            .arg("-o")
+            .arg(dir.join("oracle.o"))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let pools = Pools {
+        float_caller_saved: &[0],
+        ..EMPTY
+    };
+    for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+        for optimize in [false, true] {
+            let mut module = original.clone();
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            let pin = PinWideSimd0(allocator);
+            let tier = if optimize {
+                SelectionTier::Full
+            } else {
+                SelectionTier::Baseline
+            };
+            let selector = FeatureSelector {
+                inner: &tier,
+                features,
+            };
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &pin,
+            };
+            let text =
+                keel_codegen::x86_64::compile_with_pipeline(&module, &pools, &pipeline).unwrap();
+            let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                normalized.contains("movdqu xmm15, xmm0")
+                    && normalized.contains("movdqu xmm0, xmm15"),
+                "{text}"
+            );
+            let program =
+                keel_codegen::x86_64::compile_program_with_pipeline(&module, &pools, &pipeline)
+                    .unwrap();
+            let object =
+                keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+            assert_eq!(
+                object,
+                keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+            );
+            fs::write(dir.join("sha.o"), object).unwrap();
+            if native {
+                let result = Command::new("cc")
+                    .arg(dir.join("oracle.o"))
+                    .arg(dir.join("sha.o"))
+                    .arg("-o")
+                    .arg(dir.join("run"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let result = Command::new(dir.join("run")).output().unwrap();
+                assert!(
+                    result.status.success(),
+                    "{allocator:?} opt{optimize}: {} {}",
+                    result.status,
+                    String::from_utf8_lossy(&result.stderr)
+                );
+            }
+        }
+    }
+}

@@ -276,6 +276,18 @@ fn optional_and_required_inlining_preserve_target_permissions() {
         ("avx2", "avx", true),
         ("avx2", "", true),
         ("-avx", "", false),
+        ("", "avx512f", false),
+        ("avx512f", "avx512dq", false),
+        ("avx512dq", "avx512f", true),
+        ("avx512bw", "avx512dq", false),
+        ("avx512cd", "avx512bw", false),
+        ("avx512bw,avx512dq,avx512cd,avx512vl", "avx512bw", true),
+        ("avx512bw,-avx512bw", "avx512bw", false),
+        ("avx512f", "avx512vl", false),
+        ("avx512vl", "avx512f", true),
+        ("-avx512f", "", false),
+        ("avx512dq,-avx512dq", "avx512f", false),
+        ("avx512dq,-avx512dq", "avx512f,-avx512dq", true),
     ] {
         let attribute = |value: &str| {
             if value.is_empty() {
