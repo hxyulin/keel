@@ -23,6 +23,3 @@ mod x86_signed_byte_load;
 mod x86_size;
 #[path = "x86_scalar_selection/x86_size_constants.rs"]
 mod x86_size_constants;
-
-#[path = "x86_scalar_selection/x86_integer_idioms.rs"]
-mod x86_integer_idioms;

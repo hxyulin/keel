@@ -205,21 +205,6 @@ It does not cross memory accesses, source-location or allocation constraints,
 and is disabled in functions with inline assembly. Memory-operand comparisons
 keep their existing staging boundary.
 
-Local integer selection also recognizes two i64 forms before allocation:
-
-- `(x << k) sshr k` for modulo-64 counts 56, 48 and 32 uses `MOVSX` or
-  `MOVSXD` from the original input when the left shift is single-use.
-  Allocation keeps the original input live through the extension.
-- Negating the unsigned extension of a single-use `icmp.eq x, 0`, with an
-  i64 input and result, uses `CMP x, 1; SBB dst, dst`. This consumes CF from
-  the unsigned comparison and produces zero or all ones without `SETcc`.
-
-These covers run in every selector tier. Producers must be in the same block,
-with only unconstrained constants between them. Shared comparisons or
-extensions, custom constraints, debug locations, inline assembly and intrinsic
-functions retain their existing lowering. The zero-mask compare and SBB stay
-together; input reloads precede the compare and result spills follow SBB.
-
 ## Memory operand folding
 
 Tree and Full selection fold some loads into their consumer. Every fold keeps
