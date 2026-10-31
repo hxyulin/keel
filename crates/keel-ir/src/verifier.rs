@@ -1738,6 +1738,25 @@ impl Verifier<'_> {
                         );
                     }
                 }
+                if let Some(d) = id.x86_avx512_vl_lane()
+                    && let Some(index) = d.control
+                {
+                    let value =
+                        args.get(index)
+                            .and_then(|&v| match func.value_def(func.resolve(v)) {
+                                ValueDef::Result(i, _) => match func.inst_data(i) {
+                                    InstData::Iconst { ty: Type::I32, imm } => Some(*imm),
+                                    _ => None,
+                                },
+                                _ => None,
+                            });
+                    if !value.is_some_and(|n| (0..=1).contains(&n)) {
+                        self.inst_error(
+                            inst,
+                            "VL lane index must be a constant zero or one".into(),
+                        );
+                    }
+                }
                 if id
                     .x86_avx512_bw_mask_alu()
                     .is_some_and(|d| d.kind == crate::intrinsic::X86Avx512BwMaskAluKind::Shift)

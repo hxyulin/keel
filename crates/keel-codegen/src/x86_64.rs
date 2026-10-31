@@ -164,7 +164,10 @@ mod avx512_scalar_move;
 mod avx512_special;
 mod avx512_vl_convert;
 mod avx512_vl_integer;
+mod avx512_vl_lane;
+mod avx512_vl_narrow;
 mod avx512_vl_shift;
+mod avx512_vl_widen;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -1212,6 +1215,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+                if id.x86_avx512_vl_narrow().is_some() {
+                    avx512_vl_narrow::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|message| err(message.into()))?;
+                }
                 if id.x86_avx512_bw_convert().is_some() {
                     avx512_bw_convert::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
@@ -1223,6 +1230,14 @@ impl<'a> FunctionCompiler<'a> {
                 if id.x86_avx512_bw_mul().is_some() {
                     avx512_bw_mul::validate(func, *id, args, pipeline.selector.x86_features())
                         .map_err(|message| err(message.into()))?;
+                }
+                if id.x86_avx512_vl_lane().is_some() {
+                    avx512_vl_lane::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
+                }
+                if id.x86_avx512_vl_widen().is_some() {
+                    avx512_vl_widen::validate(func, *id, args, pipeline.selector.x86_features())
+                        .map_err(|s| err(s.into()))?;
                 }
                 if id.x86_avx512_vl_integer().is_some() {
                     avx512_vl_integer::validate(func, *id, args, pipeline.selector.x86_features())
@@ -3303,6 +3318,9 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Intrinsic { id, ref args } if id.x86_packed_search().is_some() => {
                 self.native_packed_search(id, args, result)
             }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_narrow().is_some() => {
+                self.native_avx512_vl_narrow(id, args, result);
+            }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_convert().is_some() => {
                 self.native_avx512_bw_convert(id, args, result);
             }
@@ -3311,6 +3329,12 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_bw_mul().is_some() => {
                 self.native_avx512_bw_mul(id, args, result);
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_lane().is_some() => {
+                self.native_avx512_vl_lane(id, args, result)
+            }
+            InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_widen().is_some() => {
+                self.native_avx512_vl_widen(id, args, result)
             }
             InstData::Intrinsic { id, ref args } if id.x86_avx512_vl_integer().is_some() => {
                 self.native_avx512_vl_integer(id, args, result)
@@ -6203,8 +6227,8 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
     /// Integer copies break cycles through r11. SIMD copies use reserved
-    /// xmm14/ymm14, preserving every lane without reserving frame storage.
-    /// emit_move uses only rax and xmm15/ymm15 for memory transfers, so it
+    /// xmm14/ymm14/zmm14, preserving every lane without reserving frame storage.
+    /// emit_move uses only rax and xmm15/ymm15/zmm15 for memory transfers, so it
     /// cannot clobber either cycle temporary while draining a chain.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
         let simd = moves.iter().any(|&(dst, src)| {

@@ -998,3 +998,9 @@ mod x86_avx512_vl_integer;
 
 #[path = "vector_x86/x86_avx512_bw_permute.rs"]
 mod x86_avx512_bw_permute;
+
+#[path = "vector_x86/x86_avx512_vl_widen.rs"]
+mod x86_avx512_vl_widen;
+
+#[path = "vector_x86/x86_avx512_vl_narrow.rs"]
+mod x86_avx512_vl_narrow;

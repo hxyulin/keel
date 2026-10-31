@@ -49,7 +49,7 @@ VALUE_CONTROLS.update({
     'avx512_cvt_rc': ({'X86Avx512Vcvtps2udq', 'X86Avx512Vcvtudq2ps', 'X86Avx512Vcvtpd2ps', 'X86Avx512Vcvtps2dq', 'X86Avx512Vcvtdq2ps', 'X86Avx512Vcvtpd2dq', 'X86Avx512Vcvtpd2udq'}, 3, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_cvt_exact': ({'X86Avx512Vcvtdq2pd', 'X86Avx512Vcvtudq2pd'}, 3, 4, 15, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_cvt_sae': ({'X86Avx512Vcvttps2udq', 'X86Avx512Vcvttpd2udq', 'X86Avx512Vcvttpd2dq', 'X86Avx512Vcvttps2dq', 'X86Avx512Vcvtph2ps', 'X86Avx512Vcvtps2pd'}, 3, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
-    'avx512_cvt_half': ({'X86Avx512Vcvtps2ph'}, 3, 12, 15, 'AVX512 control must be an integer constant expression in the declared range'),
+    'avx512_cvt_half': ({'X86Avx512Vcvtps2ph'}, 3, 255, 255, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_special_sae': ({'X86Avx512Getexppd', 'X86Avx512Getexpps'}, 3, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_mant_controls': ({'X86Avx512Getmantps', 'X86Avx512Getmantpd'}, 4, 8, 15, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_scalef_rc': ({'X86Avx512Scalefps', 'X86Avx512Scalefpd'}, 4, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
@@ -58,7 +58,7 @@ VALUE_CONTROLS.update({
     'avx512_ternary_imm': ({'X86Avx512MaskTernlogq', 'X86Avx512MaskTernlogd'}, 5, 255, 255, 'AVX512 control must be an integer constant expression in the declared range'),
     'avx512_rotate_imm': ({'X86Avx512MaskRolq', 'X86Avx512MaskRord', 'X86Avx512MaskRold', 'X86Avx512MaskRorq'}, 3, 255, 255, 'AVX512 control must be an integer constant expression in the declared range'),
 })
-CONTROL_ALLOWED_VALUES.update({'avx512_cvt_rc': [4, 8, 9, 10, 11], 'avx512_cvt_exact': [4], 'avx512_cvt_sae': [4, 8], 'avx512_cvt_half': [0, 1, 2, 3, 4, 8, 9, 10, 11, 12], 'avx512_special_sae': [4, 8], 'avx512_mant_controls': [4, 8], 'avx512_scalef_rc': [4, 8, 9, 10, 11], 'avx512_roundscale_controls': [4, 8], 'avx512_fixup_controls': [4, 8]})
+CONTROL_ALLOWED_VALUES.update({'avx512_cvt_rc': [4, 8, 9, 10, 11], 'avx512_cvt_exact': [4], 'avx512_cvt_sae': [4, 8], 'avx512_special_sae': [4, 8], 'avx512_mant_controls': [4, 8], 'avx512_scalef_rc': [4, 8, 9, 10, 11], 'avx512_roundscale_controls': [4, 8], 'avx512_fixup_controls': [4, 8]})
 VALUE_EXTRA_CONTROLS.update({'avx512_mant_controls': [(3, 15, 15, 'AVX512 immediate must be an integer constant expression in the declared range', [])], 'avx512_roundscale_controls': [(3, 255, 255, 'AVX512 immediate must be an integer constant expression in the declared range', [])], 'avx512_fixup_controls': [(4, 255, 255, 'AVX512 fixup control must be an integer constant expression in 0..255', [])]})
 VALUE_CONTROLS.update({
     'avx512_fma_rc': ({'X86Avx512Vfnmsub231ps', 'X86Avx512Vfmsubadd231pd', 'X86Avx512Vfmadd231pd', 'X86Avx512Vfmsubadd231ps', 'X86Avx512Vfnmadd231pd', 'X86Avx512Vfmadd213ps', 'X86Avx512Vfmsubadd132pd', 'X86Avx512Vfmadd132ps', 'X86Avx512Vfnmsub132pd', 'X86Avx512Vfmaddsub231pd', 'X86Avx512Vfnmsub213ps', 'X86Avx512Vfmsubadd132ps', 'X86Avx512Vfmaddsub132pd', 'X86Avx512Vfnmadd213pd', 'X86Avx512Vfmaddsub231ps', 'X86Avx512Vfmaddsub213ps', 'X86Avx512Vfmsubadd213pd', 'X86Avx512Vfmadd231ps', 'X86Avx512Vfnmadd213ps', 'X86Avx512Vfnmadd231ps', 'X86Avx512Vfmadd132pd', 'X86Avx512Vfmsub132ps', 'X86Avx512Vfmsub231pd', 'X86Avx512Vfmsub231ps', 'X86Avx512Vfmsub132pd', 'X86Avx512Vfnmadd132pd', 'X86Avx512Vfmadd213pd', 'X86Avx512Vfmsub213ps', 'X86Avx512Vfmsubadd213ps', 'X86Avx512Vfmaddsub132ps', 'X86Avx512Vfnmsub213pd', 'X86Avx512Vfnmsub132ps', 'X86Avx512Vfmsub213pd', 'X86Avx512Vfnmadd132ps', 'X86Avx512Vfmaddsub213pd', 'X86Avx512Vfnmsub231pd'}, 5, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
@@ -173,6 +173,8 @@ VALUE_CONTROLS['avx512vl_ternary_imm8'] = ({
     'X86Avx512VlPternlogq128',
     'X86Avx512VlPternlogq256',
 }, 5, 255, 255, 'AVX512 instruction control must be an integer constant in 0..255')
+VALUE_CONTROLS['avx512vl_lane_extract'] = ({'X86Avx512VlExtractf32x4256', 'X86Avx512VlExtracti32x4256'}, 3, 1, 1, 'AVX512VL lane index must be an integer constant equal to 0 or 1')
+VALUE_CONTROLS['avx512vl_lane_insert'] = ({'X86Avx512VlInsertf32x4256', 'X86Avx512VlInserti32x4256'}, 4, 1, 1, 'AVX512VL lane index must be an integer constant equal to 0 or 1')
 CONTROLS = {'none', 'imm8', 'u64_count'} | VALUE_CONTROLS.keys()
 
 # Reviewed C wrappers can have stricter controls than their raw typed operation.

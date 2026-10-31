@@ -21,6 +21,9 @@ mod generated_query;
 #[path = "generated/intrinsic_registry.rs"]
 mod generated_registry;
 pub use generated_registry::Intrinsic;
+#[path = "intrinsic/avx512_vl_lane.rs"]
+mod avx512_vl_lane;
+pub use avx512_vl_lane::{X86Avx512VlLane, X86Avx512VlLaneKind};
 #[path = "intrinsic/avx512_bw_misc.rs"]
 mod avx512_bw_misc;
 pub use avx512_bw_misc::{X86Avx512BwMisc, X86Avx512BwMiscKind};
@@ -66,6 +69,9 @@ pub use avx512_vl_permute::X86Avx512VlPermute;
 #[path = "intrinsic/avx512_bw_pack.rs"]
 mod avx512_bw_pack;
 pub use avx512_bw_pack::X86Avx512BwPack;
+#[path = "intrinsic/avx512_vl_narrow.rs"]
+mod avx512_vl_narrow;
+pub use avx512_vl_narrow::X86Avx512VlNarrow;
 #[path = "intrinsic/avx512_bw_convert.rs"]
 mod avx512_bw_convert;
 pub use avx512_bw_convert::{X86Avx512BwConvert, X86Avx512BwConvertKind};
@@ -77,6 +83,10 @@ pub use avx512_bw_mul::X86Avx512BwMul;
 #[path = "intrinsic/avx512_vl_integer.rs"]
 mod avx512_vl_integer;
 pub use avx512_vl_integer::{X86Avx512VlInteger, X86Avx512VlIntegerKind};
+
+#[path = "intrinsic/avx512_vl_widen.rs"]
+mod avx512_vl_widen;
+pub use avx512_vl_widen::X86Avx512VlWiden;
 
 #[derive(Debug)]
 pub struct IntrinsicInfo {
@@ -622,8 +632,9 @@ impl Intrinsic {
     }
 
     /// 4 uses MXCSR. RC forms accept 8..11 for static rounding with SAE;
-    /// SAE-only forms accept 8. Half narrowing accepts rounding 0..4 with
-    /// optional bit 3 for SAE. Exact integer widening accepts only 4.
+    /// SAE-only forms accept 8. Half narrowing accepts imm8: bit 2 selects
+    /// MXCSR rounding, bit 3 selects SAE, and bits 7:4 are ignored.
+    /// Exact integer widening accepts only 4.
     pub fn valid_x86_avx512_convert_control(self, control: i64) -> bool {
         match self {
             Self::X86Avx512Vcvtdq2ps
@@ -640,7 +651,7 @@ impl Intrinsic {
             | Self::X86Avx512Vcvtps2pd
             | Self::X86Avx512Vcvtph2ps => matches!(control, 4 | 8),
             Self::X86Avx512Vcvtdq2pd | Self::X86Avx512Vcvtudq2pd => control == 4,
-            Self::X86Avx512Vcvtps2ph => matches!(control, 0..=4 | 8..=12),
+            Self::X86Avx512Vcvtps2ph => (0..=255).contains(&control),
             _ => false,
         }
     }
@@ -1584,6 +1595,46 @@ impl Intrinsic {
     pub fn info(self) -> IntrinsicInfo {
         const MEM: &[Type] = &[Type::Ptr, Type::Ptr, Type::I64];
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
+            Intrinsic::X86Avx512VlBroadcastd128
+            | Intrinsic::X86Avx512VlBroadcastq128
+            | Intrinsic::X86Avx512VlBroadcastss128
+            | Intrinsic::X86Avx512VlBroadcastd256
+            | Intrinsic::X86Avx512VlBroadcastq256
+            | Intrinsic::X86Avx512VlBroadcastss256
+            | Intrinsic::X86Avx512VlBroadcastsd256
+            | Intrinsic::X86Avx512VlBroadcasti32x4256
+            | Intrinsic::X86Avx512VlExtracti32x4256
+            | Intrinsic::X86Avx512VlInserti32x4256
+            | Intrinsic::X86Avx512VlBroadcastf32x4256
+            | Intrinsic::X86Avx512VlExtractf32x4256
+            | Intrinsic::X86Avx512VlInsertf32x4256 => {
+                let d = self.x86_avx512_vl_lane().expect("VL lane descriptor");
+                (d.name, d.params, d.returns, true)
+            }
+
+            Intrinsic::X86Avx512VlPmovsxbd128
+            | Intrinsic::X86Avx512VlPmovsxbq128
+            | Intrinsic::X86Avx512VlPmovsxwd128
+            | Intrinsic::X86Avx512VlPmovsxwq128
+            | Intrinsic::X86Avx512VlPmovsxdq128
+            | Intrinsic::X86Avx512VlPmovzxbd128
+            | Intrinsic::X86Avx512VlPmovzxbq128
+            | Intrinsic::X86Avx512VlPmovzxwd128
+            | Intrinsic::X86Avx512VlPmovzxwq128
+            | Intrinsic::X86Avx512VlPmovzxdq128
+            | Intrinsic::X86Avx512VlPmovsxbd256
+            | Intrinsic::X86Avx512VlPmovsxbq256
+            | Intrinsic::X86Avx512VlPmovsxwd256
+            | Intrinsic::X86Avx512VlPmovsxwq256
+            | Intrinsic::X86Avx512VlPmovsxdq256
+            | Intrinsic::X86Avx512VlPmovzxbd256
+            | Intrinsic::X86Avx512VlPmovzxbq256
+            | Intrinsic::X86Avx512VlPmovzxwd256
+            | Intrinsic::X86Avx512VlPmovzxwq256
+            | Intrinsic::X86Avx512VlPmovzxdq256 => {
+                let d = self.x86_avx512_vl_widen().expect("VL widen descriptor");
+                (d.name, d.params, d.returns, true)
+            }
             Intrinsic::X86Avx512VlPabsd128
             | Intrinsic::X86Avx512VlPabsq128
             | Intrinsic::X86Avx512VlPmuldq128
@@ -1900,6 +1951,71 @@ impl Intrinsic {
                     .x86_avx512_bw_pack()
                     .expect("BW pack/unpack descriptor");
                 (descriptor.name, descriptor.params, descriptor.returns, true)
+            }
+            Intrinsic::X86Avx512VlPmovdb128
+            | Intrinsic::X86Avx512VlPmovdbStore128
+            | Intrinsic::X86Avx512VlPmovdw128
+            | Intrinsic::X86Avx512VlPmovdwStore128
+            | Intrinsic::X86Avx512VlPmovqb128
+            | Intrinsic::X86Avx512VlPmovqbStore128
+            | Intrinsic::X86Avx512VlPmovqw128
+            | Intrinsic::X86Avx512VlPmovqwStore128
+            | Intrinsic::X86Avx512VlPmovqd128
+            | Intrinsic::X86Avx512VlPmovqdStore128
+            | Intrinsic::X86Avx512VlPmovsdb128
+            | Intrinsic::X86Avx512VlPmovsdbStore128
+            | Intrinsic::X86Avx512VlPmovsdw128
+            | Intrinsic::X86Avx512VlPmovsdwStore128
+            | Intrinsic::X86Avx512VlPmovsqb128
+            | Intrinsic::X86Avx512VlPmovsqbStore128
+            | Intrinsic::X86Avx512VlPmovsqw128
+            | Intrinsic::X86Avx512VlPmovsqwStore128
+            | Intrinsic::X86Avx512VlPmovsqd128
+            | Intrinsic::X86Avx512VlPmovsqdStore128
+            | Intrinsic::X86Avx512VlPmovusdb128
+            | Intrinsic::X86Avx512VlPmovusdbStore128
+            | Intrinsic::X86Avx512VlPmovusdw128
+            | Intrinsic::X86Avx512VlPmovusdwStore128
+            | Intrinsic::X86Avx512VlPmovusqb128
+            | Intrinsic::X86Avx512VlPmovusqbStore128
+            | Intrinsic::X86Avx512VlPmovusqw128
+            | Intrinsic::X86Avx512VlPmovusqwStore128
+            | Intrinsic::X86Avx512VlPmovusqd128
+            | Intrinsic::X86Avx512VlPmovusqdStore128
+            | Intrinsic::X86Avx512VlPmovdb256
+            | Intrinsic::X86Avx512VlPmovdbStore256
+            | Intrinsic::X86Avx512VlPmovdw256
+            | Intrinsic::X86Avx512VlPmovdwStore256
+            | Intrinsic::X86Avx512VlPmovqb256
+            | Intrinsic::X86Avx512VlPmovqbStore256
+            | Intrinsic::X86Avx512VlPmovqw256
+            | Intrinsic::X86Avx512VlPmovqwStore256
+            | Intrinsic::X86Avx512VlPmovqd256
+            | Intrinsic::X86Avx512VlPmovqdStore256
+            | Intrinsic::X86Avx512VlPmovsdb256
+            | Intrinsic::X86Avx512VlPmovsdbStore256
+            | Intrinsic::X86Avx512VlPmovsdw256
+            | Intrinsic::X86Avx512VlPmovsdwStore256
+            | Intrinsic::X86Avx512VlPmovsqb256
+            | Intrinsic::X86Avx512VlPmovsqbStore256
+            | Intrinsic::X86Avx512VlPmovsqw256
+            | Intrinsic::X86Avx512VlPmovsqwStore256
+            | Intrinsic::X86Avx512VlPmovsqd256
+            | Intrinsic::X86Avx512VlPmovsqdStore256
+            | Intrinsic::X86Avx512VlPmovusdb256
+            | Intrinsic::X86Avx512VlPmovusdbStore256
+            | Intrinsic::X86Avx512VlPmovusdw256
+            | Intrinsic::X86Avx512VlPmovusdwStore256
+            | Intrinsic::X86Avx512VlPmovusqb256
+            | Intrinsic::X86Avx512VlPmovusqbStore256
+            | Intrinsic::X86Avx512VlPmovusqw256
+            | Intrinsic::X86Avx512VlPmovusqwStore256
+            | Intrinsic::X86Avx512VlPmovusqd256
+            | Intrinsic::X86Avx512VlPmovusqdStore256 => {
+                let d = self
+                    .x86_avx512_vl_narrow()
+                    .expect("VL narrowing descriptor");
+                (d.name, d.params, d.returns, !d.store)
             }
             Intrinsic::X86Avx512BwPmovsxbw128
             | Intrinsic::X86Avx512BwPmovsxbwLoad128
@@ -14953,9 +15069,12 @@ impl Intrinsic {
             || self.x86_avx512_bw_mask().is_some()
             || self.x86_avx512_vl_shift().is_some()
             || self.x86_avx512_bw_permute().is_some()
+            || self.x86_avx512_vl_widen().is_some()
+            || self.x86_avx512_vl_lane().is_some()
             || self.x86_avx512_vl_integer().is_some()
             || self.x86_avx512_bw_shift().is_some()
             || self.x86_avx512_bw_pack().is_some()
+            || self.x86_avx512_vl_narrow().is_some()
             || self.x86_avx512_bw_convert().is_some()
             || self.x86_avx512_bw_mul().is_some()
             || self.is_x86_avx512_mask()

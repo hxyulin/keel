@@ -76,7 +76,9 @@ fn sources() -> (String, String) {
         let controls: &[i32] = match recipe {
             "rc" => &[4, 8, 9, 10, 11],
             "sae" => &[4, 8],
-            "half" => &[0, 1, 2, 3, 4, 8, 9, 10, 11, 12],
+            "half" => &[
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 31, 255,
+            ],
             _ => &[4],
         };
         for &control in controls {
@@ -89,9 +91,19 @@ fn sources() -> (String, String) {
             } else {
                 format!(",{control}")
             };
-            c += &format!(
-                "extern void {name}(void*,void*,void*,{cmask});\n__attribute__((noinline)) static void ref_{name}(void*o,const void*s,const void*a,{cmask} k){{{itype} x;{otype} merge;memcpy(&x,a,{ibytes});memcpy(&merge,s,{obytes});{otype} result=_mm512_mask_{api}(merge,k,x{rounding});memcpy(o,&result,{obytes});}}\n"
-            );
+            if recipe == "half" {
+                // Clang treats noncanonical controls such as 13 as raw imm8
+                // without SAE. Use explicit assembly for the declared bit 3
+                // contract, while retaining the standard-header value oracle.
+                let sae = if control & 8 != 0 { "%{sae%}," } else { "" };
+                c += &format!(
+                    "extern void {name}(void*,void*,void*,{cmask});\n__attribute__((noinline)) static void ref_{name}(void*o,const void*s,const void*a,{cmask} k){{{itype} x;{otype} result;memcpy(&x,a,{ibytes});memcpy(&result,s,{obytes});__asm__ volatile(\"vcvtps2ph ${control},{sae}%2,%0%{{%1%}}\":\"+v\"(result):\"Yk\"(k),\"v\"(x));memcpy(o,&result,{obytes});}}\n__attribute__((noinline)) static void std_{name}(void*o,const void*s,const void*a,{cmask} k){{{itype} x;{otype} merge;memcpy(&x,a,{ibytes});memcpy(&merge,s,{obytes});{otype} result=_mm512_mask_{api}(merge,k,x{rounding});memcpy(o,&result,{obytes});}}\n"
+                );
+            } else {
+                c += &format!(
+                    "extern void {name}(void*,void*,void*,{cmask});\n__attribute__((noinline)) static void ref_{name}(void*o,const void*s,const void*a,{cmask} k){{{itype} x;{otype} merge;memcpy(&x,a,{ibytes});memcpy(&merge,s,{obytes});{otype} result=_mm512_mask_{api}(merge,k,x{rounding});memcpy(o,&result,{obytes});}}\n"
+                );
+            }
             let fill = if input.starts_with("f32") {
                 format!(
                     "for(unsigned i=0;i<{ibytes}/4;i++)memcpy(a+4*i,&floats[(i+sample*5)%16],4);"
@@ -109,8 +121,15 @@ fn sources() -> (String, String) {
                     "for(unsigned i=0;i<{ibytes}/4;i++)memcpy(a+4*i,&integers[(i+sample*3)%8],4);"
                 )
             };
+            let vendor_check = if recipe == "half" {
+                format!(
+                    "_mm_setcsr(csr);std_{name}(expected,s,a,k);if(memcmp(out,expected,{obytes}))return 13;"
+                )
+            } else {
+                String::new()
+            };
             checks += &format!(
-                "{{unsigned char a[{ibytes}],s[{obytes}],out[208],expected[{obytes}];for(unsigned i=0;i<{obytes};i++)s[i]=(unsigned char)(i*73+0xa5);for(unsigned sample=0;sample<3;sample++){{{fill}for(unsigned round=0;round<4;round++)for(unsigned pattern=0;pattern<3;pattern++){{{cmask} k=pattern==0?0:pattern==1?({cmask})~0u:({cmask})0xaaaa;unsigned csr=0x1f80|(round<<13);memset(out,0xa5,sizeof(out));_mm_setcsr(csr);{name}(s,a,out,k);unsigned status=_mm_getcsr()&63;_mm_setcsr(csr);ref_{name}(expected,s,a,k);unsigned ref_status=_mm_getcsr()&63;if(memcmp(out,expected,{obytes})||status!=ref_status||(!k&&status)||({control}&8&&status)){{fprintf(stderr,\"{name} sample%u round%u mask%u status%x ref%x\\n\",sample,round,pattern,status,ref_status);return 10;}}if(memcmp(out+64,a,{ibytes})||memcmp(out+128,s,{obytes})||memcmp(out+192,&k,sizeof(k)))return 11;for(unsigned i={obytes};i<64;i++)if(out[i]!=0xa5)return 12;}}}}}}\n"
+                "{{unsigned char a[{ibytes}],s[{obytes}],out[208],expected[{obytes}];for(unsigned i=0;i<{obytes};i++)s[i]=(unsigned char)(i*73+0xa5);for(unsigned sample=0;sample<3;sample++){{{fill}for(unsigned round=0;round<4;round++)for(unsigned pattern=0;pattern<3;pattern++){{{cmask} k=pattern==0?0:pattern==1?({cmask})~0u:({cmask})0xaaaa;unsigned csr=0x1f80|(round<<13);memset(out,0xa5,sizeof(out));_mm_setcsr(csr);{name}(s,a,out,k);unsigned observed=_mm_getcsr();unsigned status=observed&63;if((observed&~63u)!=(csr&~63u))return 14;_mm_setcsr(csr);ref_{name}(expected,s,a,k);unsigned ref_status=_mm_getcsr()&63;if(memcmp(out,expected,{obytes})||status!=ref_status||(!k&&status)||({control}&8&&status)){{fprintf(stderr,\"{name} sample%u round%u mask%u status%x ref%x\\n\",sample,round,pattern,status,ref_status);return 10;}}{vendor_check}if(memcmp(out+64,a,{ibytes})||memcmp(out+128,s,{obytes})||memcmp(out+192,&k,sizeof(k)))return 11;for(unsigned i={obytes};i<64;i++)if(out[i]!=0xa5)return 12;}}}}}}\n"
             );
         }
     }
@@ -128,6 +147,24 @@ fn avx512_conversion_bits_mxcsr_masks_and_spills() {
     let dir = std::env::temp_dir().join(format!("keel-avx512-convert-raw-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("harness.c"), harness).unwrap();
+    #[cfg(target_arch = "x86_64")]
+    let native = cfg!(target_os = "linux") && std::is_x86_feature_detected!("avx512f");
+    #[cfg(not(target_arch = "x86_64"))]
+    let native = false;
+    if native {
+        let output = Command::new("cc")
+            .args(["-O1", "-mavx512f", "-frounding-math", "-c"])
+            .arg(dir.join("harness.c"))
+            .arg("-o")
+            .arg(dir.join("harness.o"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     for (tier, alloc, pools, opt) in [
         (
             SelectionTier::Baseline,
@@ -165,14 +202,9 @@ fn avx512_conversion_bits_mxcsr_masks_and_spills() {
             keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
         );
         fs::write(dir.join("convert.o"), object).unwrap();
-        if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
-            #[cfg(target_arch = "x86_64")]
-            if !std::is_x86_feature_detected!("avx512f") {
-                continue;
-            }
+        if native {
             let output = Command::new("cc")
-                .args(["-O1", "-mavx512f", "-frounding-math"])
-                .arg(dir.join("harness.c"))
+                .arg(dir.join("harness.o"))
                 .arg(dir.join("convert.o"))
                 .arg("-o")
                 .arg(dir.join("run"))
@@ -199,8 +231,11 @@ fn avx512_conversion_contracts() {
         assert!(data.is_pinned() && data.may_trap());
         assert_eq!(data.memory_effects(), MemoryEffects::Barrier);
         assert!(id.valid_x86_avx512_convert_control(4));
-        assert!(!id.valid_x86_avx512_convert_control(7));
-        assert!(!id.valid_x86_avx512_convert_control(16));
+        let half = id == Intrinsic::X86Avx512Vcvtps2ph;
+        assert_eq!(id.valid_x86_avx512_convert_control(7), half);
+        assert_eq!(id.valid_x86_avx512_convert_control(16), half);
+        assert!(!id.valid_x86_avx512_convert_control(-1));
+        assert!(!id.valid_x86_avx512_convert_control(256));
     }
     let (source, _) = sources();
     let bad = source.replace("iconst.i32 4", "iconst.i32 7");

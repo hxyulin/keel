@@ -254,13 +254,26 @@ int main(void){
 
 #[test]
 fn wide_pclmul_lanes_live_inputs_and_spills() {
-    let f = Features::for_level(CpuLevel::V3)
-        .with_features("avx512f,vpclmulqdq")
-        .unwrap();
+    let f = Features::NONE.with_features("avx512f,vpclmulqdq").unwrap();
+    assert!(!f.avx2 && !f.fma && !f.avx512vl && !f.avx512dq && !f.avx512bw);
     let mut source = String::from("decl @clobber()\n");
     let mut harness = String::from(
-        "#include <stdint.h>\n#include <string.h>\nvoid clobber(void){}\nstatic void product(uint64_t a,uint64_t b,uint64_t*r){r[0]=r[1]=0;for(unsigned i=0;i<64;i++)if((b>>i)&1){r[0]^=a<<i;if(i)r[1]^=a>>(64-i);}}\n",
+        "#include <stdint.h>\n#include <string.h>\nstatic void product(uint64_t a,uint64_t b,uint64_t*r){r[0]=r[1]=0;for(unsigned i=0;i<64;i++)if((b>>i)&1){r[0]^=a<<i;if(i)r[1]^=a>>(64-i);}}\n",
     );
+    // Destroy every allocator-owned SIMD register, including all ZMM lanes.
+    // A real ABI clobber catches missing call spills that an empty callee cannot.
+    harness += "__attribute__((target(\"avx512f\"),noinline)) void clobber(void){__asm__ volatile(";
+    for reg in 0..16 {
+        harness += &format!("\"vpxord %%zmm{reg},%%zmm{reg},%%zmm{reg}\\n\" ");
+    }
+    harness += ":::";
+    for reg in 0..16 {
+        if reg != 0 {
+            harness += ",";
+        }
+        harness += &format!("\"zmm{reg}\"");
+    }
+    harness += ");}\n";
     for (width, lanes) in [(256, 4), (512, 8)] {
         for c in CONTROLS {
             for same in 0..2 {
@@ -296,57 +309,74 @@ fn wide_pclmul_lanes_live_inputs_and_spills() {
     let dir = std::env::temp_dir().join(format!("keel-wide-pclmul-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("harness.c"), harness).unwrap();
-    for (tier, alloc, pools, opt) in [
-        (
-            SelectionTier::Baseline,
-            AllocationTier::Fast,
-            &keel_codegen::x86_64::REGISTERS,
-            false,
-        ),
-        (
-            SelectionTier::Full,
-            AllocationTier::Full,
-            &keel_codegen::x86_64::REGISTERS,
-            true,
-        ),
-        (SelectionTier::Full, AllocationTier::Full, &EMPTY, true),
-    ] {
-        let mut module = original.clone();
-        if opt {
-            keel_opt::optimize(&mut module).unwrap();
-        }
-        let selector = FeatureSelector {
-            inner: &tier,
-            features: f,
-        };
-        let pipeline = CodegenPipeline {
-            selector: &selector,
-            allocator: &alloc,
-        };
-        let program =
-            keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-        let object = keel_asm::x86::assemble_program_object_with_features(&program, f).unwrap();
-        fs::write(dir.join("wide.o"), object).unwrap();
-        if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
-            #[cfg(target_arch = "x86_64")]
-            if !std::is_x86_feature_detected!("avx512f")
-                || !std::is_x86_feature_detected!("vpclmulqdq")
-            {
-                continue;
+    #[cfg(target_arch = "x86_64")]
+    let native = cfg!(target_os = "linux")
+        && std::is_x86_feature_detected!("avx512f")
+        && std::is_x86_feature_detected!("vpclmulqdq");
+    #[cfg(not(target_arch = "x86_64"))]
+    let native = false;
+    if native {
+        let output = Command::new("cc")
+            .args(["-O2", "-fno-tree-vectorize", "-c"])
+            .arg(dir.join("harness.c"))
+            .arg("-o")
+            .arg(dir.join("harness.o"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for opt in [false, true] {
+        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+            for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
+                let tier = if !opt && matches!(alloc, AllocationTier::Fast) {
+                    SelectionTier::Baseline
+                } else {
+                    SelectionTier::Full
+                };
+                let mut module = original.clone();
+                if opt {
+                    keel_opt::optimize(&mut module).unwrap();
+                }
+                let selector = FeatureSelector {
+                    inner: &tier,
+                    features: f,
+                };
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator: &alloc,
+                };
+                let program =
+                    keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline)
+                        .unwrap();
+                let object =
+                    keel_asm::x86::assemble_program_object_with_features(&program, f).unwrap();
+                let text =
+                    keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                assert_eq!(
+                    object,
+                    keel_asm::x86::assemble_object_with_features(&text, f).unwrap()
+                );
+                fs::write(dir.join("wide.o"), object).unwrap();
+                if native {
+                    let output = Command::new("cc")
+                        .arg(dir.join("harness.o"))
+                        .arg(dir.join("wide.o"))
+                        .arg("-o")
+                        .arg(dir.join("run"))
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(Command::new(dir.join("run")).status().unwrap().success());
+                }
             }
-            let output = Command::new("cc")
-                .arg(dir.join("harness.c"))
-                .arg(dir.join("wide.o"))
-                .arg("-o")
-                .arg(dir.join("run"))
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(Command::new(dir.join("run")).status().unwrap().success());
         }
     }
 }

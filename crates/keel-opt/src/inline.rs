@@ -821,13 +821,17 @@ fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
         || id.is_x86_raw_fp_convert()
         || id.is_x86_fp_compare()
         || id.is_x86_sha256()
+        || id.is_x86_pclmul()
         || id.x86_avx512_bw_core().is_some()
         || id.x86_avx512_bw_mask().is_some()
+        || id.x86_avx512_vl_widen().is_some()
+        || id.x86_avx512_vl_lane().is_some()
         || id.x86_avx512_vl_integer().is_some()
         || id.x86_avx512_vl_shift().is_some()
         || id.x86_avx512_bw_permute().is_some()
         || id.x86_avx512_bw_shift().is_some()
         || id.x86_avx512_bw_pack().is_some()
+        || id.x86_avx512_vl_narrow().is_some()
         || id.x86_avx512_bw_convert().is_some()
         || id.x86_avx512_bw_mul().is_some()
         || id.is_x86_avx512_mask()
@@ -868,8 +872,7 @@ fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
         || id.is_x86_fp_horizontal_dot()
         || matches!(
             id,
-            Intrinsic::X86Pclmulqdq128
-                | Intrinsic::X86AvxVzeroall
+            Intrinsic::X86AvxVzeroall
                 | Intrinsic::X86AvxVmaskmovdqu
                 | Intrinsic::X86SseMaskmovdqu
                 | Intrinsic::X86SseReadMxcsr

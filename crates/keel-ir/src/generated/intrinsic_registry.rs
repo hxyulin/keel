@@ -3606,10 +3606,196 @@ pub enum Intrinsic {
     X86Avx512VlPtestnmd256 = 2140,
     #[doc = "AVX512VL integer operation with independent masked merge and immutable inputs. Multiplication uses even dword lanes; mask tests clear unused high bits."]
     X86Avx512VlPtestnmq256 = 2141,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdb128 = 2142,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdbStore128 = 2143,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdw128 = 2144,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdwStore128 = 2145,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqb128 = 2146,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqbStore128 = 2147,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqw128 = 2148,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqwStore128 = 2149,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqd128 = 2150,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqdStore128 = 2151,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdb128 = 2152,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdbStore128 = 2153,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdw128 = 2154,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdwStore128 = 2155,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqb128 = 2156,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqbStore128 = 2157,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqw128 = 2158,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqwStore128 = 2159,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqd128 = 2160,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqdStore128 = 2161,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdb128 = 2162,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdbStore128 = 2163,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdw128 = 2164,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdwStore128 = 2165,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqb128 = 2166,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqbStore128 = 2167,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqw128 = 2168,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqwStore128 = 2169,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqd128 = 2170,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqdStore128 = 2171,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdb256 = 2172,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdbStore256 = 2173,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdw256 = 2174,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovdwStore256 = 2175,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqb256 = 2176,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqbStore256 = 2177,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqw256 = 2178,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqwStore256 = 2179,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqd256 = 2180,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovqdStore256 = 2181,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdb256 = 2182,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdbStore256 = 2183,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdw256 = 2184,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsdwStore256 = 2185,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqb256 = 2186,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqbStore256 = 2187,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqw256 = 2188,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqwStore256 = 2189,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqd256 = 2190,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovsqdStore256 = 2191,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdb256 = 2192,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdbStore256 = 2193,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdw256 = 2194,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusdwStore256 = 2195,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqb256 = 2196,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqbStore256 = 2197,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqw256 = 2198,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqwStore256 = 2199,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqd256 = 2200,
+    #[doc = "Masked VL narrowing conversion with exact active-element stores and zeroed unused result bytes. Encoded source width controls legality; unsigned saturation interprets source lanes as unsigned."]
+    X86Avx512VlPmovusqdStore256 = 2201,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxbd128 = 2202,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxbq128 = 2203,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxwd128 = 2204,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxwq128 = 2205,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxdq128 = 2206,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxbd128 = 2207,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxbq128 = 2208,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxwd128 = 2209,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxwq128 = 2210,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxdq128 = 2211,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxbd256 = 2212,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxbq256 = 2213,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxwd256 = 2214,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxwq256 = 2215,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovsxdq256 = 2216,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxbd256 = 2217,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxbq256 = 2218,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxwd256 = 2219,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxwq256 = 2220,
+    #[doc = "Masked signed or zero extension from the low source elements. Unused high source elements do not affect the result; legality follows the destination encoded width."]
+    X86Avx512VlPmovzxdq256 = 2221,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastd128 = 2222,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastq128 = 2223,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastss128 = 2224,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastd256 = 2225,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastq256 = 2226,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastss256 = 2227,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastsd256 = 2228,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcasti32x4256 = 2229,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlExtracti32x4256 = 2230,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlInserti32x4256 = 2231,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlBroadcastf32x4256 = 2232,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlExtractf32x4256 = 2233,
+    #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
+    X86Avx512VlInsertf32x4256 = 2234,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 2142] = [
+    pub const ALL: [Intrinsic; 2235] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -5752,6 +5938,99 @@ impl Intrinsic {
         Intrinsic::X86Avx512VlPtestmq256,
         Intrinsic::X86Avx512VlPtestnmd256,
         Intrinsic::X86Avx512VlPtestnmq256,
+        Intrinsic::X86Avx512VlPmovdb128,
+        Intrinsic::X86Avx512VlPmovdbStore128,
+        Intrinsic::X86Avx512VlPmovdw128,
+        Intrinsic::X86Avx512VlPmovdwStore128,
+        Intrinsic::X86Avx512VlPmovqb128,
+        Intrinsic::X86Avx512VlPmovqbStore128,
+        Intrinsic::X86Avx512VlPmovqw128,
+        Intrinsic::X86Avx512VlPmovqwStore128,
+        Intrinsic::X86Avx512VlPmovqd128,
+        Intrinsic::X86Avx512VlPmovqdStore128,
+        Intrinsic::X86Avx512VlPmovsdb128,
+        Intrinsic::X86Avx512VlPmovsdbStore128,
+        Intrinsic::X86Avx512VlPmovsdw128,
+        Intrinsic::X86Avx512VlPmovsdwStore128,
+        Intrinsic::X86Avx512VlPmovsqb128,
+        Intrinsic::X86Avx512VlPmovsqbStore128,
+        Intrinsic::X86Avx512VlPmovsqw128,
+        Intrinsic::X86Avx512VlPmovsqwStore128,
+        Intrinsic::X86Avx512VlPmovsqd128,
+        Intrinsic::X86Avx512VlPmovsqdStore128,
+        Intrinsic::X86Avx512VlPmovusdb128,
+        Intrinsic::X86Avx512VlPmovusdbStore128,
+        Intrinsic::X86Avx512VlPmovusdw128,
+        Intrinsic::X86Avx512VlPmovusdwStore128,
+        Intrinsic::X86Avx512VlPmovusqb128,
+        Intrinsic::X86Avx512VlPmovusqbStore128,
+        Intrinsic::X86Avx512VlPmovusqw128,
+        Intrinsic::X86Avx512VlPmovusqwStore128,
+        Intrinsic::X86Avx512VlPmovusqd128,
+        Intrinsic::X86Avx512VlPmovusqdStore128,
+        Intrinsic::X86Avx512VlPmovdb256,
+        Intrinsic::X86Avx512VlPmovdbStore256,
+        Intrinsic::X86Avx512VlPmovdw256,
+        Intrinsic::X86Avx512VlPmovdwStore256,
+        Intrinsic::X86Avx512VlPmovqb256,
+        Intrinsic::X86Avx512VlPmovqbStore256,
+        Intrinsic::X86Avx512VlPmovqw256,
+        Intrinsic::X86Avx512VlPmovqwStore256,
+        Intrinsic::X86Avx512VlPmovqd256,
+        Intrinsic::X86Avx512VlPmovqdStore256,
+        Intrinsic::X86Avx512VlPmovsdb256,
+        Intrinsic::X86Avx512VlPmovsdbStore256,
+        Intrinsic::X86Avx512VlPmovsdw256,
+        Intrinsic::X86Avx512VlPmovsdwStore256,
+        Intrinsic::X86Avx512VlPmovsqb256,
+        Intrinsic::X86Avx512VlPmovsqbStore256,
+        Intrinsic::X86Avx512VlPmovsqw256,
+        Intrinsic::X86Avx512VlPmovsqwStore256,
+        Intrinsic::X86Avx512VlPmovsqd256,
+        Intrinsic::X86Avx512VlPmovsqdStore256,
+        Intrinsic::X86Avx512VlPmovusdb256,
+        Intrinsic::X86Avx512VlPmovusdbStore256,
+        Intrinsic::X86Avx512VlPmovusdw256,
+        Intrinsic::X86Avx512VlPmovusdwStore256,
+        Intrinsic::X86Avx512VlPmovusqb256,
+        Intrinsic::X86Avx512VlPmovusqbStore256,
+        Intrinsic::X86Avx512VlPmovusqw256,
+        Intrinsic::X86Avx512VlPmovusqwStore256,
+        Intrinsic::X86Avx512VlPmovusqd256,
+        Intrinsic::X86Avx512VlPmovusqdStore256,
+        Intrinsic::X86Avx512VlPmovsxbd128,
+        Intrinsic::X86Avx512VlPmovsxbq128,
+        Intrinsic::X86Avx512VlPmovsxwd128,
+        Intrinsic::X86Avx512VlPmovsxwq128,
+        Intrinsic::X86Avx512VlPmovsxdq128,
+        Intrinsic::X86Avx512VlPmovzxbd128,
+        Intrinsic::X86Avx512VlPmovzxbq128,
+        Intrinsic::X86Avx512VlPmovzxwd128,
+        Intrinsic::X86Avx512VlPmovzxwq128,
+        Intrinsic::X86Avx512VlPmovzxdq128,
+        Intrinsic::X86Avx512VlPmovsxbd256,
+        Intrinsic::X86Avx512VlPmovsxbq256,
+        Intrinsic::X86Avx512VlPmovsxwd256,
+        Intrinsic::X86Avx512VlPmovsxwq256,
+        Intrinsic::X86Avx512VlPmovsxdq256,
+        Intrinsic::X86Avx512VlPmovzxbd256,
+        Intrinsic::X86Avx512VlPmovzxbq256,
+        Intrinsic::X86Avx512VlPmovzxwd256,
+        Intrinsic::X86Avx512VlPmovzxwq256,
+        Intrinsic::X86Avx512VlPmovzxdq256,
+        Intrinsic::X86Avx512VlBroadcastd128,
+        Intrinsic::X86Avx512VlBroadcastq128,
+        Intrinsic::X86Avx512VlBroadcastss128,
+        Intrinsic::X86Avx512VlBroadcastd256,
+        Intrinsic::X86Avx512VlBroadcastq256,
+        Intrinsic::X86Avx512VlBroadcastss256,
+        Intrinsic::X86Avx512VlBroadcastsd256,
+        Intrinsic::X86Avx512VlBroadcasti32x4256,
+        Intrinsic::X86Avx512VlExtracti32x4256,
+        Intrinsic::X86Avx512VlInserti32x4256,
+        Intrinsic::X86Avx512VlBroadcastf32x4256,
+        Intrinsic::X86Avx512VlExtractf32x4256,
+        Intrinsic::X86Avx512VlInsertf32x4256,
     ];
 }
 
@@ -7890,5 +8169,98 @@ macro_rules! x86_intrinsics {
             | $crate::Intrinsic::X86Avx512VlPtestmq256
             | $crate::Intrinsic::X86Avx512VlPtestnmd256
             | $crate::Intrinsic::X86Avx512VlPtestnmq256
+            | $crate::Intrinsic::X86Avx512VlPmovdb128
+            | $crate::Intrinsic::X86Avx512VlPmovdbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovdw128
+            | $crate::Intrinsic::X86Avx512VlPmovdwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovqb128
+            | $crate::Intrinsic::X86Avx512VlPmovqbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovqw128
+            | $crate::Intrinsic::X86Avx512VlPmovqwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovqd128
+            | $crate::Intrinsic::X86Avx512VlPmovqdStore128
+            | $crate::Intrinsic::X86Avx512VlPmovsdb128
+            | $crate::Intrinsic::X86Avx512VlPmovsdbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovsdw128
+            | $crate::Intrinsic::X86Avx512VlPmovsdwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovsqb128
+            | $crate::Intrinsic::X86Avx512VlPmovsqbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovsqw128
+            | $crate::Intrinsic::X86Avx512VlPmovsqwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovsqd128
+            | $crate::Intrinsic::X86Avx512VlPmovsqdStore128
+            | $crate::Intrinsic::X86Avx512VlPmovusdb128
+            | $crate::Intrinsic::X86Avx512VlPmovusdbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovusdw128
+            | $crate::Intrinsic::X86Avx512VlPmovusdwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovusqb128
+            | $crate::Intrinsic::X86Avx512VlPmovusqbStore128
+            | $crate::Intrinsic::X86Avx512VlPmovusqw128
+            | $crate::Intrinsic::X86Avx512VlPmovusqwStore128
+            | $crate::Intrinsic::X86Avx512VlPmovusqd128
+            | $crate::Intrinsic::X86Avx512VlPmovusqdStore128
+            | $crate::Intrinsic::X86Avx512VlPmovdb256
+            | $crate::Intrinsic::X86Avx512VlPmovdbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovdw256
+            | $crate::Intrinsic::X86Avx512VlPmovdwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovqb256
+            | $crate::Intrinsic::X86Avx512VlPmovqbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovqw256
+            | $crate::Intrinsic::X86Avx512VlPmovqwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovqd256
+            | $crate::Intrinsic::X86Avx512VlPmovqdStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsdb256
+            | $crate::Intrinsic::X86Avx512VlPmovsdbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsdw256
+            | $crate::Intrinsic::X86Avx512VlPmovsdwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsqb256
+            | $crate::Intrinsic::X86Avx512VlPmovsqbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsqw256
+            | $crate::Intrinsic::X86Avx512VlPmovsqwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsqd256
+            | $crate::Intrinsic::X86Avx512VlPmovsqdStore256
+            | $crate::Intrinsic::X86Avx512VlPmovusdb256
+            | $crate::Intrinsic::X86Avx512VlPmovusdbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovusdw256
+            | $crate::Intrinsic::X86Avx512VlPmovusdwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovusqb256
+            | $crate::Intrinsic::X86Avx512VlPmovusqbStore256
+            | $crate::Intrinsic::X86Avx512VlPmovusqw256
+            | $crate::Intrinsic::X86Avx512VlPmovusqwStore256
+            | $crate::Intrinsic::X86Avx512VlPmovusqd256
+            | $crate::Intrinsic::X86Avx512VlPmovusqdStore256
+            | $crate::Intrinsic::X86Avx512VlPmovsxbd128
+            | $crate::Intrinsic::X86Avx512VlPmovsxbq128
+            | $crate::Intrinsic::X86Avx512VlPmovsxwd128
+            | $crate::Intrinsic::X86Avx512VlPmovsxwq128
+            | $crate::Intrinsic::X86Avx512VlPmovsxdq128
+            | $crate::Intrinsic::X86Avx512VlPmovzxbd128
+            | $crate::Intrinsic::X86Avx512VlPmovzxbq128
+            | $crate::Intrinsic::X86Avx512VlPmovzxwd128
+            | $crate::Intrinsic::X86Avx512VlPmovzxwq128
+            | $crate::Intrinsic::X86Avx512VlPmovzxdq128
+            | $crate::Intrinsic::X86Avx512VlPmovsxbd256
+            | $crate::Intrinsic::X86Avx512VlPmovsxbq256
+            | $crate::Intrinsic::X86Avx512VlPmovsxwd256
+            | $crate::Intrinsic::X86Avx512VlPmovsxwq256
+            | $crate::Intrinsic::X86Avx512VlPmovsxdq256
+            | $crate::Intrinsic::X86Avx512VlPmovzxbd256
+            | $crate::Intrinsic::X86Avx512VlPmovzxbq256
+            | $crate::Intrinsic::X86Avx512VlPmovzxwd256
+            | $crate::Intrinsic::X86Avx512VlPmovzxwq256
+            | $crate::Intrinsic::X86Avx512VlPmovzxdq256
+            | $crate::Intrinsic::X86Avx512VlBroadcastd128
+            | $crate::Intrinsic::X86Avx512VlBroadcastq128
+            | $crate::Intrinsic::X86Avx512VlBroadcastss128
+            | $crate::Intrinsic::X86Avx512VlBroadcastd256
+            | $crate::Intrinsic::X86Avx512VlBroadcastq256
+            | $crate::Intrinsic::X86Avx512VlBroadcastss256
+            | $crate::Intrinsic::X86Avx512VlBroadcastsd256
+            | $crate::Intrinsic::X86Avx512VlBroadcasti32x4256
+            | $crate::Intrinsic::X86Avx512VlExtracti32x4256
+            | $crate::Intrinsic::X86Avx512VlInserti32x4256
+            | $crate::Intrinsic::X86Avx512VlBroadcastf32x4256
+            | $crate::Intrinsic::X86Avx512VlExtractf32x4256
+            | $crate::Intrinsic::X86Avx512VlInsertf32x4256
     };
 }

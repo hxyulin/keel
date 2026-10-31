@@ -302,9 +302,9 @@ A frameless function leaves `rsp` and `rbp` unchanged. Its CFA is `rsp + 8`,
 with the return address at `CFA - 8`, and the assembler still emits an FDE.
 Wide-vector stack alignment and vector spills keep frames.
 
-Parallel copies use reserved `r11` for integers and `xmm14`/`ymm14` when SIMD
+Parallel copies use reserved `r11` for integers and `xmm14`/`ymm14`/`zmm14` when SIMD
 locations take part, keeping every lane through a copy cycle. Memory-to-memory
-transfers use `xmm15`/`ymm15`. Ordinary 128-bit vectors do not reserve a stack
+transfers use `xmm15`/`ymm15`/`zmm15`. Ordinary 128-bit vectors do not reserve a stack
 copy temporary; wide-vector, F80 and intrinsic recipes keep one.
 
 ## Size emission
