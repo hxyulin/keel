@@ -294,9 +294,10 @@ python3 tools/x86-isa/vendor_coverage.py --reference-dir /path/to/pinned/headers
 The checker reports definitions and macros in the seven SSE–AVX2 headers,
 `crc32intrin.h` and the pinned AVX512F/VL, DQ, BW and CD headers. It compares
 them with compiler-owned headers and private fragments. The pinned SSE–AVX2 non-MMX public-name
-and AVX512F inventories have no missing candidates. This is a name check,
+and all eight pinned F/VL, DQ, BW and CD inventories have no missing candidates.
+This is a name check,
 not proof of signature, feature, immediate, ABI or semantic conformance. MMX
-entries are reported separately. Extension inventories list missing interfaces.
+entries are reported separately.
 C++ overloads, 32-bit x86, AVX-512 extensions beyond F/VL/DQ/BW/CD, AMX and unlisted
 headers are outside the inventory.
 
@@ -790,8 +791,15 @@ Conversions retain their architectural invalid-result and MXCSR behavior;
 they do not use the portable scalar conversion's saturation contract. Rounded
 forms use control 4 for MXCSR or 8..11 for static nearest/down/up/zero with SAE.
 Truncating forms and floating widening accept 4 or 8. Exact dword-to-double
-conversion accepts only 4. Single-to-half accepts 0..4 with optional bit 3 for
-SAE. Each form rejects controls unsupported by its encoding.
+conversion accepts only 4. Single-to-half accepts an imm8 in 0..255. Bit 2
+selects MXCSR rounding and ignores bits 1:0; otherwise bits 1:0 select rounding.
+Bit 3 selects SAE, and bits 7:4 are ignored. Other forms retain their own restricted
+rounding and SAE controls.
+
+Single-to-half retains this bit contract for noncanonical controls such as 13
+and 255. GCC maps their bit 3 to SAE; Clang 21 and 23 emit them as raw immediates
+without SAE. Keel follows the explicit SAE bit and tests flags against native
+assembly, while checking result bits against system headers.
 
 The corresponding `_mm512_cvt*`, masked, mask-zero and explicit-rounding C
 wrappers use the same contracts. Architectural controls are integer constant
@@ -912,8 +920,12 @@ value. Upper XMM lanes always retain arithmetic operand `a`, regardless of
 mask bits or merge contents. Rounding and SAE controls match packed FMA.
 These operations require AVX512F without AVX512VL or separate FMA permission.
 
-The scalar C masked, mask3, mask-zero and explicit-rounding interfaces retain
-these upper-lane rules. Each mathematical argument is evaluated once.
+The standard scalar C mask and mask-zero FMA interfaces copy upper XMM lanes
+from mathematical operand `a`. Mask3 interfaces instead copy them from `c`,
+which also supplies an inactive low lane. This applies to both ordinary and
+explicit-rounding forms. The mask3 wrappers use the raw 231 arrangement with
+`c` as its typed destination and `a` and `b` as multiplicands. The raw typed
+contract is unchanged. Each mathematical argument is evaluated once.
 
 The scalar bit-transfer interfaces use `x86_avx512_maskmove{ss,sd}`,
 `x86_avx512_maskload{ss,sd}` and `x86_avx512_maskstore{ss,sd}`.
@@ -1152,6 +1164,33 @@ or eight lanes as their containers permit. Ignored input lanes do not raise
 exceptions. Inactive converted lanes preserve merge bits and suppress native
 floating exceptions, including where a vendor header uses an unmasked
 conversion followed by a selection. All conversions remain pinned to MXCSR.
+
+VL integer widening uses signed or zero extension from byte to dword/qword,
+word to dword/qword, and dword to qword. Each takes `(merge, i8 mask, input)`;
+the input has a 128-bit container, and only the low elements needed by the
+128- or 256-bit result contribute. These pure operations require F plus VL,
+without BW, DQ or AVX2.
+
+VL integer narrowing converts dwords to bytes/words and qwords to
+bytes/words/dwords, with truncation, signed saturation or unsigned saturation.
+Unsigned saturation interprets the source lanes as unsigned. Register forms
+take `(merge, i8 mask, input)` and always return a 128-bit container. Only as
+many low result elements as source lanes can retain merge values; all unused
+upper bytes are zero even with a zero mask. Store forms take
+`(ptr, input, i8 mask)`, write one destination element per active source lane,
+and leave inactive memory untouched. Zero and high-only masks access no
+memory. Encoded source width, rather than result-container width, determines
+the 128/256-bit instruction form. All forms require F plus VL without BW or DQ.
+
+VL scalar broadcasts cover dword, qword and single precision at 128/256 bits,
+and double precision at 256 bits. Typed inputs are scalar `i32`, `i64`, `f32`
+or `f64`; XMM-taking C wrappers select only the low source element. Block
+broadcasts duplicate an entire 128-bit integer or floating dword block into
+a 256-bit result. Extraction and insertion select either 128-bit block of a
+256-bit value with a constant lane index zero or one. All take an independent
+merge and `i8` mask and preserve payload bits without observing MXCSR. They
+require F plus VL without DQ or BW. Memory-only block-broadcast encodings use
+a compiler-owned exact 16-byte staging copy of the SSA input.
 
 Narrow packed FMA names use `x86_avx512vl_` followed by the opcode and width.
 They cover `vfmadd`, `vfmsub`, `vfnmadd`, `vfnmsub`, `vfmaddsub` and
@@ -1481,6 +1520,10 @@ use `x86_vpclmulqdq256` and `x86_vpclmulqdq512`. Their two inputs and result
 are `i64x4` or `i64x8`, with a constant `i32` control in 0..255. Each 128-bit
 lane computes an independent carryless product, using control bits 0 and 4.
 They require VPCLMULQDQ and AVX; the 512-bit form also requires AVX512F.
+Public PCLMUL wrappers convert supported C constant expressions to an
+instruction byte before strict builtin validation, matching the pinned header's
+byte conversion. Negative and wide integer constants can therefore wrap to a
+valid byte. Private builtins and typed IR still require controls in 0..255.
 Live operands retain their original bits even when their registers overlap.
 
 ### Tests
@@ -1690,3 +1733,17 @@ each 64-bit block, first-source windows start at byte offsets 0, 0, 4, 4 and
 second-source windows at 0, 1, 2, 3. Its mask selects produced word lanes.
 These operations require F plus BW, adding VL for narrow encodings. Existing
 narrow unmasked APIs retain their legacy feature requirements.
+
+Narrow BW reduction conveniences cover byte/word add, multiply, AND, OR,
+signed/unsigned minimum and maximum, with masked and unmasked forms. Signed
+APIs return signed char or short; unsigned min/max return unsigned char or
+unsigned short. Add and multiply wrap at the lane width using unsigned
+accumulators. Empty masks return the operation's identity: zero for add/OR,
+one for multiply, all ones for AND, and the appropriate signed or unsigned
+endpoint for min/max. High mask bits are ignored. The 128-bit word min/max
+signatures retain their pinned `__mmask16` parameter even though only eight
+bits contribute. Each argument is evaluated once.
+
+These portable reductions use existing 128-bit or AVX 256-bit transport and
+grant no BW, VL, DQ or AVX2 permission. Their 512-bit counterparts retain the
+F requirement for transporting 512-bit values.

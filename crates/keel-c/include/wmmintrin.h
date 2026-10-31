@@ -7,6 +7,6 @@
 #include <emmintrin.h>
 /* Macro retains the ICE control and evaluates each vector operand once. */
 #define _mm_clmulepi64_si128(a, b, control) \
-  ((__m128i)__builtin_ia32_pclmulqdq128((__m128i)(a), (__m128i)(b), (control)))
+  ((__m128i)__builtin_ia32_pclmulqdq128((__m128i)(a), (__m128i)(b), (unsigned char)(control)))
 #include <__keel_aes.h>
 #endif

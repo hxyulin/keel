@@ -1711,3 +1711,21 @@ mod x86_avx512_vl_integer;
 
 #[path = "x86_intrinsics/x86_avx512_bw_permute.rs"]
 mod x86_avx512_bw_permute;
+
+#[path = "x86_intrinsics/x86_avx512_vl_narrow.rs"]
+mod x86_avx512_vl_narrow;
+
+#[path = "x86_intrinsics/x86_avx512_vl_widen.rs"]
+mod x86_avx512_vl_widen;
+
+#[path = "x86_intrinsics/x86_avx512_bw_reduce.rs"]
+mod x86_avx512_bw_reduce;
+
+#[path = "x86_intrinsics/x86_avx512_vl_lane.rs"]
+mod x86_avx512_vl_lane;
+
+#[path = "x86_intrinsics/x86_avx512_control_casts.rs"]
+mod x86_avx512_control_casts;
+
+#[path = "x86_intrinsics/x86_avx512_scalar_fma.rs"]
+mod x86_avx512_scalar_fma;

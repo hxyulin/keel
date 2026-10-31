@@ -85,17 +85,17 @@ fn vl_integer_ternary_controls_and_missing_unmasked_aliases() {
             let source = format!(
                 "#include <immintrin.h>\n{v} f({v} a,{v} b,{v} c,int runtime){{return {pre}_ternarylogic_epi32(a,b,c,{imm});}}"
             );
+            assert_eq!(
+                parse(&source, keel_ir::Target::X86_64LinuxGnu).is_ok(),
+                imm != "runtime",
+                "public unsigned-byte normalization: {imm}"
+            );
+            let source = format!(
+                "#include <immintrin.h>\n{v} f({v} a,{v} b,{v} c,int runtime){{return ({v})__builtin_keel_avx512vl_pternlogd{width}((__keel_i32_{width})a,(signed char)-1,(__keel_i32_{width})a,(__keel_i32_{width})b,(__keel_i32_{width})c,{imm});}}"
+            );
             assert!(
-                keel_c::compile(
-                    &source,
-                    "bad.c",
-                    keel_c::Options {
-                        target: keel_ir::Target::X86_64LinuxGnu,
-                        debug_info: false
-                    }
-                )
-                .is_err(),
-                "{imm}"
+                parse(&source, keel_ir::Target::X86_64LinuxGnu).is_err(),
+                "raw imm8 control: {imm}"
             );
         }
     }

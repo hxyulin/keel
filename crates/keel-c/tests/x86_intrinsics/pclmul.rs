@@ -103,7 +103,7 @@ fn pclmul_header_builtin_controls_and_targets() {
         },
     )
     .unwrap();
-    for control in ["-1", "256", "n", "1.0", "(0,1)", "((__int128)1<<64)"] {
+    for control in ["n", "(0,1)", "((__int128)1<<64)"] {
         let s = format!(
             "#include <wmmintrin.h>\n__m128i f(__m128i a,__m128i b,int n){{return _mm_clmulepi64_si128(a,b,{control});}}\n"
         );
@@ -297,7 +297,15 @@ fn typed_wide_pclmul_signature_and_control() {
                 .contains(&format!("intrinsic x86_vpclmulqdq{width}"))
         );
         assert!(module.to_string().contains(shape));
-        assert!(parse(&source.replace(",17)", ",256)"), Target::X86_64LinuxGnu).is_err());
+        assert!(
+            parse(
+                &source
+                    .replace(",17)", ",n)")
+                    .replace("void f(", "void f(int n,"),
+                Target::X86_64LinuxGnu
+            )
+            .is_err()
+        );
     }
 }
 
@@ -1099,14 +1107,16 @@ void byte_narrow(const void*a,void*out){_mm512_mask_cvtusepi64_storeu_epi8(out,0
         fs::create_dir_all(&directory).unwrap();
         fs::write(directory.join("code.o"), object).unwrap();
         fs::write(directory.join("harness.c"),r#"
+#include <immintrin.h>
 #include <stdint.h>
 #include <string.h>
 extern int scalar_fma_evaluations;
 extern unsigned char scalar_fma_mask;
 extern void scalar_fma_once(const void*,const void*,const void*,void*),unsigned_widen(const void*,unsigned long long,void*),byte_narrow(const void*,void*);
-int main(void){uint32_t a[4]={0x40000000,0x7f812345,0x80000000,0xdeadbeef},b[4]={0x40400000,1,2,3},c[4]={0x40800000,4,5,6},out[4];unsigned masks[]={0xfe,0xff};for(unsigned j=0;j<2;j++){scalar_fma_mask=masks[j];scalar_fma_evaluations=0;scalar_fma_once(a,b,c,out);if(scalar_fma_evaluations!=4||memcmp(out+1,a+1,12)||out[0]!=(j?0x41200000:0x40800000))return 1;}uint64_t upper[2]={0,0xfff0123456789abcULL},wide[2];unsigned_widen(upper,~0ULL,wide);double want=0x1p64;if(memcmp(wide,&want,8)||wide[1]!=upper[1])return 2;uint64_t x[8];unsigned char bytes[12];for(unsigned i=0;i<8;i++)x[i]=~0ULL;memset(bytes,0xa5,12);byte_narrow(x,bytes+2);if(bytes[0]!=0xa5||bytes[1]!=0xa5||bytes[10]!=0xa5||bytes[11]!=0xa5)return 3;for(unsigned i=2;i<10;i++)if(bytes[i]!=255)return 4;return 0;}
+int main(void){uint32_t a[4]={0x40000000,0x7f812345,0x80000000,0xdeadbeef},b[4]={0x40400000,1,2,3},c[4]={0x40800000,4,5,6},out[4];unsigned masks[]={0xfe,0xff};for(unsigned j=0;j<2;j++){scalar_fma_mask=masks[j];scalar_fma_evaluations=0;scalar_fma_once(a,b,c,out);__m128 reference=_mm_mask3_fmadd_ss(_mm_loadu_ps((void*)a),_mm_loadu_ps((void*)b),_mm_loadu_ps((void*)c),masks[j]);if(scalar_fma_evaluations!=4||memcmp(out,&reference,16)||memcmp(out+1,c+1,12)||out[0]!=(j?0x41200000:0x40800000))return 1;}uint64_t upper[2]={0,0xfff0123456789abcULL},wide[2];unsigned_widen(upper,~0ULL,wide);double want=0x1p64;if(memcmp(wide,&want,8)||wide[1]!=upper[1])return 2;uint64_t x[8];unsigned char bytes[12];for(unsigned i=0;i<8;i++)x[i]=~0ULL;memset(bytes,0xa5,12);byte_narrow(x,bytes+2);if(bytes[0]!=0xa5||bytes[1]!=0xa5||bytes[10]!=0xa5||bytes[11]!=0xa5)return 3;for(unsigned i=2;i<10;i++)if(bytes[i]!=255)return 4;return 0;}
 "#).unwrap();
         let output = Command::new("cc")
+            .args(["-O1", "-mavx512f"])
             .arg(directory.join("harness.c"))
             .arg(directory.join("code.o"))
             .arg("-o")
@@ -1347,4 +1357,275 @@ fn avx512_reduction_builtins_check_shapes_and_target() {
     )
     .unwrap();
     assert!(parse("typedef int V __attribute__((vector_size(64)));int f(V a){return __builtin_keel_avx512_reduce_add_i32x16(a);}", Target::Aarch64LinuxGnu).is_err());
+}
+
+fn check_wide_pclmul_required_inline(width: usize) {
+    use keel_codegen::{regalloc::Pools, x86_features::module_features};
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let permitted = if width == 256 {
+        "avx,vpclmulqdq"
+    } else {
+        "avx512f,vpclmulqdq"
+    };
+    let source = |caller: &str| {
+        format!(
+            r#"
+#include <immintrin.h>
+static __inline__ __attribute__((always_inline,target("{permitted}")))
+__m{width}i helper(__m{width}i a,__m{width}i b) {{
+    return _mm{width}_clmulepi64_epi128(a,b,17);
+}}
+__attribute__((target("{caller}")))
+void wide_inline(void *pa,void *pb,void *out) {{
+    __m{width}i a,b,r;
+    __builtin_memcpy(&a,pa,{bytes});__builtin_memcpy(&b,pb,{bytes});
+    r=helper(a,b);__builtin_memcpy(out,&r,{bytes});
+}}
+"#,
+            bytes = width / 8
+        )
+    };
+    let original = parse(&source(permitted), Target::X86_64LinuxGnu)
+        .unwrap_or_else(|e| panic!("matching {width}-bit mandatory inline: {e}"));
+    keel_ir::verify_module(&original).unwrap();
+    let missing = if width == 256 { "avx" } else { "vpclmulqdq" };
+    let error = parse(&source(missing), Target::X86_64LinuxGnu).unwrap_err();
+    assert!(
+        error.contains("target feature mismatch"),
+        "{width}: {error}"
+    );
+    let features = module_features(&original, Features::NONE).unwrap();
+    assert!(features.avx && features.vpclmulqdq);
+    assert_eq!(features.avx512f, width == 512);
+    assert!(
+        !features.avx2
+            && !features.fma
+            && !features.avx512vl
+            && !features.avx512dq
+            && !features.avx512bw
+    );
+    let directory =
+        std::env::temp_dir().join(format!("keel-c-wide-inline-{}-{width}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let harness = format!(
+        r#"
+#include <stdint.h>
+#include <string.h>
+extern void wide_inline(void*,void*,void*);
+static void product(uint64_t a,uint64_t b,uint64_t*r){{r[0]=r[1]=0;for(unsigned i=0;i<64;i++)if((b>>i)&1){{r[0]^=a<<i;if(i)r[1]^=a>>(64-i);}}}}
+int main(void){{uint64_t a[8],b[8],out[8],expected[8];for(unsigned sample=0;sample<16;sample++){{for(unsigned i=0;i<8;i++){{a[i]=UINT64_C(0x9e3779b97f4a7c15)*(i+1)^sample;b[i]=UINT64_C(0xfedcba9876543210)^(UINT64_C(1)<<((i+sample)%64));}}for(unsigned i=0;i<{lanes};i+=2)product(a[i+1],b[i+1],expected+i);wide_inline(a,b,out);if(memcmp(out,expected,{bytes}))return 1;}}return 0;}}
+"#,
+        lanes = width / 64,
+        bytes = width / 8
+    );
+    fs::write(directory.join("harness.c"), harness).unwrap();
+    #[cfg(target_arch = "x86_64")]
+    let native = cfg!(target_os = "linux")
+        && std::is_x86_feature_detected!("vpclmulqdq")
+        && (width == 256 || std::is_x86_feature_detected!("avx512f"));
+    #[cfg(not(target_arch = "x86_64"))]
+    let native = false;
+    if native {
+        let output = Command::new("cc")
+            .args(["-O2", "-fno-tree-vectorize", "-c"])
+            .arg(directory.join("harness.c"))
+            .arg("-o")
+            .arg(directory.join("harness.o"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for optimized in [false, true] {
+        let mut module = original.clone();
+        if optimized {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        let caller = module
+            .functions
+            .iter()
+            .find(|f| f.name == "wide_inline")
+            .unwrap();
+        assert!(
+            !caller
+                .layout_insts()
+                .any(|(_, i)| matches!(caller.inst_data(i), keel_ir::InstData::Call { .. })),
+            "helper was not expanded"
+        );
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            for pools in [&keel_codegen::x86_64::REGISTERS, &empty] {
+                let selector = FeatureSelector {
+                    inner: &SelectionTier::Full,
+                    features: Features::NONE,
+                };
+                let pipeline = CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocation,
+                };
+                let text =
+                    keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                let program =
+                    keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline)
+                        .unwrap();
+                let object =
+                    keel_asm::x86::assemble_program_object_with_features(&program, features)
+                        .unwrap();
+                assert_eq!(
+                    object,
+                    keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+                );
+                fs::write(directory.join("consumer.o"), object).unwrap();
+                if native {
+                    let output = Command::new("cc")
+                        .arg(directory.join("consumer.o"))
+                        .arg(directory.join("harness.o"))
+                        .arg("-o")
+                        .arg(directory.join("run"))
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        Command::new(directory.join("run"))
+                            .status()
+                            .unwrap()
+                            .success(),
+                        "width={width} optimized={optimized} allocation={allocation:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn wide_pclmul256_required_inline_retains_minimal_function_permissions() {
+    check_wide_pclmul_required_inline(256);
+}
+#[test]
+fn wide_pclmul512_required_inline_retains_minimal_function_permissions() {
+    check_wide_pclmul_required_inline(512);
+}
+
+#[test]
+fn avx512_half_controls_accept_full_imm8_without_widening_er_controls() {
+    let controls = [0, 4, 5, 7, 8, 12, 13, 15, 16, 31, 255];
+    let mut source = String::from("#include <immintrin.h>\n");
+    for control in controls {
+        for (n, expression) in [
+            format!("_mm512_cvtps_ph(a,{control})"),
+            format!("_mm512_mask_cvtps_ph(s,k,a,{control})"),
+            format!("_mm512_maskz_cvtps_ph(k,a,{control})"),
+            format!("_mm512_cvt_roundps_ph(a,{control})"),
+            format!("_mm512_mask_cvt_roundps_ph(s,k,a,{control})"),
+            format!("_mm512_maskz_cvt_roundps_ph(k,a,{control})"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            source += &format!(
+                "__attribute__((target(\"avx512f\"))) __m256i half_{control}_{n}(__m512 a,__m256i s,__mmask16 k){{return {expression};}}\n"
+            );
+        }
+    }
+    let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for control in controls {
+        let f = module
+            .functions
+            .iter()
+            .find(|f| f.name == format!("half_{control}_0"))
+            .unwrap();
+        let args = f
+            .layout_insts()
+            .find_map(|(_, i)| match f.inst_data(i) {
+                keel_ir::InstData::Intrinsic {
+                    id: keel_ir::Intrinsic::X86Avx512Vcvtps2ph,
+                    args,
+                } => Some(args),
+                _ => None,
+            })
+            .unwrap();
+        let keel_ir::ValueDef::Result(i, _) = f.value_def(f.resolve(args[3])) else {
+            panic!("half control is not constant")
+        };
+        assert!(
+            matches!(f.inst_data(i),keel_ir::InstData::Iconst{ty:keel_ir::Type::I32,imm} if *imm==control)
+        );
+    }
+    let features = Features::NONE.with_features("avx512f").unwrap();
+    let encoding = keel_codegen::x86_features::module_features(&module, Features::NONE).unwrap();
+    assert_eq!(encoding, features);
+    let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
+    keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+    for control in ["-1", "256", "runtime"] {
+        let source = format!(
+            "#include <immintrin.h>\n__m256i f(__m512 a,int runtime){{return _mm512_cvtps_ph(a,{control});}}"
+        );
+        assert!(parse(&source, Target::X86_64LinuxGnu).is_err(), "{control}");
+    }
+    // Half's immediate semantics do not broaden unrelated embedded rounding.
+    for control in [5, 7, 12, 13, 15, 16, 31, 255] {
+        let source = format!(
+            "#include <immintrin.h>\n__m512i f(__m512 a){{return _mm512_cvt_roundps_epi32(a,{control});}}"
+        );
+        assert!(
+            parse(&source, Target::X86_64LinuxGnu).is_err(),
+            "ER {control}"
+        );
+    }
+}
+
+#[test]
+fn public_pclmul_controls_normalize_to_instruction_bytes() {
+    use keel_ir::{InstData, ValueDef};
+    for (width, api, vector) in [
+        (128, "_mm_clmulepi64_si128", "__m128i"),
+        (256, "_mm256_clmulepi64_epi128", "__m256i"),
+        (512, "_mm512_clmulepi64_epi128", "__m512i"),
+    ] {
+        for (expression, expected) in [("-1", 255), ("256", 0), ("0x100000011ULL", 17), ("1.0", 1)]
+        {
+            let source = format!(
+                "#include <immintrin.h>\n{vector} f({vector} a,{vector} b){{return {api}(a,b,{expression});}}\n"
+            );
+            let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+            let args = f
+                .layout_insts()
+                .find_map(|(_, i)| match f.inst_data(i) {
+                    InstData::Intrinsic { id, args } if id.is_x86_pclmul() => Some(args),
+                    _ => None,
+                })
+                .unwrap();
+            let ValueDef::Result(i, _) = f.value_def(f.resolve(args[2])) else {
+                panic!("constant instruction control")
+            };
+            assert!(
+                matches!(f.inst_data(i),InstData::Iconst{imm,..} if *imm==expected),
+                "width={width} expression={expression}: {f}"
+            );
+        }
+        for control in ["-1", "256", "n", "1.0"] {
+            let source = format!(
+                "#include <immintrin.h>\n{vector} f({vector} a,{vector} b,int n){{return __builtin_ia32_pclmulqdq{width}(a,b,{control});}}\n"
+            );
+            assert!(
+                parse(&source, Target::X86_64LinuxGnu).is_err(),
+                "private control {width}/{control}"
+            );
+        }
+    }
 }
