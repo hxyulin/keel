@@ -21,3 +21,5 @@ mod x86_memory_rhs;
 mod x86_signed_byte_load;
 #[path = "x86_scalar_selection/x86_size.rs"]
 mod x86_size;
+#[path = "x86_scalar_selection/x86_size_constants.rs"]
+mod x86_size_constants;

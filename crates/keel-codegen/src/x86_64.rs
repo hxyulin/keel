@@ -6418,11 +6418,45 @@ impl<'a> FunctionCompiler<'a> {
         let bits = imm as u64 & mask(ty);
         if bits == 0 {
             self.emit(Opcode::Xor, [asm_arg(r32(d)), asm_arg(r32(d))]);
-        } else if bits <= u64::from(u32::MAX) {
+        } else {
+            self.materialize_preserving_flags(d, bits);
+        }
+    }
+
+    /// Materialize all 64 bits without disturbing a pending comparison.
+    fn materialize_preserving_flags(&mut self, d: u8, bits: u64) {
+        if bits <= u64::from(u32::MAX) {
             self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(bits)]);
         } else if i32::try_from(bits as i64).is_ok() {
             self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(bits as i64)]);
         } else {
+            // MOV r32 zero-extends; NOT r64 reconstructs a high-ones mask.
+            // Both instructions preserve flags. Compare concrete encodings
+            // after allocation, including any extended-register prefixes.
+            if self.goal == crate::CodegenGoal::Size && u32::try_from(!bits).is_ok() {
+                let size = |opcode, operands| {
+                    keel_asm::x86::instruction_size_with_features(
+                        &keel_asm_ir::x86::Instruction {
+                            opcode,
+                            operands,
+                            lock: false,
+                        },
+                        self.features,
+                    )
+                    .ok()
+                    .flatten()
+                };
+                let full = size(Opcode::Movabs, vec![asm_arg(r64(d)), asm_arg(bits)]);
+                let short = size(Opcode::Mov, vec![asm_arg(r32(d)), asm_arg(!bits)])
+                    .zip(size(Opcode::Not, vec![asm_arg(r64(d))]))
+                    .map(|(load, invert)| load + invert);
+                // Unknown or rejected encodings retain the original lowering.
+                if matches!((short, full), (Some(short), Some(full)) if short < full) {
+                    self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(!bits)]);
+                    self.emit(Opcode::Not, [asm_arg(r64(d))]);
+                    return;
+                }
+            }
             self.emit(Opcode::Movabs, [asm_arg(r64(d)), asm_arg(bits)]);
         }
     }
@@ -6435,13 +6469,7 @@ impl<'a> FunctionCompiler<'a> {
             RematRecipe::Iconst(bits) => {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
-                if bits <= u64::from(u32::MAX) {
-                    self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(bits)]);
-                } else if i32::try_from(bits as i64).is_ok() {
-                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(bits as i64)]);
-                } else {
-                    self.emit(Opcode::Movabs, [asm_arg(r64(d)), asm_arg(bits)]);
-                }
+                self.materialize_preserving_flags(d, bits);
             }
             RematRecipe::NullPtr => {
                 #[cfg(feature = "backend-profile")]

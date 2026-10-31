@@ -324,6 +324,11 @@ addition to the Size IR pipeline:
 - Share one return epilogue when the function saves registers and has
   several returns. Each redirected return replaces at least seven bytes with a
   jump of at most five.
+- For a large i64 constant whose complement fits in 32 bits, compare the
+  assembler's exact encodings of `movabs` and `mov r32, complement; not r64`.
+  Choose the latter only when smaller. Both forms preserve flags, including
+  when rematerializing an operand before a conditional move. Constants that
+  already fit a zero-extended or sign-extended 32-bit move keep that form.
 
 Leaf-frame removal can shorten frame-pointer backtraces, and these choices can
 cost runtime. Call sites keep SysV alignment. The last `-O` preset selects the
