@@ -1905,6 +1905,9 @@ impl<'a> FunctionCompiler<'a> {
             &|data| folds(func, data),
             uses,
         );
+        if present.integer_idiom && !present.inline_asm && !present.intrinsic {
+            selection.fold_x86_integer_idioms(func, uses, |data| folds(func, data));
+        }
         if present.compare {
             selection.fold_x86_mask_tests(func, uses);
         }
@@ -2686,6 +2689,39 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&idiom) = self.selection.integer_idioms.get(&inst) {
+            use crate::select::X86IntegerIdiom;
+            let value = match idiom {
+                X86IntegerIdiom::ZeroMask(value) | X86IntegerIdiom::SignExtend { value, .. } => {
+                    value
+                }
+            };
+            let a = self.use_reg(value, S0);
+            let d = self.def_reg(result);
+            match idiom {
+                X86IntegerIdiom::ZeroMask(_) => {
+                    // Unsigned x < 1 is exactly x == 0. SBB consumes only CF;
+                    // read the input before an overlapping destination is written.
+                    self.emit(
+                        Opcode::Cmp,
+                        [asm_arg(reg(a, self.ty(value))), asm_arg(1i128)],
+                    );
+                    self.emit(Opcode::Sbb, [asm_arg(r64(d)), asm_arg(r64(d))]);
+                }
+                X86IntegerIdiom::SignExtend { from, .. } => {
+                    self.emit(
+                        if from == Type::I32 {
+                            Opcode::Movsxd
+                        } else {
+                            Opcode::Movsx
+                        },
+                        [asm_arg(r64(d)), asm_arg(reg(a, from))],
+                    );
+                }
+            }
+            self.def_done(result, d);
             return;
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {

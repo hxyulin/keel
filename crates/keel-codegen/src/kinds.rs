@@ -21,6 +21,8 @@ pub(crate) struct InstKinds {
     pub ptradd: bool,
     /// `icmp` or `fcmp`.
     pub compare: bool,
+    /// Integer negation or arithmetic right shift, roots of local x86 idioms.
+    pub integer_idiom: bool,
     pub brif: bool,
     pub vector_splat: bool,
     pub vector_icmp: bool,
@@ -71,6 +73,29 @@ impl InstKinds {
                 } => kinds.ptradd = true,
                 InstData::Select { .. } => kinds.select = true,
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => kinds.compare = true,
+                InstData::Unary {
+                    op: keel_ir::UnaryOp::Ineg,
+                    arg,
+                } if func.value_type(*arg) == keel_ir::Type::I64 => {
+                    kinds.integer_idiom = true;
+                }
+                InstData::Binary {
+                    op: BinaryOp::Sshr,
+                    args,
+                } if func.value_type(args[0]) == keel_ir::Type::I64
+                    && crate::fold::iconst(func, args[1])
+                        .is_some_and(|count| matches!(count as u64 & 63, 32 | 48 | 56)) =>
+                {
+                    kinds.integer_idiom = true;
+                }
+                InstData::Binary {
+                    op: BinaryOp::Isub,
+                    args,
+                } if func.value_type(args[0]) == keel_ir::Type::I64
+                    && crate::fold::iconst(func, args[0]) == Some(0) =>
+                {
+                    kinds.integer_idiom = true;
+                }
                 InstData::Brif { .. } => kinds.brif = true,
                 InstData::VectorSplat { .. } => kinds.vector_splat = true,
                 InstData::VectorIcmp { .. } => kinds.vector_icmp = true,

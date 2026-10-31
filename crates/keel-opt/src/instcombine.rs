@@ -883,6 +883,31 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 BinaryOp::Ptradd if y == Some(0) => return Some(Fold::Value(a)),
                 _ => {}
             }
+            // Wrapping ~x + 1 is -x. This needs no use graph: a shared
+            // complement remains available for its other consumers.
+            if op == BinaryOp::Iadd && ty.is_int() {
+                for (complement, one) in [(a, b), (b, a)] {
+                    if bits(func, one) != Some(1) {
+                        continue;
+                    }
+                    let ValueDef::Result(producer, 0) = func.value_def(func.resolve(complement))
+                    else {
+                        continue;
+                    };
+                    // Keep the explicit XOR/add spelling binary: loop
+                    // vectorization accepts it but does not yet accept Ineg.
+                    if let InstData::Unary {
+                        op: UnaryOp::Bnot,
+                        arg,
+                    } = *func.inst_data(producer)
+                    {
+                        return Some(Fold::Data(InstData::Unary {
+                            op: UnaryOp::Ineg,
+                            arg: func.resolve(arg),
+                        }));
+                    }
+                }
+            }
             // A widening zero extension has no possible bits above its source
             // width. The literal's upper bits do not matter to this identity.
             if op == BinaryOp::And && ty.is_int() {

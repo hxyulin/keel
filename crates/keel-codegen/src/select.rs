@@ -49,6 +49,12 @@ pub struct Match {
     pub shift: u8,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum X86IntegerIdiom {
+    ZeroMask(Value),
+    SignExtend { value: Value, from: Type },
+}
+
 /// Exact 64-bit modular address arithmetic, evaluated at the memory access.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IndexedAddress {
@@ -121,6 +127,7 @@ pub struct Selection {
     pub(crate) select_compares: HashMap<Inst, Inst>,
     /// Exact adjacent ordinary i8 load consumed by sext.i32.
     pub(crate) signed_byte_memory: HashMap<Inst, Value>,
+    pub(crate) integer_idioms: HashMap<Inst, X86IntegerIdiom>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
@@ -149,6 +156,187 @@ impl Hints {
 }
 
 impl Selection {
+    /// Scalar, same-block covers before allocation. Only constants can
+    /// separate the producers; shared intermediate results keep their lowering.
+    pub(crate) fn fold_x86_integer_idioms(
+        &mut self,
+        func: &Function,
+        uses: &[u8],
+        folds: impl Fn(&InstData) -> Vec<Value>,
+    ) {
+        if func.debug_loc.is_some()
+            || !func.debug_vars.is_empty()
+            || func.layout_insts().any(|(_, i)| func.inst_loc(i).is_some())
+        {
+            return;
+        }
+        for block in func.blocks() {
+            let insts = func.block_insts(block);
+            for (end, &root) in insts.iter().enumerate() {
+                if !matches!(
+                    func.inst_data(root),
+                    InstData::Unary {
+                        op: UnaryOp::Ineg,
+                        ..
+                    } | InstData::Binary {
+                        op: BinaryOp::Sshr | BinaryOp::Isub,
+                        ..
+                    }
+                ) {
+                    continue;
+                }
+                let available = |i| {
+                    !func.is_removed(i)
+                        && !self.covered(i)
+                        && !self.matches.contains_key(&i)
+                        && !self.conditions.contains_key(&i)
+                        && !self.binary_memory.contains_key(&i)
+                        && !self.compare_memory.contains_key(&i)
+                        && !self.mask_tests.contains_key(&i)
+                        && !self.integer_idioms.contains_key(&i)
+                        && !self.has_constraint(i)
+                        && func.inst_results(i).first().is_some_and(|&v| {
+                            matches!(func.value_def(v), ValueDef::Result(owner, 0) if owner == i)
+                        })
+                };
+                if !available(root) || func.value_type(func.first_result(root)) != Type::I64 {
+                    continue;
+                }
+                let mut before = insts[..end].iter().rev().copied().filter(|&i| {
+                    !matches!(func.inst_data(i), InstData::Iconst { .. }) || !available(i)
+                });
+                if let InstData::Binary {
+                    op: BinaryOp::Sshr,
+                    args,
+                } = *func.inst_data(root)
+                {
+                    let shifted = func.resolve(args[0]);
+                    let ValueDef::Result(child, 0) = func.value_def(shifted) else {
+                        continue;
+                    };
+                    if before.next() != Some(child)
+                        || !available(child)
+                        || uses[shifted.index()] != 1
+                    {
+                        continue;
+                    }
+                    let InstData::Binary {
+                        op: BinaryOp::Shl,
+                        args: inner,
+                    } = *func.inst_data(child)
+                    else {
+                        continue;
+                    };
+                    let (Some(left), Some(right)) = (
+                        crate::fold::iconst(func, inner[1]),
+                        crate::fold::iconst(func, args[1]),
+                    ) else {
+                        continue;
+                    };
+                    if left as u64 & 63 != right as u64 & 63 {
+                        continue;
+                    }
+                    let from = match right as u64 & 63 {
+                        56 => Type::I8,
+                        48 => Type::I16,
+                        32 => Type::I32,
+                        _ => continue,
+                    };
+                    let value = func.resolve(inner[0]);
+                    if let ValueDef::Result(producer, _) = func.value_def(value)
+                        && self.covered(producer)
+                    {
+                        continue;
+                    }
+                    self.set_operands(root, vec![value]);
+                    self.allocation_folds.insert(
+                        root,
+                        folds(func.inst_data(root))
+                            .into_iter()
+                            .map(|v| func.resolve(v))
+                            .collect(),
+                    );
+                    self.integer_idioms
+                        .insert(root, X86IntegerIdiom::SignExtend { value, from });
+                    self.cover(child);
+                    continue;
+                }
+                let extended = match *func.inst_data(root) {
+                    InstData::Unary {
+                        op: UnaryOp::Ineg,
+                        arg,
+                    } => func.resolve(arg),
+                    InstData::Binary {
+                        op: BinaryOp::Isub,
+                        args,
+                    } if crate::fold::iconst(func, args[0]) == Some(0) => func.resolve(args[1]),
+                    _ => continue,
+                };
+                let ValueDef::Result(convert, 0) = func.value_def(extended) else {
+                    continue;
+                };
+                if before.next() != Some(convert)
+                    || !available(convert)
+                    || uses[extended.index()] != 1
+                {
+                    continue;
+                }
+                let InstData::Convert {
+                    op: ConvertOp::Uext,
+                    arg,
+                    ..
+                } = *func.inst_data(convert)
+                else {
+                    continue;
+                };
+                let boolean = func.resolve(arg);
+                let ValueDef::Result(compare, 0) = func.value_def(boolean) else {
+                    continue;
+                };
+                if before.next() != Some(compare)
+                    || !available(compare)
+                    || uses[boolean.index()] != 1
+                {
+                    continue;
+                }
+                let InstData::Icmp {
+                    cond: IntCC::Eq,
+                    args,
+                } = *func.inst_data(compare)
+                else {
+                    continue;
+                };
+                let value = if crate::fold::iconst(func, args[1]) == Some(0) {
+                    func.resolve(args[0])
+                } else if crate::fold::iconst(func, args[0]) == Some(0) {
+                    func.resolve(args[1])
+                } else {
+                    continue;
+                };
+                if func.value_type(value) != Type::I64 {
+                    continue;
+                }
+                if let ValueDef::Result(producer, _) = func.value_def(value)
+                    && self.covered(producer)
+                {
+                    continue;
+                }
+                self.set_operands(root, vec![value]);
+                self.allocation_folds.insert(
+                    root,
+                    folds(func.inst_data(root))
+                        .into_iter()
+                        .map(|v| func.resolve(v))
+                        .collect(),
+                );
+                self.integer_idioms
+                    .insert(root, X86IntegerIdiom::ZeroMask(value));
+                self.cover(convert);
+                self.cover(compare);
+            }
+        }
+    }
+
     /// Run after custom selection/constraints and before compare fusion. Keep
     /// the unmasked leaf live at the eventual compare/branch/select boundary.
     pub(crate) fn fold_x86_mask_tests(&mut self, func: &Function, uses: &[u8]) {

@@ -5,6 +5,9 @@ mod boolean;
 #[path = "instcombine/canonical_constants.rs"]
 mod canonical_constants;
 
+#[path = "instcombine/negation.rs"]
+mod negation;
+
 mod support;
 use support::execute;
 

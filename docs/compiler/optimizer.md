@@ -129,7 +129,10 @@ An AND whose literal covers every source bit of a widening zero extension is
 removed, and sign extension of an AND that clears the source sign bit becomes
 zero extension. These rules also run in Fast. i128 literals are created only
 when the IR's sign-extended i64 immediate can represent them. Combining skips
-producers whose result is already aliased.
+producers whose result is already aliased. Wrapping `~x + 1` becomes integer
+negation in both local tiers when the complement is `bnot`. A shared complement
+remains available to its other consumers. Explicit XOR/add spellings remain
+binary so they retain loop-vectorization eligibility.
 
 ## Integer facts
 

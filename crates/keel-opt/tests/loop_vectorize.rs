@@ -833,3 +833,19 @@ fn conditional_multi_sums_fold_only_proved_full_loop_unit_counts() {
         }
     }
 }
+
+#[test]
+fn local_negation_combining_keeps_explicit_xor_add_vectorizable() {
+    let source = kernel(Type::I64, Type::I64, "iadd", false).replace(
+        "v17 = iadd v15,v16",
+        "v20 = iadd v15,v16\n v21 = iconst.i64 -1\n v22 = xor v20,v21\n v23 = iconst.i64 1\n v17 = iadd v22,v23",
+    );
+    for pass in ["instcombine", "fast-local"] {
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes(&mut module, &[pass, "dce"]).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["loop-vectorize"], VectorTarget::X86Sse2)
+            .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert!(packed(&module) > 0, "{module}");
+    }
+}
