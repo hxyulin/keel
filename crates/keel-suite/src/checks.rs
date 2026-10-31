@@ -19,7 +19,7 @@ impl Group {
         match self {
             Self::C => &["suite/c", "suite/c/lz4", "suite/c/yyjson"],
             Self::Ir => &["suite/ir"],
-            Self::Asm => &["suite/asm/compiler_asm_compat"],
+            Self::Asm => &["suite/asm/compiler_asm_compat", "suite/asm/sequence_bench"],
             Self::Linker => &["suite/linker/fixtures"],
             Self::Integration => &[
                 "suite/integration",

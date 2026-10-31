@@ -76,7 +76,8 @@ python3 tools/instruction_metrics.py -o analysis.json analyze input.s \
 
 Pass `--cpu-level` or `--target-features` to the command for optional forms.
 The Python wrapper accepts `--target-features`. No LLVM tools are used for
-x86 reports, and requests for CPU timing are rejected.
+x86 reports, and requests for CPU timing are rejected. For native sequence
+comparisons, use the [sequence runner](../../../suite/README.md#native-x86-sequence-measurements).
 
 The x86 JSON schema is version 2. `sections` lists assembler-owned sections
 with their logical size, executable flag and NOBITS status. Its indices are

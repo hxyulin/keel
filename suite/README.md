@@ -338,3 +338,61 @@ C files separately, plus a deterministic public-API driver. Both compilers use
 implementation without external assembly or old-format decoders. It does not
 measure an amalgamation or the upstream CLI. The driver checks round trips and
 runs compression and decompression separately on deterministic resident inputs.
+
+### Native x86 sequence measurements
+
+`asm/sequence_bench/run.py` compares complete instruction sequences assembled by
+Keel. It requires Linux x86-64, a C compiler for the timing driver, and permission
+to lock 192 KiB of memory. It uses no LLVM analysis tools.
+
+```sh
+cargo build --release -p keel
+python3 suite/asm/sequence_bench/run.py --keel target/release/keel \
+  --cpu <allowed-cpu> --rounds 20 --sample-ms 10 \
+  --output suite/reports/sequence-run-1
+```
+
+Choose an idle core and avoid its SMT sibling. Repeat with a fresh output path
+and seed before acting on a small difference. `--case` selects comparisons;
+`--unroll` controls loop size. The initial cases compare byte versus 32-bit
+comparisons after zero extension, removal of a redundant load extension, LEA
+versus multiply/add, and MOVABS versus MOV/NOT constant materialization. The
+last case intentionally trades bytes for instructions.
+
+The driver pins itself to the chosen CPU. It retains three locked anonymous
+mappings and swaps baseline, candidate and identical-baseline control bytes into
+the same mapping for each placement, with entry offsets of 0, 16 and 32 bytes
+within a cache line. Writes use RW permissions and execution uses RX permissions.
+The mappings remain alive across cases. Lock failures abort; physical page-frame
+migration is not checked. The three placements combine different backing and
+alignment, so they do not isolate either effect. Every placement remains a
+separate result.
+
+Before measurement, independent modular arithmetic and table-lookup oracles
+check zero trips, wrapping seeds and nonzero counts. Separate one-operation
+functions check predicates before repeated operations reach a fixed point.
+Metrics must agree with the ordinary assembler's instruction bytes, and text
+relocations are rejected. The constant case overwrites its operands and is
+labelled throughput, including its one-stream form. Other cases use one dependent
+stream or eight independent streams. The load case uses a hot 256-byte permutation
+table with each loaded byte supplying the next index.
+
+Calibration chooses one trip count per case and stream count. Each sample has
+an untimed 1,024-trip warmup, then one function call timed with
+`CLOCK_MONOTONIC_RAW`. The measured boundary includes loop control, the call and
+checksum. Results are nanoseconds per complete sequence, **not instruction
+latencies or hardware cycles**. There are two discarded rounds per placement,
+then randomized baseline/candidate/control order within paired rounds. The report
+uses the geometric mean paired time ratio and a 95% percentile bootstrap interval
+resampling whole rounds. It reports the identical-byte control separately and
+does not subtract that control. These intervals describe repeatability within a
+run and placement; they do not establish robustness across machines or workloads.
+
+`results.json` retains raw samples, orders, checksums, actual entry addresses,
+CPU identity, activity snapshots, source and assembler hashes, driver build
+command, exact body sizes and instruction counts. The directory also contains
+sources, objects, encoding reports and executable byte blobs. Run artifacts stay
+under ignored `suite/reports/`. `cargo suite check asm` includes the runner's
+protocol and oracle tests; it does not execute the native measurements. Use these
+results to select compiler experiments, then validate those with application
+benchmarks before changing a default.
