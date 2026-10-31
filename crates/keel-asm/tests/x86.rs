@@ -1,3 +1,5 @@
+#[path = "x86/x86_instruction_size.rs"]
+mod x86_instruction_size;
 #[path = "x86/x86_layout_storage.rs"]
 mod x86_layout_storage;
 use keel_asm::x86::{assemble_object, assemble_program_object};

@@ -22,6 +22,7 @@ use object::{
     Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -308,6 +309,90 @@ struct Assembler {
     /// Sections by a hash of name, group, unique ID and retain flag, in
     /// declaration order. Hashes may collide, so each match is rechecked.
     section_index: FxHashMap<u64, Vec<usize>>,
+}
+
+/// Exact encoded byte length of a concrete baseline x86-64 instruction.
+///
+/// See [`instruction_size_with_features`] for layout requirements and errors.
+pub fn instruction_size(instruction: &x86::Instruction) -> Result<Option<usize>, Error> {
+    instruction_size_with_features(instruction, Features::default())
+}
+
+/// Exact encoded byte length using the assembler's encoder and target features.
+///
+/// Returns `Some(bytes)` for a concrete instruction needing no fixups. Registers,
+/// immediate values, prefixes, and displacement compression affect this length.
+/// The query does not parse source, assemble an object, or run layout.
+///
+/// Returns `None` for symbolic operands or encoder fixups, including direct
+/// PC-relative branches. This first checks feature permissions, but defers
+/// validation of symbolic operand forms to object assembly. Even fixed-width
+/// symbolic encodings are conservatively deferred. Use object assembly for
+/// branch relaxation, alignment, relocation validation, and final section sizes.
+///
+/// # Errors
+/// Returns an error for an invalid feature set, missing target features, or an
+/// invalid concrete encoding. Diagnostics have line zero because there is no
+/// source position.
+pub fn instruction_size_with_features(
+    instruction: &x86::Instruction,
+    features: Features,
+) -> Result<Option<usize>, Error> {
+    features
+        .validate()
+        .map_err(|message| Error::new(0, message))?;
+    let instruction = promoted_instruction(instruction);
+    check_instruction_features(&instruction, features, None)
+        .map_err(|message| Error::new(0, message))?;
+    if !concrete_operands(&instruction) {
+        return Ok(None);
+    }
+    let encoding = encode::encode(&instruction, false).map_err(|message| Error::new(0, message))?;
+    Ok(encoding.fixups.is_empty().then_some(encoding.bytes.len()))
+}
+
+fn promoted_instruction(instruction: &x86::Instruction) -> Cow<'_, x86::Instruction> {
+    let opcode = x86::evex::promote(instruction.opcode, &instruction.operands);
+    if opcode == instruction.opcode {
+        Cow::Borrowed(instruction)
+    } else {
+        Cow::Owned(x86::Instruction {
+            opcode,
+            ..instruction.clone()
+        })
+    }
+}
+
+fn concrete_operands(instruction: &x86::Instruction) -> bool {
+    instruction.operands.iter().all(|operand| match operand {
+        x86::Operand::Register(_) => true,
+        x86::Operand::Immediate(address) => symbol_free(address),
+        x86::Operand::Memory(memory) => symbol_free(&memory.displacement),
+    })
+}
+
+fn check_instruction_features(
+    instruction: &x86::Instruction,
+    features: Features,
+    source_features: Option<Features>,
+) -> Result<(), String> {
+    let required = if matches!(instruction.opcode, x86::Opcode::Evex(_)) {
+        x86::evex::form(instruction)
+            .ok_or_else(|| format!("{} has no supported x86 operand form", instruction.opcode))?
+            .requirements()
+    } else {
+        instruction.required_features()
+    };
+    if !features.contains(required)
+        || source_features.is_some_and(|features| !features.contains(required))
+    {
+        return Err(format!(
+            "{} requires x86 target features: {}",
+            instruction.opcode,
+            required.names().collect::<Vec<_>>().join(",")
+        ));
+    }
+    Ok(())
 }
 
 /// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
@@ -811,17 +896,8 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
-        let opcode = x86::evex::promote(i.opcode, &i.operands);
-        let promoted;
-        let i = if opcode != i.opcode {
-            promoted = x86::Instruction {
-                opcode,
-                ..i.clone()
-            };
-            &promoted
-        } else {
-            i
-        };
+        let promoted = promoted_instruction(i);
+        let i = promoted.as_ref();
         self.check_features(i, line);
         if self.unsupported.is_none()
             && let Some(&(start, end)) = self.encodings.get(i)
@@ -844,47 +920,15 @@ impl Items {
         }
     }
     fn check_features(&mut self, i: &x86::Instruction, line: usize) {
-        let required = if matches!(i.opcode, x86::Opcode::Evex(_)) {
-            let Some(form) = x86::evex::form(i) else {
-                self.unsupported.get_or_insert_with(|| {
-                    Error::new(
-                        line,
-                        format!("{} has no supported x86 operand form", i.opcode),
-                    )
-                });
-                return;
-            };
-            form.requirements()
-        } else {
-            i.required_features()
-        };
-        if !self.features.contains(required)
-            || self
-                .source_features
-                .is_some_and(|features| !features.contains(required))
-        {
-            self.unsupported.get_or_insert_with(|| {
-                Error::new(
-                    line,
-                    format!(
-                        "{} requires x86 target features: {}",
-                        i.opcode,
-                        required.names().collect::<Vec<_>>().join(",")
-                    ),
-                )
-            });
+        if let Err(message) = check_instruction_features(i, self.features, self.source_features) {
+            self.unsupported
+                .get_or_insert_with(|| Error::new(line, message));
         }
     }
     /// Encode a symbol-free instruction into the current run, if possible.
     /// Otherwise the caller retains it for per-pass layout.
     fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
-        if self.unsupported.is_some()
-            || !i.operands.iter().all(|o| match o {
-                x86::Operand::Register(_) => true,
-                x86::Operand::Immediate(a) => symbol_free(a),
-                x86::Operand::Memory(m) => symbol_free(&m.displacement),
-            })
-        {
+        if self.unsupported.is_some() || !concrete_operands(i) {
             return false;
         }
         // Without a symbol nothing folds and no branch is short, so layout

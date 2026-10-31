@@ -45,6 +45,27 @@ macros, syntax, aliases and numeric local labels. A macro or conditional block
 must close within its fragment; named forward symbols remain available for
 final object assembly.
 
+## Encoding size queries
+
+`keel_asm::x86::instruction_size(&instruction)` returns the exact byte length
+of a concrete baseline instruction. `instruction_size_with_features` accepts
+an explicit `Features` set. Both take a structured
+`keel_asm_ir::x86::Instruction` and use the same promotion, feature checks and
+encoder as object assembly. They do not parse source or build an object.
+
+The result is `Result<Option<usize>, keel_asm::Error>`. `Some(bytes)` includes
+the chosen registers, immediate width, prefixes, SIB and displacement encoding,
+including EVEX compressed displacements. `None` defers to layout: symbolic
+operands and encoder fixups, including direct PC-relative branches, are not
+assigned a size. Fixed-width symbolic forms are also conservatively deferred.
+Feature checks still apply, but symbolic operand validation belongs to object
+assembly. Invalid concrete encodings and invalid or missing features are errors
+with line zero.
+
+Use these queries to compare concrete instruction alternatives after registers
+and immediates are known. They do not include alignment padding, relax branches,
+validate relocations or estimate CPU execution time.
+
 ## AMX assembly
 
 The assembler and decoder expose the imported AMX-TILE, AMX-INT8, AMX-BF16
