@@ -352,12 +352,55 @@ python3 suite/asm/sequence_bench/run.py --keel target/release/keel \
   --output suite/reports/sequence-run-1
 ```
 
-Choose an idle core and avoid its SMT sibling. Repeat with a fresh output path
-and seed before acting on a small difference. `--case` selects comparisons;
-`--unroll` controls loop size. The initial cases compare byte versus 32-bit
-comparisons after zero extension, removal of a redundant load extension, LEA
-versus multiply/add, and MOVABS versus MOV/NOT constant materialization. The
-last case intentionally trades bytes for instructions.
+Choose an idle core and avoid its SMT sibling. `--controller-cpu` pins the Python
+controller to a separate allowed CPU. On hybrid processors, run P-cores and
+E-cores separately; the report captures Linux's core/atom CPU lists when present.
+Repeat with a fresh output path and seed before acting on a small difference.
+`--case` selects comparisons; `--unroll` controls loop size.
+
+The 46 cases test these choices. The default runs one and eight streams; repeat
+`--streams` to select 1, 2, 4 or 8 streams. Use `--unroll` to check sensitivity to
+loop size rather than treating a single unrolled loop as an instruction cost.
+
+| Cases | Baseline | Candidate | Context |
+| --- | --- | --- | --- |
+| `compare_width` | Byte comparison | 32-bit comparison | Zero-extended byte, `SETcc` consumer |
+| `load_extension` | Extending load, redundant `MOVZX` | Extending load | Hot byte table, dependent indices |
+| `lea_arithmetic` | `LEA` for 3*x+7 | `IMUL` and `ADD` | Wrapping arithmetic |
+| `constant_materialization` | `MOVABS` | `MOV` and `NOT` | Smaller encoding, overwritten destination |
+| `mask_byte`, `mask_word` | `AND` mask | `MOVZX` | Common increment before each extension |
+| `sign_byte`, `sign_word`, `sign_dword` | Left and arithmetic right shifts | `MOVSX` or `MOVSXD` | Common increment, signed wrap boundaries |
+| `fold_load_byte` | Byte load, `MOVZX` | Zero-extending load | Hot byte table, dependent indices |
+| `fold_signed_load_byte` | Byte load, `MOVSX` | Sign-extending load | Index masked before each load |
+| `zero_setcc`, `zero_branch` | `CMP` with zero | `TEST` with itself | `SETcc` or direct conditional branch |
+| `multiply_*` | `IMUL` | LEA/shift/add/subtract sequences | Factors 3, 5, 7, 9, 10, 12, 15, 17 and 63 |
+| `zero_shift_*` | Left and logical right shifts | `MOVZX` or 32-bit write | Byte, word and dword truncation after a common increment |
+| `fold_load_word` | Partial word load, `MOVZX` | Zero-extending word load | Hot table, masked dependent indices |
+| `fold_signed_load_word`, `fold_signed_load_dword`, `fold_zero_then_signed_byte` | Zero-extending load, signed extension | Sign-extending load | Forms emitted by the compiler, masked dependent indices |
+| `remove_load_dword_extension` | Dword load, redundant 32-bit move | Dword load | Implicit zero extension |
+| `zero_setcc32` | 32-bit `CMP 0` | 32-bit `TEST` | Clean 32-bit input, `SETcc` consumer |
+| `setcc_clean_test`, `setcc_clean_cmp` | Same-register `SETcc` and extension | Cleared scratch register, `SETcc`, move | Nonzero and zero predicate outcomes |
+| `bool_nonzero`, `mask_nonzero`, `mask_zero` | `SETcc` and extension | NEG/SBB or CMP/SBB sequences | Canonical Boolean or all-bits mask |
+| `invert_boolean` | Compare, `SETcc`, extension | `XOR 1` | Input proven to be 0 or 1 |
+| `rotate_left`, `rotate_right` | Shift/shift/OR | `ROL` or `ROR` | Constant rotate by 13 |
+| `bitwise_not`, `negate` | XOR -1, or NOT/ADD 1 | `NOT` or `NEG` | Dead arithmetic flags |
+| `add_lea`, `double`, `increment` | LEA, LEA, ADD 1 | ADD, ADD, INC | Dead arithmetic flags |
+| `loop_dec_sub` | DEC loop counter | SUB loop counter | Identical ADD workload, JNZ consumer |
+| `absolute_select` | Conditional branch and NEG | NEG and CMOV | Common increment, wrapping absolute value |
+
+Mask, sign-extension and arithmetic alternatives assume their arithmetic flags
+are dead. CMP/TEST alternatives consume only ZF; CMP/SBB masks consume CF.
+The zero-branch case alternates a Boolean state;
+each unrolled operation has its own branch site. It does not model unpredictable
+branches. The mask and sign-extension cases add 17 before each operation to keep
+their dependency chains changing. These shared instructions remain in the timed
+boundary. Signed-load results are masked to a valid table index before the next
+lookup. Word/dword cases use a separate aligned 256-entry table with varying
+upper bits; only the low byte supplies the next index. The absolute-value case
+quickly has predictable branches, with boundary seeds checking signed overflow.
+Rotate and some multiply alternatives use a caller-saved scratch register; this
+cost is present in their instructions, but live register pressure is not modeled.
+None of these cases measures spill costs, cache misses or unpredictable selects.
 
 The driver pins itself to the chosen CPU. It retains three locked anonymous
 mappings and swaps baseline, candidate and identical-baseline control bytes into
@@ -373,9 +416,10 @@ check zero trips, wrapping seeds and nonzero counts. Separate one-operation
 functions check predicates before repeated operations reach a fixed point.
 Metrics must agree with the ordinary assembler's instruction bytes, and text
 relocations are rejected. The constant case overwrites its operands and is
-labelled throughput, including its one-stream form. Other cases use one dependent
-stream or eight independent streams. The load case uses a hot 256-byte permutation
-table with each loaded byte supplying the next index.
+labelled throughput, including its one-stream form. By default other cases use
+one dependent stream or eight independent streams. Byte-table cases use a hot
+256-byte permutation table. Wide-load cases use a hot 1 KiB table; the low byte
+of each loaded value supplies the next index.
 
 Calibration chooses one trip count per case and stream count. Each sample has
 an untimed 1,024-trip warmup, then one function call timed with
@@ -396,3 +440,38 @@ under ignored `suite/reports/`. `cargo suite check asm` includes the runner's
 protocol and oracle tests; it does not execute the native measurements. Use these
 results to select compiler experiments, then validate those with application
 benchmarks before changing a default.
+
+#### Optional TSC timing
+
+Add `--timer dual` to collect ordered TSC ticks and wall time for each sample.
+This requires CPUID support for RDTSCP and invariant TSC. The driver checks the
+features after pinning to the measurement CPU. It records the CPU vendor,
+hypervisor flag, ordering protocol and CPUID leaf 15 frequency when Intel reports
+all required fields. An unavailable frequency is zero; ticks remain usable
+without converting them to nanoseconds. Invariant TSC ticks are reference time,
+**not current core cycles**. Use PMU measurements to study actual core cycles.
+
+Intel endpoints use `LFENCE; RDTSCP; LFENCE`. Other vendors use the more expensive
+`CPUID; RDTSCP; CPUID`, rather than assuming identical LFENCE dispatch semantics.
+These protocols include compiler memory barriers. Each endpoint captures TSC_AUX;
+a change rejects the sample. CPU affinity and stable entry addresses are checked
+too. Matching endpoint markers cannot detect an interrupt or migration away and
+back between the reads. The runner does not measure global store publication.
+The instruction ordering follows the [Intel instruction reference](https://cdrdv2-public.intel.com/789581/325383-sdm-vol-2abcd.pdf).
+
+The TSC interval brackets the function call and includes inner ordering/wrapper
+costs. The outer wall interval also includes both TSC endpoint reads. Schema 2
+reports retain both durations, separate paired intervals and ticks per sequence.
+The driver records 32 empty indirect-call probes with the selected timer. They
+show the timer/wrapper floor and are never subtracted from samples. They do not
+calibrate the cost of every snippet wrapper or establish an accuracy bound.
+
+Direct TSC reads skip clock conversion layers and can expose finer units. Unit
+granularity does not establish timestamp accuracy. These reads do not remove
+frequency changes, interrupts, front-end effects, cache state or placement
+sensitivity. For millisecond samples, timer quantization is
+usually much smaller than execution noise. Linux may already use TSC as its
+clocksource; the report records that source. In that case the two durations are
+not independent clocks. Repeat the same timer mode, CPU and loop shape, retain
+identical-byte controls, and qualify small effects across fresh runs and loop
+sizes before changing a compiler default.
