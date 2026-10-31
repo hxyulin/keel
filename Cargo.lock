@@ -404,6 +404,7 @@ dependencies = [
  "memmap2",
  "object",
  "profiling",
+ "serde_json",
  "simdutf8",
  "tracy-client",
 ]

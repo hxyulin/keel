@@ -2,6 +2,8 @@
 mod x86_instruction_size;
 #[path = "x86/x86_layout_storage.rs"]
 mod x86_layout_storage;
+#[path = "x86/x86_metrics.rs"]
+mod x86_metrics;
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::{Item, Program, x86::Instruction};
 use object::{Object, ObjectSection, ObjectSymbol};

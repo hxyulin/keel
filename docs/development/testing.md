@@ -239,6 +239,10 @@ python3 tools/instruction_metrics.py -o apple-m5.json catalog \
   --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)" --llvm-mc "$(command -v llvm-mc)"
 # Exact metrics on an assembly file, including final branch and address fixups:
 target/release/keel asm-metrics input.s -o exact.json
+# Exact x86 layout, with instruction/data/padding boundaries and no CPU tools:
+target/release/keel asm-metrics --target x86_64-unknown-linux-gnu input.s -o x86.json
+python3 tools/instruction_metrics.py -o x86-analysis.json analyze input.s \
+  --target x86_64-unknown-linux-gnu
 python3 tools/instruction_metrics.py -o before.json analyze before.s
 python3 tools/instruction_metrics.py -o after.json analyze after.s
 python3 tools/instruction_metrics.py compare before.json after.json --objective size
@@ -249,6 +253,12 @@ python3 tools/instruction_metrics.py -o after.json analyze after.s \
   --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)"
 python3 tools/instruction_metrics.py compare before.json after.json --objective speed
 ```
+
+The [x86 report contract](../targets/x86_64/assembler.md#encoding-reports)
+defines final section offsets, instruction bytes, prefixes, branch distances,
+relocations and padding. Its `analyze` route does not use LLVM or load the A64
+inventory. Size comparisons require matching assembler, target and features.
+The x86 route has no CPU timing model.
 
 CPU analysis rejects regions with extra text bytes and needs one MCA region
 with the same instruction count. It declines a speed score for warnings,

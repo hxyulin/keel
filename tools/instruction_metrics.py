@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact A64 encoding inventory and assembly costs, with optional LLVM CPU estimates.
+"""Exact A64/x86 assembly reports; optional LLVM CPU estimates are A64-only.
 
 No CPU timing is inferred from encoding bits. Analyze small straight-line regions,
 not whole functions/translation units, when requesting llvm-mca estimates.
@@ -201,10 +201,31 @@ def modeled_catalog(keel, cpu, mca, llvm_mc):
     return result
 
 
-def analyze(source, keel, cpu=None, mca="llvm-mca", iterations=100, expected_word=None):
+def analyze(source, keel, cpu=None, mca="llvm-mca", iterations=100, expected_word=None,
+            target=None, features=None):
     source = Path(source).resolve()
-    proc = run([str(keel), "asm-metrics", str(source)])
+    command = [str(keel), "asm-metrics"]
+    if target:
+        command += ["--target", target]
+    if features is not None:
+        command += ["--target-features", features]
+    if target == "x86_64-unknown-linux-gnu" and cpu:
+        raise ValueError("x86 reports provide exact encoding metrics only; no CPU timing model")
+    proc = run(command + [str(source)])
     exact = json.loads(proc.stdout)
+    if target == "x86_64-unknown-linux-gnu":
+        if exact["schema_version"] != 2 or exact["target"] != target:
+            raise ValueError("unsupported x86 assembler metrics schema/target")
+        return {
+            "schema_version": 2, "source": str(source), "source_sha256": digest(source),
+            "assembler_sha256": digest(keel), "isa_sha256": None,
+            "exact": exact, "performance": None,
+            "limitations": ["Section-relative relocatable-object layout, before linking.",
+                            "Instruction boundaries come from assembly input; explicit bytes remain data.",
+                            "Relocation bytes are placeholders; unresolved branch distances are null.",
+                            "Data includes generated/unclassified bytes and NOBITS reservations.",
+                            "Encoding sizes do not specify execution frequencies or CPU timing."],
+        }
     if exact["schema_version"] != 1 or exact["target"] != "aarch64-apple-darwin":
         raise ValueError("unsupported assembler metrics schema/target")
     if expected_word is not None:
@@ -255,6 +276,8 @@ def compare(before, after, objective):
             raise ValueError(f"incompatible reports: {key}")
     if before["exact"]["target"] != after["exact"]["target"]:
         raise ValueError("incompatible targets")
+    if before["exact"].get("features") != after["exact"].get("features"):
+        raise ValueError("incompatible target features")
     if objective == "size":
         a, b = before["exact"]["text_bytes"], after["exact"]["text_bytes"]
         unit = "bytes"
@@ -285,6 +308,8 @@ def main():
     analysis.add_argument("source", type=Path)
     analysis.add_argument("--keel", type=Path, default=ROOT / "target/release/keel")
     analysis.add_argument("--cpu")
+    analysis.add_argument("--target", choices=["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"])
+    analysis.add_argument("--target-features")
     analysis.add_argument("--llvm-mca", default="llvm-mca")
     analysis.add_argument("--iterations", type=int, default=100)
     comparison = commands.add_parser("compare")
@@ -299,7 +324,8 @@ def main():
         elif args.command == "analyze":
             if args.iterations < 1:
                 raise ValueError("iterations must be positive")
-            result = analyze(args.source, args.keel.resolve(), args.cpu, args.llvm_mca, args.iterations)
+            result = analyze(args.source, args.keel.resolve(), args.cpu, args.llvm_mca, args.iterations,
+                             target=args.target, features=args.target_features)
         else:
             result = compare(json.loads(args.before.read_text()), json.loads(args.after.read_text()), args.objective)
     except (ValueError, KeyError, OSError, TypeError) as error:

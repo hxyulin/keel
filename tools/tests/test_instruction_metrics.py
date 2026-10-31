@@ -96,6 +96,29 @@ class MetricsTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("KEEL_METRICS_BINARY"), "set KEEL_METRICS_BINARY for CLI integration")
 class IntegrationTests(unittest.TestCase):
+    def test_x86_exact_reports_compare_without_cpu_tools(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "sample.s"
+            source.write_text("cmp dil,3\njmp done\n.byte 0x90\n.p2align 4\ndone: ret\n")
+            keel = Path(os.environ["KEEL_METRICS_BINARY"]).resolve()
+            with mock.patch.object(metrics, "catalog", side_effect=AssertionError("A64 inventory used")):
+                before = metrics.analyze(source, keel, target="x86_64-unknown-linux-gnu")
+            self.assertEqual(before["schema_version"], 2)
+            self.assertIsNone(before["performance"])
+            instructions = [r for r in before["exact"]["regions"] if r["kind"] == "instruction"]
+            self.assertEqual(len(instructions), 3)
+            self.assertEqual(instructions[0]["prefixes"], [0x40])
+            source.write_text("ret\n")
+            after = metrics.analyze(source, keel, target="x86_64-unknown-linux-gnu")
+            self.assertEqual(metrics.compare(before, after, "size")["preferred"], "after")
+            with self.assertRaisesRegex(ValueError, "no CPU timing model"):
+                metrics.analyze(source, keel, cpu="zen5", target="x86_64-unknown-linux-gnu")
+            with self.assertRaisesRegex(ValueError, "complete CPU models"):
+                metrics.compare(before, after, "speed")
+            after["exact"]["features"] = ["avx"]
+            with self.assertRaisesRegex(ValueError, "target features"):
+                metrics.compare(before, after, "size")
+
     def test_exact_reports_and_optional_real_cpu_model(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "sample.s"
@@ -114,6 +137,12 @@ class IntegrationTests(unittest.TestCase):
 
 
 class SampleTests(unittest.TestCase):
+    def test_x86_cpu_request_fails_before_launching_tools(self):
+        with mock.patch.object(metrics, "run", side_effect=AssertionError("tool launched")):
+            with self.assertRaisesRegex(ValueError, "no CPU timing model"):
+                metrics.analyze(Path("unused.s"), Path("unused-keel"), cpu="zen5",
+                                target="x86_64-unknown-linux-gnu")
+
     def test_sample_uses_loaded_instruction_without_rebuilding_catalog(self):
         instruction = {
             "name": "sample", "encoding": {"width": 32, "values": [

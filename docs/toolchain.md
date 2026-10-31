@@ -191,7 +191,9 @@ let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeature
   allocation and lowering. Instrumentation is compiled out otherwise.
 - `keel asm-metrics input.s` and
   [`tools/instruction_metrics.py`](../tools/instruction_metrics.py) report
-  instruction sizes and modeled costs; see [instruction metrics](development/testing.md#instruction-metrics).
+  exact instruction sizes and layout. Add `--target x86_64-unknown-linux-gnu`
+  for x86 encoding reports without LLVM tools. Optional modeled costs remain
+  AArch64-only; see [instruction metrics](development/testing.md#instruction-metrics).
 
 ## Language support
 

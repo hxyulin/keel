@@ -5,6 +5,7 @@ mod dwarf;
 mod encode;
 mod inputs;
 mod metadata;
+mod metrics;
 mod relax;
 mod sections;
 pub(crate) mod source;
@@ -16,6 +17,9 @@ pub use keel_asm_ir::x86::{CpuLevel, Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
+};
+pub use metrics::{
+    BranchEncoding, EncodingRegion, EncodingReport, EncodingSection, RegionKind, RelocationField,
 };
 use object::write::{Comdat, Object, Relocation, Symbol, SymbolSection};
 use object::{
@@ -283,6 +287,7 @@ struct Space {
 }
 #[derive(Default)]
 struct Assembler {
+    metrics: Option<metrics::Collector>,
     arm: Option<crate::TargetFeatures>,
     sections: Vec<Section>,
     symbols: Symbols,
@@ -453,7 +458,17 @@ pub fn assemble_program_object_with_binary_inputs(
     features: x86::Features,
     resolver: &mut BinaryInputResolver<'_>,
 ) -> Result<Vec<u8>, Error> {
+    assemble_items(program_items(program, features, resolver, false)?)
+}
+
+fn program_items(
+    program: &Program,
+    features: Features,
+    resolver: &mut BinaryInputResolver<'_>,
+    metrics: bool,
+) -> Result<Items, Error> {
     let mut items = Items::new(features);
+    items.metrics = metrics.then(Vec::new);
     items.entries.reserve(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
         match item {
@@ -463,7 +478,68 @@ pub fn assemble_program_object_with_binary_inputs(
             item => items.item(item.clone(), index + 1),
         }
     }
-    assemble_items(items.finish()?)
+    items.finish()
+}
+
+/// Assemble Intel-initial source and report its final x86 encoding layout.
+///
+/// The returned object is byte-identical to ordinary assembly. Metrics distinguish
+/// parsed instructions from alignment and data, including data in executable
+/// sections. Relocation fields contain object bytes, not linked addresses.
+///
+/// # Errors
+/// Returns the same parse, feature, layout and relocation errors as object assembly.
+pub fn assemble_object_with_metrics(
+    source: &str,
+    features: Features,
+) -> Result<(Vec<u8>, EncodingReport), Error> {
+    assemble_object_with_metrics_and_binary_inputs(
+        source,
+        Syntax::Intel,
+        features,
+        &mut inputs::unavailable,
+    )
+}
+
+/// Report source layout with an initial dialect and explicit `.incbin` inputs.
+///
+/// # Errors
+/// Returns an error for invalid source, features, binary inputs or object layout.
+pub fn assemble_object_with_metrics_and_binary_inputs(
+    source: &str,
+    syntax: Syntax,
+    features: Features,
+    resolver: &mut BinaryInputResolver<'_>,
+) -> Result<(Vec<u8>, EncodingReport), Error> {
+    let mut items = Items::new(features);
+    items.parser = x86::SourceParser::new(syntax);
+    items.register_aliases = source::RegisterAliases::new(syntax == Syntax::Att);
+    items.metrics = Some(Vec::new());
+    items.parse(source, 1, resolver)?;
+    assemble_metrics(items.finish()?)
+}
+
+/// Structured-program counterpart of [`assemble_object_with_metrics`].
+///
+/// # Errors
+/// Returns an error for invalid instructions, directives, features or layout.
+pub fn assemble_program_object_with_metrics(
+    program: &Program,
+    features: Features,
+) -> Result<(Vec<u8>, EncodingReport), Error> {
+    assemble_metrics(program_items(
+        program,
+        features,
+        &mut inputs::unavailable,
+        true,
+    )?)
+}
+
+fn assemble_metrics(mut items: Items) -> Result<(Vec<u8>, EncodingReport), Error> {
+    let mut report = EncodingReport::default();
+    let object =
+        assemble_items_inner::<false>(&mut items, &mut Profile::default(), Some(&mut report))?;
+    Ok((object, report))
 }
 
 /// Stateful validation of compiler-owned scoped source fragments.
@@ -692,6 +768,7 @@ fn index32(len: usize) -> u32 {
 /// operands for each pass would cost far more than their bytes. Symbolic
 /// instructions keep a cached encoding and a compact operand record.
 struct Items {
+    metrics: Option<Vec<x86::Instruction>>,
     arm: Option<crate::TargetFeatures>,
     arm_words: Vec<crate::parser::elf::Word>,
     entries: Vec<Entry>,
@@ -721,6 +798,7 @@ struct Items {
 impl Items {
     fn new(features: x86::Features) -> Self {
         Self {
+            metrics: None,
             arm: None,
             arm_words: Vec::new(),
             entries: Vec::new(),
@@ -899,6 +977,15 @@ impl Items {
         let promoted = promoted_instruction(i);
         let i = promoted.as_ref();
         self.check_features(i, line);
+        if let Some(instructions) = &mut self.metrics {
+            instructions.push(i.clone());
+            let index = self.symbolic.push(i, &mut self.symbols);
+            self.push(Entry::Symbolic {
+                index,
+                line: line32(line),
+            });
+            return;
+        }
         if self.unsupported.is_none()
             && let Some(&(start, end)) = self.encodings.get(i)
         {
@@ -1095,15 +1182,16 @@ pub fn profile_object_with_features(
     let mut items = items.finish()?;
     profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     profile.items = items.parsed;
-    let object = assemble_items_inner::<true>(&mut items, &mut profile)?;
+    let object = assemble_items_inner::<true>(&mut items, &mut profile, None)?;
     Ok((object, profile))
 }
 fn assemble_items(mut items: Items) -> Result<Vec<u8>, Error> {
-    assemble_items_inner::<false>(&mut items, &mut Profile::default())
+    assemble_items_inner::<false>(&mut items, &mut Profile::default(), None)
 }
 fn assemble_items_inner<const PROFILE: bool>(
     items: &mut Items,
     profile: &mut Profile,
+    report: Option<&mut EncodingReport>,
 ) -> Result<Vec<u8>, Error> {
     // Start optimistically short, then only widen. Alignment (especially max-skip)
     // is not monotonic: recheck *every* remaining short branch after each layout.
@@ -1125,6 +1213,10 @@ fn assemble_items_inner<const PROFILE: bool>(
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
+        a.metrics = items
+            .metrics
+            .as_ref()
+            .map(|_| metrics::Collector::default());
         a.arm = items.arm;
         (a.symbols, a.fixes) = std::mem::take(&mut recycled);
         a.leb_widths = leb_widths.clone();
@@ -1136,6 +1228,10 @@ fn assemble_items_inner<const PROFILE: bool>(
         // Only the first pass records positions for offset-only relaxation.
         let mut trace = first.then(|| relax::Trace::new(&items.symbolic, a.symbols.names.len()));
         for entry in &items.entries {
+            let section = a.current;
+            let offset = a.offset();
+            let fix_start = a.fixes.len();
+            let metric_start = a.metrics.as_ref().map_or(0, |metrics| metrics.spans.len());
             let (result, line) = match *entry {
                 Entry::Encoded { end, line } => {
                     let bytes = &items.encoded[run..end as usize];
@@ -1213,6 +1309,32 @@ fn assemble_items_inner<const PROFILE: bool>(
                 }
             };
             result.map_err(|e| Error::new(line as usize, e))?;
+            if let Some(metrics) = &mut a.metrics {
+                for span in &mut metrics.spans[metric_start..] {
+                    span.line = line as usize;
+                }
+            }
+            if let Some(instructions) = &items.metrics {
+                let size = if section == a.current {
+                    a.offset() - offset
+                } else {
+                    0
+                };
+                let instruction = match *entry {
+                    Entry::Symbolic { index, .. } => Some(&instructions[index as usize]),
+                    _ => None,
+                };
+                if size != 0 {
+                    a.metrics.as_mut().unwrap().record(
+                        section,
+                        offset,
+                        size,
+                        line as usize,
+                        instruction,
+                        fix_start..a.fixes.len(),
+                    );
+                }
+            }
         }
         if let Some(start) = start {
             profile
@@ -1355,7 +1477,7 @@ fn assemble_items_inner<const PROFILE: bool>(
             // The layout is final: release the collected program before
             // the object writer allocates its own tables and output.
             *items = Items::new(items.features);
-            let object = a.object()?;
+            let object = a.object(report)?;
             if let Some(start) = start {
                 profile.object_ms = start.elapsed().as_secs_f64() * 1000.0;
             }
@@ -1455,12 +1577,12 @@ impl Assembler {
             _ => Err("AArch64 instruction/branch in x86 program".into()),
         }
     }
-    fn object(mut self) -> Result<Vec<u8>, Error> {
+    fn object(mut self, report: Option<&mut EncodingReport>) -> Result<Vec<u8>, Error> {
         if self.cfi.is_some() {
             return Err(Error::new(0, "unterminated .cfi_startproc"));
         }
         metadata::finish(&mut self).map_err(|e| Error::new(0, e))?;
-        self.finish()
+        self.finish(report)
     }
     fn offset(&self) -> u64 {
         self.sections[self.current].size
@@ -1961,6 +2083,7 @@ impl Assembler {
         if power > 30 {
             return Err("alignment exceeds 2^30".into());
         }
+        let at = self.offset();
         let align = 1u64 << power;
         let n = self.offset().wrapping_neg() & (align - 1);
         let section = &mut self.sections[self.current];
@@ -1982,6 +2105,10 @@ impl Assembler {
                     },
                 )?;
             }
+        }
+        let size = self.offset() - at;
+        if let Some(metrics) = &mut self.metrics {
+            metrics.alignment(self.current, at, size);
         }
         Ok(())
     }
@@ -2567,7 +2694,7 @@ impl Assembler {
             s.size.as_deref().or(inherited.1),
         )
     }
-    fn finish(mut self) -> Result<Vec<u8>, Error> {
+    fn finish(mut self, report: Option<&mut EncodingReport>) -> Result<Vec<u8>, Error> {
         let err = |s: String| Error::new(0, s);
         // Ensure even undefined references receive symbol table entries.
         // Map each name to its first section, as a search in order would.
@@ -2956,6 +3083,14 @@ impl Assembler {
                     },
                 )
                 .map_err(|e| Error::new(f.line, e.to_string()))?;
+            if let Some(metrics) = &mut self.metrics {
+                metrics
+                    .unresolved
+                    .push((f.section, f.offset, f.width, kind));
+            }
+        }
+        if let (Some(metrics), Some(report)) = (self.metrics.take(), report) {
+            *report = metrics.finish(&self.sections, &self.fixes);
         }
         // Move rather than copy the patched data: large sections would
         // otherwise be resident twice before serialization makes a third copy.

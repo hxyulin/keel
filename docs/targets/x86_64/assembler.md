@@ -66,6 +66,48 @@ Use these queries to compare concrete instruction alternatives after registers
 and immediates are known. They do not include alignment padding, relax branches,
 validate relocations or estimate CPU execution time.
 
+## Encoding reports
+
+```sh
+keel asm-metrics --target x86_64-unknown-linux-gnu input.s -o exact.json
+python3 tools/instruction_metrics.py -o analysis.json analyze input.s \
+  --target x86_64-unknown-linux-gnu --keel target/release/keel
+```
+
+Pass `--cpu-level` or `--target-features` to the command for optional forms.
+The Python wrapper accepts `--target-features`. No LLVM tools are used for
+x86 reports, and requests for CPU timing are rejected.
+
+The x86 JSON schema is version 2. `sections` lists assembler-owned sections
+with their logical size, executable flag and NOBITS status. Its indices are
+report indices, not ELF section-table indices; ELF symbol, string and relocation
+tables are outside this inventory. `regions` covers each section in offset order:
+
+- `instruction`: final bytes, encoded size, source line or program item,
+  canonical parsed instruction and actual prefix bytes. The spelling precedes
+  layout-dependent expression folding. Relocation fields identify placeholders
+  within the bytes. Direct branches report displacement width and, when locally
+  resolved, signed distance from instruction end and section-relative target.
+  Indirect branch memory displacements are not branch distances.
+- `alignment`: the final padding range. Padding encoded as NOPs remains padding.
+- `data`: remaining bytes or NOBITS reservations, including explicit bytes in
+  executable sections and assembler-generated data. Line zero means no source
+  attribution. Data and padding omit byte arrays to keep large fills compact.
+
+Offsets and local fixups reflect final assembler layout, before linking.
+Unresolved branch distances and targets are `null`; relocation placeholder bytes
+do not imply a zero-distance branch. `text_bytes` sums executable section sizes,
+including their data and padding. Other byte totals count regions across all
+assembler-owned sections, including logical NOBITS sizes.
+
+Library callers use `assemble_object_with_metrics(source, features)` or
+`assemble_program_object_with_metrics(program, features)`. Both return the
+ordinary object bytes and an `EncodingReport`. Capture is opt-in; normal
+assembly retains its merged instruction runs. The default AArch64 metrics
+command keeps its existing version 1 schema.
+The CLI resolves `.incbin` paths as `keel asm` does. Library callers provide
+an explicit resolver through `assemble_object_with_metrics_and_binary_inputs`.
+
 ## AMX assembly
 
 The assembler and decoder expose the imported AMX-TILE, AMX-INT8, AMX-BF16

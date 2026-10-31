@@ -6,7 +6,7 @@
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
-//! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
+//! keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -32,6 +32,7 @@ use keel_ir::Module;
 use std::process::ExitCode;
 mod archive;
 mod asm;
+mod asm_metrics;
 mod disasm;
 mod input;
 mod link;
@@ -48,7 +49,7 @@ const USAGE: &str = "usage:
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
-  keel asm-metrics <input.s> [-o <metrics.json>]
+  keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]
   keel disasm <input.o> [-o <output.txt>]  (AArch64 or x86-64 Mach-O/ELF)
   keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--dead-strip] [--require-export SYMBOL] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel archive [--target <triple>] -o <output.a> <member.o>...
@@ -732,9 +733,30 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "asm-metrics" => {
-            let opts = parse_options(rest, &["-o"])?;
+            let opts = parse_options(
+                rest,
+                &["-o", "--target", "--cpu-level", "--target-features"],
+            )?;
             let input = opts.input.as_ref().ok_or(USAGE)?;
             let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
+            if opts.target == Some(Target::X86_64LinuxGnu) {
+                return write_output(
+                    &opts,
+                    &asm_metrics::x86(&src, opts.x86_features)
+                        .map_err(|e| format!("{input}: {e}"))?,
+                );
+            }
+            if opts
+                .target
+                .is_some_and(|target| target != Target::Aarch64AppleDarwin)
+            {
+                return Err(
+                    "asm-metrics supports aarch64-apple-darwin and x86_64-unknown-linux-gnu".into(),
+                );
+            }
+            if opts.x86_options.supplied() {
+                return Err("x86 feature options require --target x86_64-unknown-linux-gnu".into());
+            }
             let (assembly, locations) =
                 keel_asm::assemble_with_metrics(&src).map_err(|e| format!("{input}: {e}"))?;
             let rows: Vec<_> = locations
