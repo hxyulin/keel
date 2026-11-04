@@ -30,6 +30,7 @@
 use keel_codegen::Target;
 use keel_ir::Module;
 use std::process::ExitCode;
+use target::{parse_target, resolve_target};
 mod archive;
 mod asm;
 mod asm_metrics;
@@ -37,6 +38,7 @@ mod disasm;
 mod input;
 mod link;
 mod optimization;
+mod target;
 mod unwind_options;
 mod wasm;
 mod x86_options;
@@ -267,7 +269,7 @@ impl Options {
     }
 
     fn vector_target(&self) -> keel_opt::VectorTarget {
-        match self.target.or_else(Target::host) {
+        match resolve_target(self.target).ok() {
             Some(Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu) => {
                 keel_opt::VectorTarget::Aarch64Neon
             }
@@ -285,9 +287,7 @@ impl Options {
 
     fn target(&self) -> Result<Target, String> {
         self.reject_unavailable_target()?;
-        let target = self.target.or_else(Target::host).ok_or_else(|| {
-            "keel does not run on this machine's target; pass `--target`".to_string()
-        })?;
+        let target = resolve_target(self.target)?;
         self.tuning
             .validate_target(target)
             .map_err(str::to_string)?;
@@ -615,11 +615,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "--target" => {
                 let triple = args.next().ok_or("`--target` needs a target triple")?;
-                let target = Target::from_triple(triple).ok_or_else(|| {
-                    let known: Vec<_> = Target::ALL.iter().map(|t| t.triple()).collect();
-                    format!("unknown target `{triple}`; known: {}", known.join(", "))
-                })?;
-                opts.target = Some(target);
+                opts.target = Some(parse_target(triple)?);
             }
             "-p" => {
                 let list = args.next().ok_or("`-p` needs a list of passes")?;
@@ -848,17 +844,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
             )?;
             let input = opts.input.as_ref().ok_or(USAGE)?;
             let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
-            if opts.target == Some(Target::X86_64LinuxGnu) {
+            let target = opts.target.unwrap_or(Target::Aarch64AppleDarwin);
+            if target == Target::X86_64LinuxGnu {
                 return write_output(
                     &opts,
                     &asm_metrics::x86(&src, opts.x86_features)
                         .map_err(|e| format!("{input}: {e}"))?,
                 );
             }
-            if opts
-                .target
-                .is_some_and(|target| target != Target::Aarch64AppleDarwin)
-            {
+            if target != Target::Aarch64AppleDarwin {
                 return Err(
                     "asm-metrics supports aarch64-apple-darwin and x86_64-unknown-linux-gnu".into(),
                 );

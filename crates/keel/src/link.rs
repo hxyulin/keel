@@ -1,4 +1,6 @@
 use crate::input::Source;
+use crate::target::parse_target;
+use keel_codegen::Target;
 use std::path::{Path, PathBuf};
 
 // This is Keel's native syntax, not a partial Clang option table. Put --system
@@ -122,15 +124,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
 
     let mut native_args = Vec::new();
-    let mut target = if cfg!(target_os = "linux") {
-        if cfg!(target_arch = "aarch64") {
-            "aarch64-unknown-linux-gnu"
-        } else {
-            "x86_64-unknown-linux-gnu"
-        }
-    } else {
-        "aarch64-apple-darwin"
-    };
+    let mut target = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         if arg == "--" {
@@ -138,12 +132,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
             native_args.extend(iter.cloned());
             break;
         } else if arg == "--target" || arg == "-target" {
-            target = iter.next().ok_or("--target requires a target triple")?;
+            target = Some(parse_target(
+                iter.next().ok_or("--target requires a target triple")?,
+            )?);
         } else if let Some(value) = arg
             .strip_prefix("--target=")
             .or_else(|| arg.strip_prefix("-target="))
         {
-            target = value;
+            target = Some(parse_target(value)?);
         } else {
             native_args.push(arg.clone());
             if native_value_option(arg)
@@ -153,15 +149,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    match target {
-        "x86_64-unknown-linux-gnu" => {
-            return run_elf(&native_args, keel_link::elf::Machine::X86_64);
+    let target = target.unwrap_or(if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            Target::Aarch64LinuxGnu
+        } else {
+            Target::X86_64LinuxGnu
         }
-        "aarch64-unknown-linux-gnu" | "aarch64-linux-gnu" => {
-            return run_elf(&native_args, keel_link::elf::Machine::Aarch64);
-        }
-        "aarch64-apple-darwin" => {}
-        _ => return Err(format!("unsupported linker target `{target}`")),
+    } else {
+        Target::Aarch64AppleDarwin
+    });
+    if let Some(machine) = keel_link::elf::Machine::for_target(target) {
+        return run_elf(&native_args, machine);
     }
     let args = &native_args;
 

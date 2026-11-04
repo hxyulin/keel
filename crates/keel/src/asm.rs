@@ -1,7 +1,9 @@
 //! One process can assemble several independent inputs without retaining their
 //! mappings or assembly state. Batch output names are validated before writing.
 use crate::input::Source;
+use crate::target::parse_target;
 use keel_asm::TargetFeatures;
+use keel_codegen::Target;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
@@ -15,17 +17,14 @@ struct Options {
     features: TargetFeatures,
     x86_features: keel_asm::x86::Features,
     x86_options: crate::x86_options::X86Options,
-    x86: bool,
-    arm_elf: bool,
+    target: Target,
     x86_syntax: Option<keel_asm::x86::Syntax>,
 }
 
 impl Options {
     fn parse(args: &[String]) -> Result<Self, String> {
-        let mut opts = Self {
-            arm_elf: cfg!(all(target_os = "linux", target_arch = "aarch64")),
-            ..Self::default()
-        };
+        let mut opts = Self::default();
+        let mut target = None;
         let mut args = args.iter();
         let mut positional = false;
         while let Some(arg) = args.next() {
@@ -48,15 +47,12 @@ impl Options {
                     }
                 }
                 "--target" => {
-                    let (x86, arm_elf) = match args.next().map(String::as_str) {
-                        Some("x86_64-unknown-linux-gnu" | "x86_64-linux-gnu") => (true, false),
-                        Some("aarch64-unknown-linux-gnu" | "aarch64-linux-gnu") => (false, true),
-                        Some("aarch64-apple-darwin") => (false, false),
-                        Some("wasm32-unknown-unknown") => return Err("unsupported target wasm32-unknown-unknown: native assembly is unavailable".into()),
-                        _ => return Err("assembler --target expects x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu or aarch64-apple-darwin".into()),
-                    };
-                    opts.x86 = x86;
-                    opts.arm_elf = arm_elf;
+                    let parsed =
+                        parse_target(args.next().ok_or("`--target` needs a target triple")?)?;
+                    if parsed == Target::Wasm32UnknownUnknown {
+                        return Err("unsupported target wasm32-unknown-unknown: native assembly is unavailable".into());
+                    }
+                    target = Some(parsed);
                 }
                 "--x86-syntax" => {
                     opts.x86_syntax = Some(match args.next().map(String::as_str) {
@@ -93,14 +89,21 @@ impl Options {
                 _ => opts.inputs.push(arg.into()),
             }
         }
+        opts.target =
+            target.unwrap_or(if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+                Target::Aarch64LinuxGnu
+            } else {
+                Target::Aarch64AppleDarwin
+            });
+        let x86 = opts.target == Target::X86_64LinuxGnu;
         opts.x86_features = opts.x86_options.resolve()?;
-        if opts.x86 && opts.features != TargetFeatures::default() {
+        if x86 && opts.features != TargetFeatures::default() {
             return Err("--cpu apple-m5 requires the AArch64 assembler target".into());
         }
-        if !opts.x86 && opts.x86_syntax.is_some() {
+        if !x86 && opts.x86_syntax.is_some() {
             return Err("--x86-syntax requires the x86 assembler target".into());
         }
-        if !opts.x86 && opts.x86_options.supplied() {
+        if !x86 && opts.x86_options.supplied() {
             return Err("x86 target features require the x86 assembler target".into());
         }
         if opts.inputs.is_empty() {
@@ -200,24 +203,27 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         let src = Source::open(input).map_err(|e| format!("{}: {e}", input.display()))?;
         let text = match src.text() {
             Ok(text) => std::borrow::Cow::Borrowed(text),
-            Err(e) if !opts.x86 => std::fs::read(input)
+            Err(e) if opts.target != Target::X86_64LinuxGnu => std::fs::read(input)
                 .ok()
                 .and_then(|bytes| comment_lossy(&bytes))
                 .map(std::borrow::Cow::Owned)
                 .ok_or_else(|| format!("{}: {e}", input.display()))?,
             Err(e) => return Err(format!("{}: {e}", input.display())),
         };
-        let object = if opts.x86 {
-            keel_asm::x86::assemble_object_with_binary_inputs(
+        let object = match opts.target {
+            Target::X86_64LinuxGnu => keel_asm::x86::assemble_object_with_binary_inputs(
                 &text,
                 opts.x86_syntax.unwrap_or_default(),
                 opts.x86_features,
                 &mut crate::input::binary_input,
-            )
-        } else if opts.arm_elf {
-            keel_asm::assemble_elf_object_with_features(&text, opts.features)
-        } else {
-            keel_asm::assemble_object_with_features(&text, opts.features)
+            ),
+            Target::Aarch64LinuxGnu => {
+                keel_asm::assemble_elf_object_with_features(&text, opts.features)
+            }
+            Target::Aarch64AppleDarwin => {
+                keel_asm::assemble_object_with_features(&text, opts.features)
+            }
+            Target::Wasm32UnknownUnknown => unreachable!("rejected by Options::parse"),
         }
         .map_err(|e| format!("{}: {e}", input.display()))?;
         drop(src);
