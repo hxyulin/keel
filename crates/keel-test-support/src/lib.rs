@@ -64,6 +64,13 @@ impl Tool {
     }
 }
 
+/// The skip reason for a missing [`clang`].
+pub const NO_CLANG: &str = "clang not found; set KEEL_CLANG";
+/// The skip reason for a missing [`gnu_as`].
+pub const NO_GNU_AS: &str = "x86-64 GNU as not found; set KEEL_GNU_AS";
+/// The skip reason for a missing [`gnu_ld`].
+pub const NO_GNU_LD: &str = "x86-64 GNU ld not found; set KEEL_GNU_LD";
+
 /// Clang, from `KEEL_CLANG` or `clang` on `PATH`.
 pub fn clang() -> Option<&'static Tool> {
     static TOOL: OnceLock<Option<Tool>> = OnceLock::new();
@@ -182,7 +189,8 @@ fn gnu_as_args(version: &str) -> Vec<&'static str> {
 
 /// Records a skip and returns from the enclosing function.
 ///
-/// The arguments are a `format!` reason. The enclosing function must return
+/// The argument is a `format!` string with its arguments, or one expression
+/// such as [`NO_GNU_AS`]. The enclosing function must return
 /// `()`. See the [crate documentation](crate) for the output contract.
 #[macro_export]
 macro_rules! skip {
@@ -197,11 +205,18 @@ macro_rules! skip {
 /// Use it when a test still checks something without the missing tool.
 #[macro_export]
 macro_rules! skip_part {
-    ($($reason:tt)+) => {
+    ($format:literal $($arguments:tt)*) => {
         $crate::record_skip(
             ::core::env!("CARGO_PKG_NAME"),
             ::core::module_path!(),
-            &::std::format!($($reason)+),
+            &::std::format!($format $($arguments)*),
+        )
+    };
+    ($reason:expr) => {
+        $crate::record_skip(
+            ::core::env!("CARGO_PKG_NAME"),
+            ::core::module_path!(),
+            ::core::convert::AsRef::<str>::as_ref(&$reason),
         )
     };
 }
