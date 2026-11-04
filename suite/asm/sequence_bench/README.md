@@ -22,40 +22,22 @@ E-cores separately; the report captures Linux's core/atom CPU lists when present
 Repeat with a fresh output path and seed before acting on a small difference.
 `--case` selects comparisons; `--unroll` controls loop size.
 
-The 46 cases test these choices. The default runs one and eight streams; repeat
-`--streams` to select 1, 2, 4 or 8 streams. Use `--unroll` to check sensitivity to
-loop size rather than treating a single unrolled loop as an instruction cost.
+`--list` prints every case with its baseline and candidate instructions for one
+stream, and runs on any host:
 
-| Cases | Baseline | Candidate | Context |
-| --- | --- | --- | --- |
-| `compare_width` | Byte comparison | 32-bit comparison | Zero-extended byte, `SETcc` consumer |
-| `load_extension` | Extending load, redundant `MOVZX` | Extending load | Hot byte table, dependent indices |
-| `lea_arithmetic` | `LEA` for 3*x+7 | `IMUL` and `ADD` | Wrapping arithmetic |
-| `constant_materialization` | `MOVABS` | `MOV` and `NOT` | Smaller encoding, overwritten destination |
-| `mask_byte`, `mask_word` | `AND` mask | `MOVZX` | Common increment before each extension |
-| `sign_byte`, `sign_word`, `sign_dword` | Left and arithmetic right shifts | `MOVSX` or `MOVSXD` | Common increment, signed wrap boundaries |
-| `fold_load_byte` | Byte load, `MOVZX` | Zero-extending load | Hot byte table, dependent indices |
-| `fold_signed_load_byte` | Byte load, `MOVSX` | Sign-extending load | Index masked before each load |
-| `zero_setcc`, `zero_branch` | `CMP` with zero | `TEST` with itself | `SETcc` or direct conditional branch |
-| `multiply_*` | `IMUL` | LEA/shift/add/subtract sequences | Factors 3, 5, 7, 9, 10, 12, 15, 17 and 63 |
-| `zero_shift_*` | Left and logical right shifts | `MOVZX` or 32-bit write | Byte, word and dword truncation after a common increment |
-| `fold_load_word` | Partial word load, `MOVZX` | Zero-extending word load | Hot table, masked dependent indices |
-| `fold_signed_load_word`, `fold_signed_load_dword`, `fold_zero_then_signed_byte` | Zero-extending load, signed extension | Sign-extending load | Forms emitted by the compiler, masked dependent indices |
-| `remove_load_dword_extension` | Dword load, redundant 32-bit move | Dword load | Implicit zero extension |
-| `zero_setcc32` | 32-bit `CMP 0` | 32-bit `TEST` | Clean 32-bit input, `SETcc` consumer |
-| `setcc_clean_test`, `setcc_clean_cmp` | Same-register `SETcc` and extension | Cleared scratch register, `SETcc`, move | Nonzero and zero predicate outcomes |
-| `bool_nonzero`, `mask_nonzero`, `mask_zero` | `SETcc` and extension | NEG/SBB or CMP/SBB sequences | Canonical Boolean or all-bits mask |
-| `invert_boolean` | Compare, `SETcc`, extension | `XOR 1` | Input proven to be 0 or 1 |
-| `rotate_left`, `rotate_right` | Shift/shift/OR | `ROL` or `ROR` | Constant rotate by 13 |
-| `bitwise_not`, `negate` | XOR -1, or NOT/ADD 1 | `NOT` or `NEG` | Dead arithmetic flags |
-| `add_lea`, `double`, `increment` | LEA, LEA, ADD 1 | ADD, ADD, INC | Dead arithmetic flags |
-| `loop_dec_sub` | DEC loop counter | SUB loop counter | Identical ADD workload, JNZ consumer |
-| `absolute_select` | Conditional branch and NEG | NEG and CMOV | Common increment, wrapping absolute value |
+```sh
+python3 suite/asm/sequence_bench/run.py --list
+```
+
+The default runs one and eight streams; repeat `--streams` to select 1, 2, 4 or
+8 streams. Use `--unroll` to check sensitivity to loop size rather than treating
+a single unrolled loop as an instruction cost.
 
 Mask, sign-extension and arithmetic alternatives assume their arithmetic flags
 are dead. CMP/TEST alternatives consume only ZF; CMP/SBB masks consume CF.
-The zero-branch case alternates a Boolean state;
-each unrolled operation has its own branch site. It does not model unpredictable
+The zero-branch and Boolean-inversion cases start from inputs of 0 or 1, and
+`zero_setcc32` from a zero-extended 32-bit input. The zero-branch case
+alternates a Boolean state; each unrolled operation has its own branch site. It does not model unpredictable
 branches. The mask and sign-extension cases add 17 before each operation to keep
 their dependency chains changing. These shared instructions remain in the timed
 boundary. Signed-load results are masked to a valid table index before the next

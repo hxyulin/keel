@@ -168,6 +168,17 @@ class SequenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run.source('load_extension', False, 9, 16)
 
+    def test_listing_shows_every_case_and_its_difference(self):
+        blocks = run.listing().split('\n')
+        names = [line for line in blocks if line and not line.startswith(' ')]
+        self.assertEqual(names, list(run.CASES))
+        index = blocks.index('loop_dec_sub')
+        self.assertEqual(blocks[index + 1:index + 3],
+                         ['  baseline:  add rsi, 17; dec rdi', '  candidate: add rsi, 17; sub rdi, 1'])
+        index = blocks.index('compare_width')
+        self.assertEqual(blocks[index + 1],
+                         '  baseline:  movzx esi, sil; cmp sil, 3; sete sil')
+
     def test_metric_mismatch_and_relocation_rejected(self):
         region = {'section': 0, 'relocations': [], 'kind': 'instruction',
                   'offset': 0, 'size': 1, 'bytes': [0xc3], 'line': 4}

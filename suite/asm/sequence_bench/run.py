@@ -537,10 +537,30 @@ def environment(cpu):
                                                 text=True).splitlines()[:20]}
 
 
+def listing():
+    """Each case's one-stream loop iteration: baseline, then candidate.
+
+    Loop control appears only for a case whose variants differ there."""
+    lines = []
+    for case in CASES:
+        variants = []
+        for candidate in (False, True):
+            asm, first, end = source(case, candidate, 1, 1)
+            body = asm.splitlines()
+            variants.append((body[first - 1:end - 1], body[end - 1]))
+        same_control = variants[0][1] == variants[1][1]
+        lines.append(case)
+        for label, (ops, control) in zip(('baseline:', 'candidate:'), variants):
+            lines.append(f'  {label:<11}' + '; '.join(ops if same_control else [*ops, control]))
+    return '\n'.join(lines) + '\n'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--keel', type=Path, required=True)
-    parser.add_argument('--cpu', type=int, required=True)
+    parser.add_argument('--list', action='store_true',
+                        help="print each case's baseline and candidate instructions, then exit")
+    parser.add_argument('--keel', type=Path)
+    parser.add_argument('--cpu', type=int)
     parser.add_argument('--controller-cpu', type=int,
                         help='pin the Python controller to a different allowed CPU')
     parser.add_argument('--cc', default='cc')
@@ -553,8 +573,14 @@ def main():
     parser.add_argument('--sample-ms', type=float, default=10)
     parser.add_argument('--unroll', type=int, default=16)
     parser.add_argument('--seed', type=int, default=20261031)
-    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if args.list:
+        print(listing(), end='')
+        return 0
+    missing = [f'--{name}' for name in ('keel', 'cpu', 'output') if getattr(args, name) is None]
+    if missing:
+        parser.error('the following arguments are required: ' + ', '.join(missing))
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         parser.error('native execution requires Linux x86-64')
     if args.rounds < 2 or not 0 < args.sample_ms <= 500 or not 1 <= args.unroll <= 64:
