@@ -72,31 +72,21 @@ fn smaller_layout_frames_and_shared_returns_preserve_transport_parity() {
             };
             let mut objects = Vec::new();
             for goal in [CodegenGoal::Speed, CodegenGoal::Size] {
-                let text = keel_codegen::compile_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    options(goal),
-                )
-                .unwrap();
-                let program = keel_codegen::compile_program_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    options(goal),
-                )
-                .unwrap();
+                let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(options(goal))
+                    .text(&module)
+                    .unwrap();
+                let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(options(goal))
+                    .program(&module)
+                    .unwrap();
                 let bytes = keel_asm::x86::assemble_program_object(&program).unwrap();
                 assert_eq!(bytes, keel_asm::x86::assemble_object(&text).unwrap());
                 let mut chunks = keel_asm_ir::Program::new();
-                keel_codegen::compile_program_chunks_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    options(goal),
-                    &mut |p| chunks.append(p),
-                )
-                .unwrap();
+                keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(options(goal))
+                    .program_chunks(&module, &mut |p| chunks.append(p))
+                    .unwrap();
                 assert_eq!(
                     bytes,
                     keel_asm::x86::assemble_program_object(&chunks).unwrap()
@@ -144,13 +134,10 @@ fn explicit_alignment_and_stack_observers_keep_their_contracts() {
         selector: &SelectionTier::Full,
         allocator: &AllocationTier::Full,
     };
-    let program = keel_codegen::compile_program_with_pipeline_and_emission(
-        &module,
-        Target::X86_64LinuxGnu,
-        &pipeline,
-        options(CodegenGoal::Size),
-    )
-    .unwrap();
+    let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+        .emission(options(CodegenGoal::Size))
+        .program(&module)
+        .unwrap();
     let bytes = keel_asm::x86::assemble_program_object(&program).unwrap();
     let file = object::File::parse(bytes.as_slice()).unwrap();
     assert_eq!(file.section_by_name(".text").unwrap().align(), 64);
@@ -168,13 +155,10 @@ fn explicit_alignment_and_stack_observers_keep_their_contracts() {
     ] {
         let module = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&module).unwrap();
-        let text = keel_codegen::compile_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options(CodegenGoal::Size),
-        )
-        .unwrap();
+        let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options(CodegenGoal::Size))
+            .text(&module)
+            .unwrap();
         assert!(text.contains("push\trbp"), "{text}");
     }
 }
@@ -198,13 +182,10 @@ fn sharing_saves_bytes_even_when_returns_need_near_jumps() {
     };
     let mut sizes = Vec::new();
     for goal in [CodegenGoal::Speed, CodegenGoal::Size] {
-        let text = keel_codegen::compile_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options(goal),
-        )
-        .unwrap();
+        let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options(goal))
+            .text(&module)
+            .unwrap();
         let bytes = keel_asm::x86::assemble_object(&text).unwrap();
         let file = object::File::parse(bytes.as_slice()).unwrap();
         let symbol = file
@@ -264,26 +245,20 @@ fn register_only_leaf_drops_unused_call_alignment_padding() {
         allocator: &RbxOnly,
     };
     for goal in [CodegenGoal::Speed, CodegenGoal::Size] {
-        let text = keel_codegen::compile_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options(goal),
-        )
-        .unwrap();
+        let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options(goal))
+            .text(&module)
+            .unwrap();
         assert!(text.contains("push\trbx"), "{text}");
         assert_eq!(
             text.contains("sub\trsp, 8"),
             goal == CodegenGoal::Speed,
             "{text}"
         );
-        let program = keel_codegen::compile_program_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options(goal),
-        )
-        .unwrap();
+        let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options(goal))
+            .program(&module)
+            .unwrap();
         let bytes = keel_asm::x86::assemble_program_object(&program).unwrap();
         assert_eq!(bytes, keel_asm::x86::assemble_object(&text).unwrap());
     }

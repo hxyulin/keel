@@ -79,20 +79,14 @@ fn size_constants_use_shorter_flag_preserving_sequences_and_keep_boundaries() {
                 allocator: allocation,
             };
             for goal in [CodegenGoal::Speed, CodegenGoal::Size] {
-                let text = keel_codegen::compile_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    emission(goal),
-                )
-                .unwrap();
-                let program = keel_codegen::compile_program_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    emission(goal),
-                )
-                .unwrap();
+                let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(emission(goal))
+                    .text(&module)
+                    .unwrap();
+                let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(emission(goal))
+                    .program(&module)
+                    .unwrap();
                 assert_eq!(
                     keel_asm::x86::assemble_program_object(&program).unwrap(),
                     keel_asm::x86::assemble_object(&text).unwrap(),
@@ -153,13 +147,10 @@ fn native_size_constants_preserve_values_argument_registers_and_select_flags() {
                 allocator: allocation,
             };
             for goal in [CodegenGoal::Speed, CodegenGoal::Size] {
-                let program = keel_codegen::compile_program_with_pipeline_and_emission(
-                    &module,
-                    Target::X86_64LinuxGnu,
-                    &pipeline,
-                    emission(goal),
-                )
-                .unwrap();
+                let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+                    .emission(emission(goal))
+                    .program(&module)
+                    .unwrap();
                 fs::write(
                     dir.join("code.o"),
                     keel_asm::x86::assemble_program_object(&program).unwrap(),

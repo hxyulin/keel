@@ -11,7 +11,9 @@
 use keel_asm_ir::Program;
 use keel_codegen::regalloc::{AllocationTier, Pools, RegisterAllocator};
 use keel_codegen::x86_features::{FeatureSelector, Features};
-use keel_codegen::{CodegenError, CodegenPipeline, InstructionSelector, SelectionTier};
+use keel_codegen::{
+    CodegenError, CodegenPipeline, InstructionSelector, Request, SelectionTier, Target,
+};
 use keel_ir::Module;
 
 /// Pools with no registers, so every value spills.
@@ -174,39 +176,22 @@ impl<'a> Case<'a> {
         };
         let module = self.module;
         let features = self.features.unwrap_or_default();
-        let (text, program, chunks) = match self.arch {
-            Arch::X86_64 => {
-                use keel_codegen::x86_64::*;
-                let pools = self.pools.unwrap_or(&REGISTERS);
-                let text = compile_with_pipeline(module, pools, &pipeline)?;
-                let program = compile_program_with_pipeline(module, pools, &pipeline)?;
-                let chunks = if self.chunks {
-                    let mut chunks = Program::default();
-                    compile_program_chunks_with_pipeline(module, pools, &pipeline, &mut |p| {
-                        chunks.items.extend(p.items)
-                    })?;
-                    Some(chunks)
-                } else {
-                    None
-                };
-                (text, program, chunks)
-            }
-            Arch::Aarch64 => {
-                use keel_codegen::aarch64::*;
-                let pools = self.pools.unwrap_or(&REGISTERS);
-                let text = compile_with_pipeline(module, pools, &pipeline)?;
-                let program = compile_program_with_pipeline(module, pools, &pipeline)?;
-                let chunks = if self.chunks {
-                    let mut chunks = Program::default();
-                    compile_program_chunks_with_pipeline(module, pools, &pipeline, &mut |p| {
-                        chunks.items.extend(p.items)
-                    })?;
-                    Some(chunks)
-                } else {
-                    None
-                };
-                (text, program, chunks)
-            }
+        let (target, registers) = match self.arch {
+            Arch::X86_64 => (Target::X86_64LinuxGnu, &keel_codegen::x86_64::REGISTERS),
+            Arch::Aarch64 => (
+                Target::Aarch64AppleDarwin,
+                &keel_codegen::aarch64::REGISTERS,
+            ),
+        };
+        let request = Request::new(target, pipeline).pools(self.pools.unwrap_or(registers));
+        let text = request.text(module)?;
+        let program = request.program(module)?;
+        let chunks = if self.chunks {
+            let mut chunks = Program::default();
+            request.program_chunks(module, &mut |p| chunks.items.extend(p.items))?;
+            Some(chunks)
+        } else {
+            None
         };
         let programs = std::iter::once(&program).chain(&chunks);
         for program in programs.clone() {

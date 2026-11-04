@@ -23,7 +23,18 @@ mod loop_shapes;
 mod loop_strength_reduce;
 
 #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
-use keel_codegen::aarch64::{REGISTERS, compile_linux_with_pipeline as compile_with_pipeline};
+use keel_codegen::aarch64::REGISTERS;
+/// The AArch64 Linux backend with an explicit register pool.
+#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+fn compile_with_pipeline(
+    module: &keel_ir::Module,
+    pools: &Pools,
+    pipeline: &keel_codegen::CodegenPipeline<'_>,
+) -> Result<String, keel_codegen::CodegenError> {
+    keel_codegen::Request::new(keel_codegen::Target::Aarch64LinuxGnu, *pipeline)
+        .pools(pools)
+        .text(module)
+}
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 use keel_codegen::aarch64::{REGISTERS, compile_with_pipeline};
 #[cfg(target_arch = "x86_64")]

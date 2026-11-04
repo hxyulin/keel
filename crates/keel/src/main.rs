@@ -1147,6 +1147,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         selector: &feature_selector,
         allocator,
     };
+    let request = keel_codegen::Request::new(target, pipeline).emission(opts.emission_options());
     if opts.emit_object {
         let output = opts
             .output
@@ -1170,12 +1171,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             profiling::scope!("integrated-assembly");
             assembler.push_with_binary_inputs(program, &mut input::binary_input)
         };
-        let emission = opts.emission_options();
-        with_codegen_report(opts, target, || {
-            keel_codegen::compile_program_chunks_with_pipeline_and_emission(
-                &module, target, &pipeline, emission, &mut sink,
-            )
-        })?;
+        with_codegen_report(opts, target, || request.program_chunks(&module, &mut sink))?;
         drop(module);
         let object = {
             profiling::scope!("object-finalization");
@@ -1184,10 +1180,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         profiling::scope!("object-write");
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let emission = opts.emission_options();
-        let source = with_codegen_report(opts, target, || {
-            keel_codegen::compile_with_pipeline_and_emission(&module, target, &pipeline, emission)
-        })?;
+        let source = with_codegen_report(opts, target, || request.text(&module))?;
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.
         std::mem::forget(module);

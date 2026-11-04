@@ -205,6 +205,8 @@ let object = keel_asm::assemble_program_for(target, &program)?;
 - `keel_c::preprocess` / `keel_c::compile`: C to IR.
 - `keel_opt::Pass` and `run_pipeline`: custom optimizer pipelines.
 - `CodegenPipeline`: plug in an `InstructionSelector` or `RegisterAllocator`.
+- `keel_codegen::Request`: one target, pipeline, emission policy and optional
+  register pool; `text`, `program` and `program_chunks` compile with it.
 - `keel_asm::ObjectAssembler::for_target`: incremental objects for any native
   target; `assemble_program_for` and `assemble_source_for` assemble one input.
 

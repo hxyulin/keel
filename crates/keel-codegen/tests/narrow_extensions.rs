@@ -49,7 +49,9 @@ fn assembly(
                 keel_codegen::aarch64::REGISTERS
             };
             if target == Target::Aarch64LinuxGnu {
-                keel_codegen::aarch64::compile_linux_with_pipeline(&module, &pools, &pipeline)
+                keel_codegen::Request::new(keel_codegen::Target::Aarch64LinuxGnu, pipeline)
+                    .pools(&pools)
+                    .text(&module)
                     .unwrap()
             } else {
                 keel_codegen::aarch64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()

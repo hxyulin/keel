@@ -105,9 +105,8 @@ fn c_and_ir_cli_choose_kernel_addresses_and_reject_incompatible_targets() {
 #[test]
 fn static_code_models_link_only_when_absolute_address_relocations_fit() {
     use keel_codegen::{
-        CodegenPipeline, SelectionTier,
-        regalloc::AllocationTier,
-        x86_64::{self, CodeModel},
+        CodegenPipeline, EmissionOptions, Request, SelectionTier, Target, regalloc::AllocationTier,
+        x86_64::CodeModel,
     };
     use keel_link::{Input, elf};
     let module = keel_ir::parse("data @value = align 8 { i64 7 }\nfunc @_start() -> ptr {\nblock0:\n v0 = symbol_addr @value\n return v0\n}\n").unwrap();
@@ -116,13 +115,12 @@ fn static_code_models_link_only_when_absolute_address_relocations_fit() {
         allocator: &AllocationTier::Full,
     };
     for (model, relocation) in [(CodeModel::Small, 10), (CodeModel::Kernel, 11)] {
-        let source = x86_64::compile_with_pipeline_and_code_model(
-            &module,
-            &x86_64::REGISTERS,
-            &pipeline,
-            model,
-        )
-        .unwrap();
+        let mut emission = EmissionOptions::default();
+        emission.x86_code_model = Some(model);
+        let source = Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(emission)
+            .text(&module)
+            .unwrap();
         let bytes = keel_asm::x86::assemble_object(&source).unwrap();
         let file = object::File::parse(bytes.as_slice()).unwrap();
         assert!(

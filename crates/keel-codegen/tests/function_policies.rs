@@ -18,21 +18,15 @@ fn size_and_speed_presets_override_layout_and_keep_transport_parity() {
         };
         let mut options = EmissionOptions::default();
         options.goal = default_goal;
-        let text = keel_codegen::compile_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options,
-        )
-        .unwrap();
+        let text = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options)
+            .text(&module)
+            .unwrap();
         assert!(text.contains(expected_align), "{attributes}: {text}");
-        let program = keel_codegen::compile_program_with_pipeline_and_emission(
-            &module,
-            Target::X86_64LinuxGnu,
-            &pipeline,
-            options,
-        )
-        .unwrap();
+        let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+            .emission(options)
+            .program(&module)
+            .unwrap();
         let expected = keel_asm::x86::assemble_object(&text).unwrap();
         let actual = keel_asm::x86::assemble_program_object(&program).unwrap();
         assert_eq!(expected, actual, "{attributes}");

@@ -1,5 +1,5 @@
 //! Per-invocation code layout, address and unwind metadata policies.
-use crate::{CodegenError, CodegenPipeline, Target, aarch64, x86_64};
+use crate::{CodegenError, Target, aarch64, x86_64};
 use keel_ir::Module;
 
 /// Whether ordinary functions receive compiler-generated call-frame information.
@@ -44,12 +44,16 @@ pub(crate) enum Output {
 
 pub(crate) fn compile(
     module: &Module,
-    target: Target,
-    pipeline: &CodegenPipeline<'_>,
-    options: EmissionOptions,
+    request: &crate::Request<'_>,
     structured: bool,
     sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
+    let crate::Request {
+        target,
+        ref pipeline,
+        emission: options,
+        pools,
+    } = *request;
     crate::require_native_target(target).map_err(|message| CodegenError {
         func: "<target>".into(),
         message: message.into(),
@@ -64,7 +68,7 @@ pub(crate) fn compile(
         Target::X86_64LinuxGnu => {
             match x86_64::compile_output(
                 module,
-                &x86_64::REGISTERS,
+                pools.unwrap_or(&x86_64::REGISTERS),
                 pipeline,
                 options,
                 structured,
@@ -77,7 +81,7 @@ pub(crate) fn compile(
         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
             match aarch64::compile_output(
                 module,
-                &aarch64::REGISTERS,
+                pools.unwrap_or(&aarch64::REGISTERS),
                 pipeline,
                 structured,
                 sink,

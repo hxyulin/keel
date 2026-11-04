@@ -111,6 +111,7 @@ pub fn compile_with_options(
 }
 
 /// Independently replaceable selection and allocation stages.
+#[derive(Clone, Copy)]
 pub struct CodegenPipeline<'a> {
     pub selector: &'a dyn InstructionSelector,
     pub allocator: &'a dyn regalloc::RegisterAllocator,
@@ -377,34 +378,94 @@ pub(crate) fn validate_odr(module: &Module, target: Target) -> Result<(), Codege
     Ok(())
 }
 
+/// One code generation request: the target, the selection and allocation
+/// stages, and the emission policies. The `compile*` functions are shorthands
+/// for common requests.
+#[derive(Clone, Copy, Debug)]
+pub struct Request<'a> {
+    pub target: Target,
+    pub pipeline: CodegenPipeline<'a>,
+    pub emission: EmissionOptions,
+    /// Registers to allocate from, drawn from the target's `REGISTERS`.
+    /// `None` uses all of them. Tests pass a small set to force spills.
+    pub pools: Option<&'a Pools<'a>>,
+}
+
+impl<'a> Request<'a> {
+    /// Default emission policies and the target's full register set.
+    pub fn new(target: Target, pipeline: CodegenPipeline<'a>) -> Self {
+        Self {
+            target,
+            pipeline,
+            emission: EmissionOptions::default(),
+            pools: None,
+        }
+    }
+
+    pub fn emission(mut self, emission: EmissionOptions) -> Self {
+        self.emission = emission;
+        self
+    }
+
+    pub fn pools(mut self, pools: &'a Pools<'a>) -> Self {
+        self.pools = Some(pools);
+        self
+    }
+
+    /// Compile to assembly source.
+    ///
+    /// # Errors
+    /// Returns target, operand or IR validation errors.
+    pub fn text(&self, module: &Module) -> Result<String, CodegenError> {
+        profiling::scope!("codegen", self.target.triple());
+        match emission::compile(module, self, false, None)? {
+            emission::Output::Text(text) => Ok(text),
+            _ => unreachable!("text emission requested"),
+        }
+    }
+
+    /// Compile to a shared assembly program. Both backends emit typed
+    /// instructions and metadata directly. Explicit text fragments are
+    /// reserved for supported user inline assembly.
+    ///
+    /// # Errors
+    /// Returns target, operand or IR validation errors.
+    pub fn program(&self, module: &Module) -> Result<keel_asm_ir::Program, CodegenError> {
+        match emission::compile(module, self, true, None)? {
+            emission::Output::Program(program) => Ok(program),
+            _ => unreachable!("structured emission requested"),
+        }
+    }
+
+    /// [`Self::program`] in pieces: `sink` receives consecutive parts of the
+    /// same program, at least one per function, so an incremental assembler
+    /// need not hold the whole module's program at once. Compiler-created CFI
+    /// is controlled before chunks reach the assembler.
+    ///
+    /// # Errors
+    /// Returns target, operand or IR validation errors.
+    pub fn program_chunks(
+        &self,
+        module: &Module,
+        sink: &mut dyn FnMut(keel_asm_ir::Program),
+    ) -> Result<(), CodegenError> {
+        match emission::compile(module, self, true, Some(&mut *sink))? {
+            emission::Output::Program(program) => sink(program),
+            _ => unreachable!("structured emission requested"),
+        }
+        Ok(())
+    }
+}
+
 pub fn compile_with_pipeline(
     module: &Module,
     target: Target,
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    compile_with_pipeline_and_emission(module, target, pipeline, EmissionOptions::default())
+    Request::new(target, *pipeline).text(module)
 }
 
-/// Compile source assembly with explicit address and unwind emission policies.
-///
-/// # Errors
-/// Returns target, operand or IR validation errors.
-pub fn compile_with_pipeline_and_emission(
-    module: &Module,
-    target: Target,
-    pipeline: &CodegenPipeline<'_>,
-    options: EmissionOptions,
-) -> Result<String, CodegenError> {
-    profiling::scope!("codegen", target.triple());
-    match emission::compile(module, target, pipeline, options, false, None)? {
-        emission::Output::Text(text) => Ok(text),
-        _ => unreachable!("text emission requested"),
-    }
-}
-
-/// Produce a shared assembly program for AArch64 Mach-O or AArch64/x86-64 ELF.
-/// Both backends emit typed instructions and metadata directly. Explicit text
-/// fragments are reserved for supported user inline assembly.
+/// Produce a shared assembly program; see [`Request::program`].
 pub fn compile_program(
     module: &Module,
     target: Target,
@@ -424,60 +485,17 @@ pub fn compile_program_with_pipeline(
     target: Target,
     pipeline: &CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    compile_program_with_pipeline_and_emission(module, target, pipeline, EmissionOptions::default())
+    Request::new(target, *pipeline).program(module)
 }
 
-/// Compile typed assembly with explicit address and unwind emission policies.
-///
-/// # Errors
-/// Returns target, operand or IR validation errors.
-pub fn compile_program_with_pipeline_and_emission(
-    module: &Module,
-    target: Target,
-    pipeline: &CodegenPipeline<'_>,
-    options: EmissionOptions,
-) -> Result<keel_asm_ir::Program, CodegenError> {
-    match emission::compile(module, target, pipeline, options, true, None)? {
-        emission::Output::Program(program) => Ok(program),
-        _ => unreachable!("structured emission requested"),
-    }
-}
-
-/// [`compile_program_with_pipeline`] in pieces: `sink` receives consecutive
-/// parts of the same program, at least one per function, so an incremental
-/// assembler need not hold the whole module's program at once.
+/// See [`Request::program_chunks`].
 pub fn compile_program_chunks_with_pipeline(
     module: &Module,
     target: Target,
     pipeline: &CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    compile_program_chunks_with_pipeline_and_emission(
-        module,
-        target,
-        pipeline,
-        EmissionOptions::default(),
-        sink,
-    )
-}
-
-/// Stream typed assembly with explicit address and unwind emission policies.
-/// Compiler-created CFI is controlled before chunks reach the assembler.
-///
-/// # Errors
-/// Returns target, operand or IR validation errors.
-pub fn compile_program_chunks_with_pipeline_and_emission(
-    module: &Module,
-    target: Target,
-    pipeline: &CodegenPipeline<'_>,
-    options: EmissionOptions,
-    sink: &mut dyn FnMut(keel_asm_ir::Program),
-) -> Result<(), CodegenError> {
-    match emission::compile(module, target, pipeline, options, true, Some(&mut *sink))? {
-        emission::Output::Program(program) => sink(program),
-        _ => unreachable!("structured emission requested"),
-    }
-    Ok(())
+    Request::new(target, *pipeline).program_chunks(module, sink)
 }
 
 use std::fmt;

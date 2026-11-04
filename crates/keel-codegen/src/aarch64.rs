@@ -185,16 +185,7 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
-    compile_with_options(module, pools, crate::SelectionOptions::default())
-}
-
-/// Like [`compile_with`], with optional target selection passes enabled.
-pub fn compile_with_options(
-    module: &Module,
-    pools: &Pools,
-    options: crate::SelectionOptions,
-) -> Result<String, CodegenError> {
-    let selector = crate::OptionsSelector(options);
+    let selector = crate::OptionsSelector(crate::SelectionOptions::default());
     compile_with_pipeline(
         module,
         pools,
@@ -205,24 +196,17 @@ pub fn compile_with_options(
     )
 }
 
+fn request<'a>(pools: &'a Pools<'a>, pipeline: &crate::CodegenPipeline<'a>) -> crate::Request<'a> {
+    crate::Request::new(crate::Target::Aarch64AppleDarwin, *pipeline).pools(pools)
+}
+
 /// Compile using independently replaceable selection and allocation stages.
 pub fn compile_with_pipeline(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    match compile_output(
-        module,
-        pools,
-        pipeline,
-        false,
-        None,
-        false,
-        Default::default(),
-    )? {
-        Output::Text(text) => Ok(text.into_string()),
-        _ => unreachable!(),
-    }
+    request(pools, pipeline).text(module)
 }
 
 /// Emit structured assembly, with explicit source fragments for unmigrated
@@ -232,80 +216,7 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(
-        module,
-        pools,
-        pipeline,
-        true,
-        None,
-        false,
-        Default::default(),
-    )? {
-        Output::Structured(program) => Ok(program),
-        _ => unreachable!(),
-    }
-}
-
-/// Hand the program to `sink` in order, at least once per function.
-pub fn compile_program_chunks_with_pipeline(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-    sink: &mut dyn FnMut(keel_asm_ir::Program),
-) -> Result<(), CodegenError> {
-    match compile_output(
-        module,
-        pools,
-        pipeline,
-        true,
-        Some(&mut *sink),
-        false,
-        Default::default(),
-    )? {
-        Output::Structured(program) => sink(program),
-        _ => unreachable!(),
-    }
-    Ok(())
-}
-
-/// Compile AArch64 Linux with an explicitly selected register pool.
-pub fn compile_linux_with_pipeline(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-) -> Result<String, CodegenError> {
-    match compile_output(
-        module,
-        pools,
-        pipeline,
-        false,
-        None,
-        true,
-        Default::default(),
-    )? {
-        Output::ElfText(s) => Ok(s.into_string()),
-        _ => unreachable!(),
-    }
-}
-
-/// Emit a typed AArch64 Linux program with an explicit register pool.
-pub fn compile_linux_program_with_pipeline(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(
-        module,
-        pools,
-        pipeline,
-        true,
-        None,
-        true,
-        Default::default(),
-    )? {
-        Output::Structured(p) => Ok(p),
-        _ => unreachable!(),
-    }
+    request(pools, pipeline).program(module)
 }
 
 pub(crate) fn compile_output(

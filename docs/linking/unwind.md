@@ -49,10 +49,8 @@ unwinder, ORC tables or frame-pointer policy.
 optional compiler-created metadata. `EmissionOptions` combines this policy with
 an optional x86 address model, independently of `CodegenPipeline`.
 
-Use `compile_with_pipeline_and_emission`,
-`compile_program_with_pipeline_and_emission`, or
-`compile_program_chunks_with_pipeline_and_emission`. Existing APIs retain their
-previous defaults. Cached AArch64 leaf bodies use the same policy as ordinary
+Pass it with `keel_codegen::Request::emission`, then call `text`, `program`
+or `program_chunks`. The `compile*` shorthands use the default policies. Cached AArch64 leaf bodies use the same policy as ordinary
 functions. The policy is scoped to one call; it uses no process-global state.
 
 Tests cover source, typed and chunked object parity on both Linux targets and

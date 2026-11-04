@@ -227,11 +227,14 @@ fn tls_addresses_survive_forced_spills_in_both_object_routes() {
             selector: &keel_codegen::SelectionTier::Baseline,
             allocator: &allocator,
         };
-        let source =
-            keel_codegen::aarch64::compile_linux_with_pipeline(&module, &pools, &pipeline).unwrap();
-        let program =
-            keel_codegen::aarch64::compile_linux_program_with_pipeline(&module, &pools, &pipeline)
-                .unwrap();
+        let source = keel_codegen::Request::new(keel_codegen::Target::Aarch64LinuxGnu, pipeline)
+            .pools(&pools)
+            .text(&module)
+            .unwrap();
+        let program = keel_codegen::Request::new(keel_codegen::Target::Aarch64LinuxGnu, pipeline)
+            .pools(&pools)
+            .program(&module)
+            .unwrap();
         let direct = keel_asm::assemble_elf_program_object(&program, Default::default()).unwrap();
         let parsed = keel_asm::assemble_elf_object(&source).unwrap();
         assert_eq!(direct, parsed);

@@ -227,16 +227,7 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
-    compile_with_options(module, pools, crate::SelectionOptions::default())
-}
-
-/// Like [`compile_with`], with optional target selection passes enabled.
-pub fn compile_with_options(
-    module: &Module,
-    pools: &Pools,
-    options: crate::SelectionOptions,
-) -> Result<String, CodegenError> {
-    let selector = crate::OptionsSelector(options);
+    let selector = crate::OptionsSelector(crate::SelectionOptions::default());
     compile_with_pipeline(
         module,
         pools,
@@ -293,75 +284,27 @@ pub enum CodeModel {
     Kernel,
 }
 
+fn request<'a>(pools: &'a Pools<'a>, pipeline: &crate::CodegenPipeline<'a>) -> crate::Request<'a> {
+    crate::Request::new(crate::Target::X86_64LinuxGnu, *pipeline).pools(pools)
+}
+
 /// Compile using independently replaceable selection and allocation stages.
 pub fn compile_with_pipeline(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    compile_with_pipeline_and_code_model(module, pools, pipeline, CodeModel::default())
+    request(pools, pipeline).text(module)
 }
 
-/// Compile text with an explicit address model.
-///
-/// # Errors
-/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
-pub fn compile_with_pipeline_and_code_model(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-    code_model: CodeModel,
-) -> Result<String, CodegenError> {
-    let Output::Text(text, _) = compile_output(
-        module,
-        pools,
-        pipeline,
-        crate::EmissionOptions {
-            x86_code_model: Some(code_model),
-            ..Default::default()
-        },
-        false,
-        None,
-    )?
-    else {
-        unreachable!()
-    };
-    Ok(text.into_string())
-}
 pub fn compile_program_with_pipeline(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    compile_program_with_pipeline_and_code_model(module, pools, pipeline, CodeModel::default())
+    request(pools, pipeline).program(module)
 }
 
-/// Compile structured assembly with an explicit address model.
-///
-/// # Errors
-/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
-pub fn compile_program_with_pipeline_and_code_model(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-    code_model: CodeModel,
-) -> Result<keel_asm_ir::Program, CodegenError> {
-    let Output::Structured(program) = compile_output(
-        module,
-        pools,
-        pipeline,
-        crate::EmissionOptions {
-            x86_code_model: Some(code_model),
-            ..Default::default()
-        },
-        true,
-        None,
-    )?
-    else {
-        unreachable!()
-    };
-    Ok(program)
-}
 /// Hand the program to `sink` in order, at least once per function.
 pub fn compile_program_chunks_with_pipeline(
     module: &Module,
@@ -369,43 +312,9 @@ pub fn compile_program_chunks_with_pipeline(
     pipeline: &crate::CodegenPipeline<'_>,
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    compile_program_chunks_with_pipeline_and_code_model(
-        module,
-        pools,
-        pipeline,
-        CodeModel::default(),
-        sink,
-    )
+    request(pools, pipeline).program_chunks(module, sink)
 }
 
-/// Stream structured assembly with an explicit address model.
-///
-/// # Errors
-/// Returns target/IR validation failures; Kernel also rejects userspace TLS.
-pub fn compile_program_chunks_with_pipeline_and_code_model(
-    module: &Module,
-    pools: &Pools,
-    pipeline: &crate::CodegenPipeline<'_>,
-    code_model: CodeModel,
-    sink: &mut dyn FnMut(keel_asm_ir::Program),
-) -> Result<(), CodegenError> {
-    let Output::Structured(program) = compile_output(
-        module,
-        pools,
-        pipeline,
-        crate::EmissionOptions {
-            x86_code_model: Some(code_model),
-            ..Default::default()
-        },
-        true,
-        Some(&mut *sink),
-    )?
-    else {
-        unreachable!()
-    };
-    sink(program);
-    Ok(())
-}
 pub(crate) fn compile_output(
     module: &Module,
     pools: &Pools,

@@ -36,48 +36,35 @@ fn text_typed_and_chunks_agree_and_only_optional_frame_metadata_disappears() {
                 };
                 let default =
                     keel_codegen::compile_with_pipeline(&module, target, &pipeline).unwrap();
-                let explicit = keel_codegen::compile_with_pipeline_and_emission(
-                    &module,
-                    target,
-                    &pipeline,
-                    Default::default(),
-                )
-                .unwrap();
+                let explicit = keel_codegen::Request::new(target, pipeline)
+                    .emission(Default::default())
+                    .text(&module)
+                    .unwrap();
                 assert_eq!(default, explicit);
                 assert!(default.contains(".cfi_startproc"));
                 let mut objects = Vec::new();
                 for policy in [UnwindTables::All, UnwindTables::RequiredOnly] {
-                    let text = keel_codegen::compile_with_pipeline_and_emission(
-                        &module,
-                        target,
-                        &pipeline,
-                        options(policy),
-                    )
-                    .unwrap();
+                    let text = keel_codegen::Request::new(target, pipeline)
+                        .emission(options(policy))
+                        .text(&module)
+                        .unwrap();
                     assert_eq!(
                         text.contains(".cfi_"),
                         policy == UnwindTables::All,
                         "{target:?}/{selection:?}/{allocation:?}: {text}"
                     );
-                    let program = keel_codegen::compile_program_with_pipeline_and_emission(
-                        &module,
-                        target,
-                        &pipeline,
-                        options(policy),
-                    )
-                    .unwrap();
+                    let program = keel_codegen::Request::new(target, pipeline)
+                        .emission(options(policy))
+                        .program(&module)
+                        .unwrap();
                     let bytes = assemble(&program, target);
                     let source_bytes = keel_asm::assemble_source_for(target, &text).unwrap();
                     assert_eq!(bytes, source_bytes, "{target:?}/{policy:?}");
                     let mut chunks = keel_asm_ir::Program::new();
-                    keel_codegen::compile_program_chunks_with_pipeline_and_emission(
-                        &module,
-                        target,
-                        &pipeline,
-                        options(policy),
-                        &mut |p| chunks.append(p),
-                    )
-                    .unwrap();
+                    keel_codegen::Request::new(target, pipeline)
+                        .emission(options(policy))
+                        .program_chunks(&module, &mut |p| chunks.append(p))
+                        .unwrap();
                     assert_eq!(bytes, assemble(&chunks, target));
                     let file = object::File::parse(bytes.as_slice()).unwrap();
                     let unwind_name = if target == Target::Aarch64AppleDarwin {
@@ -118,13 +105,10 @@ fn explicit_module_assembly_cfi_survives() {
         selector: &SelectionTier::Full,
         allocator: &AllocationTier::Full,
     };
-    let program = keel_codegen::compile_program_with_pipeline_and_emission(
-        &module,
-        Target::X86_64LinuxGnu,
-        &pipeline,
-        options(UnwindTables::RequiredOnly),
-    )
-    .unwrap();
+    let program = keel_codegen::Request::new(Target::X86_64LinuxGnu, pipeline)
+        .emission(options(UnwindTables::RequiredOnly))
+        .program(&module)
+        .unwrap();
     assert!(!program.items.iter().any(|item| matches!(
         item,
         keel_asm_ir::Item::Directive(keel_asm_ir::Directive::Cfi(_))
@@ -141,13 +125,10 @@ fn required_exception_frames_are_retained() {
         selector: &SelectionTier::Full,
         allocator: &AllocationTier::Full,
     };
-    let required = keel_codegen::compile_program_with_pipeline_and_emission(
-        &module,
-        Target::Aarch64AppleDarwin,
-        &pipeline,
-        options(UnwindTables::RequiredOnly),
-    )
-    .unwrap();
+    let required = keel_codegen::Request::new(Target::Aarch64AppleDarwin, pipeline)
+        .emission(options(UnwindTables::RequiredOnly))
+        .program(&module)
+        .unwrap();
     let all =
         keel_codegen::compile_program_with_pipeline(&module, Target::Aarch64AppleDarwin, &pipeline)
             .unwrap();
