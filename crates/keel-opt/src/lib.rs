@@ -380,8 +380,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &loop_vectorize::LoopReduce,
-    &loop_vectorize::AffineLoopReduce,
-    &loop_vectorize::CastLoopReduce,
     &loop_vectorize::MultiLoopReduce,
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,

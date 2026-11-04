@@ -16,9 +16,6 @@ fn independent_shared_load_sums_and_constant_count_have_separate_merges() {
         VectorTarget::X86Sse2,
     ] {
         let mut m = keel_ir::parse(&fixtures::source()).unwrap();
-        let before = m.to_string();
-        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-casts"], target).unwrap();
-        assert_eq!(before, m.to_string());
         keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
         keel_ir::verify_module(&m).unwrap();
         for f in &m.functions {

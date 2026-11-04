@@ -89,40 +89,6 @@ impl crate::Pass for LoopReduce {
     }
 }
 
-/// Opt-in affine stream recognition; deliberately absent from tier pipelines.
-pub(crate) struct AffineLoopReduce;
-impl crate::Pass for AffineLoopReduce {
-    fn name(&self) -> &'static str {
-        "loop-reduce-affine"
-    }
-    fn description(&self) -> &'static str {
-        "vectorize integer reductions with guarded invariant stream offsets"
-    }
-    fn run(&self, f: &mut Function) -> bool {
-        self.run_for_target(f, VectorTarget::Portable)
-    }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target, false, false)
-    }
-}
-
-/// Packed truncate/extend round trips, using only the portable integer ISA.
-pub(crate) struct CastLoopReduce;
-impl crate::Pass for CastLoopReduce {
-    fn name(&self) -> &'static str {
-        "loop-reduce-casts"
-    }
-    fn description(&self) -> &'static str {
-        "vectorize integer reduction truncate/extend round trips with packed masks"
-    }
-    fn run(&self, f: &mut Function) -> bool {
-        self.run_for_target(f, VectorTarget::Portable)
-    }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target, true, false)
-    }
-}
-
 /// Up to four independent read-only recurrences of a common lane width.
 pub(crate) struct MultiLoopReduce;
 impl crate::Pass for MultiLoopReduce {

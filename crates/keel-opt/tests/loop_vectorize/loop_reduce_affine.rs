@@ -27,15 +27,15 @@ fn affine_offsets_are_opt_in_guarded_deterministic_and_idempotent() {
             source().replace("iadd v2,v5", "iadd v5,v2"),
         ] {
             assert!(!packed(&run(&src, "loop-reduce", target)));
-            let m = run(&src, "loop-reduce-affine", target);
+            let m = run(&src, "loop-reduce-multi", target);
             assert!(packed(&m), "{m}");
             assert!(m.to_string().contains("icmp.uge"));
             assert_eq!(
                 m.to_string(),
-                run(&src, "loop-reduce-affine", target).to_string()
+                run(&src, "loop-reduce-multi", target).to_string()
             );
             let mut twice = m.clone();
-            keel_opt::run_passes_for_target(&mut twice, &["loop-reduce-affine"], target).unwrap();
+            keel_opt::run_passes_for_target(&mut twice, &["loop-reduce-multi"], target).unwrap();
             assert_eq!(m.to_string(), twice.to_string());
         }
     }
@@ -53,7 +53,7 @@ fn rejects_traps_effects_narrow_wrapping_indices_and_non_affine_terms() {
         ),
     ] {
         assert!(
-            !packed(&run(&src, "loop-reduce-affine", VectorTarget::Portable)),
+            !packed(&run(&src, "loop-reduce-multi", VectorTarget::Portable)),
             "{src}"
         );
     }
@@ -63,12 +63,12 @@ fn two_streams_require_an_explicit_nontrapping_contract_even_when_aliasing() {
     let src = source().replace("v15 = iadd v6,v11", "v30 = shl v5,v8\n v31 = ptradd v0,v30\n v32 = load.i64 v31\n v33 = xor v32,v11\n v15 = iadd v6,v33");
     assert!(!packed(&run(
         &src,
-        "loop-reduce-affine",
+        "loop-reduce-multi",
         VectorTarget::Portable
     )));
     assert!(packed(&run(
         &src.replace("load.i64 v31", "load.i64 notrap v31"),
-        "loop-reduce-affine",
+        "loop-reduce-multi",
         VectorTarget::Portable
     )));
 }
@@ -81,9 +81,9 @@ fn actual_logic_remains_blocked_until_a_stream_is_explicitly_safe() {
         VectorTarget::Aarch64Neon,
         VectorTarget::X86Sse2,
     ] {
-        assert!(!packed(&run(src, "loop-reduce-affine", target)));
+        assert!(!packed(&run(src, "loop-reduce-multi", target)));
         let positive = src.replace("load.i64 v16", "load.i64 notrap v16");
-        assert!(packed(&run(&positive, "loop-reduce-affine", target)));
+        assert!(packed(&run(&positive, "loop-reduce-multi", target)));
     }
 }
 
@@ -103,7 +103,7 @@ fn address_width_offsets_after_i32_extension_are_supported() {
             .replace("v16 = iconst.i64", "v16 = iconst.i32");
         assert!(packed(&run(
             &src,
-            "loop-reduce-affine",
+            "loop-reduce-multi",
             VectorTarget::Portable
         )));
     }

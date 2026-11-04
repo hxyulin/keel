@@ -15,17 +15,9 @@ fn source() -> String {
 }
 fn module(tier: keel_opt::OptimizationTier) -> keel_ir::Module {
     let mut m = keel_ir::parse(&source()).unwrap();
-    // Apply the new named pass first: tier passes may recognize the scalar
+    // Apply the extended pass first: tier passes may recognize the scalar
     // tail, but must preserve the extended pass's guards and seed merge.
-    keel_opt::run_passes(
-        &mut m,
-        &[
-            "loop-reduce-affine",
-            "loop-reduce-casts",
-            "loop-reduce-multi",
-        ],
-    )
-    .unwrap();
+    keel_opt::run_passes(&mut m, &["loop-reduce-multi"]).unwrap();
     keel_opt::optimize_with_tier(&mut m, tier).unwrap();
     keel_ir::verify_module(&m).unwrap();
     assert!(m.functions.iter().all(|f| {
@@ -164,15 +156,7 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
         keel_opt::OptimizationTier::Full,
     ] {
         let mut m = keel_ir::parse(include_str!("fixtures/reduction_fault_order.ir")).unwrap();
-        keel_opt::run_passes(
-            &mut m,
-            &[
-                "loop-reduce-affine",
-                "loop-reduce-casts",
-                "loop-reduce-multi",
-            ],
-        )
-        .unwrap();
+        keel_opt::run_passes(&mut m, &["loop-reduce-multi"]).unwrap();
         keel_opt::optimize_with_tier(&mut m, tier).unwrap();
         keel_ir::verify_module(&m).unwrap();
         assert!(

@@ -10,10 +10,7 @@ fn packed_roundtrips_support_each_width_and_signedness_on_both_targets() {
     ] {
         let mut m = keel_ir::parse(&fixtures::source()).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        let before = m.to_string();
-        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-affine"], target).unwrap();
-        assert_eq!(m.to_string(), before);
-        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-casts"], target).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
         keel_ir::verify_module(&m).unwrap();
         for f in &m.functions {
             assert!(
@@ -29,7 +26,7 @@ fn packed_roundtrips_support_each_width_and_signedness_on_both_targets() {
             );
         }
         let before = m.to_string();
-        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-casts"], target).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
         assert_eq!(m.to_string(), before);
     }
 }
@@ -44,7 +41,7 @@ fn reject_narrow_loads_other_casts_and_escaping_intermediates() {
     ] {
         let mut m = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        keel_opt::run_passes(&mut m, &["loop-reduce-casts"]).unwrap();
+        keel_opt::run_passes(&mut m, &["loop-reduce-multi"]).unwrap();
         for f in &m.functions {
             // Only i8 variants changed in the first case.
             if source.contains("trunc.i8 v5") && !f.name.contains("_8_") {
