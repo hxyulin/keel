@@ -6,6 +6,7 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
+use keel_test_support::native_program;
 use std::{
     cell::OnceCell,
     fs,
@@ -153,9 +154,9 @@ fn command(c: &mut Command) {
     let out = c.output().unwrap();
     assert!(out.status.success(), "{c:?}: {out:?}");
 }
-/// A test's C oracle. AArch64 configurations link one compiled oracle object,
-/// and x86 configurations share one syntax check. `KEEL_SHUFFLE_EVIDENCE`
-/// keeps each configuration's files for `vector_shuffle/run_native.py`.
+/// A test's C oracle. AArch64 configurations link one compiled oracle object.
+/// x86 configurations share one syntax check, and each one is a
+/// `native_program!` that runs on x86-64 Linux or is exported.
 struct Oracle<'a> {
     c: &'a str,
     dir: PathBuf,
@@ -182,12 +183,7 @@ impl<'a> Oracle<'a> {
     }
 
     fn check(&self, arm: bool, stem: &str, source: &str, asm: &str, obj: &[u8]) {
-        let root = std::env::var_os("KEEL_SHUFFLE_EVIDENCE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("keel-shuffle-{}", std::process::id()))
-            });
-        let dir = root.join(if arm { "arm" } else { "x86" });
+        let dir = self.dir.join(if arm { "arm" } else { "x86" });
         fs::create_dir_all(&dir).unwrap();
         for (ext, bytes) in [
             ("keel", source.as_bytes()),
@@ -219,11 +215,24 @@ impl<'a> Oracle<'a> {
             );
             command(&mut Command::new(exe));
         } else {
-            fs::write(
-                dir.join("run_native.py"),
-                include_str!("vector_shuffle/run_native.py"),
-            )
-            .unwrap();
+            let (c_file, object_file) = (format!("{stem}.c"), format!("{stem}.o"));
+            native_program!(stem)
+                .file(format!("{stem}.keel"), source)
+                .file(format!("{stem}.s"), asm)
+                .file(&*c_file, self.c)
+                .file(&*object_file, obj)
+                .link([
+                    "-O2",
+                    "-march=x86-64",
+                    "-msse2",
+                    "-mno-avx",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    &c_file,
+                    &object_file,
+                ])
+                .check();
             self.x86.get_or_init(|| {
                 command(
                     Command::new("clang")
@@ -270,12 +279,10 @@ impl<'a> Oracle<'a> {
                 "{stem}"
             );
         }
-        if std::env::var_os("KEEL_SHUFFLE_EVIDENCE").is_none() {
-            for ext in ["keel", "c", "s", "o", "native", "clang.o"] {
-                let path = dir.join(format!("{stem}.{ext}"));
-                if path.exists() {
-                    fs::remove_file(path).unwrap();
-                }
+        for ext in ["keel", "c", "s", "o", "native", "clang.o"] {
+            let path = dir.join(format!("{stem}.{ext}"));
+            if path.exists() {
+                fs::remove_file(path).unwrap();
             }
         }
     }

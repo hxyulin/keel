@@ -5,8 +5,9 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::native_program;
 use object::{Object, ObjectSection};
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -19,25 +20,19 @@ const TINY: Pools = Pools {
     float_caller_saved: &[1],
     float_callee_saved: &[],
 };
+/// x86-64-v3 features beyond the baseline, for `-march=x86-64-v3` programs.
+const V3_FEATURES: [&str; 7] = ["avx", "avx2", "bmi1", "bmi2", "fma", "lzcnt", "movbe"];
+const BAD_TAIL: &str = "unsigned long long __wrap_tail_gp_0_0(void) { return 0; }\n";
+
 #[test]
 fn compatible_tail_packet() {
     let module = keel_ir::parse(include_str!("../sysv_tail/corpus.ir")).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    let export = std::env::var_os("KEEL_SYSV_TAIL_EXPORT").map(PathBuf::from);
-    let dir = export.clone().unwrap_or_else(|| {
-        std::env::temp_dir().join(format!("keel-sysv-tail-{}", std::process::id()))
-    });
-    fs::create_dir_all(&dir).unwrap();
-    for name in ["corpus.ir", "oracle.c", "depth.S", "run.py"] {
-        fs::copy(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/sysv_tail")
-                .join(name),
-            dir.join(name),
-        )
-        .unwrap();
-    }
-    let mut names = Vec::new();
+    let dir = keel_test_support::TempDir::new("sysv-tail");
+    let oracle_c = include_str!("../sysv_tail/oracle.c");
+    let depth_s = include_str!("../sysv_tail/depth.S");
+    fs::write(dir.join("oracle.c"), oracle_c).unwrap();
+    let mut negative_controls = 0;
     // Clang assembles each distinct text once. Every configuration still
     // compares its own object with that oracle.
     let mut oracles = std::collections::HashMap::<String, Vec<u8>>::new();
@@ -111,8 +106,7 @@ fn compatible_tail_packet() {
                     let name = format!("{level:?}-{selector:?}-{allocator:?}-{pool}");
                     let asm = dir.join(format!("{name}.s"));
                     fs::write(&asm, &text).unwrap();
-                    fs::write(dir.join(format!("{name}.o")), &object).unwrap();
-                    let clang = oracles.entry(text).or_insert_with(|| {
+                    let clang = oracles.entry(text.clone()).or_insert_with(|| {
                         let oracle = dir.join("clang.o");
                         let output = Command::new("clang")
                             .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
@@ -141,15 +135,48 @@ fn compatible_tail_packet() {
                         keel.section_by_name(".text").unwrap().data().unwrap(),
                         "{name}"
                     );
-                    names.push(format!("\"{name}\""));
+                    let (march, required) = if level == CpuLevel::V1 {
+                        ("-march=x86-64", &[][..])
+                    } else {
+                        ("-march=x86-64-v3", &V3_FEATURES[..])
+                    };
+                    for compiler in ["gcc", "cc"] {
+                        let tail = |program: &str| {
+                            native_program!(program)
+                                .requires(required)
+                                .file("oracle.c", oracle_c)
+                                .file("depth.S", depth_s)
+                                .file("keel.s", &text)
+                                .file("keel.o", &object)
+                                .step([compiler, "-O2", march, "-c", "oracle.c", "-o", "primary.o"])
+                        };
+                        tail(&format!("{name}-{compiler}"))
+                            .step([compiler, "primary.o", "depth.S", "keel.o", "-o", "program"])
+                            .stdout("KEEL SYSV TAIL PASS\n")
+                            .check();
+                        // Replacing one argument-permuting tail with a constant
+                        // return must fail the independent value checks.
+                        if level == CpuLevel::V1 && negative_controls < 2 {
+                            negative_controls += 1;
+                            tail(&format!("{name}-{compiler}-bad-tail"))
+                                .file("bad-tail.c", BAD_TAIL)
+                                .step([
+                                    compiler,
+                                    "primary.o",
+                                    "depth.S",
+                                    "keel.o",
+                                    "bad-tail.c",
+                                    "-Wl,--wrap=tail_gp_0_0",
+                                    "-o",
+                                    "program",
+                                ])
+                                .exit(1)
+                                .check();
+                        }
+                    }
                 }
             }
         }
-    }
-    fs::remove_file(dir.join("clang.o")).unwrap();
-    fs::write(dir.join("roster.json"), format!("{{\"schema\":1,\"fullprofile\":false,\"native_accepted\":false,\"y_requires_v3\":true,\"objects\":[{}]}}\n", names.join(","))).unwrap();
-    if export.is_none() {
-        fs::remove_dir_all(dir).unwrap();
     }
 }
 #[test]

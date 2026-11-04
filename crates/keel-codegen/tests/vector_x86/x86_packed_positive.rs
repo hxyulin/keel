@@ -1,11 +1,11 @@
-//! Exact positive32 cover and portable Linux oracle export.
+//! Exact positive32 cover and Linux ELF+C oracles.
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::EntityRef;
-use std::{fs, path::PathBuf};
+use keel_test_support::native_program;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -215,35 +215,29 @@ fn fixture() -> (String, String) {
     );
     (ir, c)
 }
+/// Runs one ELF+C oracle on x86-64 Linux, or exports it.
+fn native(name: &str, text: String, object: Vec<u8>, c: &str) {
+    native_program!(name)
+        .file("oracle.s", text)
+        .file("oracle.o", object)
+        .file("oracle.c", c)
+        .link([
+            "-O2",
+            "-march=x86-64",
+            "-msse2",
+            "-mno-avx",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "oracle.c",
+            "oracle.o",
+        ])
+        .check();
+}
+
 #[test]
 fn export_linux_oracles() {
-    let evidence = std::env::var_os("KEEL_POSITIVE32_EVIDENCE").map(PathBuf::from);
     let (ir, c) = fixture();
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.keel"), &ir).unwrap();
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("../x86_positive/run_native.py"),
-        )
-        .unwrap();
-    }
-    if let (Some(dir), Some(input)) = (&evidence, std::env::var_os("KEEL_POSITIVE32_KERNEL_IR")) {
-        let src = fs::read_to_string(input).unwrap();
-        let (text, obj) = compile(
-            &src,
-            SelectionTier::Full,
-            AllocationTier::Full,
-            &keel_codegen::x86_64::REGISTERS,
-        );
-        fs::write(dir.join("kernel-direct.s"), text).unwrap();
-        fs::write(dir.join("kernel-direct.o"), obj).unwrap();
-        fs::write(
-            dir.join("kernel-direct.c"),
-            include_str!("../x86_positive/kernel.c"),
-        )
-        .unwrap();
-    }
     for sel in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -267,12 +261,12 @@ fn export_linux_oracles() {
                         if control { 0 } else { 9 },
                         "{sel:?}/{alloc:?}/{pool}/{control}"
                     );
-                    if let Some(dir) = &evidence {
-                        let name = format!("{sel:?}-{alloc:?}-{pool}-control{control}");
-                        fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        fs::write(dir.join(format!("{name}.o")), object).unwrap();
-                        fs::write(dir.join(format!("{name}.c")), &c).unwrap();
-                    }
+                    native(
+                        &format!("{sel:?}-{alloc:?}-{pool}-control{control}"),
+                        text,
+                        object,
+                        &c,
+                    );
                 }
             }
         }
@@ -313,7 +307,6 @@ impl keel_codegen::InstructionSelector for ConstrainedLoads {
 }
 #[test]
 fn export_rejection_oracles() {
-    let evidence = std::env::var_os("KEEL_POSITIVE32_EVIDENCE").map(PathBuf::from);
     let (ir, c) = fixture();
     for boundary in ["debug", "constraints", "external"] {
         let mut module = keel_ir::parse(&ir).unwrap();
@@ -370,12 +363,12 @@ fn export_rejection_oracles() {
                 };
                 let (text, obj) = compile_module(&module, selector, alloc, pools);
                 assert_eq!(loads(&text), usize::from(boundary == "external"));
-                if let Some(dir) = &evidence {
-                    let name = format!("rejection-{boundary}-{alloc:?}-{pool}");
-                    fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                    fs::write(dir.join(format!("{name}.o")), obj).unwrap();
-                    fs::write(dir.join(format!("{name}.c")), &oracle).unwrap();
-                }
+                native(
+                    &format!("rejection-{boundary}-{alloc:?}-{pool}"),
+                    text,
+                    obj,
+                    &oracle,
+                );
             }
         }
     }

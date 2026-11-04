@@ -3,6 +3,7 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
+use keel_test_support::native_program;
 
 const ARM_SPILLED: Pools = Pools {
     float_caller_saved: &[],
@@ -114,17 +115,40 @@ fn direct_masks_and_conservative_boundaries() {
 #[path = "common/mask_oracle.rs"]
 mod mask_oracle;
 
+/// Links an AArch64 Mach-O object with the C oracle and runs it on an arm64
+/// macOS host.
+fn run_arm64_macos(stem: &str, c: &str, object: &[u8]) {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        keel_test_support::skip_part!("requires arm64 macOS");
+        return;
+    }
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip_part!(keel_test_support::NO_CLANG);
+        return;
+    };
+    let dir = keel_test_support::TempDir::new("mask-oracle");
+    std::fs::write(dir.join("oracle.c"), c).unwrap();
+    std::fs::write(dir.join("oracle.o"), object).unwrap();
+    let output = clang
+        .command()
+        .args([
+            "-O2", "-Wall", "-Wextra", "-Werror", "oracle.c", "oracle.o", "-o", "program",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{stem}: {output:?}");
+    let output = std::process::Command::new(dir.join("program"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{stem}: {output:?}");
+}
+
 #[test]
 fn canonical_widening_oracle_objects() {
     let (source, c) = mask_oracle::fixture();
     let module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    let evidence = std::env::var_os("KEEL_MASK_EVIDENCE").map(std::path::PathBuf::from);
-    if let Some(dir) = &evidence {
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("oracle.keel"), &source).unwrap();
-        std::fs::write(dir.join("oracle.c"), c).unwrap();
-    }
     for selector in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             let pipeline = CodegenPipeline {
@@ -199,11 +223,20 @@ fn canonical_widening_oracle_objects() {
                         });
                         assert!(has_spill, "missing forced vector spills for {arch}");
                     }
-                    if let Some(dir) = &evidence {
-                        let stem = format!("{arch}-{selector:?}-{allocation:?}-spilled{spilled}");
-                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                        std::fs::write(dir.join(format!("{stem}-text.o")), parsed).unwrap();
-                        std::fs::write(dir.join(format!("{stem}-typed.o")), typed).unwrap();
+                    // The text and typed objects are identical; run one.
+                    let stem = format!("{arch}-{selector:?}-{allocation:?}-spilled{spilled}");
+                    if arch == "x86" {
+                        native_program!(stem)
+                            .file("oracle.c", &c)
+                            .file("oracle.s", text)
+                            .file("oracle.o", typed)
+                            .link([
+                                "-O2", "-Wall", "-Wextra", "-Werror", "-msse2", "-mno-avx",
+                                "oracle.c", "oracle.o",
+                            ])
+                            .check();
+                    } else {
+                        run_arm64_macos(&stem, &c, &typed);
                     }
                 }
             }
