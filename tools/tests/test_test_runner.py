@@ -585,15 +585,18 @@ class CheckScopeTests(unittest.TestCase):
         plan = runner.check_commands(["lint"], "cargo", "python3", ["opt/verify-each", "cli/extra"])
         commands = dict(plan)
         self.assertEqual([label for label, _ in plan],
-                         ["format", "clippy, default features", "clippy, experimental features"])
+                         ["format", "clippy, default features", "clippy, experimental features",
+                          "documentation links"])
         self.assertEqual(commands["format"], ["cargo", "fmt", "--all", "--check"])
+        self.assertEqual(commands["documentation links"], ["python3", "tools/check_docs.py"])
+        self.assertTrue((runner.ROOT / "tools/check_docs.py").is_file())
         for label in ["clippy, default features", "clippy, experimental features"]:
             self.assertEqual(commands[label][:4], ["cargo", "clippy", "--workspace", "--all-targets"])
             self.assertEqual(commands[label][-3:], ["--", "-D", "warnings"])
         self.assertNotIn("--features", commands["clippy, default features"])
         experimental = commands["clippy, experimental features"]
         self.assertEqual(experimental[experimental.index("--features") + 1], "opt/verify-each,cli/extra")
-        self.assertEqual(len(runner.check_commands(["lint"], "cargo", "python3", [])), 2)
+        self.assertEqual(len(runner.check_commands(["lint"], "cargo", "python3", [])), 3)
 
     def test_generators_check_outputs_and_run_unit_tests_for_each_generator(self):
         plan = runner.check_commands(["generators"], "cargo", "python3", [])
@@ -620,7 +623,7 @@ class CheckScopeTests(unittest.TestCase):
         output = io.StringIO()
         with mock.patch.object(runner.subprocess, "run", run), contextlib.redirect_stdout(output):
             self.assertEqual(runner.run_checks(args, self.packages), 1)
-        self.assertEqual(ran, ["format", "clippy, default features", failing])
+        self.assertEqual(ran, ["format", "clippy, default features", failing, "documentation links"])
         results = output.getvalue().split("Results:\n", 1)[1]
         self.assertIn(f"FAILED (exit 101): {failing}", results)
         self.assertIn("ok: format", results)

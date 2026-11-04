@@ -40,8 +40,16 @@ All main-workspace crates inherit the lint policy in the root manifest.
 `tools/test.py lint` runs `cargo fmt --all --check`, then
 `cargo clippy --workspace --all-targets -- -D warnings` on default features,
 then the same clippy command with every workspace feature enabled except
-`profile-with-tracy`, which builds the Tracy C++ client. Run it at each merge
-boundary.
+`profile-with-tracy`, which builds the Tracy C++ client, and last
+`tools/check_docs.py`. Run it at each merge boundary.
+
+`tools/check_docs.py` checks every tracked Markdown file outside code blocks.
+Relative links must name a tracked file or directory, and a `#fragment` on a
+Markdown target must match a heading or an `<a id>` there. A backticked path
+that starts with `crates/`, `docs/`, `suite/`, `tools/` or `third-party/` must
+exist from the repository root or the page's directory, or be ignored by Git.
+Every page must be reachable by links from `docs/README.md`, except AGENTS.md
+and pages under a `tests/` directory. Run it alone after editing docs.
 
 `tools/test.py generators` runs `generate.py --check` for the x86 tables in
 `tools/x86-isa` and the AArch64 tables in `crates/keel-asm/tools`, then each

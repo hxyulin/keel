@@ -344,6 +344,7 @@ def check_commands(scopes: list[str], cargo: str, python: str,
         if features:
             plan.append(("clippy, experimental features",
                          [*clippy, "--features", ",".join(features), "--", "-D", "warnings"]))
+        plan.append(("documentation links", [python, "tools/check_docs.py"]))
     if "generators" in scopes:
         for directory in GENERATOR_DIRECTORIES:
             plan += [(f"{directory} generator check", [python, f"{directory}/generate.py", "--check"]),
