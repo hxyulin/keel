@@ -109,12 +109,6 @@ fn smaller_layout_frames_and_shared_returns_preserve_transport_parity() {
                     let shared = function(&text, "choose");
                     assert_eq!(shared.matches("\tret\n").count(), 1, "{text}");
                     assert!(shared.contains(".Lchoose_return"), "{text}");
-                    if let Some(dir) = std::env::var_os("KEEL_SIZE_EXPORT_DIR") {
-                        let dir = std::path::PathBuf::from(dir);
-                        std::fs::create_dir_all(&dir).unwrap();
-                        std::fs::write(dir.join(format!("{selection:?}-{allocation:?}.o")), &bytes)
-                            .unwrap();
-                    }
                 } else {
                     assert!(function(&text, "leaf").contains("push\trbp"), "{text}");
                     assert!(text.contains(".p2align\t5"), "{text}");
@@ -229,10 +223,6 @@ fn sharing_saves_bytes_even_when_returns_need_near_jumps() {
                 "expected a near jump to the shared return"
             );
             assert_eq!(function(&text, "choose").matches("\tret\n").count(), 1);
-            if let Some(dir) = std::env::var_os("KEEL_SIZE_EXPORT_DIR") {
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(std::path::Path::new(&dir).join("near-jump.o"), &bytes).unwrap();
-            }
         }
     }
     assert!(
@@ -296,11 +286,5 @@ fn register_only_leaf_drops_unused_call_alignment_padding() {
         .unwrap();
         let bytes = keel_asm::x86::assemble_program_object(&program).unwrap();
         assert_eq!(bytes, keel_asm::x86::assemble_object(&text).unwrap());
-        if goal == CodegenGoal::Size
-            && let Some(dir) = std::env::var_os("KEEL_SIZE_EXPORT_DIR")
-        {
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(std::path::Path::new(&dir).join("padding.o"), &bytes).unwrap();
-        }
     }
 }

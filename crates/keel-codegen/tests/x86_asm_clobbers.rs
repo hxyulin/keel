@@ -3,6 +3,7 @@ use keel_codegen::{
     regalloc::{Pools, RegisterAllocator},
 };
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
+use keel_test_support::native_program;
 
 const SOURCE: &str = r#"
 func @plain(i64) -> i64 {
@@ -49,6 +50,17 @@ entry(v0:i64):
 }
 "#;
 
+/// Links a clobber object with the C harness and the callee-saved register
+/// observer, then runs it on x86-64 Linux or exports it.
+fn clobber_program(name: &str, object: Vec<u8>) {
+    native_program!(name)
+        .file("harness.c", include_str!("x86_asm_clobbers/harness.c"))
+        .file("observer.S", include_str!("x86_asm_clobbers/observer.S"))
+        .file("clobber.o", object)
+        .link(["-O2", "harness.c", "observer.S", "clobber.o"])
+        .check();
+}
+
 #[test]
 fn selective_preservation_keeps_transport_parity_and_exports_runtime_cases() {
     for selector in [
@@ -90,15 +102,7 @@ fn selective_preservation_keeps_transport_parity_and_exports_runtime_cases() {
                         && !clobber.contains("push r15"),
                     "undeclared callee saves: {clobber}"
                 );
-                if let Some(dir) = std::env::var_os("KEEL_ASM_CLOBBER_EXPORT_DIR") {
-                    std::fs::create_dir_all(&dir).unwrap();
-                    std::fs::write(
-                        std::path::Path::new(&dir)
-                            .join(format!("{selector:?}-{allocator:?}-{spilled}.o")),
-                        bytes,
-                    )
-                    .unwrap();
-                }
+                clobber_program(&format!("{selector:?}-{allocator:?}-{spilled}"), bytes);
             }
         }
     }
@@ -158,14 +162,7 @@ fn staging_preserves_rematerialized_inputs_and_live_clobbered_homes() {
     ] {
         for allocator in [&RematConstants as &dyn RegisterAllocator, &CalleeHomes] {
             let (bytes, _) = compile(selector, allocator, false);
-            if let Some(dir) = std::env::var_os("KEEL_ASM_CLOBBER_EXPORT_DIR") {
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(
-                    std::path::Path::new(&dir).join(format!("{selector:?}-{}.o", allocator.name())),
-                    bytes,
-                )
-                .unwrap();
-            }
+            clobber_program(&format!("{selector:?}-{}", allocator.name()), bytes);
         }
     }
 }
@@ -294,20 +291,12 @@ fn simd_operands_preserve_live_values_spills_and_upper_halves() {
                 );
                 assert!(text.contains("opaque %xmm"), "{text}");
                 assert!(text.contains("vpaddd %ymm"), "{text}");
-                if let Some(dir) = std::env::var_os("KEEL_ASM_SIMD_EXPORT_DIR") {
-                    let dir = std::path::Path::new(&dir);
-                    std::fs::create_dir_all(dir).unwrap();
-                    std::fs::write(
-                        dir.join(format!("{selector:?}-{}-{spilled}.o", allocator.name())),
-                        object,
-                    )
-                    .unwrap();
-                    std::fs::write(
-                        dir.join("runner.c"),
-                        include_str!("x86_asm_clobbers/simd_runner.c"),
-                    )
-                    .unwrap();
-                }
+                native_program!(format!("{selector:?}-{}-{spilled}", allocator.name()))
+                    .requires(&["avx2"])
+                    .file("runner.c", include_str!("x86_asm_clobbers/simd_runner.c"))
+                    .file("simd.o", object)
+                    .link(["-O2", "runner.c", "simd.o"])
+                    .check();
             }
         }
     }

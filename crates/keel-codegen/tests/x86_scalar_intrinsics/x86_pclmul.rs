@@ -5,6 +5,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::native_program;
 use std::{fs, process::Command};
 const CONTROLS: [u8; 8] = [0, 1, 16, 17, 238, 239, 254, 255];
 const EMPTY: Pools = Pools {
@@ -99,13 +100,7 @@ fn pclmul_all_tiers_allocators_spills_and_object_paths() {
     let mut m = keel_ir::parse(&source()).unwrap();
     keel_ir::verify_module(&m).unwrap();
     keel_opt::optimize(&mut m).unwrap();
-    let d = std::env::var_os("KEEL_PCLMUL_EXPORT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-pclmul-{}", std::process::id()))
-        });
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("harness.c"), harness()).unwrap();
+    let harness = harness();
     let f = Features::for_level(CpuLevel::V1)
         .with_features("pclmulqdq")
         .unwrap();
@@ -148,32 +143,13 @@ fn pclmul_all_tiers_allocators_spills_and_object_paths() {
                 {
                     assert!(!line.contains('['), "no eager folding: {line}");
                 }
-                let name = format!("{tier:?}-{alloc:?}-{spill}");
-                let o = d.join(format!("{name}.o"));
-                fs::write(&o, object).unwrap();
-                fs::write(d.join(format!("{name}.s")), text).unwrap();
-                if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
-                    #[cfg(target_arch = "x86_64")]
-                    if !std::is_x86_feature_detected!("pclmulqdq") {
-                        keel_test_support::skip_part!("host lacks PCLMULQDQ");
-                        continue;
-                    }
-                    let exe = d.join(format!("run-{name}"));
-                    let output = Command::new("cc")
-                        .args(["-O1"])
-                        .arg(d.join("harness.c"))
-                        .arg(&o)
-                        .arg("-o")
-                        .arg(&exe)
-                        .output()
-                        .unwrap();
-                    assert!(
-                        output.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                    assert!(Command::new(exe).status().unwrap().success(), "{name}");
-                }
+                native_program!(format!("{tier:?}-{alloc:?}-{spill}"))
+                    .requires(&["pclmulqdq"])
+                    .file("harness.c", &harness)
+                    .file("pclmul.s", text)
+                    .file("pclmul.o", object)
+                    .link(["-O1", "harness.c", "pclmul.o"])
+                    .check();
             }
         }
     }
@@ -218,38 +194,12 @@ int main(void){
  munmap(m,3*p);return 0;
 }
 "#;
-    let d = std::env::var_os("KEEL_PCLMUL_EXPORT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-pclmul-memory-{}", std::process::id()))
-        });
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("memory.o"), object).unwrap();
-    fs::write(d.join("memory.c"), harness).unwrap();
-    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        #[cfg(target_arch = "x86_64")]
-        if !std::is_x86_feature_detected!("pclmulqdq") {
-            return;
-        }
-        let exe = d.join("memory-test");
-        assert!(
-            Command::new("cc")
-                .arg(d.join("memory.c"))
-                .arg(d.join("memory.o"))
-                .arg("-o")
-                .arg(&exe)
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(
-            Command::new(exe)
-                .current_dir(&d)
-                .status()
-                .unwrap()
-                .success()
-        );
-    }
+    native_program!("memory")
+        .requires(&["pclmulqdq"])
+        .file("memory.o", object)
+        .file("memory.c", harness)
+        .link(["memory.c", "memory.o"])
+        .check();
 }
 
 #[test]

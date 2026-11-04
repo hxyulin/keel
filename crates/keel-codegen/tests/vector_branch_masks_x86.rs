@@ -6,7 +6,8 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 
 #[path = "common/x86_packed.rs"]
 mod x86_packed;
@@ -97,20 +98,9 @@ fn command(c: &mut Command) {
     let output = c.output().unwrap();
     assert!(output.status.success(), "{c:?}: {output:?}");
 }
-fn evidence() -> Option<PathBuf> {
-    std::env::var_os("KEEL_BRANCH_MASK_EVIDENCE").map(PathBuf::from)
-}
-fn export(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
-    if let Some(dir) = evidence() {
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(format!("{stem}.keel")), source).unwrap();
-        fs::write(dir.join(format!("{stem}.c")), c).unwrap();
-        fs::write(dir.join(format!("{stem}.s")), asm).unwrap();
-        fs::write(dir.join(format!("{stem}.o")), object).unwrap();
-    }
-}
+/// Checks the C oracle's syntax, then runs it against Keel's object on
+/// x86-64 Linux or exports it. The Keel source and assembly ride along.
 fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
-    export(stem, source, c, asm, object);
     let dir = std::env::temp_dir().join(format!("keel-branch-mask-{}-{stem}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let input = dir.join("oracle.c");
@@ -128,22 +118,14 @@ fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
             ])
             .arg(&input),
     );
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        let obj = dir.join("oracle.o");
-        fs::write(&obj, object).unwrap();
-        let exe = dir.join("oracle");
-        command(
-            Command::new("clang")
-                .args(["-O2", "-msse2", "-mno-avx"])
-                .arg(input)
-                .arg(obj)
-                .arg("-o")
-                .arg(&exe),
-        );
-        command(&mut Command::new(exe));
-    }
     fs::remove_dir_all(dir).unwrap();
+    native_program!(stem)
+        .file("oracle.keel", source)
+        .file("oracle.s", asm)
+        .file("oracle.c", c)
+        .file("oracle.o", object)
+        .link(["-O2", "-msse2", "-mno-avx", "oracle.c", "oracle.o"])
+        .check();
 }
 
 fn controlled_fixture() -> (String, String) {
