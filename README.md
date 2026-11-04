@@ -68,7 +68,7 @@ keel cc --target wasm32-unknown-unknown --emit-wasm --export add add.c -o add.wa
 links hosted programs through the system driver.
 
 C support targets C11 with common GNU extensions (vectors, VLAs, attributes,
-complex numbers, AArch64 inline assembly). See [C coverage](docs/frontends/c/README.md)
+complex numbers, AArch64 and x86-64 inline assembly). See [C coverage](docs/frontends/c/README.md)
 and [ISA status](docs/targets/README.md) for the details and limits.
 
 ## Linux kernel milestone

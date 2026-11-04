@@ -72,7 +72,7 @@ Archive extraction is still performed before script symbol evaluation;
 script-only symbol references do not independently pull archive members. The
 pinned kernel uses whole-archive and explicit library groups.
 
-# Validation
+## Validation
 
 Run focused tests with GNU ld available on the host or through Nix:
 
