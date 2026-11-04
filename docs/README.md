@@ -1,7 +1,8 @@
 # Documentation
 
-Start with the [toolchain reference](toolchain.md),
-[architecture](compiler/design.md) and [testing guide](development/testing.md).
+Start with the [toolchain reference](toolchain.md), the
+[crates and data flow](compiler/design.md#crates-and-data-flow) and the
+[testing guide](development/testing.md).
 
 ## Supported components
 
@@ -25,16 +26,16 @@ completion ledgers or per-feature progress pages.
 
 | Area | Reference |
 | --- | --- |
-| Commands, architecture and tests | [Toolchain](toolchain.md), [design](compiler/design.md), [testing](development/testing.md), [performance changes](development/performance.md) |
+| Commands, architecture and tests | [Toolchain](toolchain.md), [IR and backend design](compiler/design.md), [testing](development/testing.md), [performance changes](development/performance.md) |
 | C | [Frontend](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md) |
 | Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md) |
 | LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |
 | Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md), [unwind](linking/unwind.md) |
-| x86-64 | [Entry point](targets/x86_64/README.md), [code generation](targets/x86_64/codegen.md), [assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsics](targets/x86_64/intrinsics.md), [inline assembly](targets/x86_64/c-inline-asm.md), [system](targets/x86_64/system/README.md), [F80](targets/x86_64/f80/README.md) |
-| AArch64 | [Entry point](targets/aarch64/README.md), [assembler and DWARF line tables](targets/aarch64/assembler.md), [inline assembly](targets/aarch64/c-inline-asm.md) |
-| Other targets | [All targets](targets/README.md), [WebAssembly](targets/wasm/README.md) |
+| x86-64 | [Entry point](targets/x86_64/README.md), [code generation](targets/x86_64/codegen.md), [assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsics](targets/x86_64/intrinsics.md), [inline assembly](targets/x86_64/c-inline-asm.md), [system](targets/x86_64/system/README.md), [F80](targets/x86_64/f80/README.md), [structural coverage](targets/x86_64/coverage/README.md) |
+| AArch64 | [Entry point](targets/aarch64/README.md), [code generation](targets/aarch64/codegen.md), [assembler and DWARF line tables](targets/aarch64/assembler.md), [inline assembly](targets/aarch64/c-inline-asm.md) |
+| Other targets | [All targets](targets/README.md), [WebAssembly](targets/wasm/README.md), [WebAssembly C profile](targets/wasm/c-frontend.md) |
 | Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/integration/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
-| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md) |
+| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md), summaries for [compile time](benchmarks/compiler-20261024.md), [assembly and linking](benchmarks/assembly-link-20261024.md) and [runtime](benchmarks/runtime-20261022.md) |
 
 Detailed safety contracts linked from implementation code remain separate where
 they define a specific API's preconditions. Generated coverage inventories remain
@@ -52,7 +53,9 @@ owned by their generators. Historical progress logs are not maintained reference
 
 Keep target-specific details under their target entry point. Update the owning
 reference and navigation when moving or adding a topic; do not add a parallel
-flat document or a progress log.
+flat document or a progress log. Link every new page from this index;
+`python3 tools/check_docs.py` reports pages it cannot reach, and broken links,
+anchors and paths.
 
 ## What belongs in Git
 

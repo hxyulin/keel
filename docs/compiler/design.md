@@ -1,9 +1,51 @@
-# Keel design decisions
+# IR and backend design
 
-Keel is an educational compiler: a low-level SSA IR, optimizer, code
-generators for AArch64 and x86-64, assemblers, linkers and a C frontend. Clang
-serves as a test oracle. This page records the IR, ABI, register allocation and
-SSA builder design and their limits.
+Keel is a compiler toolchain: a C frontend, an LLVM IR importer, a low-level
+SSA IR and optimizer, code generators for AArch64 and x86-64, assemblers, a
+disassembler, linkers and a WebAssembly backend. Clang serves as a test oracle.
+This page records the IR, the ABI, instruction selection, register allocation
+and the SSA builder, and their limits. Target registers, frames and lowering
+are in the [x86-64](../targets/x86_64/codegen.md) and
+[AArch64](../targets/aarch64/codegen.md) code generation references.
+
+## Crates and data flow
+
+A native compile runs these steps in one process:
+
+```text
+C source ──keel-c──▶ keel_ir::Module ──keel-opt──▶ Module ──keel-codegen──▶ keel_asm_ir::Program
+   ──keel-asm──▶ object bytes ──keel-link──▶ executable
+```
+
+`.ll` input enters through keel-llvm's importer and `.keel` text through
+`keel_ir::parser::parse`. keel-wasm turns a Module into a WebAssembly module
+instead of running keel-codegen. The `keel` driver owns all file access; the
+library crates take and return bytes or values. Verification runs at two
+points: the optimizer verifies every function a pass changed, and
+`Allocation::validate` checks every allocation before emission.
+
+| Crate | Owns | Workspace dependencies | Entry point |
+| --- | --- | --- | --- |
+| `keel` | The command-line driver | all compiler crates, `keel-util` | `crates/keel/src/main.rs` |
+| `keel-c` | C preprocessing, parsing and IR generation | `keel-ir`, `keel-frontend`, `keel-opt` (mandatory inline-asm inlining), `keel-asm-ir` | `keel_c::preprocess`, `keel_c::compile` |
+| `keel-frontend` | SSA construction from mutable variables | `keel-ir` | `FunctionBuilder` |
+| [`keel-llvm`](../../crates/keel-llvm/README.md) | LLVM IR import, and diagnostic export | `keel-ir`, `keel-util` | `import::Importer`, `export` |
+| `keel-ir` | IR types, text parser and printer, verifier, CFG, dominators and `LoopInfo` | `keel-asm-ir` (inline-asm register names) | `parser::parse`, `verifier::verify_module` |
+| `keel-ir-interp` | Reference interpreter, a test oracle | `keel-ir` | `Interpreter` |
+| `keel-opt` | Passes, tiers and the pass manager | `keel-ir` | `Pipeline`, `PASSES` |
+| `keel-codegen` | Instruction selection, covers, register allocation, frames and emission | `keel-ir`, `keel-asm-ir`, `keel-asm`, `keel-util` | `Request` |
+| [`keel-asm-ir`](../../crates/keel-asm-ir/README.md) | Structured assembly, the shared x86 tables and `Target` | none | `Program`, `Target` |
+| [`keel-asm`](../../crates/keel-asm/README.md) | AArch64 and x86-64 assemblers | `keel-asm-ir`, `keel-util` | `ObjectAssembler::for_target` |
+| [`keel-disasm`](../../crates/keel-disasm/README.md) | AArch64 and x86-64 decoders and formatting | `keel-asm-ir` | `decode_word`, `x86::decode` |
+| [`keel-link`](../../crates/keel-link/README.md) | Mach-O and ELF linkers and archives | `keel-asm-ir`, `keel-util` | `link`, `elf::link` |
+| [`keel-wasm`](../../crates/keel-wasm/README.md) | WebAssembly emission | `keel-ir` | `emit_module` |
+| `keel-util` | LEB128 and atomic file replacement | none | `leb128`, `fs::replace` |
+| `keel-suite` | The `cargo suite` workload runner | `keel-ir` | `cargo suite` |
+| `keel-test-support` | Tool discovery, recorded skips, `TempDir`, native x86 program packets | none | `skip!`, `native_program!` |
+| [`keel-cranelift`](../../crates/keel-cranelift/README.md) | Diagnostic Cranelift bridge, in its own workspace | `keel-ir`, `keel-llvm`, `keel-codegen`, `keel-asm`, `keel-util` | `crates/keel-cranelift/src/lib.rs` |
+
+`Target` lives in keel-asm-ir because the assemblers, linkers and decoders need
+it without depending on the IR.
 
 ## Program shape
 
@@ -16,8 +58,7 @@ SSA builder design and their limits.
 - Terminators: `jump`, `brif`, `return`, `trap`, and `switch v0, block9,
   [0: block1, 7: block2(v3)]`, which compares an integer with distinct case
   values (bit patterns of its type) and otherwise goes to the default, listed
-  first. On aarch64 dense cases (at least 4, spanning less than 3× their
-  count) become a jump table, the rest a chain of compares.
+  first. Each backend chooses a jump table or a compare chain.
 - **Pinned vs floating instructions.** Anything with side effects or that can
   trap (`load`, `store`, `call`, `udiv`, terminators) keeps its position.
   Pure instructions (`iadd`, `icmp`,
@@ -41,9 +82,9 @@ SSA builder design and their limits.
 
 ## Types
 
-- Scalar values: `i8 i16 i32 i64 i128 f32 f64 ptr`. Fixed 128-bit SIMD values:
-  `i8x16 i16x8 i32x4 i64x2 f32x4 f64x2`; see [SIMD IR](simd-ir.md) for operations,
-  lane semantics and the current native lowering boundary.
+- Scalar values: `i8 i16 i32 i64 i128 f32 f64 ptr`. Fixed-width vectors of 64,
+  128, 256 and 512 bits, such as `i32x4` or `f64x8`; see [SIMD IR](simd-ir.md)
+  for the shapes, operations, lane semantics and native lowering boundary.
 - Signedness is on operations, not types. Scalar comparisons return `i8` 0/1;
   vector comparisons return integer vectors with all-ones/zero lanes.
 - `ptr` is opaque. Memory is untyped bytes. `ptrtoint.i64` and
@@ -77,14 +118,11 @@ SSA builder design and their limits.
   `overflowing_*` and the building block for checked arithmetic and
   bignums. One instruction with two results, rather than LLVM's struct
   result, keeps both as plain values; GVN and GCM treat the results
-  together. On aarch64 the flag comes from the condition flags (`adds` +
-  `cset hs/vs`), from the high half of the product for 64-bit
-  multiplication, and from a range check for `i8`/`i16`, computed in 32
-  bits where it cannot overflow.
+  together.
 - `i128` has all of these but `umulhi smulhi umul_overflow
-  smul_overflow`. On aarch64 it lives in a
-  pair of registers (or two spill slots), and its division calls
-  compiler-rt (`__udivti3` and friends) after the same trap checks.
+  smul_overflow`. It lives in a pair of registers (or two spill slots), and
+  its division calls compiler-rt (`__udivti3` and friends) after the same
+  trap checks.
 
 **Instructions vs intrinsics.** Pure operations the optimizer should fold
 and number are instructions. Adding one costs an enum variant in an existing
@@ -117,8 +155,7 @@ nontrapping unreachable instruction remain unimplemented/deferred;
   even).
 - `fma a, b, c` is `a * b + c` rounded once (`fmadd`). `fcopysign a, b` is
   `a` with `b`'s sign; like `fneg` it only moves the sign bit, NaN payloads
-  included. aarch64 has no scalar instruction for it, so it splices the bit
-  in general registers (`bfxil`).
+  included.
 - `fcmp.<cond>` gives `i8` 0/1 for `eq ne lt le gt ge ord uno`. Every
   condition except `ne` and `uno` is false when an operand is NaN; `ne` is
   C's `!=`.
@@ -168,7 +205,7 @@ they do not wrap at 65,536 entries.
   would otherwise grow the stack every iteration). They are intrinsics,
   not instructions: rare, pinned, and nothing for the optimizer to fold.
   A function that uses them addresses its fixed frame from a base
-  pointer, x19 on aarch64 (see the frame layout in `aarch64.rs`). There
+  pointer that the stack allocation does not move. There
   is no stack probing yet: an allocation larger than the guard page can
   skip past it.
 - Memory operations are ordered by CFG order.
@@ -205,12 +242,6 @@ they do not wrap at 65,536 entries.
   be `release`, a store cannot be `acquire`, and a fence cannot be
   `relaxed`. `cas` has one ordering for success and failure, the stronger
   of C11's pair.
-- On aarch64, read-modify-writes and `cas` use the LSE instructions
-  (`ldadd`, `ldclr`, `swp`, `cas`…, suffixed `a`/`l`/`al` for the
-  ordering), which every Apple arm64 CPU has, so there are no
-  load-exclusive/store-exclusive loops. `sub` adds the negation and `and`
-  clears the complement, since LSE has neither. Ordered loads and stores
-  are `ldar`/`stlr`; fences are `dmb ishld` (acquire) or `dmb ish`.
 
 ## Modules and calls
 
@@ -443,37 +474,19 @@ from Apple arm64 that matter to a frontend:
 
 ## Target
 
-- Two targets, chosen with `--target <triple>` (default: the host):
-  **aarch64-apple-darwin** (Mach-O) and **x86_64-unknown-linux-gnu**
-  (System V, ELF, glibc). `keel_ir::Target` names them, so the C frontend
-  (type sizes, `va_list`, symbol prefixes) and codegen agree.
+- Four targets, chosen with `--target <triple>` (default: the host):
+  **aarch64-apple-darwin** (Apple's AAPCS64 variant, Mach-O),
+  **x86_64-unknown-linux-gnu** (System V, ELF, glibc),
+  **aarch64-unknown-linux-gnu** (base AAPCS64, ELF) and
+  **wasm32-unknown-unknown**, which only keel-wasm compiles.
+  `keel_asm_ir::Target` names them, so the C frontend (type sizes,
+  `va_list`, symbol prefixes), codegen, the assemblers and the linkers agree.
 - On Apple, executables must carry an ad-hoc code signature
   (`LC_CODE_SIGNATURE`) or the kernel refuses to run them.
-- **x86-64** (`keel-codegen/src/x86_64.rs`, whose module docs give the
-  register roles and frame) differs from arm64 mostly where the ISA does:
-  - With 16 general registers, never allocating argument registers would
-    leave five. So rsi, rdi, r8 and r9 are allocatable, and a call's
-    arguments move into place as one parallel copy (`f(b, a)` with `a` in
-    rdi and `b` in rsi is a swap, broken with r11).
-  - Instructions are two-address (`add d, b` overwrites `d`), and many
-    use fixed registers (`div` in rdx:rax, shift counts in cl). rax, rcx
-    and rdx are therefore never allocated and serve as scratch.
-  - The fixed frame is addressed from rbp, and only outgoing arguments
-    from rsp. A dynamic allocation that moves rsp then leaves every
-    slot's address alone.
-  - Code is position independent (PIE, Linux's default). Defined symbols
-    are `rip`-relative, and others go through the GOT (`@GOTPCREL`) and
-    the PLT for calls. Thread-locals use local-exec (`fs:` + `@tpoff`)
-    when defined in the module, and initial-exec (`@gottpoff`) otherwise.
-  - The default CPU level is v1; `--cpu-level` and `--target-features`
-    select more. Traps are `ud2`.
-  - Not supported on x86-64: exceptions, i128↔float conversions, i128
-    overflow multiply and `mulhi`, and `switch` on i128.
-- Conditional branches reach ±1 MiB. A function whose code may be bigger
-  (interpreter loops get there: QuickJS's is about 4 MB from keel) has each
-  rewritten as the opposite branch over a `b`, which reaches ±128 MiB.
-  Only those functions pay the extra instruction; the size is bounded by
-  counting instructions, so no branch is measured.
+- Register roles, frames, code models, branch reach and unsupported
+  operations are target facts. The
+  [x86-64](../targets/x86_64/codegen.md#registers-and-frame) and
+  [AArch64](../targets/aarch64/codegen.md) code generation references own them.
 
 ## Debug info
 
@@ -556,12 +569,25 @@ is easy to follow, which matters more here than the last few percent that
 graph colouring would give.
 
 Allocation is selected through `RegisterAllocator`, independently of
-`InstructionSelector` and IR optimization tiers. The default `Full` tier
-uses the algorithm below with lifetime holes and optional selection
-register affinities. `Fast` collapses each interval to its first and last
-points and skips affinities; it uses the same liveness, ABI constraints,
-and spill machinery. Both tiers can be compared with the same selected
-instruction plan and register pools through `CodegenPipeline`.
+`InstructionSelector` and IR optimization tiers. `CodegenPipeline` pairs any
+selector with any allocator, so tiers can be compared on the same selected
+instruction plan and register pools. `--regalloc` picks the tier; `-O1` uses
+Fast and the other `-O` levels use Full.
+
+| Tier | Build | What it does |
+| --- | --- | --- |
+| `Full` | default | The algorithm below, with lifetime holes, selection register hints and loop-weighted spill choice |
+| `Fast` | default | One contiguous interval per value, no hints, spills the interval that ends last |
+| `Local` | `experimental-regalloc` | Block-local register cache: cross-block values keep stack homes, and local homes appear only on eviction |
+| `Split` | `experimental-regalloc` | Linear scan, then spilled values stay in registers that are free at both ends of a lowering sequence, written back to their homes at block edges. Functions with vectors or `returns_twice` calls use Full |
+
+All tiers share liveness, ABI constraints and the spill machinery, and every
+allocation passes `Allocation::validate` before emission. The experimental
+tiers stay only while they build, pass clippy and pass the
+[experimental codegen lane](../development/testing.md#experimental-codegen-features).
+
+Full runs these steps; Fast shares the first two and builds one range per
+value.
 
 1. **Linearize.** Reachable blocks in reverse postorder, which is also the
    emission order. Unreachable blocks are not emitted. Each instruction has
@@ -586,34 +612,15 @@ instruction plan and register pools through `CodegenPipeline`.
    if it fits in the hole. Integers and floats are separate register
    classes (general-purpose and SIMD/FP registers) that never interfere:
    each interval only competes for registers of its own class. When no
-   register is free, spill whichever active interval ends last (or the new
-   one, if it ends last). A spilled value lives in a stack slot for its
-   whole life: no splitting. Spill slots are shared by intervals that do
-   not overlap (holes ignored).
+   register is free, Fast spills whichever active interval ends last (or the
+   new one, if it ends last). Full spills the interval with the fewest
+   loop-weighted uses per live point, ties going to the furthest end. A
+   spilled value lives in a stack slot for its whole life: no splitting.
+   Spill slots are shared by intervals that do not overlap (holes ignored).
 
    Holes matter in big `switch`-based functions: without them, a value
    defined in one case and used in a tail block far below would block a
    register through every case in between.
-
-**Registers on aarch64:**
-
-| Registers | Use |
-|---|---|
-| x0–x7 | call arguments and results; never allocated |
-| x8, x16, x17 | scratch for reloading spilled operands, intermediate values, and parallel copies; never allocated |
-| x9–x15 | allocatable, caller-saved |
-| x18 | reserved by Apple; never touched |
-| x19–x28 | allocatable, callee-saved |
-| x29, x30 | frame pointer, return address |
-| v0–v7 | float arguments and results; never allocated |
-| v8–v15 | allocatable, callee-saved (the ABI preserves only the low 64 bits, which is all a scalar uses) |
-| v16–v18 | scratch |
-| v19–v31 | allocatable, caller-saved |
-
-Keeping x0–x7 out of the pool means a call's arguments can be moved into
-place without moving live values out of the way first. It also gives the
-`i128` lowerings free working registers: they copy their operands into
-x0–x7 as pairs, compute there, and move the result out.
 
 **Calls** (including the memory intrinsics, which are libc calls, `i128`
 division, and inline assembly that clobbers allocatable caller-saved
@@ -623,50 +630,64 @@ register or be spilled; other intervals prefer caller-saved registers,
 which cost nothing to use. An interval live across a call that returns
 twice covers the whole function (see `returns_twice`). The prologue saves
 and the epilogue restores the callee-saved registers the function actually
-uses, with `stp`/`ldp` pairs.
+uses.
 
 **Parallel copies.** Block arguments move into parameters all at once, and
-so do call arguments into x0–x7 and incoming arguments into their allocated
-locations. `parallel_copy.rs` turns such a copy into ordinary moves: emit
-any move whose destination nobody still needs to read; when only cycles are
-left, save one destination in x16 and redirect its readers there (`fmov`
-moves a float's bits into x16 and back, so one temporary serves both
-classes). A slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
-values have unspecified upper bits anyway.
+so do call arguments into argument registers and incoming arguments into
+their allocated locations. `parallel_copy.rs` turns such a copy into
+ordinary moves: emit any move whose destination nobody still needs to read;
+when only cycles are left, save one destination in a reserved scratch
+register and redirect its readers there. Each target's codegen reference
+names its scratch registers.
 
-**Frame layout,** from `sp` up:
+**Rematerialization.** Under `experimental-regalloc`,
+`RematerializingAllocator` wraps Fast or Full and replaces some spill homes
+with recipes that recompute the value at each use: integer constants, stack
+addresses and null pointers (`RematRecipe`). `--remat constants`, `stack` and
+`all` select recipes; `pressure` also prefers recipe values as spill victims;
+`null` substitutes only canonical null pointers after allocation and rejects
+Local and Split. Each target lowers a recipe without changing flags. Default
+builds produce no recipe homes.
 
-```text
-sp + 0              outgoing stack arguments (for the call that needs most)
-...                 copies of big structs passed by value
-...                 a slot keeping a call's sret address across it
-...                 incoming structs that arrived in registers, and a struct
-                    result returned in registers
-...                 spill slots, 8 bytes each (only as many as needed)
-...                 IR stack slots, each at its alignment
-...                 padding to 16 bytes
-...                 callee-saved FP registers used (d8–d15), in pairs
-x29 - 16 * pairs    callee-saved general registers used, in pairs
-x29                 saved x29, x30
-```
+The `null` mode accepts only a live `inttoptr.ptr` result whose input is a
+live `iconst.i64 0`, through at most eight i64 aliases. Computed zeros, other
+widths, result aliases and removed definitions are ineligible, and functions
+with debug variables keep their null homes. Register assignments and spill
+victims are unchanged; only the spill home of an eligible value becomes a
+recipe. x86 lowers it as `mov r32, 0`, AArch64 as a zero move that does not
+set NZCV. Combining `null` with another recipe mode returns the base
+allocation unchanged. Its tests run with
+`cargo test -p keel-codegen --features experimental-regalloc --test null_rematerialization`,
+including native AArch64 fixtures for calls, `setjmp`, stack restore and
+`invoke`. No performance gain is claimed for any mode.
 
-Outgoing arguments must be at `sp` when a call is made. Spill slots come
-right after them so `ldr x, [sp, #imm]` reaches them (at most
-4095 × 8 bytes). The epilogue resets `sp` from x29 before popping the saved
-registers, so it does not depend on the size of the rest of the frame.
+Known gaps: no interval splitting outside the experimental Split tier (a
+value spilled anywhere is spilled everywhere), and blocks are laid out in
+reverse postorder only.
 
-Known gaps: no interval splitting (a value spilled anywhere is spilled
-everywhere; the next step would be Wimmer & Franz's splitting, which
-needs code generation to follow a value between locations), no hints to place values in x0–x7,
-and blocks are laid out in reverse postorder only.
+**Decisions.** The register-assignment design moves register effects, fixed
+operands and ABI preferences into a shared policy. Its settled choices: x86-64
+keeps r10 and r11 reserved, for 12 allocatable general registers. Frameless
+x86-64 scalar C leaves land only if the suite shows no retired-instruction
+regression. On AArch64, x0–x7 become allocatable and leaves frameless on
+Darwin first, and on Linux after the ARM container interoperability test
+runs. Values with no preference take x0–x7 after x9–x15, once both orders are
+measured. The Fast tier gets register effects and fixed operands but no ABI
+preferences. The FullAffinity tier was deleted. Before x0–x7 are allocatable,
+the AArch64 indirect call must read its target as part of the argument copy.
+
+## Instruction selection
 
 **Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
 binary root/child patterns and register affinities; `build.rs` generates
-the rule table and affinity matcher. The CLI `-O` preset enables all of these
-target codegen passes, as does `--isel all`. `--isel trees,folds,hints,covers`
-chooses passes independently; explicit selectors override `-O` in either order,
-with the last selector winning. Without `-O`, and in the library API, selection
-defaults to baseline (`--isel none`). They run after any IR
+the rule table and affinity matcher. Selection has three tiers
+(`SelectionTier`, or `--isel-tier`): Baseline runs none of the passes below,
+Trees runs tree selection and every cover, and Full also folds immediate
+operands and adds register hints. `-O0` uses Baseline, `-O1` Trees and the
+other `-O` levels Full. `--isel trees,folds,hints,covers` chooses passes
+independently and `--isel all` enables all of them; explicit selectors override
+`-O` in either order, with the last selector winning. Without `-O`, and in the
+library API, selection defaults to Baseline (`--isel none`). They run after any IR
 optimization and before allocation,
 visiting consumers first. A rule consumes a pure, single-use child in the
 same block, preserving distinct source lines when debug locations exist.
@@ -680,7 +701,9 @@ implicitly fused because that changes rounding.
 Target selection prepares instruction-kind and operand-use facts once per
 function.
 
-**Covers.** A cover is a hand-written fused pattern: it claims one root
+### Covers
+
+A cover is a hand-written fused pattern: it claims one root
 instruction, consumes adjacent instructions, and lowers the root with one
 target sequence. `crates/keel-codegen/src/cover.rs` is the registry: one
 `Cover` variant per pattern with a stable name, such as `x86-mask-test` or
@@ -705,7 +728,9 @@ exhaustive `match` on the owner.
 
 `SelectionOptions::covers` lists the covers that may run. Baseline selection
 runs none, so it is the reference for every cover; Trees and Full run all of
-them. `--isel all,-x86-mask-test` drops one cover, and `--isel covers` or a
+them. The [x86-64](../targets/x86_64/codegen.md#covers) and
+[AArch64](../targets/aarch64/codegen.md#covers) references list each target's
+covers. `--isel all,-x86-mask-test` drops one cover, and `--isel covers` or a
 cover name adds them. `--codegen-report` counts the roots each cover claimed
 per function. To add a cover: add a variant to the registry, write a claim
 function that checks `enabled` and `is_free` and calls `claim`, call it from
@@ -721,17 +746,6 @@ lowers an instruction through the cover that claimed it, if any, then
 tries the i128 lowering (and on x86 the AVX and x87 ones), and otherwise
 lowers it by instruction family in `<target>/lower_*.rs`. Target-independent
 intrinsics lower in `x86_64/intrinsic_family.rs` and `aarch64/intrinsic.rs`.
-
-Aarch64 scalar loads and stores can also consume a single-use, same-block
-`ptradd` with an i64 register offset. A single-use i64 shift can be absorbed
-when its masked count is zero or log2(access bytes), producing a register-offset
-address in the memory instruction itself. Accesses remain at their original
-position and width, including volatile accesses; atomics and 128-bit/vector
-accesses keep their existing lowering. Both address leaves are published before
-allocation, with separate scratch registers for spilled bases, indices and store
-values. Shared shifts stay materialized; shared or cross-block addresses and
-distinct debug source lines prevent consuming those definitions. Narrow index
-extension is not folded by this pattern.
 
 Allocation sees the selected instruction's leaf operands at the root,
 rather than the intermediate result. This both removes the consumed

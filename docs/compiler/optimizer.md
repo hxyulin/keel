@@ -435,23 +435,3 @@ dominator tree or use graph and does no GVN, inlining or loop analysis apart
 from the size-capped `fast-loop-reduce` sum transform (at most 256
 instructions, 16 blocks, one stream address and eight vector-expression
 values). Division by zero and signed MIN/-1 still trap; signed MIN % -1 is zero.
-
-## Apple M5 tuning
-
-`--tune generic` is the default. `--tune apple-m5` selects measured choices for
-Apple arm64 without changing the target, ABI, ISA features or IR tier. With
-tree selection, i32 and i64 multiplication by 3, 5 or 9 uses
-`add r, r, r, lsl #k`; existing multiply-add covers and shared constants are
-kept. `tools/generate_m5_tuning.py` emits the Rust cost table from a
-calibration report: a rule applies only when the dependency-chain ratio's upper
-95% bootstrap bound is below 1.0 and the parallel-stream median ratio is at
-most 1.0. The x86 target rejects M5 tuning.
-
-```sh
-keel cc -O --isel-tier full --tune apple-m5 input.i -o output.s
-```
-
-`tools/instruction_metrics.py` reports encoding sizes and optional
-`llvm-mca` estimates for comparing lowerings; see
-[testing](../development/testing.md#instruction-metrics). Those estimates do
-not drive optimizer decisions.

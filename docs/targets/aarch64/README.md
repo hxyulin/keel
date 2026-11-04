@@ -1,8 +1,9 @@
 # AArch64
 
-This page covers the AArch64 Linux toolchain, NEON lowering and intrinsics, and
-branch lowering.
-For shared compiler behavior see [architecture](../../compiler/design.md) and
+This page covers the AArch64 Linux toolchain and ABI, and NEON lowering and
+intrinsics. Registers, frames, selection, covers and branches for both AArch64
+targets are in [code generation](codegen.md). For shared compiler behavior see
+[IR and backend design](../../compiler/design.md) and
 [SIMD IR](../../compiler/simd-ir.md). The [assembler](assembler.md) and
 [C inline assembly](c-inline-asm.md) have their own pages.
 
@@ -18,16 +19,6 @@ host, `cc`, `compile`, `opt`, `asm`, `archive` and `link` select it by default.
 | ABI | Base AAPCS64, including variadics and initial-exec TLS |
 | Debug info | CFI and DWARF line/type/variable info in assembly and objects |
 | Exception handling, `long double` arithmetic, SVE operations | Diagnosed as unsupported |
-
-## Stack argument addressing
-
-Darwin and Linux AArch64 support argument areas larger than 4,080 bytes for
-incoming parameters and direct or indirect calls. Loads and stores use scaled
-immediate offsets when they fit and form a scratch address otherwise. Aggregate
-copies follow the same rule for their final narrow pieces. Outgoing argument
-areas still count toward the allocator's 32,760-byte spill-area bound and the
-function's frame-size bound; guaranteed tail calls still require register-only
-arguments.
 
 ## ARM development container
 
@@ -334,20 +325,3 @@ Native execution cases run only on Linux AArch64. Coverage includes:
 The Clang overflow reference fixture (`__muloti4`) needs the compiler-rt package
 and selects `--rtlib=compiler-rt`. The full linker test suite also contains
 x86-only execution cases, so use the focused ARM commands above.
-
-## Ordinary zero branches
-
-For an ordinary i32 or i64 `brif` truth test that compare fusion does not
-cover, the backend emits CBZ to the false destination instead of
-`cmp reg, #0` and B.cond. On i32, CBZ on the W register tests the same 32 bits;
-on i64 it tests all 64. Zero is false and every nonzero pattern is true. Far
-branch relaxation may invert CBZ to CBNZ over B. i8 and i16 keep a masked TST
-because their upper bits are undefined, and i128 keeps ORR of both halves and
-CMP. A function containing inline assembly keeps CMP and B.cond for every
-`brif`, because a template can read NZCV without declaring it. The proof that
-no other generated sequence reads the removed flags is documented on
-`BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
-
-```sh
-cargo test -p keel-codegen --test arm_zero_branches
-```

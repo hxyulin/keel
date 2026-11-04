@@ -1,7 +1,8 @@
 //! Native AArch64 Mach-O/Linux ELF and x86-64 Linux ELF assemblers.
 //!
-//! The original root API targets AArch64; [`x86`] exposes Intel syntax and
-//! structured x86 instruction assembly without changing that API.
+//! The root API targets AArch64; [`x86`] assembles Intel and AT&T source and
+//! structured x86 programs, and also writes AArch64 ELF objects through the
+//! shared ELF writer. See the crate README for a module map.
 //!
 //! Instruction bit layouts come from Arm's machine-readable specification.
 //! Syntax, operand transformations, and object layout are implemented here.

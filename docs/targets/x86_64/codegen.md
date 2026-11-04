@@ -1,9 +1,41 @@
 # x86 code generation
 
-This page states the x86-64 backend's selection rules and their limits. Each
-rule is an x86 backend choice: it changes no frontend, optimizer, ABI or FP
-semantics, and memory accesses keep their original widths, positions and
-alignment unless a section says otherwise.
+This page states the x86-64 backend's registers, frame, selection rules and
+their limits. Each rule is an x86 backend choice: it changes no frontend,
+optimizer, ABI or FP semantics, and memory accesses keep their original
+widths, positions and alignment unless a section says otherwise. The backend
+is `crates/keel-codegen/src/x86_64.rs` and the modules under
+`crates/keel-codegen/src/x86_64/`. Shared selection and allocation rules are in
+[IR and backend design](../../compiler/design.md#instruction-selection).
+
+## Registers and frame
+
+The module docs of `crates/keel-codegen/src/x86_64.rs` give the register
+roles and the frame layout. The rules that differ from AArch64:
+
+- With 16 general registers, never allocating argument registers would leave
+  five. So rsi, rdi, r8 and r9 are allocatable, and a call's arguments move
+  into place as one parallel copy (`f(b, a)` with `a` in rdi and `b` in rsi is
+  a swap, broken with r11).
+- Instructions are two-address (`add d, b` overwrites `d`), and many use fixed
+  registers (`div` in rdx:rax, shift counts in cl). rax, rcx and rdx are
+  therefore never allocated and serve as scratch. r10 holds indirect call
+  targets and is never allocated.
+- The fixed frame is addressed from rbp, and only outgoing arguments from
+  rsp. A dynamic allocation that moves rsp leaves every slot's address alone.
+- Under the default `pic` [code model](#code-models), code is position
+  independent. Defined symbols are `rip`-relative, and others go through the
+  GOT (`@GOTPCREL`) and the PLT for calls. The `small` and `kernel` models use
+  absolute addresses instead. Thread-locals use local-exec (`fs:` + `@tpoff`)
+  when defined in the module, and initial-exec (`@gottpoff`) otherwise.
+- The default CPU level is v1; `--cpu-level` and `--target-features` select
+  more. Traps are `ud2`.
+- Not supported: exceptions, i128↔float conversions, i128 overflow multiply
+  and `mulhi`, and `switch` on i128.
+
+The register-assignment design keeps r10 and r11 reserved, for 12
+allocatable general registers. Frameless scalar C leaves (beyond the size goal
+below) land only if the suite shows no retired-instruction regression.
 
 ## AVX selection
 
@@ -255,6 +287,46 @@ a named [cover](../../compiler/design.md) that `--isel all,-<name>` turns off:
 - **Signed dword widening loads.** With SSE4.1, the adjacent chain
   `load.i64; vsplat.i64x2; bitcast.i32x4; swiden_low.i64x2` with single-use
   intermediates becomes `pmovsxdq xmm, m64`.
+
+## Covers
+
+Every cover is off at Baseline selection and on at Trees and Full; see
+[covers](../../compiler/design.md#covers) for the registry and `--isel`
+toggles. `--isel all,-<name>` drops one, and `--codegen-report` counts the
+roots each one claimed. x86 runs the shared covers `offset-address`,
+`indexed-address`, `zero-test`, `compare-branch` and `packed-abs`, and these:
+
+| Cover | Stage | Pattern |
+|---|---|---|
+| `x86-division-remainder` | selection | `x - (x / y) * y` reads the division's remainder |
+| `x86-lea-mul3` | selection | `x * 3 + c` as one LEA (see below) |
+| `x86-binary-memory`, `x86-compare-memory` | selection | Adjacent load as the memory RHS (see [memory operand folding](#memory-operand-folding)) |
+| `x86-mask-test` | backend | i32 `and` with a literal mask tested against zero, as TEST |
+| `x86-select-compare` | backend | Single-use scalar compare re-emitted at its select (see [scalar compare and select](#scalar-compare-and-select)) |
+| `x86-packed-positive`, `x86-packed-sign` | backend | i64x2 positive filters, clamps and sign selects |
+| `x86-packed-low-load`, `x86-packed-wide-load`, `x86-signed-byte-load` | backend | Widening loads |
+
+### LEA for multiply by three plus a constant
+
+`x86-lea-mul3` selects `iadd(imul(x, 3), C)`, with either operand order at
+both nodes, for modular i32 and i64 only. The product must have exactly one
+resolved use, belong to the root block and have no distinct explicit source
+line, and the root result must not be an alias. i32 factor and displacement
+constants are reduced modulo 2^32; an i64 displacement must fit signed disp32.
+Factors five and nine are not selected.
+
+The emitter loads the input once and emits `LEA r32/r64, [r64 + r64*2 +
+disp32]`. The 32-bit destination truncates the effective address and zeroes
+its upper half, as other i32 results do. LEA neither accesses memory nor
+touches flags. `tests/fixtures/bridge_madd.ir`, extracted from the optimized
+x86-64 output for `recurrences.c`, checks that tree modes select LEA and
+Baseline keeps IMUL and ADD. On x86-64 Linux a test also links the direct
+functions against a Clang `-O0` oracle and runs them. No runtime gain is
+claimed for this cover.
+
+```sh
+cargo test -p keel-codegen --test x86_scalar_selection -- x86_lea::
+```
 
 ## Code models
 
