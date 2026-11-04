@@ -1182,9 +1182,17 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("vselect needs equal vector arms and an integer mask of the same lane shape, got ({mask}, {a}, {b})"));
                 }
             }
-            InstData::Iconst { ty, .. } => {
+            InstData::Iconst { ty, imm } => {
                 if !ty.is_int() {
                     self.inst_error(inst, format!("iconst type must be an integer, got {ty}"));
+                } else if ty.canonical_imm(*imm) != *imm {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "iconst.{ty} immediate {imm} is not sign-extended from {ty}; write {}",
+                            ty.canonical_imm(*imm)
+                        ),
+                    );
                 }
             }
             InstData::F80const { .. } => {}

@@ -56,6 +56,12 @@ SSA builder design and their limits.
 
 ## Integer operations
 
+- Constants: `iconst.i8 -1` stores its 64-bit immediate sign-extended from
+  the type's width, one form per value. The parser and `InstBuilder::iconst`
+  accept any spelling and store its low bits in that form, so
+  `iconst.i8 255` reads back as `iconst.i8 -1`. The verifier rejects any
+  other immediate. An `i128` constant is the immediate sign-extended to 128
+  bits.
 - Arithmetic: `iadd isub imul ineg`, `udiv sdiv urem srem` (trap on a zero
   divisor; `sdiv` also on `MIN / -1`), `umulhi smulhi` (high half of the
   double-width product).

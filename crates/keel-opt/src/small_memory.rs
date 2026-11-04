@@ -94,10 +94,7 @@ pub fn run(f: &mut Function) -> bool {
                             let repeat = emit(
                                 f,
                                 at,
-                                InstData::Iconst {
-                                    ty,
-                                    imm: ((u64::MAX / 255) >> (64 - width * 8)) as i64,
-                                },
+                                InstData::iconst(ty, ((u64::MAX / 255) >> (64 - width * 8)) as i64),
                             );
                             emit(
                                 f,
@@ -160,14 +157,7 @@ fn address(f: &mut Function, at: Inst, base: Value, offset: i64) -> Value {
     if offset == 0 {
         base
     } else {
-        let offset = emit(
-            f,
-            at,
-            InstData::Iconst {
-                ty: Type::I64,
-                imm: offset,
-            },
-        );
+        let offset = emit(f, at, InstData::iconst(Type::I64, offset));
         emit(
             f,
             at,
@@ -221,14 +211,7 @@ fn expand_memcmp_equality(f: &mut Function, at: Inst, args: &[Value]) -> bool {
     }
     // Keep loads at the original operation, including across intervening
     // writes/calls. Exact nonoverlapping chunks cover [0,size) on each side.
-    let mut unequal = emit(
-        f,
-        at,
-        InstData::Iconst {
-            ty: Type::I8,
-            imm: 0,
-        },
-    );
+    let mut unequal = emit(f, at, InstData::iconst(Type::I8, 0));
     let mut offset = 0;
     for (width, ty) in [
         (8, Type::I64),

@@ -233,10 +233,7 @@ pub fn promote(f: &mut Function) -> bool {
         if offset != 0 {
             let off = f.insert_inst(
                 InsertPoint::Before(anchor),
-                D::Iconst {
-                    ty: Type::I64,
-                    imm: offset as i64,
-                },
+                D::iconst(Type::I64, offset as i64),
             );
             let add = f.insert_inst(
                 InsertPoint::Before(anchor),

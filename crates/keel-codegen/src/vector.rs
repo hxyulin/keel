@@ -563,13 +563,10 @@ struct LaneLowering<'a> {
 impl LaneLowering<'_> {
     fn integer(&mut self, ty: Type, imm: i64) -> Value {
         if let Some(shape) = ty.vector() {
-            let arg = self.emit(InstData::Iconst {
-                ty: shape.lane_type(),
-                imm,
-            });
+            let arg = self.emit(InstData::iconst(shape.lane_type(), imm));
             self.emit(InstData::VectorSplat { ty, arg })
         } else {
-            self.emit(InstData::Iconst { ty, imm })
+            self.emit(InstData::iconst(ty, imm))
         }
     }
     fn bin(&mut self, op: BinaryOp, a: Value, b: Value) -> Value {

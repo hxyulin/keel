@@ -5,6 +5,7 @@
 //! The separate loop-reduce passes handle read-only wrapping integer sums.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
+use crate::ir_match::int_bits;
 use keel_ir::dominators::DominatorTree;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
@@ -927,7 +928,7 @@ fn emit(f: &mut Function, b: Block, d: D) -> Value {
     f.first_result(i)
 }
 fn iconst(f: &mut Function, b: Block, ty: Type, n: i64) -> Value {
-    emit(f, b, D::Iconst { ty, imm: n })
+    emit(f, b, D::iconst(ty, n))
 }
 fn bin(f: &mut Function, b: Block, op: B, a: Value, c: Value) -> Value {
     emit(f, b, D::Binary { op, args: [a, c] })
@@ -1977,8 +1978,7 @@ fn normalize_multi_recurrences(f: &mut Function) -> bool {
                     } else {
                         continue;
                     };
-                    let zero =
-                        f.insert_inst(keel_ir::InsertPoint::Before(root), D::Iconst { ty, imm: 0 });
+                    let zero = f.insert_inst(keel_ir::InsertPoint::Before(root), D::iconst(ty, 0));
                     let mut arms = [f.first_result(zero); 2];
                     arms[chosen] = value;
                     let masked = f.insert_inst(
@@ -2053,10 +2053,7 @@ fn normalize_multi_recurrences(f: &mut Function) -> bool {
             if constant(f, start) != Some(0) {
                 let zero = f.insert_inst(
                     keel_ir::InsertPoint::Before(anchor),
-                    D::Iconst {
-                        ty: f.value_type(iv),
-                        imm: 0,
-                    },
+                    D::iconst(f.value_type(iv), 0),
                 );
                 let nonempty = f.insert_inst(
                     keel_ir::InsertPoint::Before(anchor),

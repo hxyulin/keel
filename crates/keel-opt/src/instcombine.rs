@@ -128,7 +128,7 @@ fn mask(ty: Type) -> u128 {
 }
 
 fn zero(ty: Type) -> Fold {
-    Fold::Data(InstData::Iconst { ty, imm: 0 })
+    Fold::Data(InstData::iconst(ty, 0))
 }
 
 fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
@@ -300,7 +300,7 @@ fn literal(func: &mut Function, inst: Inst, ty: Type, bits: u128) -> Option<Valu
     if imm as i128 as u128 & mask(ty) != bits {
         return None;
     }
-    let c = func.insert_inst(InsertPoint::Before(inst), InstData::Iconst { ty, imm });
+    let c = func.insert_inst(InsertPoint::Before(inst), InstData::iconst(ty, imm));
     func.set_inst_loc(c, func.inst_loc(inst));
     Some(func.first_result(c))
 }
@@ -558,10 +558,7 @@ fn compare(func: &mut Function, inst: Inst, cond: IntCC, a: Value, b: Value) -> 
 }
 
 fn truth(value: bool) -> Fold {
-    Fold::Data(InstData::Iconst {
-        ty: Type::I8,
-        imm: i64::from(value),
-    })
+    Fold::Data(InstData::iconst(Type::I8, i64::from(value)))
 }
 
 fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Option<Fold> {
@@ -579,7 +576,7 @@ fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Optio
             return Some(if op == BinaryOp::And {
                 zero(ty)
             } else {
-                Fold::Data(InstData::Iconst { ty, imm: -1 })
+                Fold::Data(InstData::iconst(ty, -1))
             });
         }
         if let Some((inner, args)) = binary(func, b) {
@@ -949,7 +946,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 BinaryOp::And if x == Some(mask(ty)) => Some((Rule::AllOnes, Fold::Value(b))),
                 BinaryOp::And if y == Some(mask(ty)) => Some((Rule::AllOnes, Fold::Value(a))),
                 BinaryOp::Or if x == Some(mask(ty)) || y == Some(mask(ty)) => {
-                    Some((Rule::AllOnes, Fold::Data(InstData::Iconst { ty, imm: -1 })))
+                    Some((Rule::AllOnes, Fold::Data(InstData::iconst(ty, -1))))
                 }
                 BinaryOp::Udiv | BinaryOp::Sdiv if y == Some(1) => {
                     Some((Rule::DivideOne, Fold::Value(a)))
@@ -1038,10 +1035,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 };
                 let c = func.insert_inst(
                     InsertPoint::Before(inst),
-                    InstData::Iconst {
-                        ty: Type::I64,
-                        imm: shift as i64,
-                    },
+                    InstData::iconst(Type::I64, shift as i64),
                 );
                 func.set_inst_loc(c, func.inst_loc(inst));
                 return Some((
@@ -1135,10 +1129,10 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             {
                 return Some((
                     Rule::ConstantAddress,
-                    Fold::Data(InstData::Iconst {
-                        ty: Type::I64,
-                        imm: number.wrapping_add(offset) as u64 as i64,
-                    }),
+                    Fold::Data(InstData::iconst(
+                        Type::I64,
+                        number.wrapping_add(offset) as u64 as i64,
+                    )),
                 ));
             }
             let ValueDef::Result(inner, _) = func.value_def(arg) else {
@@ -1203,10 +1197,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             );
             return Some((
                 Rule::CompareSelf,
-                Fold::Data(InstData::Iconst {
-                    ty: Type::I8,
-                    imm: i64::from(truth),
-                }),
+                Fold::Data(InstData::iconst(Type::I8, i64::from(truth))),
             ));
         }
         InstData::Icmp { cond, args: [a, b] } if matches!(cond, IntCC::Eq | IntCC::Ne) => {
@@ -1214,10 +1205,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 if let Some(source) = widening_source(func, a) {
                     let zero = func.insert_inst(
                         InsertPoint::Before(inst),
-                        InstData::Iconst {
-                            ty: func.value_type(source),
-                            imm: 0,
-                        },
+                        InstData::iconst(func.value_type(source), 0),
                     );
                     func.set_inst_loc(zero, func.inst_loc(inst));
                     return Some((

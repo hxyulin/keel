@@ -188,14 +188,7 @@ fn insert(f: &mut Function, at: InsertPoint, d: InstData) -> Value {
     f.first_result(i)
 }
 fn offset(f: &mut Function, at: InsertPoint, base: Value) -> Value {
-    let eight = insert(
-        f,
-        at,
-        InstData::Iconst {
-            ty: Type::I64,
-            imm: 8,
-        },
-    );
+    let eight = insert(f, at, InstData::iconst(Type::I64, 8));
     insert(
         f,
         at,

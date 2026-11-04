@@ -241,10 +241,7 @@ fn promote_private(f: &mut Function) -> bool {
                     let init = f
                         .ins(InsertPoint::Before(i))
                         .loc(loc)
-                        .build(InstData::Iconst {
-                            ty: field.2,
-                            imm: repeated_byte(byte, field.2),
-                        });
+                        .build(InstData::iconst(field.2, repeated_byte(byte, field.2)));
                     value = Some(f.first_result(init));
                     continue;
                 }

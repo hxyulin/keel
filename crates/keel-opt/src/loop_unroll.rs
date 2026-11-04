@@ -325,7 +325,7 @@ fn transform(f: &mut Function, c: Candidate) {
     // iv<=bound is inductive: entry iv=0; a paired step occurs only when
     // bound-iv>=2. Hence subtraction and the two unit increments cannot wrap.
     let remaining = bin(f, pair_header, B::Isub, c.bound, iv);
-    let two = emit(f, pair_header, D::Iconst { ty: iv_ty, imm: 2 });
+    let two = emit(f, pair_header, D::iconst(iv_ty, 2));
     let enough = emit(
         f,
         pair_header,
@@ -378,10 +378,7 @@ fn transform(f: &mut Function, c: Candidate) {
     tail.extend(extra_params);
     jump(f, combine, c.header, tail);
     // Insert zero before the preheader terminator, preserving all existing work.
-    let zero_inst = f.insert_inst(
-        InsertPoint::Before(c.pre_jump),
-        D::Iconst { ty: sum_ty, imm: 0 },
-    );
+    let zero_inst = f.insert_inst(InsertPoint::Before(c.pre_jump), D::iconst(sum_ty, 0));
     let zero = f.first_result(zero_inst);
     let mut entry = vec![c.start, c.seed, zero];
     entry.extend(c.extras.iter().map(|e| e.1));

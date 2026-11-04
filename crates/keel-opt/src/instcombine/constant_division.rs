@@ -59,10 +59,7 @@ pub(super) fn reduce(
         func.first_result(inserted)
     };
     // Iconst's signed immediate carries the raw bit pattern, including bit 63.
-    let multiplier = emit(InstData::Iconst {
-        ty,
-        imm: reciprocal.multiplier as i64,
-    });
+    let multiplier = emit(InstData::iconst(ty, reciprocal.multiplier as i64));
     let mut quotient = emit(InstData::Binary {
         op: BinaryOp::Umulhi,
         args: [dividend, multiplier],
@@ -72,10 +69,7 @@ pub(super) fn reduce(
             op: BinaryOp::Isub,
             args: [dividend, quotient],
         });
-        let one = emit(InstData::Iconst {
-            ty: Type::I64,
-            imm: 1,
-        });
+        let one = emit(InstData::iconst(Type::I64, 1));
         let half = emit(InstData::Binary {
             op: BinaryOp::Ushr,
             args: [difference, one],
@@ -86,10 +80,7 @@ pub(super) fn reduce(
             args: [quotient, half],
         });
     }
-    let shift = emit(InstData::Iconst {
-        ty: Type::I64,
-        imm: i64::from(reciprocal.shift),
-    });
+    let shift = emit(InstData::iconst(Type::I64, i64::from(reciprocal.shift)));
     let quotient_data = InstData::Binary {
         op: BinaryOp::Ushr,
         args: [quotient, shift],

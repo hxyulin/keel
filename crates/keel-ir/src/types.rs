@@ -33,6 +33,20 @@ impl Type {
         )
     }
 
+    /// `imm` truncated to this integer type's width and sign-extended back
+    /// to 64 bits: the one form an `iconst` of this type stores. `i64`,
+    /// `i128` and non-integer types return `imm` unchanged.
+    #[inline]
+    pub fn canonical_imm(self, imm: i64) -> i64 {
+        let shift = match self {
+            Type::I8 => 56,
+            Type::I16 => 48,
+            Type::I32 => 32,
+            _ => return imm,
+        };
+        (imm << shift) >> shift
+    }
+
     #[inline]
     pub fn is_float(self) -> bool {
         matches!(self, Type::F32 | Type::F64 | Type::F80)

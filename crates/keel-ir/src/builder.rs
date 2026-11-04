@@ -151,7 +151,7 @@ impl InstBuilder<'_> {
     }
 
     pub fn iconst(self, ty: Type, imm: i64) -> Value {
-        self.value(InstData::Iconst { ty, imm })
+        self.value(InstData::iconst(ty, imm))
     }
 
     pub fn binary(self, op: BinaryOp, a: Value, b: Value) -> Value {

@@ -523,3 +523,53 @@ fn holey_arenas_preserve_all_golden_verifier_outcomes() {
     }
     assert!(checked > 0);
 }
+
+#[test]
+fn iconst_immediates_must_be_sign_extended_from_their_type() {
+    let source = "func @f() -> i8 {\nblock0:\n    v0 = iconst.i8 0\n    return v0\n}";
+    let verify = |imm| {
+        let mut module = keel_ir::parse(source).unwrap();
+        let f = &mut module.functions[0];
+        let inst = f.layout_insts().next().unwrap().1;
+        *f.inst_data_mut(inst) = InstData::Iconst { ty: Type::I8, imm };
+        keel_ir::verify_module(&module)
+    };
+    for imm in [-128, -1, 0, 127] {
+        assert!(verify(imm).is_ok(), "{imm}");
+    }
+    for imm in [128, 255, -129, 256] {
+        let errors = verify(imm).expect_err("non-canonical iconst accepted");
+        assert!(
+            errors[0].message.contains("not sign-extended"),
+            "{errors:?}"
+        );
+    }
+
+    // The parser and the builder store the canonical form of any spelling.
+    let module = keel_ir::parse(
+        "func @f() -> i32 {\nblock0:\n    v0 = iconst.i8 255\n    v1 = iconst.i32 0xffffffff\n    v2 = iconst.i32 4294967295\n    return v2\n}",
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let text = module.to_string();
+    assert!(text.contains("v0 = iconst.i8 -1"), "{text}");
+    assert!(text.contains("v1 = iconst.i32 -1"), "{text}");
+    assert!(text.contains("v2 = iconst.i32 -1"), "{text}");
+
+    let mut module = keel_ir::parse(source).unwrap();
+    let f = &mut module.functions[0];
+    let ret = f.layout_insts().nth(1).unwrap().1;
+    let v = f
+        .ins(keel_ir::InsertPoint::Before(ret))
+        .iconst(Type::I16, 0x8000);
+    let keel_ir::ValueDef::Result(inst, _) = f.value_def(v) else {
+        unreachable!()
+    };
+    assert_eq!(
+        *f.inst_data(inst),
+        InstData::Iconst {
+            ty: Type::I16,
+            imm: -0x8000
+        }
+    );
+}

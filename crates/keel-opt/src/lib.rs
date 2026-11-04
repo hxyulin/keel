@@ -40,6 +40,7 @@ pub use inline::{
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod internal_fast_calls;
+mod ir_match;
 mod known_bits;
 mod load_reuse;
 mod loop_rotate;

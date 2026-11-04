@@ -158,7 +158,7 @@ pub fn run(f: &mut Function) -> bool {
                         args: [seed, stride],
                     },
                 );
-                let step = emit(f, entry, D::Iconst { ty, imm });
+                let step = emit(f, entry, D::iconst(ty, imm));
                 let delta = emit(
                     f,
                     entry,

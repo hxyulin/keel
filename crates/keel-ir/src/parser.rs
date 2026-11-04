@@ -1715,7 +1715,7 @@ impl Parser {
                 "iconst" => {
                     let ty = suffix_type("type")?;
                     let imm = self.int("an integer")?;
-                    InstData::Iconst { ty, imm }
+                    InstData::iconst(ty, imm)
                 }
                 "fma" => {
                     no_suffix()?;

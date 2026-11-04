@@ -482,11 +482,12 @@ fn split_initializer_constants_keep_source_location_and_scope() {
     let new: Vec<_> = f.layout_insts().filter(|(_, i)| !old.contains(i)).collect();
     assert_eq!(new.len(), 1);
     assert_eq!(f.inst_loc(new[0].1), Some(loc));
-    assert!(matches!(
-        f.inst_data(new[0].1),
+    // Four 0x80 bytes, sign-extended from i32.
+    assert_eq!(
+        *f.inst_data(new[0].1),
         D::Iconst {
             ty: Type::I32,
-            imm: 2155905152
+            imm: 0x8080_8080_u32 as i32 as i64
         }
-    ));
+    );
 }

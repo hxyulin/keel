@@ -96,7 +96,8 @@ fn analyze(
             other => other,
         };
     }
-    let limit = constant(f, character_args[1])?;
+    // Unsigned bits, so an i8 `ult 128` reads its canonical -128 as 128.
+    let limit = int_bits(f, character_args[1])?;
     let mut allowed = FxHashSet::from_iter([last(f, test)?, character_cmp]);
     if let Some(i) = def(f, character_args[1]) {
         allowed.insert(i);

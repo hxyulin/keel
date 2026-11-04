@@ -13,7 +13,10 @@ use std::fmt;
 
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum InstData {
-    /// Integer constant, sign-extended (or truncated) to `ty`.
+    /// Integer constant. `imm` holds the value sign-extended from `ty`'s
+    /// width ([`Type::canonical_imm`]), so `iconst.i8 255` is stored as -1;
+    /// the verifier rejects any other form. Build one with
+    /// [`InstData::iconst`] to get the canonical form.
     Iconst {
         ty: Type,
         imm: i64,
@@ -811,6 +814,16 @@ impl UnaryOp {
 }
 
 impl InstData {
+    /// An `iconst` of `ty` holding `imm` in canonical form: `imm` is taken
+    /// as bits of `ty` and sign-extended.
+    #[inline]
+    pub fn iconst(ty: Type, imm: i64) -> Self {
+        Self::Iconst {
+            ty,
+            imm: ty.canonical_imm(imm),
+        }
+    }
+
     /// A compile-time object-lifetime boundary with no machine operand uses.
     #[inline]
     pub fn is_lifetime_marker(&self) -> bool {

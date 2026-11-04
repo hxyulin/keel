@@ -99,14 +99,8 @@ pub(crate) fn fold_overflow<'a>(
         }
     };
     Some([
-        InstData::Iconst {
-            ty: a.ty,
-            imm: Const::new(a.ty, wrapped).signed(),
-        },
-        InstData::Iconst {
-            ty: Type::I8,
-            imm: i64::from(overflow),
-        },
+        InstData::iconst(a.ty, Const::new(a.ty, wrapped).signed()),
+        InstData::iconst(Type::I8, i64::from(overflow)),
     ])
 }
 
@@ -479,14 +473,8 @@ mod tests {
                     assert_eq!(
                         folded,
                         [
-                            InstData::Iconst {
-                                ty: Type::I8,
-                                imm: i64::from(result as i8)
-                            },
-                            InstData::Iconst {
-                                ty: Type::I8,
-                                imm: i64::from(overflow)
-                            }
+                            InstData::iconst(Type::I8, i64::from(result as i8)),
+                            InstData::iconst(Type::I8, i64::from(overflow))
                         ],
                         "{op:?}, {x}, {y}"
                     );
