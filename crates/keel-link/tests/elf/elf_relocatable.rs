@@ -175,8 +175,8 @@ impl Drop for Scratch {
 
 #[test]
 fn gnu_final_link_matches_with_and_without_keel_partial_link() {
-    let Some(ld) = std::env::var_os("KEEL_GNU_LD") else {
-        return;
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
     };
     let scratch = Scratch::new();
     let objects = [
@@ -194,7 +194,8 @@ fn gnu_final_link_matches_with_and_without_keel_partial_link() {
         ("direct", vec!["0.o", "1.o"]),
         ("indirect", vec!["partial.o"]),
     ] {
-        let result = std::process::Command::new(&ld)
+        let result = ld
+            .command()
             .current_dir(&scratch.0)
             .args(["-m", "elf_x86_64", "-o", output])
             .args(inputs)
@@ -221,7 +222,7 @@ fn gnu_final_link_matches_with_and_without_keel_partial_link() {
 #[test]
 #[ignore = "requires KEEL_KERNEL_AGGREGATE, KEEL_KERNEL_SCRIPT and KEEL_GNU_LD"]
 fn pinned_kernel_partial_link_preserves_gnu_final_layout() {
-    let ld = std::env::var_os("KEEL_GNU_LD").expect("GNU ld path");
+    let ld = keel_test_support::gnu_ld().expect(keel_test_support::NO_GNU_LD);
     let aggregate = std::env::var_os("KEEL_KERNEL_AGGREGATE").expect("pinned aggregate path");
     let script = std::env::var_os("KEEL_KERNEL_SCRIPT").expect("pinned expanded script path");
     let bytes = std::fs::read(&aggregate).unwrap();
@@ -232,7 +233,8 @@ fn pinned_kernel_partial_link_preserves_gnu_final_layout() {
         ("direct", std::path::PathBuf::from(aggregate)),
         ("indirect", scratch.0.join("partial.o")),
     ] {
-        let result = std::process::Command::new(&ld)
+        let result = ld
+            .command()
             .current_dir(&scratch.0)
             .args([
                 "-m",

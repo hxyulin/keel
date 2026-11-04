@@ -371,8 +371,7 @@ fn clang_elf_objects_match_system_linker_bounds_policy() {
             path.is_file().then_some(path)
         });
     let Some(linker) = linker else {
-        eprintln!("ELF system comparison skipped: set KEEL_TEST_ELF_LD to GNU ld or ld.lld");
-        return;
+        keel_test_support::skip!("no ELF linker; set KEEL_TEST_ELF_LD to GNU ld or ld.lld");
     };
     let temp = std::env::temp_dir().join(format!(
         "keel-elf-registration-bounds-{}",

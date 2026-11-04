@@ -400,6 +400,7 @@ dependencies = [
  "keel-ir",
  "keel-link",
  "keel-opt",
+ "keel-test-support",
  "keel-wasm",
  "memmap2",
  "object",
@@ -499,6 +500,7 @@ version = "0.1.0"
 dependencies = [
  "bbtree",
  "keel-asm",
+ "keel-test-support",
  "object",
  "serde",
  "serde_yaml",

@@ -111,9 +111,8 @@ fn common_and_section_relative_constants() {
 }
 #[test]
 fn gnu_differential() {
-    let Ok(ld) = std::env::var("KEEL_GNU_LD") else {
-        eprintln!("GNU differential skipped: set KEEL_GNU_LD");
-        return;
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
     };
     let dir = std::env::temp_dir().join(format!("keel-script-differential-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -155,7 +154,8 @@ fn gnu_differential() {
         let input = keel_asm::x86::assemble_object(source).unwrap();
         std::fs::write(dir.join("input.o"), &input).unwrap();
         std::fs::write(dir.join("layout.lds"), script).unwrap();
-        let status = std::process::Command::new(&ld)
+        let status = ld
+            .command()
             .args([
                 "-z",
                 "max-page-size=4096",
