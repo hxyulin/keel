@@ -82,7 +82,6 @@ it; use `run_pipeline` or `run_passes`.
 | `dce` | Mark from pinned instructions; dead block parameters die with their arguments |
 | `gcm` | Global code motion, the scheduler for floating instructions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
-| `stack-cache` (opt-in) | Cache fields of an initialized stack object through loops |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |
@@ -341,11 +340,12 @@ barrier when later loads derive from incoming pointer parameters: fresh reads
 after the barrier seed the SSA values. Follow the pass with
 `phi-simplify,dce`. Balanced, Size and Full run it.
 
-`stack-cache` seeds integer and pointer fields of an object passed to an
-initializer from memory after the last entry-block effect and carries them
-through bounded loop SSA, keeping every store. Limits are 64 blocks, 2,048
-instructions and eight fields. No tier runs it
-(`cargo test -p keel-opt --test stack_cache`).
+`stack-promote` also promotes integer and pointer fields of an object passed
+to an entry-block initializer call. It seeds them from memory after the last
+entry-block effect and carries them through bounded loop SSA. Every later load
+must read an exact field or a pointer derived from an entry parameter, so the
+pass removes the later stores. Limits are 64 blocks, 2,048 instructions and
+eight fields (`cargo test -p keel-opt --test stack_cache`).
 
 ### loop-memory
 

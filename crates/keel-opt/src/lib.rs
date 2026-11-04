@@ -377,7 +377,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[14],
     &BUILTINS[15],
     &BUILTINS[16],
-    &stack_cache::StackCache,
     &load_reuse::LoadReuse,
     &loop_memory::LoopMemory,
     &loop_rotate::LoopRotate,

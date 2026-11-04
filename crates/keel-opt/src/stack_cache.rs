@@ -1,10 +1,13 @@
-//! Cache fixed stack fields in SSA after an entry-block effect boundary.
+//! Promote fixed stack fields to SSA after an entry-block effect boundary.
+//! `stack-promote` runs this after private-slot promotion.
 //!
-//! Unlike private-slot promotion, this permits a previously captured address.
-//! Every original store remains in place: arbitrary reads may still alias the
-//! object. The suffix must contain no other writers or memory barriers. Initial
-//! reads are confined to valid, in-bounds fixed slots; Keel's uninitialized
-//! memory is stable, so this does not invent values or speculate faults.
+//! Unlike private-slot promotion, this admits a slot whose address an
+//! entry-block call captured. The suffix must contain no other writers or
+//! memory barriers, and every suffix load must read an exact field or a pointer
+//! derived from an entry parameter, which predates the slot. With no observer
+//! left, suffix stores are removed. Initial reads are confined to valid,
+//! in-bounds fixed slots; Keel's uninitialized memory is stable, so this does
+//! not invent values or speculate faults.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopDepth;
@@ -12,31 +15,10 @@ use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData as D, MemoryFlags, StackSlot, Type, Value,
 };
 
-pub(crate) struct StackCache;
-impl crate::Pass for StackCache {
-    fn name(&self) -> &'static str {
-        "stack-cache"
-    }
-    fn description(&self) -> &'static str {
-        "cache loop stack reads after entry effects while retaining observable stores (opt-in)"
-    }
-    fn run(&self, f: &mut Function) -> bool {
-        run(f)
-    }
-}
-
 type Field = (StackSlot, usize, Type);
-
-pub fn run(f: &mut Function) -> bool {
-    run_impl(f, false)
-}
 
 /// Remove suffix stores only when all possible observers are excluded.
 pub fn promote(f: &mut Function) -> bool {
-    run_impl(f, true)
-}
-
-fn run_impl(f: &mut Function, promote: bool) -> bool {
     if f.stack_slots().next().is_none() {
         return false;
     }
@@ -119,74 +101,71 @@ fn run_impl(f: &mut Function, promote: bool) -> bool {
         .map(|i| (entry, i))
         .chain(instructions.iter().copied().filter(|&(b, _)| b != entry))
         .collect();
-    if promote {
-        // Entry parameters predate this activation's fixed slots. Only ptradd
-        // preserves that disjoint provenance; a loaded, returned, cast or phi
-        // pointer may instead point at an object captured by the initializer.
-        let mut external = keel_ir::fxhash::FxHashSet::default();
-        external.extend(
-            f.block_params(entry)
-                .iter()
-                .copied()
-                .filter(|&v| f.value_type(v) == Type::Ptr),
-        );
-        for _ in 0..8 {
-            let before = external.len();
-            for &(_, i) in &instructions {
-                if let D::Binary {
-                    op: BinaryOp::Ptradd,
-                    args,
-                } = *f.inst_data(i)
-                    && external.contains(&f.resolve(args[0]))
-                {
-                    external.insert(f.resolve(f.first_result(i)));
-                }
-            }
-            if before == external.len() {
-                break;
+    // Entry parameters predate this activation's fixed slots. Only ptradd
+    // preserves that disjoint provenance; a loaded, returned, cast or phi
+    // pointer may instead point at an object captured by the initializer.
+    let mut external = keel_ir::fxhash::FxHashSet::default();
+    external.extend(
+        f.block_params(entry)
+            .iter()
+            .copied()
+            .filter(|&v| f.value_type(v) == Type::Ptr),
+    );
+    for _ in 0..8 {
+        let before = external.len();
+        for &(_, i) in &instructions {
+            if let D::Binary {
+                op: BinaryOp::Ptradd,
+                args,
+            } = *f.inst_data(i)
+                && external.contains(&f.resolve(args[0]))
+            {
+                external.insert(f.resolve(f.first_result(i)));
             }
         }
-        for &(_, i) in &suffix {
-            let d = f.inst_data(i);
-            match *d {
-                D::Load { addr, ty, flags } if !flags.volatile => {
-                    if field(addr, ty).is_none() && !external.contains(&f.resolve(addr)) {
-                        return false;
-                    }
+        if before == external.len() {
+            break;
+        }
+    }
+    for &(_, i) in &suffix {
+        let d = f.inst_data(i);
+        match *d {
+            D::Load { addr, ty, flags } if !flags.volatile => {
+                if field(addr, ty).is_none() && !external.contains(&f.resolve(addr)) {
+                    return false;
                 }
-                D::Store { addr, value, flags } if !flags.volatile => {
-                    if field(addr, f.value_type(f.resolve(value))).is_none() {
-                        return false;
-                    }
-                }
-                _ if d.memory_effects() != keel_ir::MemoryEffects::None => return false,
-                _ => {}
             }
-            // No address observations after the boundary, even in a pure
-            // comparison, return, pointer store, or unsupported derivation.
-            let mut observer = false;
-            d.for_each_operand(|v| {
-                let v = f.resolve(v);
-                if !addresses.contains_key(&v) {
-                    return;
+            D::Store { addr, value, flags } if !flags.volatile => {
+                if field(addr, f.value_type(f.resolve(value))).is_none() {
+                    return false;
                 }
-                let allowed = match d {
-                    D::Load { addr, .. } => f.resolve(*addr) == v,
-                    D::Store { addr, value, .. } => f.resolve(*addr) == v && f.resolve(*value) != v,
-                    D::Binary {
-                        op: BinaryOp::Ptradd,
-                        args,
-                    } => {
-                        f.resolve(args[0]) == v
-                            && addresses.contains_key(&f.resolve(f.first_result(i)))
-                    }
-                    _ => false,
-                };
-                observer |= !allowed;
-            });
-            if observer {
-                return false;
             }
+            _ if d.memory_effects() != keel_ir::MemoryEffects::None => return false,
+            _ => {}
+        }
+        // No address observations after the boundary, even in a pure
+        // comparison, return, pointer store, or unsupported derivation.
+        let mut observer = false;
+        d.for_each_operand(|v| {
+            let v = f.resolve(v);
+            if !addresses.contains_key(&v) {
+                return;
+            }
+            let allowed = match d {
+                D::Load { addr, .. } => f.resolve(*addr) == v,
+                D::Store { addr, value, .. } => f.resolve(*addr) == v && f.resolve(*value) != v,
+                D::Binary {
+                    op: BinaryOp::Ptradd,
+                    args,
+                } => {
+                    f.resolve(args[0]) == v && addresses.contains_key(&f.resolve(f.first_result(i)))
+                }
+                _ => false,
+            };
+            observer |= !allowed;
+        });
+        if observer {
+            return false;
         }
     }
     let mut accesses = FxHashMap::default();
@@ -212,22 +191,20 @@ fn run_impl(f: &mut Function, promote: bool) -> bool {
     let dom = DominatorTree::compute(f, &cfg);
     let loops = LoopDepth::compute(f, &cfg, &dom);
     let mut captured = keel_ir::fxhash::FxHashSet::default();
-    if promote {
-        for &i in &entry_insts[..cut] {
-            if matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. }) {
-                f.inst_data(i).for_each_operand(|v| {
-                    if let Some(&(slot, _)) = addresses.get(&f.resolve(v)) {
-                        captured.insert(slot);
-                    }
-                });
-            }
+    for &i in &entry_insts[..cut] {
+        if matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. }) {
+            f.inst_data(i).for_each_operand(|v| {
+                if let Some(&(slot, _)) = addresses.get(&f.resolve(v)) {
+                    captured.insert(slot);
+                }
+            });
         }
     }
     let selected: Vec<_> = fields
         .iter()
         .copied()
         .filter(|&(s, o, t)| {
-            (!promote || captured.contains(&s))
+            captured.contains(&s)
                 && !fields.iter().any(|&(other, offset, ty)| {
                     other == s
                         && (offset, ty) != (o, t)
@@ -304,9 +281,7 @@ fn run_impl(f: &mut Function, promote: bool) -> bool {
                     }
                     D::Store { value: v, .. } => {
                         value = f.resolve(v);
-                        if promote {
-                            f.remove_inst(i);
-                        }
+                        f.remove_inst(i);
                     }
                     _ => unreachable!(),
                 }

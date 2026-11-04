@@ -1,4 +1,4 @@
-//! Post-capture stack caching: unknown initializer and aliases observe every write.
+//! Post-capture stack promotion: an unknown initializer observes every write before the cut.
 #[path = "stack_cache/load_reuse.rs"]
 mod load_reuse;
 
@@ -39,7 +39,7 @@ fn variants(dir: &Path) -> Vec<&'static str> {
             "opt",
             "--verify-each",
             "-p",
-            "stack-cache,phi-simplify,dce",
+            "stack-promote,phi-simplify,dce",
             "before.keel",
             "-o",
             "cached.keel",
