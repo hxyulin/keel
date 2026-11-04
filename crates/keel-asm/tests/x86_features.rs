@@ -187,12 +187,7 @@ fn differential(name: &str, cases: &[String]) {
         ours == assemble_program_object(&typed).unwrap(),
         "{name}: typed object differs"
     );
-    let root = std::env::var_os("KEEL_X86_FEATURE_ARTIFACTS").map(std::path::PathBuf::from);
-    let dir = root.as_ref().map_or_else(
-        || std::env::temp_dir().join(format!("keel-x86-features-{}-{name}", std::process::id())),
-        |p| p.join(name),
-    );
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new(&format!("x86-features-{name}"));
     let input = dir.join("input.s");
     let reference = dir.join("clang.o");
     let candidate = dir.join("keel.o");
@@ -241,9 +236,6 @@ fn differential(name: &str, cases: &[String]) {
         section(&ours).0.len(),
         section(&ours).1.len()
     );
-    if root.is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 }
 
 #[test]

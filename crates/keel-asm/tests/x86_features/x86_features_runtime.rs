@@ -222,12 +222,7 @@ fn baseline_vector_kernels_execute_against_intrinsics_when_x86_runner_is_availab
     if !native && !darwin {
         keel_test_support::skip!("no local x86-64 Linux or Darwin runner");
     }
-    let root = std::env::var_os("KEEL_X86_FEATURE_ARTIFACTS").map(std::path::PathBuf::from);
-    let dir = root.as_ref().map_or_else(
-        || std::env::temp_dir().join(format!("keel-x86-features-runtime-{}", std::process::id())),
-        |p| p.join("runtime"),
-    );
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("x86-features-runtime");
     let cases = cases();
     let mut c = String::from(
         "#include <emmintrin.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n",
@@ -425,7 +420,4 @@ int main(void) {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    if root.is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 }

@@ -161,12 +161,8 @@ fn differential(cases: Vec<String>, label: &str) {
     differential_syntax(cases, label, false);
 }
 fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
-    let evidence = std::env::var_os("KEEL_V3_EVIDENCE_DIR");
-    let dir = evidence.as_ref().map_or_else(
-        || std::env::temp_dir().join(format!("keel-v3-{}-{label}", std::process::id())),
-        |root| std::path::PathBuf::from(root).join(label),
-    );
-    std::fs::create_dir_all(&dir).unwrap();
+    // A failing test keeps this directory with each tool's input.
+    let dir = keel_test_support::TempDir::new(&format!("v3-{label}"));
     // Check both source orders for known symmetric instructions: LLVM and GAS
     // differ on whether they exchange sources to save a VEX byte. Each accepted
     // encoding is still compared byte-for-byte to an independent assembler.
@@ -252,13 +248,11 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
                 .join("\n");
             std::fs::write(&input, format!("{syntax}\n{gnu}")).unwrap();
         }
-        if evidence.is_some() {
-            std::fs::copy(
-                &input,
-                dir.join(if tool == "clang" { "clang.s" } else { "gnu.s" }),
-            )
-            .unwrap();
-        }
+        std::fs::copy(
+            &input,
+            dir.join(if tool == "clang" { "clang.s" } else { "gnu.s" }),
+        )
+        .unwrap();
         let output = dir.join(if tool == "clang" { "clang.o" } else { "gnu.o" });
         let mut cmd = match gnu_as {
             Some(gnu) if tool != "clang" => gnu.command(),
@@ -322,9 +316,6 @@ fn differential_syntax(cases: Vec<String>, label: &str, att_syntax: bool) {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    if evidence.is_none() {
-        std::fs::remove_dir_all(dir).unwrap();
-    }
 }
 
 fn scalar_cases() -> Vec<String> {

@@ -83,12 +83,7 @@ fn pclmul_legacy_encoding_oracles_and_feature_contract() {
         ours,
         bytes(&assemble_program_object_with_features(&typed, f).unwrap())
     );
-    let dir = std::env::var_os("KEEL_PCLMUL_ASM_EXPORT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-pclmul-asm-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("pclmul-asm");
     fs::write(
         dir.join("keel.o"),
         assemble_object_with_features(&source, f).unwrap(),
