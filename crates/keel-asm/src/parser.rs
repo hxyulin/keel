@@ -1513,83 +1513,13 @@ fn assemble_pass(
     // Resolve assignments before instruction fixups so function aliases (including
     // Clang's TLS initialization wrapper aliases) retain their defining section.
     // Iteration admits forward/chained assignments and diagnoses unresolved cycles.
-    let mut constants = BTreeMap::new();
-    let mut alias_definitions = BTreeMap::new();
-    while !aliases.is_empty() {
-        let mut resolved = Vec::new();
-        for (&name, (line, expr)) in &aliases {
-            let err = |message| Error::new(*line, message);
-            if labels.contains_key(name) {
-                return Err(err("assignment conflicts with label"));
-            }
-            if expr.subtract.is_none()
-                && let Some(add) = expr.add
-                && let Some(target) = labels.get(add).copied()
-            {
-                if expr.constant != 0 {
-                    return Err(err(
-                        "section-symbol aliases with nonzero addends require unsupported Mach-O alternate-entry semantics",
-                    ));
-                }
-                labels.insert(name, target);
-                // Exact aliases take the defining symbol's weak attributes,
-                // replacing annotations on the alias itself. Keep this identity
-                // separate from locations, visibility and linker-atom ownership.
-                alias_definitions.insert(name, alias_definitions.get(add).copied().unwrap_or(add));
-                // Source order is significant for temporary labels at atom ends.
-                // Keep aliases beside their target, rather than assigning them
-                // to whichever function happened to be parsed last.
-                let position = label_order
-                    .iter()
-                    .position(|(label, _)| *label == add)
-                    .ok_or_else(|| err("symbol alias has no source definition"))?;
-                label_order.insert(position + 1, (name, target));
-                resolved.push(name);
-                continue;
-            }
-            let value = match (expr.add, expr.subtract) {
-                (Some(add), Some(sub)) => {
-                    let (Some(a), Some(b)) = (labels.get(add), labels.get(sub)) else {
-                        continue;
-                    };
-                    if a.section != b.section {
-                        return Err(err("assignments require a same-section difference"));
-                    }
-                    expr.constant
-                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
-                        .ok_or_else(|| err("assignment overflow"))?
-                }
-                (None, None) => expr.constant,
-                (Some(add), None) => {
-                    let Some(value) = constants.get(add).copied() else {
-                        continue;
-                    };
-                    expr.constant
-                        .checked_add(value)
-                        .ok_or_else(|| err("assignment overflow"))?
-                }
-                _ => {
-                    return Err(err(
-                        "assignments require constants, symbol aliases or same-section differences",
-                    ));
-                }
-            };
-            if globals.contains_key(name) || weak_definitions.contains_key(name) {
-                return Err(err(
-                    "exported absolute symbol assignments require unsupported Mach-O N_ABS semantics",
-                ));
-            }
-            constants.insert(name, value);
-            resolved.push(name);
-        }
-        if resolved.is_empty() {
-            let (_, (line, _)) = aliases.first_key_value().unwrap();
-            return Err(Error::new(*line, "undefined or cyclic symbol assignment"));
-        }
-        for name in resolved {
-            aliases.remove(name);
-        }
-    }
+    let (constants, alias_definitions) = resolve_assignments(
+        aliases,
+        &mut labels,
+        &mut label_order,
+        &globals,
+        &weak_definitions,
+    )?;
     let mut atoms = atoms::Atoms::new(
         &arena,
         &label_order,
@@ -1610,306 +1540,26 @@ fn assemble_pass(
             }
         }
     }
-    // Temporary names are rarely global: skip their lookups when none is.
-    let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
-    for mut branch in branches {
-        let err = |message| Error::new(branch.line, message);
-        let kind = BranchKind(branch.spec.encoding);
-        let delta = if !branch.symbol && is_integer(branch.spec.target) {
-            integer(branch.spec.target).map_err(err)?
-        } else {
-            let expr = if branch.symbol {
-                relocate::Expression {
-                    name: branch.spec.target,
-                    modifier: None,
-                    addend: 0,
-                }
-            } else {
-                relocate::expression(branch.spec.target).map_err(err)?
-            };
-            let target = labels.get(expr.name);
-            let local = expr.name.starts_with('L')
-                && !(temporary_globals && globals.contains_key(expr.name));
-            if branch.spec.width == 26
-                && (target.is_some_and(|t| {
-                    t.section != branch.section
-                        || (result.subsections_via_symbols
-                            && !atoms.contains(
-                                data::Location {
-                                    section: branch.section,
-                                    offset: branch.offset as u64,
-                                },
-                                (expr.name, *t),
-                            ))
-                }) || (target.is_none() && !local))
-            {
-                if expr.addend % 4 != 0 {
-                    return Err(err("branch addend must be 4-byte aligned".into()));
-                }
-                let offset = branch
-                    .offset
-                    .try_into()
-                    .map_err(|_| err("text offset exceeds 32 bits".into()))?;
-                relocation_lines.insert((branch.section, offset), branch.line);
-                result.relocations.push(crate::Relocation {
-                    section: branch.section,
-                    size: 4,
-                    subtract_symbol: None,
-                    offset,
-                    symbol: expr.name.to_string(),
-                    kind: crate::RelocationKind::Branch26,
-                    addend: expr.addend,
-                });
-                0
-            } else {
-                let target = target
-                    .ok_or_else(|| err(format!("undefined local {kind} target `{}`", expr.name)))?;
-                if target.section != branch.section {
-                    return Err(err(format!(
-                        "{kind} targets must be in the same executable section"
-                    )));
-                }
-                if result.subsections_via_symbols
-                    && !atoms.contains(
-                        data::Location {
-                            section: branch.section,
-                            offset: branch.offset as u64,
-                        },
-                        (expr.name, *target),
-                    )
-                {
-                    return Err(err(format!(
-                        "{kind} requires a target in the same linker atom"
-                    )));
-                }
-                target.offset as i64 + expr.addend - branch.offset as i64
-            }
-        };
-        let bound = 1i64 << (branch.spec.width + 1);
-        if delta % 4 != 0 || !(-bound..bound).contains(&delta) {
-            return Err(err(format!(
-                "{kind} displacement must be 4-byte aligned and in {}..={} bytes",
-                -bound,
-                bound - 4
-            )));
-        }
-        branch.spec.fields.push((
-            branch.spec.field,
-            ((delta / 4) as u32) & ((1 << branch.spec.width) - 1),
-        ));
-        let instruction =
-            keel_asm_ir::Instruction::new(branch.spec.encoding, branch.spec.fields.iter().copied());
-        let word = crate::encode_instruction(&instruction, features).map_err(err)?;
-        data::bytes_mut(&mut result, branch.section).map_err(err)?
-            [branch.offset..branch.offset + 4]
-            .copy_from_slice(&word.to_le_bytes());
-    }
-    for (section, line, offset, destination, expr) in addresses {
-        let target = labels.get(expr.name).ok_or_else(|| {
-            Error::new(
-                line,
-                format!("adr requires a defined text symbol `{}`", expr.name),
-            )
-        })?;
-        if target.section != section {
-            return Err(Error::new(
-                line,
-                "adr requires a target in the same text section",
-            ));
-        }
-        if result.subsections_via_symbols
-            && !atoms.contains(
-                data::Location {
-                    section,
-                    offset: offset as u64,
-                },
-                (expr.name, *target),
-            )
-        {
-            return Err(Error::new(
-                line,
-                "adr requires a target in the same linker atom; use adrp/add across atoms",
-            ));
-        }
-        let word = relocate::address_word_register(
-            "adr",
-            destination,
-            target.offset as i64 + expr.addend - offset as i64,
-        )
-        .map_err(|e| Error::new(line, e))?;
-        data::bytes_mut(&mut result, section).map_err(|e| Error::new(line, e))?[offset..offset + 4]
-            .copy_from_slice(&word.to_le_bytes());
-    }
+    fix_branches(
+        branches,
+        &labels,
+        &globals,
+        &atoms,
+        &mut result,
+        &mut relocation_lines,
+        features,
+    )?;
+    fix_addresses(addresses, &labels, &atoms, &mut result)?;
     debug.finish(&mut result, &mut labels, &prefix)?;
-    for fixup in data_fixups {
-        let mut expr = fixup.expression;
-        if fixup.got {
-            let target = expr
-                .add
-                .take()
-                .ok_or_else(|| Error::new(fixup.line, "GOT pointer requires a symbol"))?;
-            let sub = expr
-                .subtract
-                .as_ref()
-                .and_then(|s| labels.get(s))
-                .ok_or_else(|| {
-                    Error::new(
-                        fixup.line,
-                        "GOT pointer requires a defined subtraction label",
-                    )
-                })?;
-            if fixup.width != 4 || sub.section != fixup.location.section {
-                return Err(Error::new(
-                    fixup.line,
-                    "GOT pointer requires .long symbol@GOT-label in the same section",
-                ));
-            }
-            let addend = expr
-                .constant
-                .checked_add(i128::from(fixup.location.offset) - i128::from(sub.offset))
-                .and_then(|n| i32::try_from(n).ok())
-                .ok_or_else(|| {
-                    Error::new(fixup.line, "GOT pointer addend exceeds signed 32 bits")
-                })?;
-            if addend != 0 {
-                return Err(Error::new(
-                    fixup.line,
-                    "GOT pointers require zero addend and subtraction of their own address",
-                ));
-            }
-            let offset = u32::try_from(fixup.location.offset)
-                .map_err(|_| Error::new(fixup.line, "GOT relocation offset exceeds 32 bits"))?;
-            relocation_lines.insert((fixup.location.section, offset), fixup.line);
-            result.relocations.push(crate::Relocation {
-                section: fixup.location.section,
-                size: 4,
-                subtract_symbol: None,
-                offset,
-                symbol: target.to_string(),
-                kind: crate::RelocationKind::PointerToGot,
-                addend: i64::from(addend),
-            });
-            continue;
-        }
-        if let Some(value) = expr.add.as_ref().and_then(|s| constants.get(s)) {
-            if expr.subtract.is_some() {
-                return Err(Error::new(
-                    fixup.line,
-                    "constant assignment cannot be combined with a symbol difference",
-                ));
-            }
-            let value = expr
-                .constant
-                .checked_add(*value)
-                .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
-            let bytes = data::value(value, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
-            let out = data::bytes_mut(&mut result, fixup.location.section)
-                .map_err(|e| Error::new(fixup.line, e))?;
-            let offset = fixup.location.offset as usize;
-            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
-            continue;
-        }
-        let expr = &mut expr;
-        let add = expr.add.take().unwrap();
-        let mut constant = expr.constant;
-        let resolved = if expr.subtract == Some(add) {
-            true
-        } else if let Some(subtract) = &expr.subtract {
-            match (labels.get(&add), labels.get(subtract)) {
-                (Some(a), Some(b))
-                    if a.section == b.section
-                        && (!result.subsections_via_symbols
-                            || atoms.same((add, *a), (subtract, *b))) =>
-                {
-                    constant = constant
-                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
-                        .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
-                    true
-                }
-                _ => false,
-            }
-        } else {
-            false
-        };
-        if resolved {
-            let bytes = data::value(
-                data::shift_value(constant, fixup.right_shift)
-                    .map_err(|e| Error::new(fixup.line, e))?,
-                fixup.width,
-            )
-            .map_err(|e| Error::new(fixup.line, e))?;
-            let out = data::bytes_mut(&mut result, fixup.location.section)
-                .map_err(|e| Error::new(fixup.line, e))?;
-            let offset = fixup.location.offset as usize;
-            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
-        } else {
-            if fixup.right_shift != 0
-                || fixup.width < 4
-                || (fixup.width != 8 && expr.subtract.is_none())
-            {
-                return Err(Error::new(
-                    fixup.line,
-                    "symbolic data requires .quad pointers or .long/.quad differences",
-                ));
-            }
-            data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
-            let offset =
-                fixup.location.offset.try_into().map_err(|_| {
-                    Error::new(fixup.line, "data relocation offset exceeds 32 bits")
-                })?;
-            relocation_lines.insert((fixup.location.section, offset), fixup.line);
-            result.relocations.push(crate::Relocation {
-                section: fixup.location.section,
-                size: fixup.width,
-                subtract_symbol: expr.subtract.take().map(str::to_string),
-                offset,
-                symbol: add.to_string(),
-                kind: crate::RelocationKind::Unsigned,
-                addend: constant as i64,
-            });
-        }
-    }
-    for (line, kind, names, arity) in loh {
-        let mut offsets = [0; 3];
-        let mut first = None;
-        let mut hint_section = None;
-        for (offset, name) in offsets.iter_mut().zip(&names[..arity]) {
-            let location = *labels
-                .get(name)
-                .ok_or_else(|| Error::new(line, format!("undefined LOH symbol `{name}`")))?;
-            if !data::is_code(&result, location.section)
-                || hint_section.is_some_and(|s| s != location.section)
-                || location.offset % 4 != 0
-                || location.offset >= data::position(&result, location.section)
-            {
-                return Err(Error::new(
-                    line,
-                    "LOH symbols must reference text instructions",
-                ));
-            }
-            if let Some((first_name, first_location)) = first {
-                if result.subsections_via_symbols
-                    && !atoms.same((first_name, first_location), (name, location))
-                {
-                    return Err(Error::new(
-                        line,
-                        "LOH symbols must belong to one linker atom",
-                    ));
-                }
-            } else {
-                first = Some((*name, location));
-            }
-            hint_section = Some(location.section);
-            *offset = location.offset;
-        }
-        result
-            .linker_optimization_hints
-            .push(crate::LinkerOptimizationHint {
-                section: hint_section.unwrap(),
-                kind,
-                offsets,
-            });
-    }
+    fix_data(
+        data_fixups,
+        &constants,
+        &labels,
+        &atoms,
+        &mut result,
+        &mut relocation_lines,
+    )?;
+    link_hints(loh, &labels, &atoms, &mut result)?;
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
@@ -2006,6 +1656,439 @@ fn assemble_pass(
         })
         .collect();
     Ok((result, symbolic_leb, locations))
+}
+/// The value of each constant `.set` assignment.
+type Constants<'a> = BTreeMap<&'a str, i128>;
+/// Resolve `.set` assignments in rounds, so forward and chained assignments
+/// work, into label aliases and constants. Each alias joins `label_order`
+/// beside its target. Returns the constants and each alias's defining symbol.
+fn resolve_assignments<'a>(
+    mut aliases: BTreeMap<&'a str, (usize, data::Expression<'a>)>,
+    labels: &mut Labels<'a>,
+    label_order: &mut BumpVec<'_, (&'a str, data::Location)>,
+    globals: &FxHashMap<&'a str, usize>,
+    weak_definitions: &FxHashMap<&'a str, usize>,
+) -> Result<(Constants<'a>, BTreeMap<&'a str, &'a str>), Error> {
+    let mut constants = BTreeMap::new();
+    let mut alias_definitions = BTreeMap::new();
+    while !aliases.is_empty() {
+        let mut resolved = Vec::new();
+        for (&name, (line, expr)) in &aliases {
+            let err = |message| Error::new(*line, message);
+            if labels.contains_key(name) {
+                return Err(err("assignment conflicts with label"));
+            }
+            if expr.subtract.is_none()
+                && let Some(add) = expr.add
+                && let Some(target) = labels.get(add).copied()
+            {
+                if expr.constant != 0 {
+                    return Err(err(
+                        "section-symbol aliases with nonzero addends require unsupported Mach-O alternate-entry semantics",
+                    ));
+                }
+                labels.insert(name, target);
+                // Exact aliases take the defining symbol's weak attributes,
+                // replacing annotations on the alias itself. Keep this identity
+                // separate from locations, visibility and linker-atom ownership.
+                alias_definitions.insert(name, alias_definitions.get(add).copied().unwrap_or(add));
+                // Source order is significant for temporary labels at atom ends.
+                // Keep aliases beside their target, rather than assigning them
+                // to whichever function happened to be parsed last.
+                let position = label_order
+                    .iter()
+                    .position(|(label, _)| *label == add)
+                    .ok_or_else(|| err("symbol alias has no source definition"))?;
+                label_order.insert(position + 1, (name, target));
+                resolved.push(name);
+                continue;
+            }
+            let value = match (expr.add, expr.subtract) {
+                (Some(add), Some(sub)) => {
+                    let (Some(a), Some(b)) = (labels.get(add), labels.get(sub)) else {
+                        continue;
+                    };
+                    if a.section != b.section {
+                        return Err(err("assignments require a same-section difference"));
+                    }
+                    expr.constant
+                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                        .ok_or_else(|| err("assignment overflow"))?
+                }
+                (None, None) => expr.constant,
+                (Some(add), None) => {
+                    let Some(value) = constants.get(add).copied() else {
+                        continue;
+                    };
+                    expr.constant
+                        .checked_add(value)
+                        .ok_or_else(|| err("assignment overflow"))?
+                }
+                _ => {
+                    return Err(err(
+                        "assignments require constants, symbol aliases or same-section differences",
+                    ));
+                }
+            };
+            if globals.contains_key(name) || weak_definitions.contains_key(name) {
+                return Err(err(
+                    "exported absolute symbol assignments require unsupported Mach-O N_ABS semantics",
+                ));
+            }
+            constants.insert(name, value);
+            resolved.push(name);
+        }
+        if resolved.is_empty() {
+            let (_, (line, _)) = aliases.first_key_value().unwrap();
+            return Err(Error::new(*line, "undefined or cyclic symbol assignment"));
+        }
+        for name in resolved {
+            aliases.remove(name);
+        }
+    }
+    Ok((constants, alias_definitions))
+}
+/// Encode each branch and literal load against a local target, or record a
+/// `Branch26` relocation when the target is external or in another atom.
+fn fix_branches<'a>(
+    branches: BumpVec<'_, Branch<'a>>,
+    labels: &Labels<'a>,
+    globals: &FxHashMap<&'a str, usize>,
+    atoms: &atoms::Atoms<'a>,
+    result: &mut Assembly,
+    relocation_lines: &mut FxHashMap<(usize, u32), usize>,
+    features: crate::TargetFeatures,
+) -> Result<(), Error> {
+    // Temporary names are rarely global: skip their lookups when none is.
+    let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
+    for mut branch in branches {
+        let err = |message| Error::new(branch.line, message);
+        let kind = BranchKind(branch.spec.encoding);
+        let delta = if !branch.symbol && is_integer(branch.spec.target) {
+            integer(branch.spec.target).map_err(err)?
+        } else {
+            let expr = if branch.symbol {
+                relocate::Expression {
+                    name: branch.spec.target,
+                    modifier: None,
+                    addend: 0,
+                }
+            } else {
+                relocate::expression(branch.spec.target).map_err(err)?
+            };
+            let target = labels.get(expr.name);
+            let local = expr.name.starts_with('L')
+                && !(temporary_globals && globals.contains_key(expr.name));
+            if branch.spec.width == 26
+                && (target.is_some_and(|t| {
+                    t.section != branch.section
+                        || (result.subsections_via_symbols
+                            && !atoms.contains(
+                                data::Location {
+                                    section: branch.section,
+                                    offset: branch.offset as u64,
+                                },
+                                (expr.name, *t),
+                            ))
+                }) || (target.is_none() && !local))
+            {
+                if expr.addend % 4 != 0 {
+                    return Err(err("branch addend must be 4-byte aligned".into()));
+                }
+                let offset = branch
+                    .offset
+                    .try_into()
+                    .map_err(|_| err("text offset exceeds 32 bits".into()))?;
+                relocation_lines.insert((branch.section, offset), branch.line);
+                result.relocations.push(crate::Relocation {
+                    section: branch.section,
+                    size: 4,
+                    subtract_symbol: None,
+                    offset,
+                    symbol: expr.name.to_string(),
+                    kind: crate::RelocationKind::Branch26,
+                    addend: expr.addend,
+                });
+                0
+            } else {
+                let target = target
+                    .ok_or_else(|| err(format!("undefined local {kind} target `{}`", expr.name)))?;
+                if target.section != branch.section {
+                    return Err(err(format!(
+                        "{kind} targets must be in the same executable section"
+                    )));
+                }
+                if result.subsections_via_symbols
+                    && !atoms.contains(
+                        data::Location {
+                            section: branch.section,
+                            offset: branch.offset as u64,
+                        },
+                        (expr.name, *target),
+                    )
+                {
+                    return Err(err(format!(
+                        "{kind} requires a target in the same linker atom"
+                    )));
+                }
+                target.offset as i64 + expr.addend - branch.offset as i64
+            }
+        };
+        let bound = 1i64 << (branch.spec.width + 1);
+        if delta % 4 != 0 || !(-bound..bound).contains(&delta) {
+            return Err(err(format!(
+                "{kind} displacement must be 4-byte aligned and in {}..={} bytes",
+                -bound,
+                bound - 4
+            )));
+        }
+        branch.spec.fields.push((
+            branch.spec.field,
+            ((delta / 4) as u32) & ((1 << branch.spec.width) - 1),
+        ));
+        let instruction =
+            keel_asm_ir::Instruction::new(branch.spec.encoding, branch.spec.fields.iter().copied());
+        let word = crate::encode_instruction(&instruction, features).map_err(err)?;
+        data::bytes_mut(result, branch.section).map_err(err)?[branch.offset..branch.offset + 4]
+            .copy_from_slice(&word.to_le_bytes());
+    }
+    Ok(())
+}
+/// Encode each `adr` against its target in the same section and atom.
+fn fix_addresses<'a>(
+    addresses: BumpVec<'_, (usize, usize, usize, u32, relocate::Expression<'a>)>,
+    labels: &Labels<'a>,
+    atoms: &atoms::Atoms<'a>,
+    result: &mut Assembly,
+) -> Result<(), Error> {
+    for (section, line, offset, destination, expr) in addresses {
+        let target = labels.get(expr.name).ok_or_else(|| {
+            Error::new(
+                line,
+                format!("adr requires a defined text symbol `{}`", expr.name),
+            )
+        })?;
+        if target.section != section {
+            return Err(Error::new(
+                line,
+                "adr requires a target in the same text section",
+            ));
+        }
+        if result.subsections_via_symbols
+            && !atoms.contains(
+                data::Location {
+                    section,
+                    offset: offset as u64,
+                },
+                (expr.name, *target),
+            )
+        {
+            return Err(Error::new(
+                line,
+                "adr requires a target in the same linker atom; use adrp/add across atoms",
+            ));
+        }
+        let word = relocate::address_word_register(
+            "adr",
+            destination,
+            target.offset as i64 + expr.addend - offset as i64,
+        )
+        .map_err(|e| Error::new(line, e))?;
+        data::bytes_mut(result, section).map_err(|e| Error::new(line, e))?[offset..offset + 4]
+            .copy_from_slice(&word.to_le_bytes());
+    }
+    Ok(())
+}
+/// Patch each data fixup that resolves to a constant or a same-atom
+/// difference, and record a relocation for the rest.
+fn fix_data<'a>(
+    data_fixups: BumpVec<'_, DataFixup<'a>>,
+    constants: &Constants<'a>,
+    labels: &Labels<'a>,
+    atoms: &atoms::Atoms<'a>,
+    result: &mut Assembly,
+    relocation_lines: &mut FxHashMap<(usize, u32), usize>,
+) -> Result<(), Error> {
+    for fixup in data_fixups {
+        let mut expr = fixup.expression;
+        if fixup.got {
+            let target = expr
+                .add
+                .take()
+                .ok_or_else(|| Error::new(fixup.line, "GOT pointer requires a symbol"))?;
+            let sub = expr
+                .subtract
+                .as_ref()
+                .and_then(|s| labels.get(s))
+                .ok_or_else(|| {
+                    Error::new(
+                        fixup.line,
+                        "GOT pointer requires a defined subtraction label",
+                    )
+                })?;
+            if fixup.width != 4 || sub.section != fixup.location.section {
+                return Err(Error::new(
+                    fixup.line,
+                    "GOT pointer requires .long symbol@GOT-label in the same section",
+                ));
+            }
+            let addend = expr
+                .constant
+                .checked_add(i128::from(fixup.location.offset) - i128::from(sub.offset))
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new(fixup.line, "GOT pointer addend exceeds signed 32 bits")
+                })?;
+            if addend != 0 {
+                return Err(Error::new(
+                    fixup.line,
+                    "GOT pointers require zero addend and subtraction of their own address",
+                ));
+            }
+            let offset = u32::try_from(fixup.location.offset)
+                .map_err(|_| Error::new(fixup.line, "GOT relocation offset exceeds 32 bits"))?;
+            relocation_lines.insert((fixup.location.section, offset), fixup.line);
+            result.relocations.push(crate::Relocation {
+                section: fixup.location.section,
+                size: 4,
+                subtract_symbol: None,
+                offset,
+                symbol: target.to_string(),
+                kind: crate::RelocationKind::PointerToGot,
+                addend: i64::from(addend),
+            });
+            continue;
+        }
+        if let Some(value) = expr.add.as_ref().and_then(|s| constants.get(s)) {
+            if expr.subtract.is_some() {
+                return Err(Error::new(
+                    fixup.line,
+                    "constant assignment cannot be combined with a symbol difference",
+                ));
+            }
+            let value = expr
+                .constant
+                .checked_add(*value)
+                .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
+            let bytes = data::value(value, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let out = data::bytes_mut(result, fixup.location.section)
+                .map_err(|e| Error::new(fixup.line, e))?;
+            let offset = fixup.location.offset as usize;
+            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
+            continue;
+        }
+        let expr = &mut expr;
+        let add = expr.add.take().unwrap();
+        let mut constant = expr.constant;
+        let resolved = if expr.subtract == Some(add) {
+            true
+        } else if let Some(subtract) = &expr.subtract {
+            match (labels.get(&add), labels.get(subtract)) {
+                (Some(a), Some(b))
+                    if a.section == b.section
+                        && (!result.subsections_via_symbols
+                            || atoms.same((add, *a), (subtract, *b))) =>
+                {
+                    constant = constant
+                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                        .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if resolved {
+            let bytes = data::value(
+                data::shift_value(constant, fixup.right_shift)
+                    .map_err(|e| Error::new(fixup.line, e))?,
+                fixup.width,
+            )
+            .map_err(|e| Error::new(fixup.line, e))?;
+            let out = data::bytes_mut(result, fixup.location.section)
+                .map_err(|e| Error::new(fixup.line, e))?;
+            let offset = fixup.location.offset as usize;
+            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
+        } else {
+            if fixup.right_shift != 0
+                || fixup.width < 4
+                || (fixup.width != 8 && expr.subtract.is_none())
+            {
+                return Err(Error::new(
+                    fixup.line,
+                    "symbolic data requires .quad pointers or .long/.quad differences",
+                ));
+            }
+            data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let offset =
+                fixup.location.offset.try_into().map_err(|_| {
+                    Error::new(fixup.line, "data relocation offset exceeds 32 bits")
+                })?;
+            relocation_lines.insert((fixup.location.section, offset), fixup.line);
+            result.relocations.push(crate::Relocation {
+                section: fixup.location.section,
+                size: fixup.width,
+                subtract_symbol: expr.subtract.take().map(str::to_string),
+                offset,
+                symbol: add.to_string(),
+                kind: crate::RelocationKind::Unsigned,
+                addend: constant as i64,
+            });
+        }
+    }
+    Ok(())
+}
+/// Check that each linker optimization hint names text instructions in one
+/// section and atom, and record it.
+fn link_hints<'a>(
+    loh: BumpVec<'_, (usize, u8, [&'a str; 3], usize)>,
+    labels: &Labels<'a>,
+    atoms: &atoms::Atoms<'a>,
+    result: &mut Assembly,
+) -> Result<(), Error> {
+    for (line, kind, names, arity) in loh {
+        let mut offsets = [0; 3];
+        let mut first = None;
+        let mut hint_section = None;
+        for (offset, name) in offsets.iter_mut().zip(&names[..arity]) {
+            let location = *labels
+                .get(name)
+                .ok_or_else(|| Error::new(line, format!("undefined LOH symbol `{name}`")))?;
+            if !data::is_code(result, location.section)
+                || hint_section.is_some_and(|s| s != location.section)
+                || location.offset % 4 != 0
+                || location.offset >= data::position(result, location.section)
+            {
+                return Err(Error::new(
+                    line,
+                    "LOH symbols must reference text instructions",
+                ));
+            }
+            if let Some((first_name, first_location)) = first {
+                if result.subsections_via_symbols
+                    && !atoms.same((first_name, first_location), (name, location))
+                {
+                    return Err(Error::new(
+                        line,
+                        "LOH symbols must belong to one linker atom",
+                    ));
+                }
+            } else {
+                first = Some((*name, location));
+            }
+            hint_section = Some(location.section);
+            *offset = location.offset;
+        }
+        result
+            .linker_optimization_hints
+            .push(crate::LinkerOptimizationHint {
+                section: hint_section.unwrap(),
+                kind,
+                offsets,
+            });
+    }
+    Ok(())
 }
 
 /// `str` order, comparing eight bytes at a time inline: labels share long
