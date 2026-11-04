@@ -176,7 +176,6 @@ fn prepare_with_chain_output_limits(
         }
         for (index, nested_clobbers, is_chain) in ready {
             let original = &module.functions[index];
-            #[cfg(feature = "backend-profile")]
             let _function_profile = crate::backend_profile::function(&original.name);
             let func = vector::lower(original);
             let compiler =
@@ -201,6 +200,8 @@ fn prepare_with_chain_output_limits(
                 if size > *remaining {
                     // A rejected body has no proof, so its callers cannot
                     // become ready. Keep trying independent, smaller chains.
+                    // The main loop compiles it again.
+                    crate::backend_profile::discard_function_counters();
                     continue;
                 }
                 *remaining -= size;
@@ -468,6 +469,47 @@ block0(v0:i64):
                 }
             }
         }
+    }
+
+    #[test]
+    fn rejected_chain_bodies_leave_no_backend_counts() {
+        let module = keel_ir::parse(
+            "func @swap(i64, i64) -> i64 cc(fast) local {
+block0(v0:i64, v1:i64):
+ v2 = call @leaf(v1, v0)
+ return v2
+}
+func @leaf(i64, i64) -> i64 cc(fast) local {
+block0(v0:i64, v1:i64):
+ v2 = isub v0, v1
+ return v2
+}
+func @root(i64, i64) -> i64 {
+block0(v0:i64, v1:i64):
+ v2 = call @swap(v0, v1)
+ return v2
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let symbols = crate::symbols::Symbols::new(&module);
+        let pipeline = crate::CodegenPipeline {
+            selector: &crate::SelectionTier::Full,
+            allocator: &crate::regalloc::AllocationTier::Full,
+        };
+        let moves = |limit| {
+            let ((_, prepared), report) = crate::backend_profile::capture(|| {
+                prepare_with_chain_output_limits(&symbols, &REGISTERS, &pipeline, false, limit, 0)
+                    .unwrap()
+            });
+            let counter = crate::backend_profile::Counter::RegisterMoves as usize;
+            let swap = report.functions.iter().find(|f| f.name == "swap").unwrap();
+            assert_eq!(report.counters[counter], swap.counters[counter]);
+            (prepared.contains_key(&0), swap.counters[counter])
+        };
+        let (accepted, kept) = moves(usize::MAX);
+        assert!(accepted && kept > 0);
+        assert_eq!(moves(0), (false, 0));
     }
 
     #[test]

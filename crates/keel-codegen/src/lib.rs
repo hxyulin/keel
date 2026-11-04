@@ -8,7 +8,6 @@ macro_rules! backend_scope {
         let _backend_scope = crate::backend_profile::scope(crate::backend_profile::Stage::$stage);
     };
 }
-#[cfg(feature = "backend-profile")]
 pub mod backend_profile;
 
 pub mod aarch64;

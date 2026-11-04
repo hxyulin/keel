@@ -324,7 +324,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         json!({"remat_pressure":remat_pressure,"remat_constants":remat_constants,"remat_stack":remat_stack,"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
         "functions":module.functions.len(),"ir_instructions":module.functions.iter().map(|f|f.layout_insts().count()).sum::<usize>(),
         "object_bytes":expected.len(),"code_bytes":assembly.text.len(),"native_instructions":program.stats().instructions,
-        "allocation_metrics":{"spill_slots":allocation_metrics.spill_slots,"spilled_value_halves":allocation_metrics.spilled_value_halves,"callee_saves":allocation_metrics.callee_saves},"explicit_spill_helper_calls":spill_counters,"objects_identical":true,"runs":runs,"function_profiles":hot_functions})
+        "allocation_metrics":{"spill_slots":allocation_metrics.spill_slots,"spilled_value_halves":allocation_metrics.spilled_value_halves,"callee_saves":allocation_metrics.callee_saves},"backend_counters":spill_counters,"objects_identical":true,"runs":runs,"function_profiles":hot_functions})
     );
     Ok(())
 }

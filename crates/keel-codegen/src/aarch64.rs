@@ -406,7 +406,6 @@ pub(crate) fn compile_output(
             out.flush(&mut sink);
             continue;
         }
-        #[cfg(feature = "backend-profile")]
         let _function_profile = crate::backend_profile::function(&original.name);
         let func = vector::lower(original);
         let mut compiler = FunctionCompiler::new_for_target(
@@ -5144,6 +5143,9 @@ impl<'a> FunctionCompiler<'a> {
     /// One 64-bit move between any two locations. Narrow values have
     /// unspecified upper bits, so copying all 64 is always fine.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
+        if crate::lowering::is_register_move(dst, src) {
+            crate::backend_profile::count(crate::backend_profile::Counter::RegisterMoves);
+        }
         match (dst, src) {
             (Loc::Remat(_), _) => unreachable!("a move cannot define a recipe"),
             _ if dst == src => {}
@@ -5382,17 +5384,14 @@ impl<'a> FunctionCompiler<'a> {
     fn rematerialize(&mut self, scratch: u8, value: Value) {
         match regalloc::remat_recipe(self.func, value).expect("validated recipe") {
             RematRecipe::Iconst(bits) => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 self.materialize(scratch, bits, true);
             }
             RematRecipe::NullPtr => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 self.materialize(scratch, 0, true);
             }
             RematRecipe::StackAddr(slot) => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
                 let offset = self.stack_slot_offsets[slot.index()];
                 self.address(Loc::Reg(scratch), self.base, offset);
@@ -5592,11 +5591,10 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn spill(&mut self, store: bool, float: bool, register: u8, slot: u32) {
-        #[cfg(feature = "backend-profile")]
         crate::backend_profile::count(if store {
-            crate::backend_profile::Counter::SpillHelperStores
+            crate::backend_profile::Counter::SpillStores
         } else {
-            crate::backend_profile::Counter::SpillHelperLoads
+            crate::backend_profile::Counter::Reloads
         });
         if float && let Some(&bytes) = self.vector_spills.get(&slot) {
             self.vector_spill(store, register, slot, bytes);

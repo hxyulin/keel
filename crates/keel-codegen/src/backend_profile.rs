@@ -1,8 +1,11 @@
-//! Opt-in, thread-local backend timing. Enable `backend-profile` and wrap a
-//! compilation in [`capture`]. Other threads and compilations are independent.
+//! Thread-local backend counters and timing. Wrap a compilation in
+//! [`capture`] to collect them. Other threads and compilations are independent.
+//! [`Counter`]s and per-function attribution are always available; stage
+//! timings other than [`Stage::Function`] need the `backend-profile` feature.
 //! Inclusive times nest; self times subtract instrumented child scopes.
 use std::{
     cell::RefCell,
+    collections::HashMap,
     time::{Duration, Instant},
 };
 
@@ -75,26 +78,36 @@ impl Stage {
         }
     }
 }
-/// Static emission-helper counts, not dynamic execution counts or total memory traffic.
+/// Static counts of instructions the backends emit through their shared
+/// location helpers: operand reloads, result spills, allocation copies and
+/// rematerialization. They are not dynamic execution counts. Spilled values
+/// that an x86-64 instruction reads or writes in place as a memory operand
+/// are not counted.
 #[derive(Clone, Copy, Debug)]
 #[repr(usize)]
 pub enum Counter {
-    SpillHelperLoads,
-    SpillHelperStores,
+    /// Register-to-spill-slot stores.
+    SpillStores,
+    /// Spill-slot-to-register loads.
+    Reloads,
+    /// Register-to-register copies between allocated locations.
+    RegisterMoves,
     RematConstants,
     RematStackAddresses,
 }
 impl Counter {
-    pub const ALL: [Self; 4] = [
-        Self::SpillHelperLoads,
-        Self::SpillHelperStores,
+    pub const ALL: [Self; 5] = [
+        Self::SpillStores,
+        Self::Reloads,
+        Self::RegisterMoves,
         Self::RematConstants,
         Self::RematStackAddresses,
     ];
     pub fn name(self) -> &'static str {
         match self {
-            Self::SpillHelperLoads => "spill_helper_loads",
-            Self::SpillHelperStores => "spill_helper_stores",
+            Self::SpillStores => "spill_stores",
+            Self::Reloads => "reloads",
+            Self::RegisterMoves => "register_moves",
             Self::RematConstants => "rematerialized_constants",
             Self::RematStackAddresses => "rematerialized_stack_addresses",
         }
@@ -114,6 +127,8 @@ impl Timing {
         self.calls += 1;
     }
 }
+/// One function's totals. A function compiled more than once (an AArch64
+/// leaf-call body that was rejected and recompiled) keeps a single entry.
 #[derive(Debug)]
 pub struct FunctionProfile {
     pub name: String,
@@ -137,6 +152,7 @@ struct Recorder {
     report: Report,
     stack: Vec<Active>,
     function: Option<usize>,
+    names: HashMap<String, usize>,
 }
 thread_local! { static RECORDER: RefCell<Option<Recorder>> = const { RefCell::new(None) }; }
 
@@ -180,6 +196,24 @@ pub(crate) fn count(counter: Counter) {
     });
 }
 
+/// Drop the current function's counts, for output that is discarded and
+/// compiled again. Timings stay, since the time was spent.
+pub(crate) fn discard_function_counters() {
+    RECORDER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let Some(recorder) = slot.as_mut() else {
+            return;
+        };
+        let Some(index) = recorder.function else {
+            return;
+        };
+        let counters = std::mem::take(&mut recorder.report.functions[index].counters);
+        for (total, discarded) in recorder.report.counters.iter_mut().zip(counters) {
+            *total -= discarded;
+        }
+    });
+}
+
 pub(crate) struct Guard {
     active: bool,
     previous_function: Option<Option<usize>>,
@@ -203,15 +237,19 @@ pub(crate) fn scope(stage: Stage) -> Guard {
         previous_function: None,
     }
 }
+/// Attribute counts and timings to function `name` until the guard drops.
 pub(crate) fn function(name: &str) -> Guard {
     let previous = RECORDER.with(|cell| {
         let mut slot = cell.borrow_mut();
         let recorder = slot.as_mut()?;
-        let index = recorder.report.functions.len();
-        recorder.report.functions.push(FunctionProfile {
-            name: name.to_owned(),
-            stages: [Timing::default(); Stage::ALL.len()],
-            counters: [0; Counter::ALL.len()],
+        let functions = &mut recorder.report.functions;
+        let index = *recorder.names.entry(name.to_owned()).or_insert_with(|| {
+            functions.push(FunctionProfile {
+                name: name.to_owned(),
+                stages: [Timing::default(); Stage::ALL.len()],
+                counters: [0; Counter::ALL.len()],
+            });
+            functions.len() - 1
         });
         Some(recorder.function.replace(index))
     });
@@ -249,23 +287,48 @@ mod tests {
     use super::*;
     #[test]
     fn counters_follow_function_scope_and_reset_between_captures() {
-        count(Counter::SpillHelperStores);
+        count(Counter::SpillStores);
         let (_, report) = capture(|| {
-            count(Counter::SpillHelperLoads);
+            count(Counter::Reloads);
             {
                 let _function = function("first");
-                count(Counter::SpillHelperLoads);
-                count(Counter::SpillHelperStores);
+                count(Counter::Reloads);
+                count(Counter::SpillStores);
             }
             let _function = function("second");
-            count(Counter::SpillHelperStores);
+            count(Counter::SpillStores);
         });
-        assert_eq!(report.counters, [2, 2, 0, 0]);
-        assert_eq!(report.functions[0].counters, [1, 1, 0, 0]);
-        assert_eq!(report.functions[1].counters, [0, 1, 0, 0]);
+        assert_eq!(report.counters, [2, 2, 0, 0, 0]);
+        assert_eq!(report.functions[0].counters, [1, 1, 0, 0, 0]);
+        assert_eq!(report.functions[1].counters, [1, 0, 0, 0, 0]);
         assert_eq!(capture(|| ()).1.counters, [0; Counter::ALL.len()]);
     }
 
+    #[test]
+    fn recompiled_functions_share_one_entry_without_discarded_counts() {
+        let (_, report) = capture(|| {
+            {
+                let _function = function("leaf");
+                count(Counter::RegisterMoves);
+                discard_function_counters();
+            }
+            let other = function("other");
+            count(Counter::Reloads);
+            drop(other);
+            let _function = function("leaf");
+            count(Counter::RegisterMoves);
+        });
+        let names: Vec<_> = report.functions.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["leaf", "other"]);
+        assert_eq!(report.functions[0].counters, [0, 0, 1, 0, 0]);
+        assert_eq!(report.counters, [0, 1, 1, 0, 0]);
+        assert_eq!(
+            report.functions[0].stages[Stage::Function as usize].calls,
+            2
+        );
+    }
+
+    #[cfg(feature = "backend-profile")]
     #[test]
     fn coarse_lowering_stages_preserve_output_and_reconcile() {
         for (source, compare_fusion_calls) in [

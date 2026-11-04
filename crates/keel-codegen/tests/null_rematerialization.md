@@ -21,7 +21,7 @@ x86 uses `MOV r32,0`, preserving flags and zero extending to pointer width.
 AArch64 uses non-NZCV-setting 64-bit zero materialization. The exact allocated
 Remat conversion definition is skipped. Existing transfer scratch registers and
 parallel-copy ordering handle all uses, including stack destinations. Null
-recipe materializations use the existing backend-profile RematConstants counter.
+recipe materializations use the existing backend_profile RematConstants counter.
 The supported pointer contract is limited to the existing 64-bit targets.
 
 The default build, default allocator and constants/stack/all/pressure modes do

@@ -482,6 +482,7 @@ pub(crate) fn compile_output(
     let mut frames = Vec::new();
     let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
+        let _function_profile = crate::backend_profile::function(&original.name);
         let features = crate::x86_features::function_features(
             &original.name,
             &original.attrs,
@@ -6159,6 +6160,17 @@ impl<'a> FunctionCompiler<'a> {
     /// Copy between allocated locations. Scalar slots carry 64 bits; vector
     /// slots and vector register copies preserve all 128 bits.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
+        use crate::backend_profile::{Counter, count};
+        if crate::lowering::is_register_move(dst, src) {
+            count(Counter::RegisterMoves);
+        } else if dst != src {
+            if matches!(src, Loc::Stack(_)) {
+                count(Counter::Reloads);
+            }
+            if matches!(dst, Loc::Stack(_)) {
+                count(Counter::SpillStores);
+            }
+        }
         match (dst, src) {
             (Loc::Remat(_), _) => unreachable!("rematerialized locations are source-only"),
             _ if dst == src => {}
@@ -6381,17 +6393,14 @@ impl<'a> FunctionCompiler<'a> {
         use crate::regalloc::{RematRecipe, remat_recipe};
         match remat_recipe(self.func, value).expect("valid rematerialization recipe") {
             RematRecipe::Iconst(bits) => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 self.materialize_preserving_flags(d, bits);
             }
             RematRecipe::NullPtr => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(0u32)]);
             }
             RematRecipe::StackAddr(slot) => {
-                #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
                 let at = self.frame(self.stack_slot_offsets[slot.index()]);
                 self.emit(Opcode::Lea, [asm_arg(r64(d)), asm_arg(&at)]);
@@ -6451,6 +6460,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
+                crate::backend_profile::count(crate::backend_profile::Counter::Reloads);
                 self.emit(Opcode::Mov, [asm_arg(r64(scratch)), asm_arg(self.slot(s))]);
                 scratch
             }
@@ -6467,6 +6477,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
+                crate::backend_profile::count(crate::backend_profile::Counter::Reloads);
                 let ty = self.ty(value);
                 let bits = if ty.is_vector() { ptr(ty) } else { 64 };
                 self.emit(
@@ -6510,6 +6521,7 @@ impl<'a> FunctionCompiler<'a> {
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
         if let Some(Loc::Stack(s)) = self.defined(value) {
+            crate::backend_profile::count(crate::backend_profile::Counter::SpillStores);
             let ty = self.func.value_type(value);
             let bits = if ty.is_vector() { ptr(ty) } else { 64 };
             if ty.is_float() || ty.is_vector() {

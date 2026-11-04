@@ -141,6 +141,16 @@ impl SwitchPlan {
     }
 }
 
+/// Whether a location copy from `src` to `dst` is one register-to-register
+/// instruction. The backends count these for the codegen report.
+pub(crate) fn is_register_move(dst: Loc, src: Loc) -> bool {
+    dst != src
+        && matches!(
+            (dst, src),
+            (Loc::Reg(_) | Loc::FReg(_), Loc::Reg(_) | Loc::FReg(_))
+        )
+}
+
 /// Instructions that clobber the caller-saved registers on every target:
 /// calls, the memory intrinsics, which call libc, and trapping `i128`
 /// arithmetic, which calls compiler-rt.
