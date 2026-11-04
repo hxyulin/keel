@@ -3,7 +3,7 @@ use super::clone::{inline_call, two_functions};
 use super::eligibility::{FrameSemantics, body_eligibility_reason, eligibility_reason_with_frames};
 use super::recursive_definitions;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::{Inst, InstData, Module, Symbol};
+use keel_ir::{Function, Inst, InstData, Module, Symbol};
 
 /// Expand mandatory C inline calls before validating deferred asm immediates.
 /// This phase does not use optional optimizer profitability budgets. Hard
@@ -57,79 +57,6 @@ pub fn required_inline_asm_with_c_definitions(
             ));
         }
     }
-    fn discard_unused(module: &mut Module) {
-        let mut live: FxHashSet<String> = module
-            .functions
-            .iter()
-            .filter(|f| {
-                !f.local
-                    || !f.attrs.alwaysinline
-                    || f.attrs.used
-                    || f.attrs.retain
-                    || f.attrs.constructor
-                    || f.attrs.destructor
-            })
-            .map(|f| f.name.clone())
-            .collect();
-        for d in &module.data {
-            if let Some(init) = &d.init {
-                for item in &init.items {
-                    if let keel_ir::DataItem::Ptr { symbol, .. }
-                    | keel_ir::DataItem::RttiName { symbol } = item
-                    {
-                        live.insert(symbol.clone());
-                    }
-                }
-            }
-        }
-        loop {
-            let before = live.len();
-            for f in &module.functions {
-                if !live.contains(&f.name) {
-                    continue;
-                }
-                for (_, i) in f.layout_insts() {
-                    match f.inst_data(i) {
-                        InstData::Call { func, .. }
-                        | InstData::ReturnCall { func, .. }
-                        | InstData::Invoke { func, .. } => {
-                            live.insert(f.callee(*func).name.clone());
-                        }
-                        InstData::SymbolAddr {
-                            symbol: Symbol::Func(r),
-                        } => {
-                            live.insert(f.callee(*r).name.clone());
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            if live.len() == before {
-                break;
-            }
-        }
-        for f in &module.functions {
-            if !live.contains(&f.name) {
-                let mut attrs = f.attrs.clone();
-                // Placement belongs to an emitted definition, not the ABI
-                // declaration retained after its unused body is discarded.
-                attrs.section = None;
-                if let Some(decl) = module.decls.iter_mut().find(|d| d.name == f.name) {
-                    decl.attrs.section = None;
-                } else {
-                    module.decls.push(keel_ir::FuncDecl {
-                        name: f.name.clone(),
-                        sig: f.sig.clone(),
-                        attrs,
-                    });
-                }
-            }
-        }
-        module.functions.retain(|f| live.contains(&f.name));
-        // Removed calls leave callee imports behind. Refresh their contracts
-        // from the declarations that now own the discarded bodies' names.
-        module.sync_function_attrs();
-    }
     discard_unused(module);
     // Only mandatory edges drive expansion. Ordinary calls may close a cycle
     // through an alwaysinline wrapper without requiring infinite expansion.
@@ -169,78 +96,190 @@ pub fn required_inline_asm_with_c_definitions(
     if sites.iter().any(|sites| !sites.is_empty()) {
         expand_required_with_fallback(module, definitions, &recursive, 1_000_000)?;
     }
-    if !inline_only.is_empty() {
-        for name in inline_only {
-            if let Some(function) = module.functions.iter().find(|f| f.name == *name) {
-                if !function.local || function.attrs.weak || function.weak_odr {
-                    return Err(format!(
-                        "GNU inline implementation @{name} is not a local strong body"
-                    ));
-                }
-                if !module.decls.iter().any(|decl| decl.name == *name) {
-                    module.decls.push(keel_ir::FuncDecl {
-                        name: (*name).to_owned(),
-                        sig: function.sig.clone(),
-                        attrs: function.attrs.clone(),
-                    });
-                }
-            }
-        }
-        module
-            .functions
-            .retain(|function| !inline_only.contains(&function.name.as_str()));
-        for decl in &mut module.decls {
-            if inline_only.contains(&decl.name.as_str()) {
-                decl.attrs.alwaysinline = false;
-                decl.attrs.section = None;
-            }
-        }
-        module.sync_function_attrs();
-    }
+    discard_inline_only(module, inline_only)?;
     discard_unused(module);
     // Constant cleanup is required for constraint legality, independently of -O.
     for f in &mut module.functions {
-        if !f
-            .layout_insts()
-            .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
-        {
-            continue;
-        }
-        // Width-selecting C macros can contain invalid asm in constant-dead
-        // branches even when every operand is already a legal register or
-        // memory operand. Use the CFG so incoming goto edges stay reachable.
-        for _ in 0..8 {
-            let mut changed = crate::phi_simplify::run(f);
-            changed |= crate::const_fold::run(f);
-            changed |= crate::simplify_cfg::run(f);
-            if !changed {
-                break;
-            }
-        }
-        if !f.layout_insts().any(|(_, i)| match f.inst_data(i) {
-            InstData::InlineAsm { asm, args } => asm.inputs.iter().zip(args).any(|(op, arg)| {
-                if !matches!(op, keel_ir::AsmOperand::Imm | keel_ir::AsmOperand::NumericImm | keel_ir::AsmOperand::RegImm | keel_ir::AsmOperand::RegSignedImm32 | keel_ir::AsmOperand::RegShiftImm5 | keel_ir::AsmOperand::PortImm8) { return false; }
-                let numeric = matches!(f.value_def(f.resolve(*arg)), keel_ir::ValueDef::Result(def, _) if matches!(f.inst_data(def), InstData::Iconst { .. }));
-                !numeric && !(*op == keel_ir::AsmOperand::Imm && keel_ir::symbolic_immediate(f, *arg).is_some())
-            }),
-            _ => false,
-        }) { continue; }
-        for _ in 0..8 {
-            let mut changed = crate::phi_simplify::run(f);
-            changed |= crate::gvn::run(f);
-            changed |= crate::memory_forward::run(f);
-            if !f.debug_vars.is_empty() {
-                changed |= crate::memory_forward::finalize_asm_immediates(f);
-            }
-            changed |= crate::const_fold::run(f);
-            changed |= crate::instcombine::run(f);
-            changed |= crate::simplify_cfg::run(f);
-            if !changed {
-                break;
+        finalize_asm_operands(f);
+    }
+    Ok(())
+}
+
+/// Removes the local alwaysinline bodies nothing references, keeping a
+/// declaration for each.
+fn discard_unused(module: &mut Module) {
+    let mut live: FxHashSet<String> = module
+        .functions
+        .iter()
+        .filter(|f| {
+            !f.local
+                || !f.attrs.alwaysinline
+                || f.attrs.used
+                || f.attrs.retain
+                || f.attrs.constructor
+                || f.attrs.destructor
+        })
+        .map(|f| f.name.clone())
+        .collect();
+    for d in &module.data {
+        if let Some(init) = &d.init {
+            for item in &init.items {
+                if let keel_ir::DataItem::Ptr { symbol, .. }
+                | keel_ir::DataItem::RttiName { symbol } = item
+                {
+                    live.insert(symbol.clone());
+                }
             }
         }
     }
+    loop {
+        let before = live.len();
+        for f in &module.functions {
+            if !live.contains(&f.name) {
+                continue;
+            }
+            for (_, i) in f.layout_insts() {
+                match f.inst_data(i) {
+                    InstData::Call { func, .. }
+                    | InstData::ReturnCall { func, .. }
+                    | InstData::Invoke { func, .. } => {
+                        live.insert(f.callee(*func).name.clone());
+                    }
+                    InstData::SymbolAddr {
+                        symbol: Symbol::Func(r),
+                    } => {
+                        live.insert(f.callee(*r).name.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if live.len() == before {
+            break;
+        }
+    }
+    for f in &module.functions {
+        if !live.contains(&f.name) {
+            let mut attrs = f.attrs.clone();
+            // Placement belongs to an emitted definition, not the ABI
+            // declaration retained after its unused body is discarded.
+            attrs.section = None;
+            if let Some(decl) = module.decls.iter_mut().find(|d| d.name == f.name) {
+                decl.attrs.section = None;
+            } else {
+                module.decls.push(keel_ir::FuncDecl {
+                    name: f.name.clone(),
+                    sig: f.sig.clone(),
+                    attrs,
+                });
+            }
+        }
+    }
+    module.functions.retain(|f| live.contains(&f.name));
+    // Removed calls leave callee imports behind. Refresh their contracts
+    // from the declarations that now own the discarded bodies' names.
+    module.sync_function_attrs();
+}
+
+/// Drops GNU inline-only bodies after expansion and keeps their external
+/// ABI declarations.
+fn discard_inline_only(module: &mut Module, inline_only: &[&str]) -> Result<(), String> {
+    if inline_only.is_empty() {
+        return Ok(());
+    }
+    for name in inline_only {
+        if let Some(function) = module.functions.iter().find(|f| f.name == *name) {
+            if !function.local || function.attrs.weak || function.weak_odr {
+                return Err(format!(
+                    "GNU inline implementation @{name} is not a local strong body"
+                ));
+            }
+            if !module.decls.iter().any(|decl| decl.name == *name) {
+                module.decls.push(keel_ir::FuncDecl {
+                    name: (*name).to_owned(),
+                    sig: function.sig.clone(),
+                    attrs: function.attrs.clone(),
+                });
+            }
+        }
+    }
+    module
+        .functions
+        .retain(|function| !inline_only.contains(&function.name.as_str()));
+    for decl in &mut module.decls {
+        if inline_only.contains(&decl.name.as_str()) {
+            decl.attrs.alwaysinline = false;
+            decl.attrs.section = None;
+        }
+    }
+    module.sync_function_attrs();
     Ok(())
+}
+
+/// Folds the constants an inline asm statement's immediate operands need.
+fn finalize_asm_operands(f: &mut Function) {
+    if !f
+        .layout_insts()
+        .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
+    {
+        return;
+    }
+    // Width-selecting C macros can contain invalid asm in constant-dead
+    // branches even when every operand is already a legal register or
+    // memory operand. Use the CFG so incoming goto edges stay reachable.
+    for _ in 0..8 {
+        let mut changed = crate::phi_simplify::run(f);
+        changed |= crate::const_fold::run(f);
+        changed |= crate::simplify_cfg::run(f);
+        if !changed {
+            break;
+        }
+    }
+    if !has_unresolved_immediate(f) {
+        return;
+    }
+    for _ in 0..8 {
+        let mut changed = crate::phi_simplify::run(f);
+        changed |= crate::gvn::run(f);
+        changed |= crate::memory_forward::run(f);
+        if !f.debug_vars.is_empty() {
+            changed |= crate::memory_forward::finalize_asm_immediates(f);
+        }
+        changed |= crate::const_fold::run(f);
+        changed |= crate::instcombine::run(f);
+        changed |= crate::simplify_cfg::run(f);
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Whether an inline asm immediate operand is still neither an integer
+/// constant nor, for `AsmOperand::Imm`, a symbolic address.
+fn has_unresolved_immediate(f: &Function) -> bool {
+    use keel_ir::AsmOperand;
+    f.layout_insts().any(|(_, i)| match f.inst_data(i) {
+        InstData::InlineAsm { asm, args } => asm.inputs.iter().zip(args).any(|(op, arg)| {
+            if !matches!(
+                op,
+                AsmOperand::Imm
+                    | AsmOperand::NumericImm
+                    | AsmOperand::RegImm
+                    | AsmOperand::RegSignedImm32
+                    | AsmOperand::RegShiftImm5
+                    | AsmOperand::PortImm8
+            ) {
+                return false;
+            }
+            let numeric = matches!(
+                f.value_def(f.resolve(*arg)),
+                keel_ir::ValueDef::Result(def, _)
+                    if matches!(f.inst_data(def), InstData::Iconst { .. })
+            );
+            !numeric && !(*op == AsmOperand::Imm && keel_ir::symbolic_immediate(f, *arg).is_some())
+        }),
+        _ => false,
+    })
 }
 
 #[derive(Clone, Copy)]
