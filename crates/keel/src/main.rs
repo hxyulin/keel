@@ -534,10 +534,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("local") => keel_codegen::regalloc::AllocationTier::Local,
                     #[cfg(feature = "experimental-regalloc")]
                     Some("split") => keel_codegen::regalloc::AllocationTier::Split,
-                    #[cfg(feature = "experimental-regalloc")]
-                    Some("full-affinity") => keel_codegen::regalloc::AllocationTier::FullAffinity,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full (local/split/full-affinity require experimental-regalloc)".into()),
+                    _ => return Err("`--regalloc` needs fast or full (local/split require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
@@ -667,10 +665,6 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         if !explicit_allocation {
             opts.allocation = level.allocation();
         }
-    }
-    #[cfg(feature = "experimental-regalloc")]
-    if opts.remat != 0 && opts.allocation == keel_codegen::regalloc::AllocationTier::FullAffinity {
-        return Err("--remat is not proven with --regalloc full-affinity".into());
     }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat & (4 | 8) != 0
@@ -1348,23 +1342,6 @@ mod tests {
     }
 
     #[test]
-    fn full_affinity_is_explicit_and_feature_gated() {
-        #[cfg(feature = "experimental-regalloc")]
-        {
-            let opts = options(&["--regalloc", "full-affinity"]).unwrap();
-            assert_eq!(
-                opts.allocation,
-                keel_codegen::regalloc::AllocationTier::FullAffinity
-            );
-            for remat in ["constants", "stack", "all", "pressure", "null"] {
-                assert!(options(&["--regalloc", "full-affinity", "--remat", remat]).is_err());
-            }
-        }
-        #[cfg(not(feature = "experimental-regalloc"))]
-        assert!(options(&["--regalloc", "full-affinity"]).is_err());
-    }
-
-    #[test]
     fn level_presets_keep_explicit_backend_overrides_in_either_order() {
         use keel_codegen::{SelectionOptions, regalloc::AllocationTier};
         for level in ["-O0", "-O1", "-O2", "-O3", "-Os"] {
@@ -1765,7 +1742,7 @@ mod x86_feature_option_tests {
     }
     #[test]
     fn null_remat_is_an_independent_experimental_fast_full_mode() {
-        for tier in ["fast", "full", "local", "split", "full-affinity"] {
+        for tier in ["fast", "full", "local", "split"] {
             let args = ["--remat", "null", "--regalloc", tier].map(str::to_owned);
             let result = parse_options(&args, &["--remat", "--regalloc"]);
             #[cfg(feature = "experimental-regalloc")]

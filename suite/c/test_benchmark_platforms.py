@@ -25,7 +25,7 @@ class OptimizationMatrix(unittest.TestCase):
     def test_ablation_keeps_optimizer_and_isa_fixed(self):
         matrix = benchmark.optimization_configs('/compiler')
         self.assertEqual(len(matrix), 11)
-        self.assertEqual(len(benchmark.optimization_configs('/compiler', True)), 23)
+        self.assertEqual(len(benchmark.optimization_configs('/compiler', True)), 17)
         for name, (kind, compiler, flags) in matrix.items():
             self.assertEqual((kind, compiler), ('keel', '/compiler'))
             self.assertNotIn('--target-features', flags)

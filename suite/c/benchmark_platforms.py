@@ -94,7 +94,7 @@ def optimization_configs(keel, experimental=False):
               for level in ['O0', 'O1', 'O2', 'O3', 'Os']}
     allocators = ['fast', 'full']
     if experimental:
-        allocators += ['local', 'split', 'full-affinity']
+        allocators += ['local', 'split']
     for selection in ['baseline', 'trees', 'full']:
         for allocation in allocators:
             result[f'keel-O2-{selection}-{allocation}'] = (

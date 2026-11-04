@@ -187,9 +187,6 @@ pub enum AllocationTier {
     /// Experimental splitting of spilled ranges into available registers.
     #[cfg(feature = "experimental-regalloc")]
     Split,
-    /// Experimental Full intervals with unanimous incoming scalar GPR preferences.
-    #[cfg(feature = "experimental-regalloc")]
-    FullAffinity,
     #[default]
     Full,
 }
@@ -201,8 +198,6 @@ impl RegisterAllocator for AllocationTier {
             Self::Local => "local",
             #[cfg(feature = "experimental-regalloc")]
             Self::Split => "split",
-            #[cfg(feature = "experimental-regalloc")]
-            Self::FullAffinity => "full-affinity",
             Self::Full => "full",
         }
     }
@@ -303,29 +298,6 @@ fn allocate_tier_inner(
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
             let mut spilled =
                 weighted::linear_scan(func, selection, &cfg, &order, &intervals, pools, &mut locs);
-            assign_spill_slots(&mut spilled, &mut locs)
-        }
-        #[cfg(feature = "experimental-regalloc")]
-        AllocationTier::FullAffinity => {
-            let intervals =
-                build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
-            let incoming = IncomingAffinities::collect(func, &order, &returns_twice);
-            let mut spilled = linear_scan_with_preference(
-                &intervals,
-                pools,
-                &mut locs,
-                &selection.hints,
-                |cur, locs| {
-                    if cur.half == 0 && !cur.float && !cur.vector {
-                        // A consensus necessarily names an earlier assigned home,
-                        // so affinity alone cannot introduce a new callee save.
-                        incoming.consensus(cur.value, locs)
-                    } else {
-                        None
-                    }
-                },
-                |a, b| b.end().cmp(&a.end()),
-            );
             assign_spill_slots(&mut spilled, &mut locs)
         }
     };
@@ -1438,83 +1410,6 @@ fn intervals_from_liveness(
     intervals
 }
 
-// Gather once, with O(values + edge arguments) storage. The instruction walk
-// detects returns-twice; no CFG or liveness analysis is repeated per interval.
-// Keep duplicate predecessor edges: two arms of one branch can disagree.
-#[cfg(feature = "experimental-regalloc")]
-#[derive(Default)]
-struct IncomingAffinities {
-    sources: Vec<Vec<Value>>,
-}
-
-#[cfg(feature = "experimental-regalloc")]
-impl IncomingAffinities {
-    fn collect(
-        func: &Function,
-        order: &[Block],
-        returns_twice: &impl Fn(&InstData) -> bool,
-    ) -> Self {
-        if func.sig.returns_twice
-            || order.iter().any(|&block| {
-                func.block_insts(block)
-                    .iter()
-                    .any(|&inst| returns_twice(func.inst_data(inst)))
-            })
-        {
-            return Self::default();
-        }
-        let mut sources = vec![Vec::new(); func.num_values()];
-        let mut excluded = vec![false; func.num_values()];
-        for &block in order {
-            for &param in func.block_params(block) {
-                // Entry parameters also have implicit incoming ABI values.
-                excluded[param.index()] = Some(block) == func.entry_block()
-                    || !matches!(
-                        func.value_type(param),
-                        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
-                    );
-            }
-        }
-        for &block in order {
-            let Some(&term) = func.block_insts(block).last() else {
-                continue;
-            };
-            let data = func.inst_data(term);
-            for dest in data.branch_dests() {
-                if matches!(data, InstData::Invoke { .. }) {
-                    // Neither the normal nor exceptional Invoke target is in scope,
-                    // independently of whether this edge carries arguments.
-                    for &param in func.block_params(dest.block) {
-                        excluded[param.index()] = true;
-                    }
-                }
-                for (&param, &arg) in func.block_params(dest.block).iter().zip(&dest.args) {
-                    sources[param.index()].push(func.resolve(arg));
-                }
-            }
-        }
-        for (args, excluded) in sources.iter_mut().zip(excluded) {
-            if excluded {
-                args.clear();
-            }
-        }
-        Self { sources }
-    }
-
-    fn consensus(&self, value: Value, locs: &[Vec<Option<Loc>>; 2]) -> Option<Loc> {
-        let args = self.sources.get(value.index())?;
-        let (&first, rest) = args.split_first()?;
-        let reg = locs[0][first.index()]?;
-        if !matches!(reg, Loc::Reg(_)) {
-            return None;
-        }
-        // None includes future backedges and sources already evicted to a spill.
-        rest.iter()
-            .all(|arg| locs[0][arg.index()] == Some(reg))
-            .then_some(reg)
-    }
-}
-
 /// Gives each interval a register from `pools` or spills it, evicting the
 /// latest endpoint. Fills in the register locations and returns the spilled
 /// intervals.
@@ -1535,18 +1430,6 @@ fn linear_scan_with_priority<'a>(
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &crate::select::Hints,
-    priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
-) -> Vec<&'a Interval> {
-    // The ordinary tiers build no incoming-edge table or extra scan state.
-    linear_scan_with_preference(intervals, pools, locs, hints, |_, _| None, priority)
-}
-
-fn linear_scan_with_preference<'a>(
-    intervals: &'a [Interval],
-    pools: &Pools,
-    locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &crate::select::Hints,
-    preference: impl Fn(&Interval, &[Vec<Option<Loc>>; 2]) -> Option<Loc>,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
@@ -1740,16 +1623,14 @@ fn linear_scan_with_preference<'a>(
                 .and_then(|v| locs[cur.half][v.index()])
                 .filter(|&r| available(r))
         };
-        let free = preferred
-            .or_else(|| preference(cur, locs).filter(|&reg| available(reg)))
-            .or_else(|| {
-                callers
-                    .iter()
-                    .chain(callee_saved)
-                    .copied()
-                    .find(|&n| available_number(n))
-                    .map(class)
-            });
+        let free = preferred.or_else(|| {
+            callers
+                .iter()
+                .chain(callee_saved)
+                .copied()
+                .find(|&n| available_number(n))
+                .map(class)
+        });
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
             occupied[cur.float as usize][register_number(reg) as usize] += 1;
@@ -2498,9 +2379,6 @@ mod differential_tests;
 
 #[cfg(test)]
 mod transfer_tests;
-
-#[cfg(all(test, feature = "experimental-regalloc"))]
-mod affinity_tests;
 
 #[cfg(test)]
 mod call_preserves_tests;

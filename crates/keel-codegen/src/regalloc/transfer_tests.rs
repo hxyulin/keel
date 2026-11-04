@@ -173,11 +173,7 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                 #[cfg(feature = "experimental-regalloc")]
                 let tiers = {
                     let mut tiers = tiers;
-                    tiers.extend([
-                        AllocationTier::Local,
-                        AllocationTier::Split,
-                        AllocationTier::FullAffinity,
-                    ]);
+                    tiers.extend([AllocationTier::Local, AllocationTier::Split]);
                     tiers
                 };
                 for tier in tiers {
@@ -185,18 +181,16 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     #[cfg(feature = "experimental-regalloc")]
                     let allocations = {
                         let mut allocations = allocations;
-                        if tier != AllocationTier::FullAffinity {
-                            allocations.push(
-                                RematerializingAllocator {
-                                    base: &tier,
-                                    prefer_spilling: false,
-                                    constants: true,
-                                    stack_addresses: true,
-                                    null_pointers: false,
-                                }
-                                .allocate(&input),
-                            );
-                        }
+                        allocations.push(
+                            RematerializingAllocator {
+                                base: &tier,
+                                prefer_spilling: false,
+                                constants: true,
+                                stack_addresses: true,
+                                null_pointers: false,
+                            }
+                            .allocate(&input),
+                        );
                         if matches!(tier, AllocationTier::Fast | AllocationTier::Full) {
                             allocations.push(
                                 RematerializingAllocator {
