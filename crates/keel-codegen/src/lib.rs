@@ -20,6 +20,7 @@ pub use emission::{CodegenGoal, EmissionOptions, UnwindTables};
 mod fold;
 mod integer_division;
 mod kinds;
+mod lowering;
 mod metadata;
 mod packed_absolute;
 mod parallel_copy;

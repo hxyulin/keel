@@ -103,6 +103,7 @@ use crate::data;
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::integer_division::{reducible_divisor, signed_reciprocal, unsigned_reciprocal};
+use crate::lowering::{self, EdgeCopies, SwitchPlan};
 use crate::metadata::{Cfi, Directive, Expression, SectionKind, Sink};
 use crate::parallel_copy::for_each_move;
 use crate::regalloc::{self, Allocation, Loc, Pools, RematRecipe};
@@ -793,12 +794,10 @@ fn folded_divisor(func: &Function, data: &InstData) -> Option<Value> {
     }
 }
 
-/// Instructions that clobber the caller-saved registers: calls, the memory
-/// intrinsics, which are calls to libc, `i128` division, a call to
-/// compiler-rt, and inline assembly that says so.
+/// Instructions that clobber the caller-saved registers: the shared
+/// [`lowering::is_call`] set, and inline assembly that says so.
 fn is_call(func: &Function, data: &InstData) -> bool {
     match data {
-        InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => true,
         // Inline assembly that clobbers allocatable caller-saved registers
         // is treated like a call, which keeps values out of all of them.
         InstData::InlineAsm { asm, .. } => asm.clobbers.iter().any(|c| match c {
@@ -810,25 +809,7 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             }) => REGISTERS.float_caller_saved.contains(num),
             AsmClobber::Memory | AsmClobber::Flags => false,
         }),
-        InstData::Binary { op, args } => {
-            op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
-        }
-        InstData::Intrinsic { id, .. } => matches!(
-            id,
-            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp
-        ),
-        _ => false,
-    }
-}
-
-/// Calls that may return a second time, from a `longjmp`.
-fn returns_twice(func: &Function, data: &InstData) -> bool {
-    match data {
-        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
-            func.callee(*callee).sig.returns_twice
-        }
-        InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
-        _ => false,
+        _ => lowering::is_call(func, data),
     }
 }
 
@@ -942,6 +923,27 @@ struct FunctionCompiler<'a> {
     /// The moves of a call's arguments or an edge's block arguments, kept
     /// between parallel copies rather than allocated for each.
     copies: Vec<(Loc, Loc)>,
+}
+
+impl<'a> EdgeCopies<'a> for FunctionCompiler<'a> {
+    fn func(&self) -> &'a Function {
+        self.func
+    }
+    fn allocation(&self) -> &Allocation {
+        &self.alloc
+    }
+    fn allocation_index(&self) -> Option<usize> {
+        self.allocation_index
+    }
+    fn current_inst(&self) -> Option<Inst> {
+        self.current_inst
+    }
+    fn copy_buffer(&mut self) -> &mut Vec<(Loc, Loc)> {
+        &mut self.copies
+    }
+    fn emit_parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
+        self.parallel_copy(moves);
+    }
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -1393,7 +1395,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         let is_call = |data: &InstData| is_call(func, data);
-        let returns_twice = |data: &InstData| returns_twice(func, data);
+        let returns_twice = |data: &InstData| lowering::returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
             func,
             pools: &pools,
@@ -2031,26 +2033,6 @@ impl<'a> FunctionCompiler<'a> {
             let moves = moves.clone();
             self.parallel_copy(&moves);
         }
-    }
-
-    fn defined(&self, value: Value) -> Option<Loc> {
-        self.alloc.operand_loc(
-            self.allocation_index,
-            crate::regalloc::ValuePart::low(value),
-            crate::regalloc::OperandKind::Def,
-        )
-    }
-    fn defined_hi(&self, value: Value) -> Option<Loc> {
-        self.alloc.operand_loc(
-            self.allocation_index,
-            crate::regalloc::ValuePart::high(value),
-            crate::regalloc::OperandKind::Def,
-        )
-    }
-    fn edge_moves(&self, successor: usize) -> &[crate::regalloc::Transfer] {
-        self.alloc
-            .edits
-            .edge(self.current_inst.expect("edge in a terminator"), successor)
     }
 
     fn inst(&mut self, inst: Inst) {
@@ -4964,7 +4946,7 @@ impl<'a> FunctionCompiler<'a> {
         let mask = u64::MAX >> (64 - 8 * ty.bytes().expect("integer"));
         let x = self.use_reg(arg, S0);
         let x = self.extend(S0, x, ty, false);
-        let values: Vec<u64> = cases.iter().map(|&c| c as u64 & mask).collect();
+        let plan = SwitchPlan::new(cases, mask);
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
@@ -4975,13 +4957,8 @@ impl<'a> FunctionCompiler<'a> {
                 },
             )
             .collect();
-
-        let (min, max) = match (values.iter().min(), values.iter().max()) {
-            (Some(&min), Some(&max)) => (min, max),
-            _ => (0, 0),
-        };
-        let span = max - min;
-        if values.len() >= 4 && span < 3 * values.len() as u64 && span < 4096 {
+        let (min, span) = (plan.min, plan.span);
+        if plan.jump_table() {
             // idx = x - min, unsigned; anything above the span is default.
             let idx = if min == 0 {
                 x
@@ -5015,16 +4992,12 @@ impl<'a> FunctionCompiler<'a> {
             self.mach("br", [(Reg::x(S1)).into()]);
             // Offsets from the table to each target, never executed.
             self.out.label(table.clone());
-            for k in 0..=span {
-                let i = values
-                    .iter()
-                    .position(|&v| v == min + k)
-                    .map_or(0, |i| i + 1);
+            for i in plan.table() {
                 self.out
                     .integer(4, Expression::difference(targets[i].clone(), table.clone()));
             }
         } else {
-            for (i, &value) in values.iter().enumerate() {
+            for (i, &value) in plan.values.iter().enumerate() {
                 let operand = self.operand(S1, value, is64);
                 self.mach("cmp", [(reg(x, ty)).into(), (operand)]);
                 self.conditional("eq", Name::Text(&targets[i + 1]));
@@ -5133,55 +5106,6 @@ impl<'a> FunctionCompiler<'a> {
             Type::I32 => self.mach("cmp", [(Reg::w(reg)).into(), Arg::imm(0)]),
             _ => self.mach("cmp", [(Reg::x(reg)).into(), Arg::imm(0)]),
         }
-    }
-
-    /// Copies block-call arguments into the target's parameters. All copies
-    /// happen at once (`jump block1(v4, v3)` may swap two parameters), so
-    /// they go through the parallel-copy sequentializer.
-    fn block_args_noop(&self, call: &BlockCall, successor: usize) -> bool {
-        self.edge_moves(successor)
-            .iter()
-            .all(|(dst, src)| dst == src)
-            && self
-                .func
-                .block_params(call.block)
-                .iter()
-                .zip(&call.args)
-                .all(|(&param, &arg)| {
-                    let low = self
-                        .alloc
-                        .param_loc(call.block, crate::regalloc::ValuePart::low(param));
-                    let high = self
-                        .alloc
-                        .param_loc(call.block, crate::regalloc::ValuePart::high(param));
-                    low.is_none_or(|dst| dst == self.loc(arg))
-                        && high.is_none_or(|dst| dst == self.hi(arg))
-                })
-    }
-
-    fn block_args(&mut self, call: &BlockCall, successor: usize) {
-        let params = self.func.block_params(call.block);
-        let mut moves = std::mem::take(&mut self.copies);
-        moves.extend_from_slice(self.edge_moves(successor));
-        for (&param, &arg) in params.iter().zip(&call.args) {
-            // A parameter with no location is an alias, never read.
-            let Some(dst) = self
-                .alloc
-                .param_loc(call.block, crate::regalloc::ValuePart::low(param))
-            else {
-                continue;
-            };
-            moves.push((dst, self.loc(arg)));
-            if let Some(hi) = self
-                .alloc
-                .param_loc(call.block, crate::regalloc::ValuePart::high(param))
-            {
-                moves.push((hi, self.hi(arg)));
-            }
-        }
-        self.parallel_copy(&moves);
-        moves.clear();
-        self.copies = moves;
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
@@ -5423,17 +5347,6 @@ impl<'a> FunctionCompiler<'a> {
         format!("L{}_trap", self.func.name)
     }
 
-    /// The location of an operand.
-    fn loc(&self, value: Value) -> Loc {
-        self.alloc
-            .operand_loc(
-                self.allocation_index,
-                crate::regalloc::ValuePart::low(self.func.resolve(value)),
-                crate::regalloc::OperandKind::Use,
-            )
-            .expect("operand in reachable code is allocated")
-    }
-
     /// The register holding operand `value`: its own, or `scratch` after
     /// reloading it from its spill slot.
     /// The memory operand for an access of type `ty` at `addr`: the stack
@@ -5514,17 +5427,6 @@ impl<'a> FunctionCompiler<'a> {
             }
             Loc::FReg(_) | Loc::Remat(_) => unreachable!("an integer half"),
         }
-    }
-
-    /// The location of the high half of `i128` operand `value`.
-    fn hi(&self, value: Value) -> Loc {
-        self.alloc
-            .operand_loc(
-                self.allocation_index,
-                crate::regalloc::ValuePart::high(self.func.resolve(value)),
-                crate::regalloc::OperandKind::Use,
-            )
-            .expect("operand in reachable code is allocated")
     }
 
     /// Sets flags so that `ne` means `value` is non-zero; an `i128` is

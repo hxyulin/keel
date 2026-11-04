@@ -115,6 +115,7 @@ mod xstate;
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::integer_division::{reducible_divisor, signed_reciprocal, unsigned_reciprocal};
+use crate::lowering::{self, EdgeCopies, SwitchPlan};
 use crate::metadata::{Cfi, Directive, Expression, Sink};
 use crate::parallel_copy::for_each_move;
 use crate::regalloc::{self, Allocation, Loc, Pools};
@@ -803,14 +804,11 @@ fn native_fma_legal(ty: Type, features: keel_asm_ir::x86::Features) -> bool {
         }
 }
 
-/// Instructions that clobber the caller-saved registers: calls, and the
-/// operations that are calls to libc or libgcc (`i128` division).
+/// Instructions that clobber the caller-saved registers: the shared
+/// [`lowering::is_call`] set, FMA without native support, which calls libm,
+/// and the x86 intrinsics and inline assembly that act as calls.
 fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Features) -> bool {
     match data {
-        InstData::Binary { op, args } => {
-            op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
-        }
-        InstData::Call { .. } | InstData::CallIndirect { .. } => true,
         // The reserved-stack dependency permits balanced template calls.
         // Treat those calls as ABI barriers even when a template's explicit
         // clobbers name only the GPRs used by a reduced kernel call sequence.
@@ -818,28 +816,11 @@ fn is_call(func: &Function, data: &InstData, features: keel_asm_ir::x86::Feature
         InstData::Fma { args } => {
             !native_fma_legal(func.value_type(func.resolve(args[0])), features)
         }
-        InstData::Intrinsic { id, .. } => {
-            matches!(
-                id,
-                Intrinsic::Memcpy
-                    | Intrinsic::Memmove
-                    | Intrinsic::Memset
-                    | Intrinsic::Memcmp
-                    | Intrinsic::X86AvxVzeroall
-                    | Intrinsic::X86Xrstor64
-                    | Intrinsic::X86Fxrstor64
-            )
-        }
-        _ => false,
-    }
-}
-
-/// Calls that may return a second time, from a `longjmp`.
-fn returns_twice(func: &Function, data: &InstData) -> bool {
-    match data {
-        InstData::Call { func: callee, .. } => func.callee(*callee).sig.returns_twice,
-        InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
-        _ => false,
+        InstData::Intrinsic {
+            id: Intrinsic::X86AvxVzeroall | Intrinsic::X86Xrstor64 | Intrinsic::X86Fxrstor64,
+            ..
+        } => true,
+        _ => lowering::is_call(func, data),
     }
 }
 
@@ -1033,6 +1014,27 @@ struct FunctionCompiler<'a> {
     /// Whether the function's name is written in its labels as it is,
     /// without quotes or escapes.
     bare_name: bool,
+}
+
+impl<'a> EdgeCopies<'a> for FunctionCompiler<'a> {
+    fn func(&self) -> &'a Function {
+        self.func
+    }
+    fn allocation(&self) -> &Allocation {
+        &self.alloc
+    }
+    fn allocation_index(&self) -> Option<usize> {
+        self.allocation_index
+    }
+    fn current_inst(&self) -> Option<Inst> {
+        self.current_inst
+    }
+    fn copy_buffer(&mut self) -> &mut Vec<(Loc, Loc)> {
+        &mut self.copies
+    }
+    fn emit_parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
+        self.parallel_copy(moves);
+    }
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -1955,7 +1957,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         selection.fold_signed_byte_loads(func, uses);
         let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
-        let returns_twice = |data: &InstData| returns_twice(func, data);
+        let returns_twice = |data: &InstData| lowering::returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
             func,
             pools,
@@ -2663,26 +2665,6 @@ impl<'a> FunctionCompiler<'a> {
             let moves = moves.clone();
             self.parallel_copy(&moves);
         }
-    }
-
-    fn defined(&self, value: Value) -> Option<Loc> {
-        self.alloc.operand_loc(
-            self.allocation_index,
-            crate::regalloc::ValuePart::low(value),
-            crate::regalloc::OperandKind::Def,
-        )
-    }
-    fn defined_hi(&self, value: Value) -> Option<Loc> {
-        self.alloc.operand_loc(
-            self.allocation_index,
-            crate::regalloc::ValuePart::high(value),
-            crate::regalloc::OperandKind::Def,
-        )
-    }
-    fn edge_moves(&self, successor: usize) -> &[crate::regalloc::Transfer] {
-        self.alloc
-            .edits
-            .edge(self.current_inst.expect("edge in a terminator"), successor)
     }
 
     fn inst(&mut self, inst: Inst) {
@@ -4170,17 +4152,6 @@ impl<'a> FunctionCompiler<'a> {
             Loc::FReg(_) => unreachable!("not an integer"),
             Loc::Remat(_) => unreachable!("i128 halves are not rematerialized"),
         }
-    }
-
-    /// The location of the high half of `i128` operand `value`.
-    fn hi(&self, value: Value) -> Loc {
-        self.alloc
-            .operand_loc(
-                self.allocation_index,
-                crate::regalloc::ValuePart::high(self.func.resolve(value)),
-                crate::regalloc::OperandKind::Use,
-            )
-            .expect("operand in reachable code is allocated")
     }
 
     /// Moves an `i128` result from rax (low) and rdx (high) to its places.
@@ -5986,7 +5957,7 @@ impl<'a> FunctionCompiler<'a> {
         let x = self.use_reg(arg, S0);
         let x = self.extend(S0, x, ty, false);
         let width = wide_ty(ty);
-        let values: Vec<u64> = cases.iter().map(|&c| c as u64 & mask).collect();
+        let plan = SwitchPlan::new(cases, mask);
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
@@ -5995,12 +5966,7 @@ impl<'a> FunctionCompiler<'a> {
                 false => format!(".L{}_{inst}_edge{i}", self.func.name),
             })
             .collect();
-
-        let (min, max) = match (values.iter().min(), values.iter().max()) {
-            (Some(&min), Some(&max)) => (min, max),
-            _ => (0, 0),
-        };
-        let span = max - min;
+        let (min, span) = (plan.min, plan.span);
         // A value that fits a sign-extended 32-bit immediate.
         let imm = |this: &mut Self, value: u64| -> AsmOperand {
             if width == Type::I64 && i32::try_from(value as i64).is_err() {
@@ -6010,7 +5976,7 @@ impl<'a> FunctionCompiler<'a> {
                 asm_arg(value as i64)
             }
         };
-        if values.len() >= 4 && span < 3 * values.len() as u64 && span < 4096 {
+        if plan.jump_table() {
             // idx = x - min, unsigned; anything above the span is default.
             // A 32-bit index is zero-extended by writing it.
             let rax = reg(S0, width);
@@ -6046,16 +6012,12 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(Opcode::Jmp, [asm_arg(r64(0))]);
             self.out.align(2);
             self.out.label(table.clone());
-            for k in 0..=span {
-                let i = values
-                    .iter()
-                    .position(|&v| v == min + k)
-                    .map_or(0, |i| i + 1);
+            for i in plan.table() {
                 self.out
                     .integer(4, Expression::difference(targets[i].clone(), table.clone()));
             }
         } else {
-            for (i, &value) in values.iter().enumerate() {
+            for (i, &value) in plan.values.iter().enumerate() {
                 let operand = imm(self, value);
                 self.emit(Opcode::Cmp, [asm_arg(reg(x, width)), asm_arg(operand)]);
                 self.emit(Opcode::Jcc(4), [asm_arg(&targets[i + 1])]);
@@ -6175,57 +6137,6 @@ impl<'a> FunctionCompiler<'a> {
         let c = self.use_reg(value, S0);
         let r = reg(c, ty);
         self.emit(Opcode::Test, [asm_arg(r), asm_arg(r)]);
-    }
-
-    /// Whether an edge can branch directly without executing any copies.
-    /// Include allocator transfers and both halves of wide block arguments;
-    /// parameters without locations are aliases and need no copy.
-    fn block_args_noop(&self, call: &BlockCall, successor: usize) -> bool {
-        self.edge_moves(successor)
-            .iter()
-            .all(|(dst, src)| dst == src)
-            && self
-                .func
-                .block_params(call.block)
-                .iter()
-                .zip(&call.args)
-                .all(|(&param, &arg)| {
-                    let low = self
-                        .alloc
-                        .param_loc(call.block, crate::regalloc::ValuePart::low(param));
-                    let high = self
-                        .alloc
-                        .param_loc(call.block, crate::regalloc::ValuePart::high(param));
-                    low.is_none_or(|dst| dst == self.loc(arg))
-                        && high.is_none_or(|dst| dst == self.hi(arg))
-                })
-    }
-
-    /// Copies block-call arguments into the target's parameters, all at
-    /// once (`jump block1(v4, v3)` may swap two parameters).
-    fn block_args(&mut self, call: &BlockCall, successor: usize) {
-        let params = self.func.block_params(call.block);
-        let mut moves = std::mem::take(&mut self.copies);
-        moves.extend_from_slice(self.edge_moves(successor));
-        for (&param, &arg) in params.iter().zip(&call.args) {
-            // A parameter with no location is an alias, never read.
-            let Some(dst) = self
-                .alloc
-                .param_loc(call.block, crate::regalloc::ValuePart::low(param))
-            else {
-                continue;
-            };
-            moves.push((dst, self.loc(arg)));
-            if let Some(hi) = self
-                .alloc
-                .param_loc(call.block, crate::regalloc::ValuePart::high(param))
-            {
-                moves.push((hi, self.hi(arg)));
-            }
-        }
-        self.parallel_copy(&moves);
-        moves.clear();
-        self.copies = moves;
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
@@ -6491,17 +6402,6 @@ impl<'a> FunctionCompiler<'a> {
     fn trap_label(&mut self) -> String {
         self.uses_trap = true;
         format!(".L{}_trap", self.func.name)
-    }
-
-    /// The location of an operand.
-    fn loc(&self, value: Value) -> Loc {
-        self.alloc
-            .operand_loc(
-                self.allocation_index,
-                crate::regalloc::ValuePart::low(self.func.resolve(value)),
-                crate::regalloc::OperandKind::Use,
-            )
-            .expect("operand in reachable code is allocated")
     }
 
     /// Resolve every address leaf before the destination write, including
