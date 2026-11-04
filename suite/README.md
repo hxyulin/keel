@@ -276,6 +276,10 @@ cargo suite check c ir                    # C and IR runner tests
 cargo suite check asm linker integration  # Other component runner tests
 ```
 
+Each component runs `unittest` in every directory under `suite/<component>`
+that holds a Git-tracked `test_*.py` file, so a new test directory needs no
+runner change. The command needs a Git checkout.
+
 These check runner protocols and fixtures. They do not qualify native compiler,
 linker or kernel behavior. Native LLVM cases that need explicit library/tool
 arguments run through `test-frontends`, not ordinary test discovery. Use
