@@ -51,7 +51,7 @@ def main():
     ld = Path(run(['xcrun', '--find', 'ld']).strip()).resolve()
     sdk = Path(run(['xcrun', '--sdk', 'macosx', '--show-sdk-path']).strip())
     triple = 'arm64-apple-macosx11.0.0'
-    report = {'schema': 1, 'date': '2026-10-24', 'source_commit': run(['git', 'rev-parse', 'HEAD']).strip(),
+    report = {'schema': 1, 'date': time.strftime('%Y-%m-%d'), 'source_commit': run(['git', 'rev-parse', 'HEAD']).strip(),
               'host': platform.node(), 'platform': platform.platform(),
               'cpu': run(['sysctl', '-n', 'machdep.cpu.brand_string']).strip(),
               'clang_version': run([clang, '--version']), 'apple_ld_version': subprocess.run([str(ld), '-v'], capture_output=True, text=True, check=True).stderr,
