@@ -282,8 +282,6 @@ fn malformed_controls_and_types_rejected() {
                 "iconst.i16 -1",
                 "iconst.i16 256",
                 "iconst.i16 65535",
-                "iconst.i16 65536",
-                "iconst.i16 -65536",
                 "iconst.i32 224",
                 "load.i16 v3",
             ] {

@@ -56,7 +56,8 @@ pub(crate) fn remat_recipe(func: &Function, value: Value) -> Option<RematRecipe>
             } else {
                 (imm as u64) & ((1u64 << width) - 1)
             };
-            if imm < 0 || bits != imm as u64 {
+            // Narrow immediates are stored sign-extended from their width.
+            if ty.canonical_imm(imm) != imm {
                 return None;
             }
             Some(RematRecipe::Iconst(bits))
