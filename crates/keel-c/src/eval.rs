@@ -113,51 +113,28 @@ pub(crate) fn eval_constant_with_binding_and_layout(
     nonnull: &dyn Fn(usize) -> bool,
     layout: CDataLayout,
 ) -> Option<Const> {
-    match &e.kind {
-        ExprKind::Cast(a) | ExprKind::Unary(_, a) => {
-            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
-        }
-        ExprKind::Binary(_, a, b) | ExprKind::PtrAdd(a, b, _) | ExprKind::PtrDiff(a, b, _) => {
-            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
-            eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
-        }
-        ExprKind::Comma(a, b) => {
-            if !allow_comma {
-                return None;
-            }
-            eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?;
-            eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
-        }
-        ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
-            let first = truthy(
-                eval_constant_with_binding_and_layout(a, allow_comma, nonnull, layout)?,
-                nonnull,
-            )?;
-            if first == matches!(e.kind, ExprKind::LogAnd(..)) {
-                eval_constant_with_binding_and_layout(b, allow_comma, nonnull, layout)?;
-            }
-        }
-        ExprKind::Cond(c, a, b) => {
-            let selected = if truthy(
-                eval_constant_with_binding_and_layout(c, allow_comma, nonnull, layout)?,
-                nonnull,
-            )? {
-                a
-            } else {
-                b
-            };
-            eval_constant_with_binding_and_layout(selected, allow_comma, nonnull, layout)?;
-        }
-        ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args)
-            if !args
-                .iter()
-                .all(|arg| scalar_constant_tree(arg, allow_comma, layout, 64)) =>
-        {
-            return None;
-        }
-        _ => {}
-    }
-    eval_with_binding_and_layout(e, nonnull, layout)
+    let comma = if allow_comma {
+        Comma::Constant
+    } else {
+        Comma::Reject
+    };
+    fold(e, comma, nonnull, layout)
+}
+
+/// How an evaluation treats the comma operator.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Comma {
+    /// Use the right operand and ignore the left one.
+    Ignore,
+    /// A comma makes the expression non-constant.
+    Reject,
+    /// Both operands must be constant.
+    Constant,
+}
+
+#[cfg(test)]
+thread_local! {
+    static VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Integer builtin proofs exclude effects and intermediates wider than Const::Int.
@@ -196,6 +173,21 @@ pub fn eval_with_binding_and_layout(
     nonnull: &dyn Fn(usize) -> bool,
     layout: CDataLayout,
 ) -> Option<Const> {
+    fold(e, Comma::Ignore, nonnull, layout)
+}
+
+/// Evaluate `e` in one walk. Every child is visited once, in the caller's
+/// comma mode, and only the operands C evaluates are visited.
+fn fold(
+    e: &Expr<'_>,
+    comma: Comma,
+    nonnull: &dyn Fn(usize) -> bool,
+    layout: CDataLayout,
+) -> Option<Const> {
+    #[cfg(test)]
+    VISITS.with(|v| v.set(v.get() + 1));
+    let child = |x: &Expr<'_>| fold(x, comma, nonnull, layout);
+    let constant = |x: &Expr<'_>| fold(x, Comma::Constant, nonnull, layout);
     let value = match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
@@ -206,10 +198,10 @@ pub fn eval_with_binding_and_layout(
                 return None;
             }
             let [arg] = *args else { return None };
-            if !scalar_constant_tree(arg, true, layout, 64) {
+            if !scalar_constant_tree(arg, comma != Comma::Reject, layout, 64) {
                 return None;
             }
-            let Const::Int(value) = eval_with_binding_and_layout(arg, nonnull, layout)? else {
+            let Const::Int(value) = fold(arg, Comma::Ignore, nonnull, layout)? else {
                 return None;
             };
             if matches!(e.kind, ExprKind::Builtin(Builtin::Ffs, _)) {
@@ -232,40 +224,30 @@ pub fn eval_with_binding_and_layout(
             })
         }
         ExprKind::Builtin(Builtin::Complex, args) => {
-            let (Const::Float(r), Const::Float(i)) = (
-                eval_constant_with_binding_and_layout(&args[0], true, nonnull, layout)?,
-                eval_constant_with_binding_and_layout(&args[1], true, nonnull, layout)?,
-            ) else {
+            let (Const::Float(r), Const::Float(i)) = (constant(&args[0])?, constant(&args[1])?)
+            else {
                 return None;
             };
             Const::Complex(r, i)
         }
         ExprKind::Member { base, offset, .. } if base.ty.is_complex() => {
-            let Const::Complex(r, i) =
-                eval_constant_with_binding_and_layout(base, true, nonnull, layout)?
-            else {
+            let Const::Complex(r, i) = constant(base)? else {
                 return None;
             };
             Const::Float(if *offset == 0 { r } else { i })
         }
         ExprKind::Builtin(Builtin::Hint | Builtin::AssumeAligned(_), args) => {
-            let value = eval_constant_with_binding_and_layout(&args[0], true, nonnull, layout)?;
+            let value = constant(&args[0])?;
             for arg in &args[1..] {
-                eval_constant_with_binding_and_layout(arg, true, nonnull, layout)?;
+                constant(arg)?;
             }
             value
         }
         ExprKind::LabelAddr(n) => Const::Int(*n as i64),
         ExprKind::Addr(inner) => eval_addr(inner, nonnull, layout)?,
-        ExprKind::Cast(inner) => cast(
-            eval_with_binding_and_layout(inner, nonnull, layout)?,
-            &inner.ty,
-            &e.ty,
-            nonnull,
-            layout,
-        )?,
+        ExprKind::Cast(inner) => cast(child(inner)?, &inner.ty, &e.ty, nonnull, layout)?,
         ExprKind::Unary(op, a) => {
-            let a = eval_with_binding_and_layout(a, nonnull, layout)?;
+            let a = child(a)?;
             match (op, a) {
                 (UnOp::Not, a) => Const::Int(i64::from(!truthy(a, nonnull)?)),
                 (UnOp::Neg, Const::Int(v)) => {
@@ -280,10 +262,7 @@ pub fn eval_with_binding_and_layout(
             }
         }
         ExprKind::Binary(op, a, b) if a.ty.is_complex() || b.ty.is_complex() => {
-            let (x, y) = (
-                eval_with_binding_and_layout(a, nonnull, layout)?,
-                eval_with_binding_and_layout(b, nonnull, layout)?,
-            );
+            let (x, y) = (child(a)?, child(b)?);
             if matches!(op, BinOp::Eq | BinOp::Ne) {
                 let (Const::Complex(xr, xi), Const::Complex(yr, yi)) = (x, y) else {
                     return None;
@@ -341,20 +320,13 @@ pub fn eval_with_binding_and_layout(
                 Const::Complex(round(r), round(i))
             }
         }
-        ExprKind::Binary(op, a, b) => binary(
-            *op,
-            &a.ty,
-            &e.ty,
-            eval_with_binding_and_layout(a, nonnull, layout)?,
-            eval_with_binding_and_layout(b, nonnull, layout)?,
-            layout,
-        )?,
+        ExprKind::Binary(op, a, b) => binary(*op, &a.ty, &e.ty, child(a)?, child(b)?, layout)?,
         ExprKind::PtrAdd(p, n, size) => {
-            let Const::Int(n) = eval_with_binding_and_layout(n, nonnull, layout)? else {
+            let Const::Int(n) = child(n)? else {
                 return None;
             };
             let delta = n.wrapping_mul(*size as i64);
-            match eval_with_binding_and_layout(p, nonnull, layout)? {
+            match child(p)? {
                 Const::Addr(base, off) => Const::Addr(
                     base,
                     if layout.pointer_bytes() == 4 {
@@ -368,10 +340,7 @@ pub fn eval_with_binding_and_layout(
                 Const::Float(_) | Const::Complex(..) => return None,
             }
         }
-        ExprKind::PtrDiff(a, b, size) => match (
-            eval_with_binding_and_layout(a, nonnull, layout)?,
-            eval_with_binding_and_layout(b, nonnull, layout)?,
-        ) {
+        ExprKind::PtrDiff(a, b, size) => match (child(a)?, child(b)?) {
             (Const::Addr(x, i), Const::Addr(y, j)) if x == y => {
                 Const::Int(if layout.pointer_bytes() == 4 {
                     i.checked_sub(j)?.checked_div(i64::try_from(*size).ok()?)?
@@ -387,21 +356,26 @@ pub fn eval_with_binding_and_layout(
             _ => return None,
         },
         ExprKind::LogAnd(a, b) => Const::Int(i64::from(
-            truthy(eval_with_binding_and_layout(a, nonnull, layout)?, nonnull)?
-                && truthy(eval_with_binding_and_layout(b, nonnull, layout)?, nonnull)?,
+            truthy(child(a)?, nonnull)? && truthy(child(b)?, nonnull)?,
         )),
         ExprKind::LogOr(a, b) => Const::Int(i64::from(
-            truthy(eval_with_binding_and_layout(a, nonnull, layout)?, nonnull)?
-                || truthy(eval_with_binding_and_layout(b, nonnull, layout)?, nonnull)?,
+            truthy(child(a)?, nonnull)? || truthy(child(b)?, nonnull)?,
         )),
         ExprKind::Cond(c, a, b) => {
-            if truthy(eval_with_binding_and_layout(c, nonnull, layout)?, nonnull)? {
-                eval_with_binding_and_layout(a, nonnull, layout)?
+            if truthy(child(c)?, nonnull)? {
+                child(a)?
             } else {
-                eval_with_binding_and_layout(b, nonnull, layout)?
+                child(b)?
             }
         }
-        ExprKind::Comma(_, b) => eval_with_binding_and_layout(b, nonnull, layout)?,
+        ExprKind::Comma(a, b) => match comma {
+            Comma::Ignore => child(b)?,
+            Comma::Reject => return None,
+            Comma::Constant => {
+                child(a)?;
+                child(b)?
+            }
+        },
         _ => return None,
     };
     Some(match value {
@@ -435,12 +409,10 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
             })),
             Const::Float(_) | Const::Complex(..) => None,
         },
-        ExprKind::Deref(p) => {
-            match eval_constant_with_binding_and_layout(p, true, nonnull, layout)? {
-                c @ (Const::Addr(..) | Const::Reloc(..) | Const::Int(_)) => Some(c),
-                Const::Float(_) | Const::Complex(..) => None,
-            }
-        }
+        ExprKind::Deref(p) => match fold(p, Comma::Constant, nonnull, layout)? {
+            c @ (Const::Addr(..) | Const::Reloc(..) | Const::Int(_)) => Some(c),
+            Const::Float(_) | Const::Complex(..) => None,
+        },
         _ => None,
     }
 }
@@ -606,5 +578,58 @@ fn binary(
             })
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse::Parser;
+    use crate::strings::Strings;
+    use bumpalo::Bump;
+    use keel_ir::Target;
+
+    fn nodes(e: &Expr<'_>) -> usize {
+        1 + match &e.kind {
+            ExprKind::Cast(a) | ExprKind::Unary(_, a) => nodes(a),
+            ExprKind::Binary(_, a, b) | ExprKind::Comma(a, b) => nodes(a) + nodes(b),
+            _ => 0,
+        }
+    }
+
+    fn visits(f: impl FnOnce()) -> usize {
+        VISITS.with(|v| v.set(0));
+        f();
+        VISITS.with(|v| v.get())
+    }
+
+    #[test]
+    fn long_chains_visit_each_node_once() {
+        // Parsing and evaluation recurse once per level; debug frames are large.
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(chain)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn chain() {
+        let arena = Bump::new();
+        let terms = 2_000;
+        let src = format!("0{}", " + 1".repeat(terms));
+        let mut p = Parser::new(&src, "chain.c", Target::default(), Strings::new(&arena));
+        let e = p.expr().unwrap();
+        let n = nodes(&e);
+        assert!(n > terms);
+        let layout = CDataLayout::NATIVE_LP64;
+        for allow_comma in [false, true] {
+            let mut value = None;
+            let count = visits(|| value = eval_constant_with_layout(&e, allow_comma, layout));
+            assert_eq!(value, Some(Const::Int(terms as i64)));
+            assert_eq!(count, n);
+        }
+        let count = visits(|| assert!(eval_with_layout(&e, layout).is_some()));
+        assert_eq!(count, n);
     }
 }
