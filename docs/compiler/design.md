@@ -78,7 +78,19 @@ it without depending on the IR.
   or before an instruction), moved and removed; blocks and block parameters
   can be removed. Removed entities keep their handles and nothing is
   renumbered; the verifier reports any use of a value whose definition was
-  removed. `func.ins(at).iadd(a, b)` builds typed instructions.
+  removed. `InstBuilder` (`func.ins(at).iadd(a, b)`) builds typed
+  instructions. Passes also call `insert_inst` with an `InstData`, rewrite in
+  place through `inst_data_mut` (keeping the result count and types), and
+  redirect values with `replace_all_uses`.
+
+**Decisions.** Instruction storage keeps contiguous per-block slices; there
+is no linked list. The planned storage work adds `Function::remove_insts`
+for passes that remove many instructions at once, position hints so an
+insertion does not scan its block, a CFG stamp taken on read, and a 48-byte
+`InstData` with indirect-call arguments and `invoke` kept inline. A
+mid-block insertion still shifts the rest of the block. Functions are not
+compacted to drop removed entities unless a workload shows the waste
+matters.
 
 ## Types
 

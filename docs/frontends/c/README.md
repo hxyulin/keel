@@ -211,6 +211,27 @@ parse, but values are errors. On x86-64 Linux `__float128` and
   diagnosed. Conversions between 128-bit integers and floating types fold in
   constant expressions but are rejected at run time.
 
+**Decisions.** Integer constant evaluation has one exact kernel,
+`crates/keel-c/src/int_const.rs`. Shift counts out of range in a constant
+context are rejected, not clamped as Clang does. Constant `__int128` ↔
+floating conversions fold exactly; runtime support through compiler-rt calls
+is separate work. `switch` on `__int128` stays a parser error. A 128-bit
+enumerator is accepted only when its value fits 64 bits, and
+`enum : __int128` is not supported. Complex ↔ `__int128` conversions stay
+rejected in every context until runtime `__int128` ↔ floating conversions
+exist, since a complex conversion goes through its element type. Once the
+kernel is the only folder, irgen's literal folds will run only at `-O0`, so
+the optimizer sees one IR shape at every other level.
+
+The planned C11 initializer model settles these behaviors, not all of which
+are implemented yet. An initializer overridden by a later designator is
+skipped together with its side effects, as Clang and GCC do. A GNU range
+`[a ... b] = e` evaluates `e` once. Wide-string element types are checked by
+name on every target. The GNU flexible-array forms that Clang rejects stay
+accepted: designators into the member, and file-scope compound literals. A
+plain literal with escapes at or above 0x80 is rejected when concatenated to
+a wide literal. `u'x'`, `U'x'` and `L'x'` take their type from the prefix.
+
 ## Boundaries
 
 Support for a syntax or attribute does not imply every GCC extension or every
