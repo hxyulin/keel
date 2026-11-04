@@ -477,7 +477,7 @@ fn stale_single_result_aliases_survive_local_folds_and_all_optimizer_tiers() {
         let replacement = Value::new(1);
         original.functions[0].replace_all_uses(stale, replacement);
         keel_ir::verify_module(&original).unwrap();
-        for pass in ["instcombine", "fast-local"] {
+        for pass in ["instcombine", "fast-local", "const-fold"] {
             let mut optimized = original.clone();
             // The stale instruction must neither be replaced nor rewritten.
             assert!(

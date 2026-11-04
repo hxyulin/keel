@@ -27,6 +27,13 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for &block in domtree.rpo() {
         for inst in func.block_insts(block).to_vec() {
+            // A stale layout instruction can remain after its result was
+            // aliased. Never overwrite that replacement.
+            if let [result] = *func.inst_results(inst)
+                && !matches!(func.value_def(result), ValueDef::Result(owner, 0) if owner == inst)
+            {
+                continue;
+            }
             if let Some(constants) = fold_overflow(func.inst_data(inst), |v| constant_ref(func, v))
             {
                 replace_with_constants(func, inst, &constants);
