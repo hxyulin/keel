@@ -45,15 +45,7 @@ int queries(char *argument __attribute__((nonstring))) {
 "#;
 
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "has-attribute.c",
-        keel_c::Options {
-            target,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "has-attribute.c", target, false)
 }
 
 #[test]
@@ -78,9 +70,7 @@ fn nonstring_queries_track_declarations_without_evaluating_operands() {
                 _ => unreachable!(),
             };
             if Target::host() == Some(target) {
-                let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
-                    .join(format!("nonstring-opt{optimize}"));
-                fs::create_dir_all(&dir).unwrap();
+                let dir = keel_test_support::TempDir::new(&format!("nonstring-opt{optimize}"));
                 fs::write(dir.join("queries.o"), object).unwrap();
                 fs::write(dir.join("main.c"), "extern int queries(char *); int main(void) { char buffer[8]; return queries(buffer); }\n").unwrap();
                 let output = Command::new("clang")

@@ -33,15 +33,7 @@ fn compile(
     target: Target,
     debug_info: bool,
 ) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "statement-expression-labels.c",
-        keel_c::Options {
-            target,
-            debug_info,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "statement-expression-labels.c", target, debug_info)
 }
 
 #[test]
@@ -70,10 +62,9 @@ fn labeled_expressions_keep_their_types_and_goto_side_effects() {
                     Target::Wasm32UnknownUnknown => unreachable!("native-only test"),
                 };
                 if Target::host() == Some(target) {
-                    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+                    let dir = keel_test_support::TempDir::new(&format!(
                         "statement-expression-labels-debug{debug_info}-opt{optimize}"
                     ));
-                    fs::create_dir_all(&dir).unwrap();
                     fs::write(dir.join("labels.o"), object).unwrap();
                     fs::write(
                         dir.join("main.c"),

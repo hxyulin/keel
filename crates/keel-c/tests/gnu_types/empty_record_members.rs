@@ -1,15 +1,7 @@
 use keel_ir::Target;
 
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "empty-record-members.c",
-        keel_c::Options {
-            target,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "empty-record-members.c", target, false)
 }
 
 #[test]

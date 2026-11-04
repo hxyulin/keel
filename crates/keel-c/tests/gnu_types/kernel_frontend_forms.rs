@@ -1,15 +1,7 @@
 //! Frontend forms used by the pinned Linux headers.
 use keel_ir::Target;
 fn compile(source: &str) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "kernel-forms.c",
-        keel_c::Options {
-            target: Target::X86_64LinuxGnu,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "kernel-forms.c", Target::X86_64LinuxGnu, false)
 }
 #[test]
 fn fallthrough_is_independent_of_lexer_chunk_position() {
@@ -46,8 +38,7 @@ fn static_compound_copies_preserve_offsets_bits_strings_and_relocations() {
     let roundtrip = keel_ir::parse(&text).unwrap();
     keel_ir::verify_module(&roundtrip).unwrap();
     keel_codegen::compile(&roundtrip, Target::X86_64LinuxGnu).unwrap();
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("static-compound-copy");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("static-compound-copy");
     let body = dir.join("source.c");
     let runner = dir.join("runner.c");
     std::fs::write(&body, source).unwrap();
@@ -105,8 +96,7 @@ fn static_compound_copies_preserve_offsets_bits_strings_and_relocations() {
 }
 
 fn native_check(source: &str, name: &str) {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new(name);
     let body = dir.join("source.c");
     let runner = dir.join("runner.c");
     std::fs::write(&body, source).unwrap();

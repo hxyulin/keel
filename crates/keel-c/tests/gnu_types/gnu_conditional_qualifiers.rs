@@ -46,24 +46,12 @@ int test(void) {
 "#;
 
 fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
-    let module = keel_c::compile(
-        source,
-        "gnu-conditional.c",
-        keel_c::Options {
-            target,
-            debug_info: debug,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    module
+    crate::support::module(source, "gnu-conditional.c", target, debug)
 }
 
 #[test]
 fn qualified_values_compile_and_execute_without_repeating_effects() {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-conditional-qualifiers");
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("gnu-conditional-qualifiers");
     fs::write(
         dir.join("main.c"),
         "extern int test(void); int main(void){return test();}",

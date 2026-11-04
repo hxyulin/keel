@@ -1,15 +1,7 @@
 //! Foreign function pointer storage retains ABI identity without lowering calls.
 use keel_ir::Target;
 fn compile(source: &str) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "foreign-abi.c",
-        keel_c::Options {
-            target: Target::X86_64LinuxGnu,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "foreign-abi.c", Target::X86_64LinuxGnu, false)
 }
 #[test]
 fn microsoft_function_pointer_fields_preserve_layout_and_identity() {

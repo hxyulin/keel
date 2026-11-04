@@ -90,21 +90,12 @@ fn compile(
     target: Target,
     debug_info: bool,
 ) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "union-cast.c",
-        keel_c::Options {
-            target,
-            debug_info,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "union-cast.c", target, debug_info)
 }
 
 #[test]
 fn union_cast_storage_and_runtime() {
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("gnu-union-casts");
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("gnu-union-casts");
     let runner = dir.join("main.c");
     fs::write(
         &runner,

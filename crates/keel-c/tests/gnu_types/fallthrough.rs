@@ -1,15 +1,7 @@
 use keel_ir::Target;
 
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "fallthrough.c",
-        keel_c::Options {
-            target,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    crate::support::frontend(source, "fallthrough.c", target, false)
 }
 
 #[test]

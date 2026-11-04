@@ -1,6 +1,6 @@
 //! Pointer-only transparent unions retain the existing one-word aggregate ABI.
 use keel_ir::Target;
-use std::{fs, path::Path, process::Command};
+use std::{fs, process::Command};
 const SOURCE: &str = r#"
 typedef union { unsigned long *word; int *integer; void *any; } Arg __attribute__((transparent_union));
 unsigned long external_read(Arg);
@@ -27,8 +27,7 @@ int main(void) { unsigned long values[]={0xfedcba9876543210UL,37},*p=values;
 "#;
 #[test]
 fn pointer_union_calls_cross_native_compiler_boundaries() {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("transparent-unions");
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("transparent-unions");
     let source = dir.join("source.c");
     let runner = dir.join("runner.c");
     fs::write(&source, SOURCE).unwrap();
@@ -37,11 +36,7 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
         let module = keel_c::compile(
             SOURCE,
             "transparent.c",
-            keel_c::Options {
-                target,
-                debug_info: true,
-                ..Default::default()
-            },
+            crate::support::options(target, true),
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
@@ -73,11 +68,7 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
         let module = keel_c::compile(
             SOURCE,
             "transparent.c",
-            keel_c::Options {
-                target: Target::X86_64LinuxGnu,
-                debug_info: false,
-                ..Default::default()
-            },
+            crate::support::options(Target::X86_64LinuxGnu, false),
         )
         .unwrap();
         let object = keel_asm::x86::assemble_object(
@@ -105,11 +96,7 @@ fn transparent_union_restrictions_remain_diagnostics() {
             keel_c::compile(
                 source,
                 "invalid.c",
-                keel_c::Options {
-                    target: Target::X86_64LinuxGnu,
-                    debug_info: false,
-                    ..Default::default()
-                }
+                crate::support::options(Target::X86_64LinuxGnu, false)
             )
             .is_err(),
             "{source}"

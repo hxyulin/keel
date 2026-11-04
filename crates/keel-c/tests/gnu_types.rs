@@ -14,20 +14,15 @@ mod has_attribute;
 mod kernel_frontend_forms;
 #[path = "gnu_types/statement_expression_labels.rs"]
 mod statement_expression_labels;
+#[allow(dead_code)]
+#[path = "common/support.rs"]
+mod support;
 #[path = "gnu_types/transparent_unions.rs"]
 mod transparent_unions;
 
 use keel_ir::Target;
 fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diagnostic> {
-    keel_c::compile(
-        source,
-        "gnu-types.c",
-        keel_c::Options {
-            target,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
+    support::frontend(source, "gnu-types.c", target, false)
 }
 fn clang_accepts(source: &str, target: Target) {
     clang_checks(source, target, true);
