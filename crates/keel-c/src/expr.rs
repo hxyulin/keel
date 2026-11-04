@@ -3922,7 +3922,7 @@ mod integer_layout_tests {
             ),
             ("(long)(0UL - 1UL)", Long, -1, Long, -1),
             ("~0UL", ULong, -1, ULong, 4294967295),
-            ("(long)4294967295.0", Long, 4294967295, Long, -1),
+            ("(long)4294967295.0", Long, 4294967295, Long, 2147483647),
         ] {
             // Return to native after wasm using shared interned type constants.
             for (layout, ty, value) in [

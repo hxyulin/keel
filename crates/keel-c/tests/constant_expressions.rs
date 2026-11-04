@@ -263,3 +263,22 @@ fn shift_counts_outside_the_width_are_not_constant() {
     assert_eq!(stored(&m, "u"), (1u32 << 31).to_le_bytes());
     assert_eq!(stored(&m, "s"), (-1i32).to_le_bytes());
 }
+#[test]
+fn out_of_range_float_conversions_saturate() {
+    let m = compile(
+        "_Static_assert((int)1e10 == 2147483647, \"\");\
+         _Static_assert((int)-1e10 == -2147483647 - 1, \"\");\
+         _Static_assert((unsigned)-1.0 == 0, \"\");\
+         _Static_assert((int)(0.0 / 0.0) == 0, \"\");\
+         _Static_assert((unsigned char)300.0 == 255, \"\");\
+         _Static_assert((long)1e30 == 0x7fffffffffffffffL, \"\");\
+         _Static_assert((unsigned long)1e30 == 0xffffffffffffffffUL, \"\");\
+         int big = 1e10; unsigned neg = -1.0; int nan = 0.0 / 0.0; short low = -1e9;",
+        Target::default(),
+        false,
+    );
+    assert_eq!(stored(&m, "big"), i32::MAX.to_le_bytes());
+    assert_eq!(stored(&m, "neg"), 0u32.to_le_bytes());
+    assert_eq!(stored(&m, "nan"), 0i32.to_le_bytes());
+    assert_eq!(stored(&m, "low"), i16::MIN.to_le_bytes());
+}

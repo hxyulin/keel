@@ -3,6 +3,7 @@
 //! initialize objects with static storage.
 
 use crate::ast::{BinOp, Builtin, Expr, ExprKind, UnOp};
+use crate::int_const::{self, IntTy, Policy};
 use crate::types::{CDataLayout, IntKind, Ty};
 
 /// What an address constant points into.
@@ -461,6 +462,16 @@ fn cast(
             Const::Int(normalize_with_layout(v, to, layout))
         }
         (Const::Int(_), Ty::Int(_)) => return None,
+        (Const::Float(f), Ty::Int(k)) if k.size_with_layout(layout) <= 8 => {
+            // Out of range, C leaves the value undefined; GCC and Clang
+            // saturate to the target type, with NaN giving 0.
+            let ty = IntTy::of(to, layout)?;
+            Const::Int(
+                int_const::from_float(f, ty, Policy::CONSTANT)
+                    .ok()?
+                    .bits64(),
+            )
+        }
         (Const::Float(f), Ty::Int(k)) => {
             let v = if k.signed() {
                 f as i64
