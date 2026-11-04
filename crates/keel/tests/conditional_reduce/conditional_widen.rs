@@ -1,4 +1,5 @@
-//! Exercise permanent-corpus C shapes through the Full frontend pipeline.
+//! Exercise permanent-corpus C shapes through the Full frontend pipeline:
+//! conditional widening reductions and the packed clamp.
 use super::{run, text};
 use std::{fs, path::Path, process::Command};
 #[test]
@@ -36,6 +37,12 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
                 let f = m.functions.iter().find(|f| f.name == name).unwrap();
                 assert!(f.to_string().contains("widen_low.i64x2"), "{f}");
             }
+            // The packed clamp reads exactly two source elements per chunk.
+            let clamp = m.functions.iter().find(|f| f.name == "rk_clamped").unwrap();
+            let clamp = clamp.to_string();
+            assert!(clamp.contains("vselect"), "{clamp}");
+            assert_eq!(clamp.matches("swiden_low.i64x2").count(), 2, "{clamp}");
+            assert!(!clamp.contains("load.i32x4"), "{clamp}");
         }
         for isel in ["none", "all"] {
             let out = format!("{stem}-{isel}");
@@ -87,6 +94,11 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
         let oracle = include_str!("../../../keel-opt/tests/conditional_widen/oracle.c");
         let adapters = "\nextern uint64_t rk_positive32(const void*,const void*,const void*,uint64_t);\nextern uint64_t rk_balance32(const void*,const void*,const void*,uint64_t);\nuint64_t positive(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_positive32((const char*)a+4*start,0,0,n-start):0);}\nuint64_t balance(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_balance32((const char*)a+4*start,0,0,n-start):0);}\n";
         fs::write(dir.join("oracle.c"), oracle.to_owned() + adapters).unwrap();
+        fs::write(
+            dir.join("clamp.c"),
+            include_str!("../../../keel-opt/tests/packed_clamp/frontend_oracle.c"),
+        )
+        .unwrap();
         let native_target = if cfg!(target_arch = "x86_64") {
             "x86_64-unknown-linux-gnu"
         } else {
@@ -102,6 +114,14 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
                 "test",
             ]));
             run(&mut Command::new(dir.join("test")));
+            run(Command::new("clang").current_dir(&dir).args([
+                "-O2",
+                "clamp.c",
+                &format!("{native_target}-{isel}.o"),
+                "-o",
+                "clamp",
+            ]));
+            assert!(run(&mut Command::new(dir.join("clamp"))).contains("\"status\":\"passed\""));
         }
     }
 }
