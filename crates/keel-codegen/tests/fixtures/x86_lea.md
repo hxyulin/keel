@@ -23,7 +23,7 @@ IR operation exposes IMUL/ADD flags.
 
 `bridge_madd.ir` is the `bridge_madd` function extracted from the C frontend's
 optimized x86-64 Linux output for
-`crates/keel-opt/tests/load_narrow/recurrences.c`. As a retained fixture it does
+`recurrences.c` in this directory. As a retained fixture it does
 not by itself establish activation by a fresh frontend build.
 
 ## Tests

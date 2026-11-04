@@ -42,7 +42,6 @@ pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod internal_fast_calls;
 mod known_bits;
-mod load_narrow;
 mod load_reuse;
 mod loop_memory;
 mod loop_rotate;
@@ -380,7 +379,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[16],
     &stack_cache::StackCache,
     &load_reuse::LoadReuse,
-    &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
     &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,

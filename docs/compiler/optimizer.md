@@ -91,7 +91,6 @@ it; use `run_pipeline` or `run_passes`.
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `sign-extend-idiom` (opt-in) | Recognize a manual signed-byte conversion |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
-| `load-narrow` (opt-in) | Narrow fault-free private stack loads; see `load_narrow.rs` |
 | `constant-args`, `empty-calls`, `unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls |
