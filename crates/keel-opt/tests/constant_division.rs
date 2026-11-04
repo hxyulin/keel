@@ -79,6 +79,62 @@ fn verified_wide_ir_matches_division_and_remainder_in_every_tier() {
     }
 }
 
+/// Every divisor up to 257, every power of two and seeded random divisors,
+/// all in one module through the full pipeline. Each function is checked
+/// around low, final and random quotient multiples.
+#[test]
+fn full_pipeline_matches_division_for_dense_power_and_random_divisors() {
+    let mut random = 0xdec1_a1u64;
+    let mut next = move || {
+        random ^= random << 13;
+        random ^= random >> 7;
+        random ^= random << 17;
+        random
+    };
+    let mut cases = Vec::new();
+    let mut text = String::new();
+    for (ty, width) in [("i32", 32u32), ("i64", 64)] {
+        let mask = u64::MAX >> (64 - width);
+        let mut divisors: std::collections::BTreeSet<u64> = (1..=257).collect();
+        divisors.extend((0..width).map(|bit| 1 << bit));
+        divisors.extend([mask >> 1, (mask >> 1) + 2, mask]);
+        divisors.extend((0..64).map(|_| (next() & mask).max(1)));
+        for d in divisors {
+            for op in ["udiv", "urem"] {
+                let name = format!("f{}", cases.len());
+                text += &source(ty, d, op).replacen("@f(", &format!("@{name}("), 1);
+                text.push('\n');
+                cases.push((name, mask, d, op));
+            }
+        }
+    }
+    let mut module = keel_ir::parse(&text).unwrap();
+    keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let optimized = module.to_string();
+    assert!(!optimized.contains("udiv") && !optimized.contains("urem"));
+    for (name, mask, d, op) in cases {
+        let function = module.functions.iter().find(|f| f.name == name).unwrap();
+        let mut inputs = vec![0, 1, d - 1, d, d.wrapping_add(1) & mask, mask];
+        for q in [1, 2, mask / d, next() % (mask / d).saturating_add(1)] {
+            let multiple = q.wrapping_mul(d);
+            if multiple / d == q {
+                inputs.extend([multiple.wrapping_sub(1), multiple, multiple.wrapping_add(1)]);
+            }
+        }
+        inputs.extend((0..8).map(|_| next()));
+        for n in inputs {
+            let n = n & mask;
+            let expected = if op == "udiv" { n / d } else { n % d };
+            assert_eq!(
+                support::execute(function, &[n]),
+                expected,
+                "{op} {n} by {d} (mask {mask:#x})"
+            );
+        }
+    }
+}
+
 #[test]
 fn full_pipeline_shares_quotient_and_preserves_locations() {
     for d in [3, 7, 10, u64::MAX] {
