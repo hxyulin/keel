@@ -25,7 +25,7 @@ completion ledgers or per-feature progress pages.
 
 | Area | Reference |
 | --- | --- |
-| Commands, architecture and tests | [Toolchain](toolchain.md), [design](compiler/design.md), [testing](development/testing.md) |
+| Commands, architecture and tests | [Toolchain](toolchain.md), [design](compiler/design.md), [testing](development/testing.md), [performance changes](development/performance.md) |
 | C | [Frontend](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md) |
 | Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md) |
 | LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |

@@ -5,6 +5,10 @@
   `refactor`, `test`, `docs`, `build`, `ci`, or `chore`.
 - Write a short, imperative description. Mark breaking changes with `!` and
   explain them in a `BREAKING CHANGE:` footer.
+- End the body of a runtime `perf` commit, and the tip commit of a rejected
+  experiment branch, with the `AB-*` trailer block that `cargo suite ab` prints,
+  one block per host. See `docs/development/performance.md` for the gates and
+  the acceptance rule.
 
 # Validation scope
 

@@ -375,6 +375,9 @@ as an instruction.
 
 ## Profiling a slowdown
 
+To decide whether a compiler change is faster, follow the
+[performance guide](performance.md). This section explains where time goes.
+
 Use an ordinary release build for timing comparisons. On Linux, start with
 hardware counters and sampled stacks on the exact failing workload:
 
