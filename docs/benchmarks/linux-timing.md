@@ -76,6 +76,9 @@ is necessary even with these controls.
    Avoid competition on the measurement CPU's SMT sibling. Record the CPU/cache
    topology; affinity does not isolate a core from interrupts or shared caches.
 
+`cargo suite ab` follows steps 1 to 4 and 6 for the suite benchmarks; see the
+[suite guide](../../suite/README.md#timing-two-compilers).
+
 The fixed file-backed mapping keeps executable placement comparable across
 images. It does not make corresponding functions have identical virtual
 addresses: changing code can change function sizes and layout.

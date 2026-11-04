@@ -294,8 +294,9 @@ arguments run through `test-frontends`, not ordinary test discovery. Use
 
 ## Measurements
 
-Use `python3 suite/c/benchmark_platforms.py --help` for paired application
-compile/runtime comparisons. `integration/compiler-bench/` and `linker/` own
+Use [`cargo suite ab`](#timing-two-compilers) to compare the runtime of two
+Keel compilers. Use `python3 suite/c/benchmark_platforms.py --help` for paired
+application compile/runtime comparisons. `integration/compiler-bench/` and `linker/` own
 public README measurements. Workload names such as `lua` remain unchanged;
 prepared sources and build caches remain under `target/suite/<name>/`.
 
@@ -358,6 +359,71 @@ Use `--expect-identical` as the gate for refactors that must not change
 generated code. Objects that both binaries fail to compile are reported and not
 compared. Retired-instruction totals are per configuration. They come from one
 run, so repeat the run before reading a difference under about one percent.
+
+## Timing two compilers
+
+```sh
+cargo suite ab --baseline main --candidate HEAD --placements 4 --cpu 8 --controller-cpu 0
+cargo suite ab --baseline target/keel-base --candidate target/release/keel --apps lua,yyjson/api
+```
+
+`ab` builds the chosen suites (default: every benchmark) with two Keel
+compilers in one configuration (default `keel-O`) and times them against each
+other. Each side is a Keel binary or a Git revision. A revision is unpacked
+with `git archive` and built with `cargo build --release -p keel` in
+`target/keel-suite/ab/keel-<commit>/`, which later runs reuse.
+
+Before any timing, both builds run the suite's test commands. With `compare`,
+the candidate must print what the baseline prints. Each benchmark must also
+print the same with both builds. `--no-tests` skips the test commands but not
+the benchmark check.
+
+Every further placement relinks both builds with a padding object in front of
+the suite code, which moves every suite function 16 more bytes: placement 0 is
+the normal build, placement 1 moves the code 16 bytes, placement 3 moves it
+48. Placements catch alignment effects that an identical-image control cannot.
+`suite/c/ab_timing.py` then runs each benchmark in blocks. A block runs the
+baseline, the candidate and the control (a copy of the baseline image) twice
+each, in a shuffled order followed by its mirror, so linear drift cancels.
+Placements are shuffled within each round.
+
+On Linux, each placement is one executable path and inode. The timing loop
+overwrites that file in place between runs and keeps a read-only mapping of
+its file-backed `PT_LOAD` pages locked, so every image in a placement runs
+from the same page-cache pages. Children run with ASLR disabled and, with
+`--cpu`, pinned to one CPU. `perf stat` counts `cycles:u` and
+`instructions:u`, plus any `--counters` events. Locking needs enough
+`ulimit -l`; `--no-lock` prefaults the pages without locking them. On macOS,
+each image runs from its own copy with an equal-length path, and
+`/usr/bin/time -l` counts cycles and instructions of the whole process.
+
+A placement's ratio is the median over rounds of the candidate's block sum over
+the baseline's. A workload's change is the geometric mean over placements. The
+verdict applies the acceptance rule to cycles:
+
+- **reject** if a workload is more than 1.5% slower at every placement, and
+  its smallest slowdown exceeds its control's largest distance from no change;
+- **neutral** if the geomean over workloads is inside the identical-control
+  spread, the control's largest distance from no change overall or at any one
+  placement;
+- **accept** if the geomean is -0.5% or better;
+- **reject** otherwise.
+
+The table lists each workload's cycles change, its range over placements, the
+control, the instruction and wall-time changes, and the baseline's own range
+over placements. The run ends with a commit trailer block for the commit
+message. The plan, raw runs and report go to `target/keel-suite/ab/runs/<time>/`.
+
+| Option | Effect |
+|--------|--------|
+| `--apps lua,yyjson/api` | Suites or benchmarks to time |
+| `-c keel-O` | Keel configuration from `suite/configs.toml` |
+| `--placements N` | Code placements (default 4) |
+| `-n N`, `-w N` | Measured and warmup rounds per placement (default 5 and 1) |
+| `--counters EVENTS` | More perf events on Linux, comma-separated |
+| `--cpu N`, `--controller-cpu N` | Benchmark and controller CPUs on Linux |
+| `--no-lock` | Do not lock executable pages on Linux |
+| `--seed N` | Seed of the run order |
 
 ## Checking runtime slowdowns
 

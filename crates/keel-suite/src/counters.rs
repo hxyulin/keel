@@ -7,6 +7,23 @@ use std::collections::BTreeMap;
 /// `instructions` on both systems, and any other requested perf events.
 pub type Counts = BTreeMap<String, u64>;
 
+/// The command prefix that counts `events` (perf names, such as
+/// `cycles:u`) of the command after it and writes them to `output`. macOS
+/// counts cycles and instructions of the whole process, user and kernel.
+pub fn command(events: &[&str], output: &str) -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        ["/usr/bin/time", "-l", "-o", output]
+            .map(String::from)
+            .into()
+    } else {
+        let mut argv: Vec<String> = ["perf", "stat", "-x", ",", "-o", output]
+            .map(String::from)
+            .into();
+        argv.extend(["-e".into(), events.join(","), "--".into()]);
+        argv
+    }
+}
+
 /// The counts in `time -l` or `perf stat -x ,` output. Events that perf did
 /// not count, or counted for only part of the run (multiplexed), are left out.
 pub fn parse(text: &str) -> Counts {

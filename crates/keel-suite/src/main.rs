@@ -8,8 +8,10 @@
 //! cargo suite run lua/fib -n 10      # every configuration, timed
 //! cargo suite compare aarch64-apple-darwin x86_64-unknown-linux-gnu
 //! cargo suite codegen-diff --baseline old/keel --candidate new/keel
+//! cargo suite ab --baseline main --candidate HEAD --placements 4
 //! ```
 
+mod ab;
 mod build;
 mod checks;
 mod codegen_diff;
@@ -108,6 +110,8 @@ enum Command {
     Compare { a: String, b: String },
     /// Compile every suite file to assembly with two keel binaries and report what changed.
     CodegenDiff(codegen_diff::Options),
+    /// Time two keel compilers' builds against each other and give a verdict.
+    Ab(ab::Options),
     /// Check compatible same-host runtime runs for slowdowns.
     Regressions {
         a: String,
@@ -154,6 +158,7 @@ fn run(cli: Cli) -> Result<bool> {
     match cli.command {
         Command::Check { groups, python } => checks::run(&root, &groups, &python),
         Command::CodegenDiff(options) => codegen_diff::run(&root, options, jobs, cli.input_mode),
+        Command::Ab(options) => ab::run(&root, options, jobs, cli.input_mode),
         Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {
             list(&root)?;
