@@ -48,8 +48,8 @@ static __inline__ __attribute__((always_inline)) __m512 _mm512_div_ps(__m512 a, 
 static __inline__ __attribute__((always_inline)) __m512 _mm512_sqrt_ps(__m512 a) { return _mm512_mask_sqrt_ps((__m512){0}, 0xffff, a); }
 static __inline__ __attribute__((always_inline)) __m512 _mm512_load_ps(const void *p) { return _mm512_mask_loadu_ps((__m512){0}, 0xffff, p); }
 static __inline__ __attribute__((always_inline)) void _mm512_store_ps(void *p, __m512 a) { _mm512_mask_storeu_ps(p, 0xffff, a); }
-static __inline__ __attribute__((always_inline)) __m512 _mm512_loadu_ps(const void *p) { return _mm512_mask_loadu_ps((__m512){0}, 0xffff, p); }
-static __inline__ __attribute__((always_inline)) void _mm512_storeu_ps(void *p, __m512 a) { _mm512_mask_storeu_ps(p, 0xffff, a); }
+static __inline__ __attribute__((always_inline)) __m512 _mm512_loadu_ps(const void *p) { return *(const __m512_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm512_storeu_ps(void *p, __m512 a) { *(__m512_u *)p = a; }
 static __inline__ __attribute__((always_inline)) __m512d _mm512_setzero_pd(void) { return (__m512d){0}; }
 static __inline__ __attribute__((always_inline)) __m512d _mm512_set1_pd(double x) { return (__m512d){x, x, x, x, x, x, x, x}; }
 static __inline__ __attribute__((always_inline)) __m512d _mm512_add_pd(__m512d a, __m512d b) { return _mm512_mask_add_pd((__m512d){0}, 0xff, a, b); }
@@ -59,8 +59,8 @@ static __inline__ __attribute__((always_inline)) __m512d _mm512_div_pd(__m512d a
 static __inline__ __attribute__((always_inline)) __m512d _mm512_sqrt_pd(__m512d a) { return _mm512_mask_sqrt_pd((__m512d){0}, 0xff, a); }
 static __inline__ __attribute__((always_inline)) __m512d _mm512_load_pd(const void *p) { return _mm512_mask_loadu_pd((__m512d){0}, 0xff, p); }
 static __inline__ __attribute__((always_inline)) void _mm512_store_pd(void *p, __m512d a) { _mm512_mask_storeu_pd(p, 0xff, a); }
-static __inline__ __attribute__((always_inline)) __m512d _mm512_loadu_pd(const void *p) { return _mm512_mask_loadu_pd((__m512d){0}, 0xff, p); }
-static __inline__ __attribute__((always_inline)) void _mm512_storeu_pd(void *p, __m512d a) { _mm512_mask_storeu_pd(p, 0xff, a); }
+static __inline__ __attribute__((always_inline)) __m512d _mm512_loadu_pd(const void *p) { return *(const __m512d_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm512_storeu_pd(void *p, __m512d a) { *(__m512d_u *)p = a; }
 static __inline__ __attribute__((always_inline)) __m512i _mm512_setzero_si512(void) { return (__m512i){0}; }
 typedef unsigned int __keel_avx512_u32 __attribute__((vector_size(64)));
 static __inline__ __attribute__((always_inline)) __m512i _mm512_set1_epi32(int x) { return (__m512i)(__keel_avx512_u32){x, x, x, x, x, x, x, x, x, x, x, x, x, x, x, x}; }
@@ -77,8 +77,8 @@ static __inline__ __attribute__((always_inline)) __m512i _mm512_xor_si512(__m512
 static __inline__ __attribute__((always_inline)) __m512i _mm512_andnot_si512(__m512i a, __m512i b) { return ~a & b; }
 static __inline__ __attribute__((always_inline)) __m512i _mm512_load_si512(const void *p) { return _mm512_mask_loadu_epi64((__m512i){0}, 0xff, p); }
 static __inline__ __attribute__((always_inline)) void _mm512_store_si512(void *p, __m512i a) { _mm512_mask_storeu_epi64(p, 0xff, a); }
-static __inline__ __attribute__((always_inline)) __m512i _mm512_loadu_si512(const void *p) { return _mm512_mask_loadu_epi64((__m512i){0}, 0xff, p); }
-static __inline__ __attribute__((always_inline)) void _mm512_storeu_si512(void *p, __m512i a) { _mm512_mask_storeu_epi64(p, 0xff, a); }
+static __inline__ __attribute__((always_inline)) __m512i _mm512_loadu_si512(const void *p) { return *(const __m512i_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm512_storeu_si512(void *p, __m512i a) { *(__m512i_u *)p = a; }
 static __inline__ __attribute__((always_inline)) __m512d _mm512_castps_pd(__m512 a) { return (__m512d)a; }
 static __inline__ __attribute__((always_inline)) __m512i _mm512_castps_si512(__m512 a) { return (__m512i)a; }
 static __inline__ __attribute__((always_inline)) __m512 _mm512_castpd_ps(__m512d a) { return (__m512)a; }

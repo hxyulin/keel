@@ -10,6 +10,8 @@ mod batch;
 mod compact_frame;
 #[path = "frontend_direct_ir/initializers.rs"]
 mod initializers;
+#[path = "frontend_direct_ir/x86_wrappers.rs"]
+mod x86_wrappers;
 
 use std::path::Path;
 use std::process::Command;

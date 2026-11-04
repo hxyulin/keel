@@ -71,18 +71,18 @@ static __inline__ __attribute__((always_inline)) __m256i _mm256_setr_m128i(__m12
   return (__m256i){lo[0], lo[1], hi[0], hi[1]};
 }
 static __inline__ __attribute__((always_inline)) __m128 _mm_broadcast_ss(const float *p) {
-  float a; __builtin_memcpy(&a,p,4); return (__m128){a, a, a, a};
+  float a = *p; return (__m128){a, a, a, a};
 }
 static __inline__ __attribute__((always_inline)) __m256 _mm256_broadcast_ss(const float *p) {
-  float a; __builtin_memcpy(&a,p,4); return (__m256){a, a, a, a, a, a, a, a};
+  float a = *p; return (__m256){a, a, a, a, a, a, a, a};
 }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_broadcast_sd(const double *p) {
-  double a; __builtin_memcpy(&a,p,8); return (__m256d){a, a, a, a};
+  double a = *p; return (__m256d){a, a, a, a};
 }
 static __inline__ __attribute__((always_inline)) __m256 _mm256_broadcast_ps(const __m128 *p) {
-  __m128 a; __builtin_memcpy(&a,p,16); return (__m256){a[0], a[1], a[2], a[3], a[0], a[1], a[2], a[3]};
+  __m128 a = *p; return (__m256){a[0], a[1], a[2], a[3], a[0], a[1], a[2], a[3]};
 }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_broadcast_pd(const __m128d *p) {
-  __m128d a; __builtin_memcpy(&a,p,16); return (__m256d){a[0], a[1], a[0], a[1]};
+  __m128d a = *p; return (__m256d){a[0], a[1], a[0], a[1]};
 }
 #endif /* _KEEL_AVX_CONSTRUCT_H */

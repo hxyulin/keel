@@ -16,22 +16,10 @@ static __inline__ __attribute__((always_inline)) __m128d _mm_set1_pd(double x) {
 static __inline__ __attribute__((always_inline)) __m128d _mm_set_pd(double x1, double x0) {
   return (__m128d){x0, x1};
 }
-static __inline__ __attribute__((always_inline)) __m128d _mm_load_pd(const double *p) {
-  __m128d r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_store_pd(double *p, __m128d a) {
-  __builtin_memcpy(p, &a, 16);
-}
-static __inline__ __attribute__((always_inline)) __m128d _mm_loadu_pd(const double *p) {
-  __m128d r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_storeu_pd(double *p, __m128d a) {
-  __builtin_memcpy(p, &a, 16);
-}
+static __inline__ __attribute__((always_inline)) __m128d _mm_load_pd(const double *p) { return *(const __m128d *)p; }
+static __inline__ __attribute__((always_inline)) void _mm_store_pd(double *p, __m128d a) { *(__m128d *)p = a; }
+static __inline__ __attribute__((always_inline)) __m128d _mm_loadu_pd(const double *p) { return *(const __m128d_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm_storeu_pd(double *p, __m128d a) { *(__m128d_u *)p = a; }
 typedef long long __m128i __attribute__((vector_size(16)));
 typedef long long __m128i_u __attribute__((vector_size(16), aligned(1)));
 typedef unsigned char __keel_u8_128 __attribute__((vector_size(16)));
@@ -116,22 +104,10 @@ static __inline__ __attribute__((always_inline)) __m128i _mm_andnot_si128(__m128
   return ~a & b;
 }
 static __inline__ __attribute__((always_inline)) __m128i _mm_setzero_si128(void) { return (__m128i){0}; }
-static __inline__ __attribute__((always_inline)) __m128i _mm_load_si128(const __m128i *p) {
-  __m128i r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_store_si128(__m128i *p, __m128i a) {
-  __builtin_memcpy(p, &a, 16);
-}
-static __inline__ __attribute__((always_inline)) __m128i _mm_loadu_si128(const __m128i_u *p) {
-  __m128i r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_storeu_si128(__m128i_u *p, __m128i a) {
-  __builtin_memcpy(p, &a, 16);
-}
+static __inline__ __attribute__((always_inline)) __m128i _mm_load_si128(const __m128i *p) { return *p; }
+static __inline__ __attribute__((always_inline)) void _mm_store_si128(__m128i *p, __m128i a) { *p = a; }
+static __inline__ __attribute__((always_inline)) __m128i _mm_loadu_si128(const __m128i_u *p) { return *p; }
+static __inline__ __attribute__((always_inline)) void _mm_storeu_si128(__m128i_u *p, __m128i a) { *p = a; }
 static __inline__ __attribute__((always_inline)) __m128d _mm_castps_pd(__m128 a) { return (__m128d)a; }
 static __inline__ __attribute__((always_inline)) __m128i _mm_castps_si128(__m128 a) { return (__m128i)a; }
 static __inline__ __attribute__((always_inline)) __m128 _mm_castpd_ps(__m128d a) { return (__m128)a; }

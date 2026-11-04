@@ -87,22 +87,10 @@ static __inline__ __attribute__((always_inline)) __m256i _mm256_andnot_si256(__m
   return ~a & b;
 }
 static __inline__ __attribute__((always_inline)) __m256i _mm256_setzero_si256(void) { return (__m256i){0}; }
-static __inline__ __attribute__((always_inline)) __m256i _mm256_load_si256(const __m256i *p) {
-  __m256i r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_store_si256(__m256i *p, __m256i a) {
-  __builtin_memcpy(p, &a, 32);
-}
-static __inline__ __attribute__((always_inline)) __m256i _mm256_loadu_si256(const __m256i_u *p) {
-  __m256i r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_storeu_si256(__m256i_u *p, __m256i a) {
-  __builtin_memcpy(p, &a, 32);
-}
+static __inline__ __attribute__((always_inline)) __m256i _mm256_load_si256(const __m256i *p) { return *p; }
+static __inline__ __attribute__((always_inline)) void _mm256_store_si256(__m256i *p, __m256i a) { *p = a; }
+static __inline__ __attribute__((always_inline)) __m256i _mm256_loadu_si256(const __m256i_u *p) { return *p; }
+static __inline__ __attribute__((always_inline)) void _mm256_storeu_si256(__m256i_u *p, __m256i a) { *p = a; }
 #define _mm256_shuffle_epi32(a, i)                                             \
   __extension__({                                                              \
     __m256i __keel_a = (a);                                                    \

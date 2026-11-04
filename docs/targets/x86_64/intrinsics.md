@@ -60,10 +60,14 @@ headers. These rules apply to every wrapper:
 - Each vector operand is evaluated once. Immediate controls must be integer
   constant expressions in the range each wrapper states.
 
-Wrappers use C vectors, lane access and fixed-size `__builtin_memcpy`, or
-checked builtins with dedicated typed IR for architectural operations. All of
-them go through the ordinary IR, optimization, ABI, feature gating and
-instruction selection.
+Wrappers use C vectors, lane access and typed loads and stores, or checked
+builtins with dedicated typed IR for architectural operations. Unaligned
+accesses go through the `aligned(1)` types (`__m128_u`, `__m256i_u`,
+`__m512_u` and the scalar `__keel_i32_u` style types), so each is one IR load
+or store. Unmasked unaligned AVX-512 loads and stores are plain accesses; the
+aligned `_mm512_load_*` and `_mm512_store_*` forms keep the masked intrinsic,
+which faults on a misaligned address. All of them go through the ordinary IR,
+optimization, ABI, feature gating and instruction selection.
 
 ### Integer family and fused/conversion wrappers
 

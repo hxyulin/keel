@@ -31,22 +31,10 @@ static __inline__ __attribute__((always_inline)) __m256 _mm256_set_ps(float x7, 
                                        float x3, float x2, float x1, float x0) {
   return (__m256){x0, x1, x2, x3, x4, x5, x6, x7};
 }
-static __inline__ __attribute__((always_inline)) __m256 _mm256_load_ps(const float *p) {
-  __m256 r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_store_ps(float *p, __m256 a) {
-  __builtin_memcpy(p, &a, 32);
-}
-static __inline__ __attribute__((always_inline)) __m256 _mm256_loadu_ps(const float *p) {
-  __m256 r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_storeu_ps(float *p, __m256 a) {
-  __builtin_memcpy(p, &a, 32);
-}
+static __inline__ __attribute__((always_inline)) __m256 _mm256_load_ps(const float *p) { return *(const __m256 *)p; }
+static __inline__ __attribute__((always_inline)) void _mm256_store_ps(float *p, __m256 a) { *(__m256 *)p = a; }
+static __inline__ __attribute__((always_inline)) __m256 _mm256_loadu_ps(const float *p) { return *(const __m256_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm256_storeu_ps(float *p, __m256 a) { *(__m256_u *)p = a; }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_add_pd(__m256d a, __m256d b) { return a + b; }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_sub_pd(__m256d a, __m256d b) { return a - b; }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_mul_pd(__m256d a, __m256d b) { return a * b; }
@@ -59,22 +47,10 @@ static __inline__ __attribute__((always_inline)) __m256d _mm256_set_pd(double x3
                                         double x0) {
   return (__m256d){x0, x1, x2, x3};
 }
-static __inline__ __attribute__((always_inline)) __m256d _mm256_load_pd(const double *p) {
-  __m256d r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_store_pd(double *p, __m256d a) {
-  __builtin_memcpy(p, &a, 32);
-}
-static __inline__ __attribute__((always_inline)) __m256d _mm256_loadu_pd(const double *p) {
-  __m256d r;
-  __builtin_memcpy(&r, p, 32);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm256_storeu_pd(double *p, __m256d a) {
-  __builtin_memcpy(p, &a, 32);
-}
+static __inline__ __attribute__((always_inline)) __m256d _mm256_load_pd(const double *p) { return *(const __m256d *)p; }
+static __inline__ __attribute__((always_inline)) void _mm256_store_pd(double *p, __m256d a) { *(__m256d *)p = a; }
+static __inline__ __attribute__((always_inline)) __m256d _mm256_loadu_pd(const double *p) { return *(const __m256d_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm256_storeu_pd(double *p, __m256d a) { *(__m256d_u *)p = a; }
 static __inline__ __attribute__((always_inline)) __m256d _mm256_castps_pd(__m256 a) { return (__m256d)a; }
 static __inline__ __attribute__((always_inline)) __m256i _mm256_castps_si256(__m256 a) { return (__m256i)a; }
 static __inline__ __attribute__((always_inline)) __m256 _mm256_castpd_ps(__m256d a) { return (__m256)a; }

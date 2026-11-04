@@ -15,22 +15,10 @@ static __inline__ __attribute__((always_inline)) __m128 _mm_set1_ps(float x) { r
 static __inline__ __attribute__((always_inline)) __m128 _mm_set_ps(float x3, float x2, float x1, float x0) {
   return (__m128){x0, x1, x2, x3};
 }
-static __inline__ __attribute__((always_inline)) __m128 _mm_load_ps(const float *p) {
-  __m128 r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_store_ps(float *p, __m128 a) {
-  __builtin_memcpy(p, &a, 16);
-}
-static __inline__ __attribute__((always_inline)) __m128 _mm_loadu_ps(const float *p) {
-  __m128 r;
-  __builtin_memcpy(&r, p, 16);
-  return r;
-}
-static __inline__ __attribute__((always_inline)) void _mm_storeu_ps(float *p, __m128 a) {
-  __builtin_memcpy(p, &a, 16);
-}
+static __inline__ __attribute__((always_inline)) __m128 _mm_load_ps(const float *p) { return *(const __m128 *)p; }
+static __inline__ __attribute__((always_inline)) void _mm_store_ps(float *p, __m128 a) { *(__m128 *)p = a; }
+static __inline__ __attribute__((always_inline)) __m128 _mm_loadu_ps(const float *p) { return *(const __m128_u *)p; }
+static __inline__ __attribute__((always_inline)) void _mm_storeu_ps(float *p, __m128 a) { *(__m128_u *)p = a; }
 #define _MM_SHUFFLE(z, y, x, w) (((z) << 6) | ((y) << 4) | ((x) << 2) | (w))
 #define _mm_shuffle_ps(a, b, i)                                                \
   __builtin_shufflevector((a), (b), (i) & 3, ((i) >> 2) & 3,                   \
