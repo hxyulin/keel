@@ -23,7 +23,7 @@ pub use metrics::{
     BranchEncoding, EncodingRegion, EncodingReport, EncodingSection, RegionKind, RelocationField,
 };
 use object::elf;
-use object::write::{Comdat, Object, Relocation, Symbol, SymbolSection};
+use object::write::{Comdat, Object, Relocation, SectionId, Symbol, SymbolId, SymbolSection};
 use object::{
     Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
@@ -2763,6 +2763,62 @@ impl Assembler {
     }
     fn finish(mut self, report: Option<&mut EncodingReport>) -> Result<Vec<u8>, Error> {
         let err = |s: String| Error::new(0, s);
+        self.reference_symbols();
+        let (groups, synthetic_signatures) = self.comdat_groups();
+        let mut object = Object::new(
+            BinaryFormat::Elf,
+            if self.arm.is_some() {
+                Architecture::Aarch64
+            } else {
+                Architecture::X86_64
+            },
+            Endianness::Little,
+        );
+        for file in &self.source_files {
+            object.add_file_symbol(file.clone());
+        }
+        let sections = self.add_sections(&mut object);
+        let identity = self.relocation_identities();
+        let symbols = self.add_symbols(
+            &mut object,
+            &sections,
+            &identity,
+            &groups,
+            &synthetic_signatures,
+        )?;
+        let symbol = |id: SymId| symbols[id as usize].expect("no such symbol");
+        for (signature, members) in &groups {
+            object.add_comdat(Comdat {
+                kind: ComdatKind::Any,
+                symbol: symbol(self.symbols.names.get(signature).unwrap()),
+                sections: members.iter().map(|&i| sections[i]).collect(),
+            });
+        }
+        self.add_relocations(&mut object, &sections, &identity, &symbols)?;
+        if let (Some(metrics), Some(report)) = (self.metrics.take(), report) {
+            *report = metrics.finish(&self.sections, &self.fixes);
+        }
+        // Move rather than copy the patched data: large sections would
+        // otherwise be resident twice before serialization makes a third copy.
+        for (i, s) in self.sections.iter_mut().enumerate() {
+            if !s.nobits {
+                object.set_section_data(sections[i], std::mem::take(&mut s.data), s.align);
+            }
+        }
+        let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
+        sections::finalize(
+            &mut bytes,
+            &self.sections,
+            &groups,
+            &synthetic_signatures,
+            self.addrsig.as_deref(),
+        )
+        .map_err(err)?;
+        Ok(bytes)
+    }
+    /// Give every relocation target a symbol table entry. A target named like
+    /// a section and otherwise undefined becomes that section's symbol.
+    fn reference_symbols(&mut self) {
         // Ensure even undefined references receive symbol table entries.
         // Map each name to its first section, as a search in order would.
         let mut section_names = FxHashMap::default();
@@ -2794,6 +2850,10 @@ impl Assembler {
                 }
             }
         }
+    }
+    /// COMDAT group members by signature, and the signatures that need a
+    /// synthetic definition because no other symbol or reference uses the name.
+    fn comdat_groups(&mut self) -> (BTreeMap<String, Vec<usize>>, BTreeSet<String>) {
         let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for (i, section) in self.sections.iter().enumerate() {
             if let Some(signature) = &section.group {
@@ -2833,18 +2893,11 @@ impl Assembler {
             let id = self.symbols.intern(signature);
             self.symbols.entry(id);
         }
-        let mut object = Object::new(
-            BinaryFormat::Elf,
-            if self.arm.is_some() {
-                Architecture::Aarch64
-            } else {
-                Architecture::X86_64
-            },
-            Endianness::Little,
-        );
-        for file in &self.source_files {
-            object.add_file_symbol(file.clone());
-        }
+        (groups, synthetic_signatures)
+    }
+    /// Add every section to `object`. Initialized data is attached after
+    /// relocation patching.
+    fn add_sections(&self, object: &mut Object<'_>) -> Vec<SectionId> {
         let mut sections = Vec::new();
         for s in &self.sections {
             let kind = if s.nobits {
@@ -2872,6 +2925,11 @@ impl Assembler {
             }
             sections.push(id);
         }
+        sections
+    }
+    /// Symbols that relocations must reference by name rather than through
+    /// their section symbol.
+    fn relocation_identities(&self) -> FxHashSet<SymId> {
         let identity: FxHashSet<_> = self
             .fixes
             .iter()
@@ -2902,6 +2960,19 @@ impl Assembler {
             })
             .filter_map(|f| f.expr.add)
             .collect();
+        identity
+    }
+    /// Add the symbol table in name order, dropping temporary local labels.
+    /// Returns the object symbol of each [`SymId`] that has one.
+    fn add_symbols(
+        &self,
+        object: &mut Object<'_>,
+        sections: &[SectionId],
+        identity: &FxHashSet<SymId>,
+        groups: &BTreeMap<String, Vec<usize>>,
+        synthetic_signatures: &BTreeSet<String>,
+    ) -> Result<Vec<Option<SymbolId>>, Error> {
+        let err = |s: String| Error::new(0, s);
         let mut retained = identity.clone();
         if let Some(names) = &self.addrsig {
             retained.extend(names.iter().filter_map(|n| self.symbols.names.get(n)));
@@ -3023,14 +3094,18 @@ impl Assembler {
             };
             symbols[id as usize] = Some(symbol_id);
         }
+        Ok(symbols)
+    }
+    /// Resolve each fixup in place when it is local and absolute or
+    /// PC-relative within its section, and otherwise add a relocation.
+    fn add_relocations(
+        &mut self,
+        object: &mut Object<'_>,
+        sections: &[SectionId],
+        identity: &FxHashSet<SymId>,
+        symbols: &[Option<SymbolId>],
+    ) -> Result<(), Error> {
         let symbols = |id: SymId| symbols[id as usize].expect("no such symbol");
-        for (signature, members) in &groups {
-            object.add_comdat(Comdat {
-                kind: ComdatKind::Any,
-                symbol: symbols(self.symbols.names.get(signature).unwrap()),
-                sections: members.iter().map(|&i| sections[i]).collect(),
-            });
-        }
         for f in &self.fixes {
             let expr = &f.expr;
             let mut kind = f.kind;
@@ -3177,26 +3252,7 @@ impl Assembler {
                     .push((f.section, f.offset, f.width, kind));
             }
         }
-        if let (Some(metrics), Some(report)) = (self.metrics.take(), report) {
-            *report = metrics.finish(&self.sections, &self.fixes);
-        }
-        // Move rather than copy the patched data: large sections would
-        // otherwise be resident twice before serialization makes a third copy.
-        for (i, s) in self.sections.iter_mut().enumerate() {
-            if !s.nobits {
-                object.set_section_data(sections[i], std::mem::take(&mut s.data), s.align);
-            }
-        }
-        let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
-        sections::finalize(
-            &mut bytes,
-            &self.sections,
-            &groups,
-            &synthetic_signatures,
-            self.addrsig.as_deref(),
-        )
-        .map_err(err)?;
-        Ok(bytes)
+        Ok(())
     }
 }
 
