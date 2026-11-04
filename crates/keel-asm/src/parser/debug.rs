@@ -3,6 +3,7 @@
 use super::compact::{self, Rule};
 use super::data::{self, Location};
 use super::text::Trim;
+use crate::dwarf_line::{self, quoted};
 use crate::fxhash::FxHashMap;
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use bumpalo::{Bump, collections::Vec as BumpVec};
@@ -50,23 +51,6 @@ const IS_STMT: u8 = 1;
 const BASIC_BLOCK: u8 = 2;
 const PROLOGUE_END: u8 = 4;
 const EPILOGUE_BEGIN: u8 = 8;
-/// Splits one leading quoted string, honoring backslash escapes.
-fn quoted(s: &str) -> Result<(&str, &str), String> {
-    let s = s.trim_fast();
-    let bytes = s.as_bytes();
-    if bytes.first() != Some(&b'"') {
-        return Err("expected quoted string".into());
-    }
-    let mut i = 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 2,
-            b'"' => return Ok((&s[..=i], &s[i + 1..])),
-            _ => i += 1,
-        }
-    }
-    Err("unterminated string".into())
-}
 /// LLVM's POSIX `sys::path::parent_path`/`filename` split of a `.file` name
 /// without a directory. Spellings where LLVM yields surprising components
 /// (a trailing separator, or a leading `//` network root) are rejected.
@@ -945,26 +929,7 @@ impl<'a> Debug<'a> {
         let length_at = bytes.len();
         bytes.extend_from_slice(&[0; 4]);
         let header = bytes.len();
-        bytes.extend_from_slice(&[
-            1,
-            1,
-            1,
-            (-5i8) as u8,
-            14,
-            13,
-            0,
-            1,
-            1,
-            1,
-            1,
-            0,
-            0,
-            0,
-            1,
-            0,
-            0,
-            1,
-        ]);
+        bytes.extend_from_slice(&dwarf_line::PROGRAM_PARAMETERS);
         if let Some((compilation, root)) = &self.root {
             tables5(
                 a,
@@ -976,18 +941,11 @@ impl<'a> Debug<'a> {
                 &mut bytes,
             )?;
         } else {
-            for directory in &self.directories {
-                bytes.extend(directory);
-                bytes.push(0);
-            }
-            bytes.push(0);
-            for file in self.files.values() {
-                bytes.extend(&file.name);
-                bytes.push(0);
-                leb128::unsigned(&mut bytes, file.directory.into());
-                bytes.extend_from_slice(&[0, 0]);
-            }
-            bytes.push(0);
+            dwarf_line::v4_tables(
+                &mut bytes,
+                &self.directories,
+                self.files.values().map(|f| (&f.name[..], f.directory)),
+            );
         }
         let len = (bytes.len() - header) as u32;
         bytes[length_at..header].copy_from_slice(&len.to_le_bytes());

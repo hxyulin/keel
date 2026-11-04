@@ -2,6 +2,7 @@
 //! location flag survive assembly; unsupported operands are diagnosed.
 use super::metadata::leb;
 use super::{Assembler, Expr, Fix, RelocKind, Sym};
+use crate::dwarf_line::{self, quoted};
 use keel_asm_ir::x86::{self, Modifier};
 use std::collections::BTreeMap;
 
@@ -30,21 +31,6 @@ struct Row {
     flags: u8,
     isa: u32,
     discriminator: u32,
-}
-fn quoted(s: &str) -> Result<(&str, &str), String> {
-    let s = s.trim();
-    if !s.starts_with('"') {
-        return Err("expected quoted string".into());
-    }
-    let mut i = 1;
-    while i < s.len() {
-        match s.as_bytes()[i] {
-            b'\\' => i += 2,
-            b'"' => return Ok((&s[..=i], &s[i + 1..])),
-            _ => i += 1,
-        }
-    }
-    Err("unterminated string".into())
 }
 impl Debug {
     pub(super) fn parse_file(&mut self, args: &str) -> Result<(), String> {
@@ -301,26 +287,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
     let length_at = b.len();
     b.extend([0; 4]);
     let header_at = b.len();
-    b.extend([
-        1,
-        1,
-        1,
-        (-5i8) as u8,
-        14,
-        13,
-        0,
-        1,
-        1,
-        1,
-        1,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
-        1,
-    ]);
+    b.extend(dwarf_line::PROGRAM_PARAMETERS);
     if let Some(root) = &d.root {
         a.section_metadata(".debug_line_str", Some(0x30), false, 1, None)?;
         let string_section = a.current;
@@ -378,18 +345,11 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
         a.bytes(&strings)?;
         a.current = line_section;
     } else {
-        for dir in &d.directories {
-            b.extend(dir);
-            b.push(0);
-        }
-        b.push(0);
-        for f in d.files.values() {
-            b.extend(&f.name);
-            b.push(0);
-            leb(&mut b, f.directory.into(), false)?;
-            b.extend([0, 0]);
-        }
-        b.push(0);
+        dwarf_line::v4_tables(
+            &mut b,
+            &d.directories,
+            d.files.values().map(|f| (&f.name[..], f.directory)),
+        );
     }
     let length = b.len() - header_at;
     patch32(&mut b, length_at, length)?;
