@@ -1101,6 +1101,9 @@ fn execute_pipeline(
                     .map(|f| (name_key(&f.name), f.fingerprint())),
             );
         }
+        if reporting {
+            instcombine::clear_hits();
+        }
         let start = reporting.then(Instant::now);
         versions.changed.clear();
         let module_changed = pass.run_module(
@@ -1181,6 +1184,7 @@ fn execute_pipeline(
                     before: before.expect("reporting captured module counts"),
                     after: IrCounts::module(module),
                     inline_sites: inline_sites.expect("reporting enabled module observations"),
+                    rules: instcombine::take_hits(),
                 });
             }
             result?;
@@ -1213,6 +1217,7 @@ fn execute_pipeline(
                         after: before.clone(),
                         before,
                         inline_sites: Vec::new(),
+                        rules: Vec::new(),
                     });
                 }
                 continue;
@@ -1245,6 +1250,9 @@ fn execute_pipeline(
                 // completed invocation to append to the report.
                 result?;
                 canonical[index] = true;
+            }
+            if reporting {
+                instcombine::clear_hits();
             }
             let start = reporting.then(Instant::now);
             let function_context = OptimizationContext {
@@ -1295,6 +1303,7 @@ fn execute_pipeline(
                     before: before.expect("reporting captured function counts"),
                     after: IrCounts::function(func),
                     inline_sites: Vec::new(),
+                    rules: instcombine::take_hits(),
                 });
             }
             result?;

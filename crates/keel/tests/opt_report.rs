@@ -66,6 +66,10 @@ fn reports_are_explicit_and_do_not_change_stdout_or_named_output() {
         assert_eq!(plain.stderr, output.stderr);
         let report = fs::read_to_string(dir.join(&name)).unwrap();
         assert!(report.starts_with("{\"schema_version\":2,\"invocations\":["));
+        assert_eq!(
+            report.matches(",\"rules\":{").count(),
+            report.matches("{\"pipeline_index\":").count()
+        );
         if n == 4 {
             assert_eq!(report, "{\"schema_version\":2,\"invocations\":[]}\n");
         }

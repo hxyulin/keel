@@ -105,6 +105,9 @@ pub struct PassObservation {
     pub before: IrCounts,
     pub after: IrCounts,
     pub inline_sites: Vec<InlineSite>,
+    /// Instcombine rule hits during the invocation, by rule name, the
+    /// nonzero ones in rule order. Other passes that run its kernel count too.
+    pub rules: Vec<(&'static str, u64)>,
 }
 #[derive(Debug, Default)]
 pub struct OptimizationReport {
@@ -187,7 +190,14 @@ impl OptimizationReport {
                     write!(out, ",\"experimental_net_growth\":{growth}}}").unwrap();
                 }
             }
-            out.push_str("]}");
+            out.push_str("],\"rules\":{");
+            for (i, (rule, hits)) in p.rules.iter().enumerate() {
+                if i != 0 {
+                    out.push(',');
+                }
+                write!(out, "{}:{hits}", quoted(rule)).unwrap();
+            }
+            out.push_str("}}");
         }
         out.push(']');
         if let Some(budget) = &self.inline_budget {

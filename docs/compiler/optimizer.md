@@ -172,6 +172,12 @@ zero extension. These rules also run in Fast. i128 literals are created only
 when the IR's sign-extended i64 immediate can represent them. Combining skips
 producers whose result is already aliased.
 
+Each rule has a name, such as `identity-zero`, `power-of-two` or
+`compare-range`, declared in the `rules!` list in `instcombine.rs`. The
+optimization report counts a rule each time its rewrite is applied, per
+invocation, in the invocation's `rules` object. Fast and the other passes that
+call the `instcombine` kernel count under their own invocations.
+
 ## Integer facts
 
 `known-bits` stores disjoint known-zero and known-one masks for each integer

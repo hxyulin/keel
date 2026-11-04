@@ -310,6 +310,7 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
         before: IrCounts::default(),
         after: IrCounts::default(),
         inline_sites: vec![],
+        rules: vec![("identity-zero", 2)],
     };
     let PassObservation {
         pipeline_index: _,
@@ -326,6 +327,7 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
         before: _,
         after: _,
         inline_sites: _,
+        rules: _,
     } = &observation;
     let report = OptimizationReport {
         invocations: vec![observation],
@@ -334,6 +336,7 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
     let json = report.to_json();
     assert!(json.starts_with("{\"schema_version\":2,\"invocations\":["));
     assert!(!json.contains("context"));
+    assert!(json.contains(",\"inline_sites\":[],\"rules\":{\"identity-zero\":2}}]"));
     let context = OptimizationContext::new(
         VectorTarget::X86Sse2,
         VectorCapabilities::new(true, true, false, 123),

@@ -515,3 +515,37 @@ fn failed_canonical_restoration_does_not_execute_or_report_the_requested_pass() 
     assert!(report.invocations.is_empty());
     assert_eq!(plain.to_string(), observed.to_string());
 }
+
+#[test]
+fn instcombine_rule_hits_belong_to_their_invocation() {
+    // @f: x + 0, then (x + 0) * 8. @g has nothing to combine.
+    let source = "func @f(i64) -> i64 {\nblock0(v0: i64):\n v1 = iconst.i64 0\n v2 = iadd v0, v1\n v3 = iconst.i64 8\n v4 = imul v2, v3\n return v4\n}\n\
+                  func @g(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}";
+    let (_, report) = observed(source, &["instcombine", "dce", "instcombine"]);
+    let rules: Vec<_> = report
+        .invocations
+        .iter()
+        .map(|p| (p.pass, p.function.as_deref().unwrap(), p.rules.clone()))
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            (
+                "instcombine",
+                "f",
+                vec![("identity-zero", 1), ("power-of-two", 1)]
+            ),
+            ("instcombine", "g", vec![]),
+            ("dce", "f", vec![]),
+            ("dce", "g", vec![]),
+            ("instcombine", "f", vec![]),
+            ("instcombine", "g", vec![]),
+        ]
+    );
+    let json = report.to_json();
+    assert!(
+        json.contains("\"rules\":{\"identity-zero\":1,\"power-of-two\":1}}"),
+        "{json}"
+    );
+    assert_eq!(json.matches("\"rules\":{}").count(), 5);
+}

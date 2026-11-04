@@ -22,6 +22,90 @@ use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
     Value, ValueDef,
 };
+use std::cell::Cell;
+
+/// Declares `Rule` and its report names in one list.
+macro_rules! rules {
+    ($($rule:ident = $name:literal,)*) => {
+        /// The simplification rules, named for the optimization report. A
+        /// rule is counted when its rewrite is applied; the report lists each
+        /// invocation's nonzero counts in this order.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum Rule {
+            $($rule,)*
+        }
+        const RULE_NAMES: [&str; [$($name,)*].len()] = [$($name,)*];
+    };
+}
+
+rules! {
+    Vector = "vector",
+    OverflowConstants = "overflow-constants",
+    Select = "select",
+    ConstantFold = "constant-fold",
+    CompareRange = "compare-range",
+    IdentityZero = "identity-zero",
+    SelfCancel = "self-cancel",
+    Idempotent = "idempotent",
+    MultiplyOne = "multiply-one",
+    AnnihilateZero = "annihilate-zero",
+    AllOnes = "all-ones",
+    DivideOne = "divide-one",
+    RemainderUnit = "remainder-unit",
+    ShiftByWidth = "shift-by-width",
+    MaskOfZeroExtend = "mask-of-zero-extend",
+    Boolean = "boolean",
+    KnownBits = "known-bits",
+    Algebra = "algebra",
+    PowerOfTwo = "power-of-two",
+    ConstantDivision = "constant-division",
+    Involution = "involution",
+    NonnegativeSignExtend = "nonnegative-sign-extend",
+    SameWidthConvert = "same-width-convert",
+    TruncateBitwise = "truncate-bitwise",
+    ConstantAddress = "constant-address",
+    PointerRoundTrip = "pointer-round-trip",
+    ExtensionChain = "extension-chain",
+    CompareSelf = "compare-self",
+    CompareNarrowZero = "compare-narrow-zero",
+    CompareOfCompare = "compare-of-compare",
+    CompareExtensions = "compare-extensions",
+    Canonicalize = "canonicalize",
+    BranchCondition = "branch-condition",
+    QuotientReuse = "quotient-reuse",
+}
+
+impl Rule {
+    fn hit(self) {
+        HITS.with(|hits| {
+            let count = &hits[self as usize];
+            count.set(count.get() + 1);
+        });
+    }
+}
+
+thread_local! {
+    static HITS: [Cell<u64>; RULE_NAMES.len()] =
+        const { [const { Cell::new(0) }; RULE_NAMES.len()] };
+}
+
+/// Rule hits on this thread since the last call or [`clear_hits`], the
+/// nonzero ones in rule order. Clears the counts.
+pub(crate) fn take_hits() -> Vec<(&'static str, u64)> {
+    HITS.with(|hits| {
+        hits.iter()
+            .zip(RULE_NAMES)
+            .filter_map(|(count, name)| {
+                let n = count.replace(0);
+                (n != 0).then_some((name, n))
+            })
+            .collect()
+    })
+}
+
+pub(crate) fn clear_hits() {
+    HITS.with(|hits| hits.iter().for_each(|count| count.set(0)));
+}
 
 enum Fold {
     Value(Value),
@@ -793,7 +877,7 @@ fn has_rules(data: &InstData) -> bool {
 
 /// `canonical` promises that `inst` is in canonical form, which spares the
 /// normalization check.
-fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Option<Fold> {
+fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Option<(Rule, Fold)> {
     // Other opcodes have no rules here; at most canonicalization changes them.
     // The opcode decides that before results are read.
     let data = func.inst_data(inst);
@@ -817,10 +901,10 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
     };
 
     if let Some(fold) = vector::simplify(func, &data, uses) {
-        return Some(fold);
+        return Some((Rule::Vector, fold));
     }
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
-        return Some(Fold::Multi(constants));
+        return Some((Rule::OverflowConstants, Fold::Multi(constants)));
     }
     let ty = func.value_type(result);
     // Recursive known-bit rules, reassociation and division expansion are
@@ -829,48 +913,52 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
     if let InstData::Select { args: [cond, a, b] } = data
         && let Some(fold) = select(func, cond, a, b, ty, full)
     {
-        return Some(fold);
+        return Some((Rule::Select, fold));
     }
     if !matches!(data, InstData::Iconst { .. } | InstData::Fconst { .. })
         && func.inst_results(inst).len() == 1
         && let Some(folded) = const_fold::fold(&data, |v| constant(func, v))
     {
-        return Some(Fold::Data(folded));
+        return Some((Rule::ConstantFold, Fold::Data(folded)));
     }
     if let InstData::Icmp { cond, args: [a, b] } = data
         && full
         && a != b
         && let Some(fold) = compare(func, inst, cond, a, b)
     {
-        return Some(fold);
+        return Some((Rule::CompareRange, fold));
     }
     match data {
         InstData::Binary { op, args: [a, b] } if !op.is_float() => {
             let (x, y) = (bits(func, a), bits(func, b));
-            match op {
+            let identity = match op {
                 BinaryOp::Iadd | BinaryOp::Or | BinaryOp::Xor if y == Some(0) => {
-                    return Some(Fold::Value(a));
+                    Some((Rule::IdentityZero, Fold::Value(a)))
                 }
                 BinaryOp::Iadd | BinaryOp::Or | BinaryOp::Xor if x == Some(0) => {
-                    return Some(Fold::Value(b));
+                    Some((Rule::IdentityZero, Fold::Value(b)))
                 }
-                BinaryOp::Isub if y == Some(0) => return Some(Fold::Value(a)),
-                BinaryOp::Isub | BinaryOp::Xor if a == b => return Some(zero(ty)),
-                BinaryOp::And | BinaryOp::Or if a == b => return Some(Fold::Value(a)),
-                BinaryOp::Imul if y == Some(1) => return Some(Fold::Value(a)),
-                BinaryOp::Imul if x == Some(1) => return Some(Fold::Value(b)),
+                BinaryOp::Isub if y == Some(0) => Some((Rule::IdentityZero, Fold::Value(a))),
+                BinaryOp::Isub | BinaryOp::Xor if a == b => Some((Rule::SelfCancel, zero(ty))),
+                BinaryOp::And | BinaryOp::Or if a == b => Some((Rule::Idempotent, Fold::Value(a))),
+                BinaryOp::Imul if y == Some(1) => Some((Rule::MultiplyOne, Fold::Value(a))),
+                BinaryOp::Imul if x == Some(1) => Some((Rule::MultiplyOne, Fold::Value(b))),
                 BinaryOp::Imul | BinaryOp::And if x == Some(0) || y == Some(0) => {
-                    return Some(zero(ty));
+                    Some((Rule::AnnihilateZero, zero(ty)))
                 }
-                BinaryOp::And if x == Some(mask(ty)) => return Some(Fold::Value(b)),
-                BinaryOp::And if y == Some(mask(ty)) => return Some(Fold::Value(a)),
+                BinaryOp::And if x == Some(mask(ty)) => Some((Rule::AllOnes, Fold::Value(b))),
+                BinaryOp::And if y == Some(mask(ty)) => Some((Rule::AllOnes, Fold::Value(a))),
                 BinaryOp::Or if x == Some(mask(ty)) || y == Some(mask(ty)) => {
-                    return Some(Fold::Data(InstData::Iconst { ty, imm: -1 }));
+                    Some((Rule::AllOnes, Fold::Data(InstData::Iconst { ty, imm: -1 })))
                 }
-                BinaryOp::Udiv | BinaryOp::Sdiv if y == Some(1) => return Some(Fold::Value(a)),
-                BinaryOp::Urem | BinaryOp::Srem if y == Some(1) => return Some(zero(ty)),
+                BinaryOp::Udiv | BinaryOp::Sdiv if y == Some(1) => {
+                    Some((Rule::DivideOne, Fold::Value(a)))
+                }
+                BinaryOp::Urem | BinaryOp::Srem if y == Some(1) => {
+                    Some((Rule::RemainderUnit, zero(ty)))
+                }
                 // Unlike signed division, MIN % -1 is defined and equals zero.
-                BinaryOp::Srem if y == Some(mask(ty)) => return Some(zero(ty)),
+                BinaryOp::Srem if y == Some(mask(ty)) => Some((Rule::RemainderUnit, zero(ty))),
                 BinaryOp::Shl
                 | BinaryOp::Ushr
                 | BinaryOp::Sshr
@@ -878,10 +966,13 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 | BinaryOp::Rotr
                     if y.is_some_and(|n| n % (8 * ty.bytes().unwrap()) as u128 == 0) =>
                 {
-                    return Some(Fold::Value(a));
+                    Some((Rule::ShiftByWidth, Fold::Value(a)))
                 }
-                BinaryOp::Ptradd if y == Some(0) => return Some(Fold::Value(a)),
-                _ => {}
+                BinaryOp::Ptradd if y == Some(0) => Some((Rule::IdentityZero, Fold::Value(a))),
+                _ => None,
+            };
+            if identity.is_some() {
+                return identity;
             }
             // A widening zero extension has no possible bits above its source
             // width. The literal's upper bits do not matter to this identity.
@@ -903,18 +994,18 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                             m & source_mask == source_mask
                         })
                     {
-                        return Some(Fold::Value(extended));
+                        return Some((Rule::MaskOfZeroExtend, Fold::Value(extended)));
                     }
                 }
             }
             if let Some(fold) = boolean(func, op, a, b, ty) {
-                return Some(fold);
+                return Some((Rule::Boolean, fold));
             }
             if full && let Some(fold) = bits_and_shifts(func, inst, op, a, b, ty) {
-                return Some(fold);
+                return Some((Rule::KnownBits, fold));
             }
             if full && let Some(fold) = algebra(func, inst, op, a, b, ty, uses) {
-                return Some(fold);
+                return Some((Rule::Algebra, fold));
             }
             let power = match op {
                 BinaryOp::Imul => y.or(x),
@@ -935,10 +1026,13 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                         // Remainder by a power of two is a mask; use a
                         // same-width constant and retain the result handle.
                         let c = literal(func, inst, ty, power - 1)?;
-                        return Some(Fold::Data(InstData::Binary {
-                            op: BinaryOp::And,
-                            args: [a, c],
-                        }));
+                        return Some((
+                            Rule::PowerOfTwo,
+                            Fold::Data(InstData::Binary {
+                                op: BinaryOp::And,
+                                args: [a, c],
+                            }),
+                        ));
                     }
                     _ => return None,
                 };
@@ -950,17 +1044,20 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     },
                 );
                 func.set_inst_loc(c, func.inst_loc(inst));
-                return Some(Fold::Data(InstData::Binary {
-                    op: new_op,
-                    args: [operand, func.first_result(c)],
-                }));
+                return Some((
+                    Rule::PowerOfTwo,
+                    Fold::Data(InstData::Binary {
+                        op: new_op,
+                        args: [operand, func.first_result(c)],
+                    }),
+                ));
             }
             if matches!(op, BinaryOp::Udiv | BinaryOp::Urem)
                 && full
                 && let Some(divisor) = y
                 && let Some(data) = constant_division::reduce(func, inst, op, a, b, ty, divisor)
             {
-                return Some(Fold::Data(data));
+                return Some((Rule::ConstantDivision, Fold::Data(data)));
             }
         }
         InstData::Unary {
@@ -977,7 +1074,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 && let InstData::Unary { op, .. } = data
                 && inner_op == op
             {
-                return Some(Fold::Value(original));
+                return Some((Rule::Involution, Fold::Value(original)));
             }
         }
         InstData::Convert { op, ty, arg } => {
@@ -995,17 +1092,20 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     func.value_type(literal) == from
                         && bits(func, literal).is_some_and(|m| m & sign == 0)
                 }) {
-                    return Some(Fold::Data(InstData::Convert {
-                        op: ConvertOp::Uext,
-                        ty,
-                        arg,
-                    }));
+                    return Some((
+                        Rule::NonnegativeSignExtend,
+                        Fold::Data(InstData::Convert {
+                            op: ConvertOp::Uext,
+                            ty,
+                            arg,
+                        }),
+                    ));
                 }
             }
             if matches!(op, ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc)
                 && ty == func.value_type(arg)
             {
-                return Some(Fold::Value(arg));
+                return Some((Rule::SameWidthConvert, Fold::Value(arg)));
             }
             // Truncation ignores an operation that cannot change its low bits.
             if op == ConvertOp::Trunc
@@ -1018,7 +1118,10 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     _ => false,
                 }
             {
-                return Some(Fold::Data(InstData::Convert { op, ty, arg: x }));
+                return Some((
+                    Rule::TruncateBitwise,
+                    Fold::Data(InstData::Convert { op, ty, arg: x }),
+                ));
             }
             if op == ConvertOp::PtrToInt
                 && let Some((BinaryOp::Ptradd, [base, offset])) = binary(func, arg)
@@ -1030,10 +1133,13 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 } = *func.inst_data(base_inst)
                 && let (Some(number), Some(offset)) = (bits(func, number), bits(func, offset))
             {
-                return Some(Fold::Data(InstData::Iconst {
-                    ty: Type::I64,
-                    imm: number.wrapping_add(offset) as u64 as i64,
-                }));
+                return Some((
+                    Rule::ConstantAddress,
+                    Fold::Data(InstData::Iconst {
+                        ty: Type::I64,
+                        imm: number.wrapping_add(offset) as u64 as i64,
+                    }),
+                ));
             }
             let ValueDef::Result(inner, _) = func.value_def(arg) else {
                 return None;
@@ -1051,7 +1157,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                         | (ConvertOp::IntToPtr, ConvertOp::PtrToInt)
                 )
             {
-                return Some(Fold::Value(original));
+                return Some((Rule::PointerRoundTrip, Fold::Value(original)));
             }
             if let InstData::Convert {
                 op: inner_op,
@@ -1067,7 +1173,9 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 let original = func.resolve(original);
                 let from = func.value_type(original);
                 let combined = match (op, inner_op) {
-                    (ConvertOp::Trunc, _) if ty == from => return Some(Fold::Value(original)),
+                    (ConvertOp::Trunc, _) if ty == from => {
+                        return Some((Rule::ExtensionChain, Fold::Value(original)));
+                    }
                     (ConvertOp::Trunc, _) if ty.bytes() < from.bytes() => Some(ConvertOp::Trunc),
                     (ConvertOp::Trunc, ConvertOp::Uext | ConvertOp::Sext) => Some(inner_op),
                     (ConvertOp::Uext | ConvertOp::Sext, ConvertOp::Uext) => Some(ConvertOp::Uext),
@@ -1077,11 +1185,14 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     _ => None,
                 };
                 if let Some(op) = combined {
-                    return Some(Fold::Data(InstData::Convert {
-                        op,
-                        ty,
-                        arg: original,
-                    }));
+                    return Some((
+                        Rule::ExtensionChain,
+                        Fold::Data(InstData::Convert {
+                            op,
+                            ty,
+                            arg: original,
+                        }),
+                    ));
                 }
             }
         }
@@ -1090,10 +1201,13 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 cond,
                 IntCC::Eq | IntCC::Sle | IntCC::Sge | IntCC::Ule | IntCC::Uge
             );
-            return Some(Fold::Data(InstData::Iconst {
-                ty: Type::I8,
-                imm: i64::from(truth),
-            }));
+            return Some((
+                Rule::CompareSelf,
+                Fold::Data(InstData::Iconst {
+                    ty: Type::I8,
+                    imm: i64::from(truth),
+                }),
+            ));
         }
         InstData::Icmp { cond, args: [a, b] } if matches!(cond, IntCC::Eq | IntCC::Ne) => {
             if bits(func, b) == Some(0) {
@@ -1106,10 +1220,13 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                         },
                     );
                     func.set_inst_loc(zero, func.inst_loc(inst));
-                    return Some(Fold::Data(InstData::Icmp {
-                        cond,
-                        args: [source, func.first_result(zero)],
-                    }));
+                    return Some((
+                        Rule::CompareNarrowZero,
+                        Fold::Data(InstData::Icmp {
+                            cond,
+                            args: [source, func.first_result(zero)],
+                        }),
+                    ));
                 }
                 if func.value_type(a) == Type::I8
                     && let ValueDef::Result(inner, 0) = func.value_def(a)
@@ -1121,14 +1238,17 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     // Integer comparisons are canonical i8 0/1. Copying their
                     // payload preserves this result's identity and location,
                     // without changing any other use of the inner comparison.
-                    return Some(Fold::Data(InstData::Icmp {
-                        cond: if cond == IntCC::Eq {
-                            invert_integer(inner_cond)
-                        } else {
-                            inner_cond
-                        },
-                        args: args.map(|v| func.resolve(v)),
-                    }));
+                    return Some((
+                        Rule::CompareOfCompare,
+                        Fold::Data(InstData::Icmp {
+                            cond: if cond == IntCC::Eq {
+                                invert_integer(inner_cond)
+                            } else {
+                                inner_cond
+                            },
+                            args: args.map(|v| func.resolve(v)),
+                        }),
+                    ));
                 }
             }
             if let ValueDef::Result(left, 0) = func.value_def(a)
@@ -1152,13 +1272,16 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     && from == func.value_type(y)
                     && from.bytes() < ty.bytes()
                 {
-                    return Some(Fold::Data(InstData::Icmp { cond, args: [x, y] }));
+                    return Some((
+                        Rule::CompareExtensions,
+                        Fold::Data(InstData::Icmp { cond, args: [x, y] }),
+                    ));
                 }
             }
         }
         _ => {}
     }
-    canonicalized.then_some(Fold::Data(data))
+    canonicalized.then_some((Rule::Canonicalize, Fold::Data(data)))
 }
 
 /// Reuse only a quotient already executed earlier in this block. Keeping that
@@ -1222,6 +1345,7 @@ pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Qu
         op: BinaryOp::Isub,
         args: [args[0], func.first_result(product)],
     };
+    Rule::QuotientReuse.hit();
     true
 }
 
@@ -1272,6 +1396,7 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
                 *func.inst_data_mut(inst) = data;
                 func.inst_data(inst)
                     .for_each_operand(|v| users.push(func.resolve(v), inst));
+                Rule::BranchCondition.hit();
                 changed = true;
                 canonical = false;
             }
@@ -1281,7 +1406,7 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
         let fold = simplify(func, inst, Uses::Users(&lazy), canonical);
         // New instructions need not be canonical, even without a fold.
         canonical &= fold.is_none() && func.num_insts() == insts;
-        let Some(fold) = fold else {
+        let Some((rule, fold)) = fold else {
             continue;
         };
         let users = lazy.get_mut(func);
@@ -1330,6 +1455,7 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
                 work.push(user);
             }
         }
+        rule.hit();
         changed = true;
     }
     changed
@@ -1342,7 +1468,7 @@ pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
     if func.inst_results(inst).is_empty() {
         return false;
     }
-    let Some(fold) = simplify(func, inst, Uses::Unknown, false) else {
+    let Some((rule, fold)) = simplify(func, inst, Uses::Unknown, false) else {
         return false;
     };
     match fold {
@@ -1363,6 +1489,7 @@ pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
         }
         Fold::Multi(constants) => const_fold::replace_with_constants(func, inst, &constants),
     }
+    rule.hit();
     true
 }
 
