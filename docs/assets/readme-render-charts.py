@@ -70,12 +70,13 @@ def render(data, chart):
         by_label = {label: value for label, value, _ in rows}
         headline = chart['headline']
         speedup = by_label[headline['slow']] / by_label[headline['fast']]
-        headline_text = f'{speedup:.1f}× faster'
+        factor, word = (speedup, 'faster') if speedup >= 1 else (1 / speedup, 'slower')
+        headline_text = f'{factor:.1f}× {word}'
         caption = f'{headline["fast"]} vs {headline["slow"]}'
         axis = f'Wall time ({unit}) · lower is better'
         label_value = lambda v: f'{fmt(v)} {unit}'
         desc = '; '.join(f'{label}: {fmt(v)} {unit}' for label, v, _ in rows)
-        desc += f'. {headline["fast"]} is {speedup:.1f}× faster than {headline["slow"]}.'
+        desc += f'. {headline["fast"]} is {factor:.1f}× {word} than {headline["slow"]}.'
     machine = chart.get('machine', data['machine'])
     statistic = chart.get('statistic', data['statistic'])
     desc += f' {machine}, {statistic}.'
