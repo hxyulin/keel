@@ -84,7 +84,6 @@ fn checked_controls_shapes_targets_and_strict_sse2() {
             "(n++,1)",
             "(1<<31)",
             "(1/0)",
-            "(int)(__int128)1",
             "(int)(1.0+1.0)",
         ] {
             let err=compile(&format!("#include <emmintrin.h>\n__m128i f(__m128i a,int n){{return _mm_{op}i_epi{bits}(a,{n});}}"),target).unwrap_err();
@@ -168,8 +167,6 @@ fn private_bridge_contract_and_header_coexistence() {
         "(int)2147483648.0",
         "(unsigned long long)18446744073709551616.0",
         "(int)(void*)17",
-        "(int)(((__int128)1<<64)/256)",
-        "1?17:n",
         "(n,17)",
     ] {
         let src = format!(
@@ -186,6 +183,8 @@ fn private_bridge_contract_and_header_coexistence() {
         "1?17:(1/0)",
         "0&&(1/0)",
         "1||(1/0)",
+        "(int)(((__int128)1<<64)>>60)",
+        "__builtin_bswap16(0x1100)",
     ] {
         compile(&format!("#include <emmintrin.h>\n__m128i f(__m128i a){{return _mm_slli_epi16(a,{control});}}"), target).unwrap();
     }

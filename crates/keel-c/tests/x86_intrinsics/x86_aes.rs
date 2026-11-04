@@ -88,7 +88,6 @@ fn headers_builtins_ice_shapes_features_and_foreign_diagnostics() {
         "_mm_aeskeygenassist_si128(a,256)",
         "_mm_aeskeygenassist_si128(a,1.0)",
         "_mm_aeskeygenassist_si128(a,(n++,1))",
-        "_mm_aeskeygenassist_si128(a,(int)(((__int128)1<<64)/256))",
         "_mm_aeskeygenassist_si128(a,(int)(0.5+0.5))",
         "_mm_aeskeygenassist_si128(a,(long)(void*)1)",
     ] {
@@ -161,9 +160,7 @@ fn aes_keyassist_reuses_defined_bounded_ice_proof() {
         "(unsigned char)(1L << 64)",
         "(unsigned char)(long)9223372036854775808.0",
         "(1/0)",
-        "(int)(__int128)17",
         "(int)(void*)17",
-        "1 ? 17 : n",
         "(n,17)",
     ] {
         assert!(

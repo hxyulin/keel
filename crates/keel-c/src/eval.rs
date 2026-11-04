@@ -118,18 +118,78 @@ pub(crate) fn eval_constant_with_binding_and_layout(
     } else {
         Comma::Reject
     };
-    fold(e, comma, nonnull, layout)
+    Eval::new(layout, nonnull, Policy::CONSTANT)
+        .eval(e, comma)
+        .map(|f| f.value)
 }
 
 /// How an evaluation treats the comma operator.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Comma {
+pub(crate) enum Comma {
     /// Use the right operand and ignore the left one.
     Ignore,
     /// A comma makes the expression non-constant.
     Reject,
     /// Both operands must be constant.
     Constant,
+}
+
+/// What kind of constant an expression is, by the most general node it
+/// evaluated.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) enum Class {
+    /// An integer constant expression (C11 6.6p6): integer literals,
+    /// `sizeof`, enumerators and floating literals converted directly to an
+    /// integer type.
+    Integer,
+    /// An arithmetic constant expression: other floating operands.
+    Arithmetic,
+    /// An address, a pointer conversion or an evaluated comma.
+    Other,
+}
+
+/// A constant with the class of the expression that produced it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct Folded {
+    pub value: Const,
+    pub class: Class,
+}
+
+/// One evaluation: the data layout, which globals final binding makes
+/// nonnull, and which undefined results the caller accepts.
+pub(crate) struct Eval<'f> {
+    layout: CDataLayout,
+    nonnull: &'f dyn Fn(usize) -> bool,
+    policy: Policy,
+    class: std::cell::Cell<Class>,
+}
+
+impl<'f> Eval<'f> {
+    pub(crate) fn new(
+        layout: CDataLayout,
+        nonnull: &'f dyn Fn(usize) -> bool,
+        policy: Policy,
+    ) -> Self {
+        Eval {
+            layout,
+            nonnull,
+            policy,
+            class: std::cell::Cell::new(Class::Integer),
+        }
+    }
+
+    pub(crate) fn eval(&self, e: &Expr<'_>, comma: Comma) -> Option<Folded> {
+        self.class.set(Class::Integer);
+        let value = fold(self, e, comma)?;
+        Some(Folded {
+            value,
+            class: self.class.get(),
+        })
+    }
+
+    fn mark(&self, class: Class) {
+        self.class.set(self.class.get().max(class));
+    }
 }
 
 #[cfg(test)]
@@ -148,24 +208,25 @@ pub fn eval_with_binding_and_layout(
     nonnull: &dyn Fn(usize) -> bool,
     layout: CDataLayout,
 ) -> Option<Const> {
-    fold(e, Comma::Ignore, nonnull, layout)
+    Eval::new(layout, nonnull, Policy::CONSTANT)
+        .eval(e, Comma::Ignore)
+        .map(|f| f.value)
 }
 
 /// Evaluate `e` in one walk. Every child is visited once, in the caller's
 /// comma mode, and only the operands C evaluates are visited.
-fn fold(
-    e: &Expr<'_>,
-    comma: Comma,
-    nonnull: &dyn Fn(usize) -> bool,
-    layout: CDataLayout,
-) -> Option<Const> {
+fn fold(cx: &Eval<'_>, e: &Expr<'_>, comma: Comma) -> Option<Const> {
     #[cfg(test)]
     VISITS.with(|v| v.set(v.get() + 1));
-    let child = |x: &Expr<'_>| fold(x, comma, nonnull, layout);
-    let constant = |x: &Expr<'_>| fold(x, Comma::Constant, nonnull, layout);
+    let (nonnull, layout, policy) = (cx.nonnull, cx.layout, cx.policy);
+    let child = |x: &Expr<'_>| fold(cx, x, comma);
+    let constant = |x: &Expr<'_>| fold(cx, x, Comma::Constant);
     let value = match &e.kind {
         ExprKind::Int(v) => Const::Int(IntConst::from_literal(int_ty(&e.ty, layout), *v)),
-        ExprKind::Float(f) => Const::Float(*f),
+        ExprKind::Float(f) => {
+            cx.mark(Class::Arithmetic);
+            Const::Float(*f)
+        }
         ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args) => {
             // Existing builtin signatures are native LP64; do not infer a
             // 64-bit swap from unsigned long on the private ILP32 profile.
@@ -180,7 +241,7 @@ fn fold(
             } else {
                 Comma::Constant
             };
-            let Const::Int(value) = fold(arg, mode, nonnull, layout)? else {
+            let Const::Int(value) = fold(cx, arg, mode)? else {
                 return None;
             };
             let bits = value.bits();
@@ -228,16 +289,37 @@ fn fold(
             value
         }
         ExprKind::LabelAddr(n) => {
+            cx.mark(Class::Other);
             Const::Int(IntConst::from_literal(int_ty(&e.ty, layout), *n as i64))
         }
-        ExprKind::Addr(inner) => eval_addr(inner, nonnull, layout)?,
-        ExprKind::Cast(inner) => cast(child(inner)?, &inner.ty, &e.ty, nonnull, layout)?,
+        ExprKind::Addr(inner) => {
+            cx.mark(Class::Other);
+            eval_addr(cx, inner)?
+        }
+        // A floating literal converted directly to an integer type is an
+        // integer constant expression.
+        ExprKind::Cast(
+            inner @ Expr {
+                kind: ExprKind::Float(f),
+                ..
+            },
+        ) if e.ty.is_integer() => {
+            cast(Const::Float(*f), &inner.ty, &e.ty, nonnull, layout, policy)?
+        }
+        ExprKind::Cast(inner) => {
+            if e.ty.is_ptr() {
+                cx.mark(Class::Other);
+            } else if e.ty.is_float() || e.ty.is_complex() {
+                cx.mark(Class::Arithmetic);
+            }
+            cast(child(inner)?, &inner.ty, &e.ty, nonnull, layout, policy)?
+        }
         ExprKind::Unary(op, a) => {
             let a = child(a)?;
             match (op, a) {
                 (UnOp::Not, a) => boolean(!truthy(a, nonnull)?),
                 (UnOp::Neg | UnOp::BitNot, Const::Int(v)) => {
-                    Const::Int(int_const::unary(*op, v, Policy::CONSTANT).ok()?)
+                    Const::Int(int_const::unary(*op, v, policy).ok()?)
                 }
                 (UnOp::Neg, Const::Float(f)) => Const::Float(-f),
                 (UnOp::Neg, Const::Complex(r, i)) => Const::Complex(-r, -i),
@@ -303,8 +385,11 @@ fn fold(
                 Const::Complex(round(r), round(i))
             }
         }
-        ExprKind::Binary(op, a, b) => binary(*op, &a.ty, &e.ty, child(a)?, child(b)?, layout)?,
+        ExprKind::Binary(op, a, b) => {
+            binary(*op, &a.ty, &e.ty, child(a)?, child(b)?, layout, policy)?
+        }
         ExprKind::PtrAdd(p, n, size) => {
+            cx.mark(Class::Other);
             let Const::Int(n) = child(n)? else {
                 return None;
             };
@@ -324,24 +409,10 @@ fn fold(
                 Const::Float(_) | Const::Complex(..) => return None,
             }
         }
-        ExprKind::PtrDiff(a, b, size) => match (child(a)?, child(b)?) {
-            (Const::Addr(x, i), Const::Addr(y, j)) if x == y => {
-                int64(if layout.pointer_bytes() == 4 {
-                    i.checked_sub(j)?.checked_div(i64::try_from(*size).ok()?)?
-                } else {
-                    (i - j) / *size as i64
-                })
-            }
-            (Const::Int(i), Const::Int(j)) => int64({
-                let (i, j) = (i.bits64(), j.bits64());
-                if layout.pointer_bytes() == 4 {
-                    i.wrapping_sub(j).checked_div(i64::try_from(*size).ok()?)?
-                } else {
-                    i.wrapping_sub(j) / *size as i64
-                }
-            }),
-            _ => return None,
-        },
+        ExprKind::PtrDiff(a, b, size) => {
+            cx.mark(Class::Other);
+            ptr_diff(child(a)?, child(b)?, *size, layout)?
+        }
         ExprKind::LogAnd(a, b) => {
             boolean(truthy(child(a)?, nonnull)? && truthy(child(b)?, nonnull)?)
         }
@@ -359,6 +430,7 @@ fn fold(
             Comma::Ignore => child(b)?,
             Comma::Reject => return None,
             Comma::Constant => {
+                cx.mark(Class::Other);
                 child(a)?;
                 child(b)?
             }
@@ -371,12 +443,33 @@ fn fold(
     })
 }
 
+/// `a - b` for pointers to elements of `size` bytes.
+fn ptr_diff(a: Const, b: Const, size: u64, layout: CDataLayout) -> Option<Const> {
+    Some(match (a, b) {
+        (Const::Addr(x, i), Const::Addr(y, j)) if x == y => int64(if layout.pointer_bytes() == 4 {
+            i.checked_sub(j)?.checked_div(i64::try_from(size).ok()?)?
+        } else {
+            (i - j) / size as i64
+        }),
+        (Const::Int(i), Const::Int(j)) => int64({
+            let (i, j) = (i.bits64(), j.bits64());
+            if layout.pointer_bytes() == 4 {
+                i.wrapping_sub(j).checked_div(i64::try_from(size).ok()?)?
+            } else {
+                i.wrapping_sub(j) / size as i64
+            }
+        }),
+        _ => return None,
+    })
+}
+
 /// The address of an lvalue with static storage.
-fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout) -> Option<Const> {
+fn eval_addr(cx: &Eval<'_>, e: &Expr<'_>) -> Option<Const> {
+    let layout = cx.layout;
     match &e.kind {
         ExprKind::Global(g) => Some(Const::Addr(Base::Global(*g), 0)),
         ExprKind::Str(s) => Some(Const::Addr(Base::Str(*s), 0)),
-        ExprKind::Member { base, offset, .. } => match eval_addr(base, nonnull, layout)? {
+        ExprKind::Member { base, offset, .. } => match eval_addr(cx, base)? {
             Const::Addr(b, off) => Some(Const::Addr(
                 b,
                 if layout.pointer_bytes() == 4 {
@@ -392,7 +485,7 @@ fn eval_addr(e: &Expr<'_>, nonnull: &dyn Fn(usize) -> bool, layout: CDataLayout)
             Const::Int(v) => Some(int64(v.bits64().wrapping_add(*offset as i64))),
             Const::Float(_) | Const::Complex(..) => None,
         },
-        ExprKind::Deref(p) => match fold(p, Comma::Constant, nonnull, layout)? {
+        ExprKind::Deref(p) => match fold(cx, p, Comma::Constant)? {
             c @ (Const::Addr(..) | Const::Reloc(..) | Const::Int(_)) => Some(c),
             Const::Float(_) | Const::Complex(..) => None,
         },
@@ -406,6 +499,7 @@ fn cast(
     to: &Ty,
     nonnull: &dyn Fn(usize) -> bool,
     layout: CDataLayout,
+    policy: Policy,
 ) -> Option<Const> {
     // Complex and 128-bit conversions are rejected at runtime, until the
     // runtime integer-floating conversions they go through exist.
@@ -426,11 +520,14 @@ fn cast(
         let (r, i) = if let Const::Complex(r, i) = c {
             let Ty::Complex(src) = from else { return None };
             (
-                cast(Const::Float(r), src, elem, nonnull, layout)?,
-                cast(Const::Float(i), src, elem, nonnull, layout)?,
+                cast(Const::Float(r), src, elem, nonnull, layout, policy)?,
+                cast(Const::Float(i), src, elem, nonnull, layout, policy)?,
             )
         } else {
-            (cast(c, from, elem, nonnull, layout)?, Const::Float(0.0))
+            (
+                cast(c, from, elem, nonnull, layout, policy)?,
+                Const::Float(0.0),
+            )
         };
         let (Const::Float(r), Const::Float(i)) = (r, i) else {
             return None;
@@ -439,7 +536,7 @@ fn cast(
     }
     if let Const::Complex(r, _) = c {
         let Ty::Complex(elem) = from else { return None };
-        return cast(Const::Float(r), elem, to, nonnull, layout);
+        return cast(Const::Float(r), elem, to, nonnull, layout, policy);
     }
     Some(match (c, to) {
         (Const::Int(v), Ty::Int(_)) => Const::Int(v.convert(int_ty(to, layout))),
@@ -447,7 +544,7 @@ fn cast(
             // Out of range, C leaves the value undefined; GCC and Clang
             // saturate to the target type, with NaN giving 0.
             let ty = int_ty(to, layout);
-            Const::Int(int_const::from_float(f, ty, Policy::CONSTANT).ok()?)
+            Const::Int(int_const::from_float(f, ty, policy).ok()?)
         }
         (Const::Addr(..) | Const::Reloc(..), Ty::Int(k))
             if layout == CDataLayout::NATIVE_LP64 && k.size_with_layout(layout) == 8 =>
@@ -471,6 +568,7 @@ fn binary(
     a: Const,
     b: Const,
     layout: CDataLayout,
+    policy: Policy,
 ) -> Option<Const> {
     let integer_address = layout == CDataLayout::NATIVE_LP64
         && [operand, result].into_iter().all(|ty| {
@@ -497,7 +595,7 @@ fn binary(
         (Const::Int(x), Const::Int(y)) => {
             // Both operands, and a shift count, have the operand type.
             let ty = int_ty(operand, layout);
-            let v = int_const::binary(op, x.convert(ty), y.convert(ty), Policy::CONSTANT).ok()?;
+            let v = int_const::binary(op, x.convert(ty), y.convert(ty), policy).ok()?;
             Some(Const::Int(v.convert(int_ty(result, layout))))
         }
         (Const::Float(x), Const::Float(y)) => {

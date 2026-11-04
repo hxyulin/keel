@@ -3,9 +3,10 @@
 
 use crate::ast::*;
 use crate::eval::{
-    Const, eval_constant, eval_constant_with_layout, eval_int, eval_int_with_layout, wrap_literal,
+    Class, Comma, Const, Eval, Folded, eval_constant_with_layout, eval_int_with_layout,
+    wrap_literal,
 };
-use crate::int_const::{IntConst, IntTy};
+use crate::int_const::{IntConst, IntTy, Policy};
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
@@ -28,144 +29,31 @@ pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty<'a>, loc: Loc) -> Expr<'a> {
     }
 }
 
-/// The general constant evaluator stores integer values in 64 bits. Do not
-/// use it as a representability proof through i128 (or extended FP/pointer)
-/// intermediates, even when the final scalar type is narrower.
-// Native-only proof boundary; migrating the scalar evaluator does not migrate
-// the vector range/shape checks that consume this proof.
+/// A scalar that a vector broadcast may convert at compile time: an
+/// arithmetic constant expression with no commas. Native layout only: the
+/// vector range checks that consume it assume LP64.
 fn broadcast_constant(e: &Expr<'_>, layout: CDataLayout) -> Option<Const> {
     if layout != CDataLayout::NATIVE_LP64 {
         return None;
     }
-    fn supported(e: &Expr<'_>) -> bool {
-        if !(e.ty.int_kind().is_some_and(|k| k.size() <= 8)
-            || matches!(e.ty, Ty::Float | Ty::Double))
-        {
-            return false;
-        }
-        match e.kind {
-            ExprKind::Int(_) | ExprKind::Float(_) => true,
-            ExprKind::Cast(a) | ExprKind::Unary(_, a) => supported(a),
-            ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
-                supported(a) && supported(b)
-            }
-            ExprKind::Cond(a, b, c) => supported(a) && supported(b) && supported(c),
-            _ => false,
-        }
-    }
-    supported(e).then(|| eval_constant(e, false)).flatten()
+    let f = Eval::new(layout, &|_| false, Policy::CONSTANT).eval(e, Comma::Reject)?;
+    (f.class <= Class::Arithmetic).then_some(f.value)
 }
 
-/// Integer controls are bounded C ICEs, not arbitrary folds by the general
-/// evaluator (which deliberately wraps shifts/overflow and saturates FP casts).
+/// An integer constant expression used as a builtin immediate, in the AST's
+/// integer encoding. Any undefined behavior makes it invalid, unlike the
+/// general evaluator, which wraps overflow and saturates float conversions.
 fn integer_constant_control(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
-    if layout != CDataLayout::NATIVE_LP64 {
+    if layout != CDataLayout::NATIVE_LP64 || !e.ty.is_integer() {
         return None;
     }
-    fn integer(e: &Expr<'_>) -> bool {
-        e.ty.int_kind().is_some_and(|k| k.size() <= 8)
+    match Eval::new(layout, &|_| false, Policy::STRICT).eval(e, Comma::Reject)? {
+        Folded {
+            value: Const::Int(c),
+            class: Class::Integer,
+        } => c.literal(),
+        _ => None,
     }
-    fn shape(e: &Expr<'_>) -> bool {
-        if !integer(e) {
-            return false;
-        }
-        match e.kind {
-            ExprKind::Int(_) => true,
-            ExprKind::Cast(a) if matches!(a.kind, ExprKind::Float(_)) => {
-                matches!(a.ty, Ty::Float | Ty::Double)
-            }
-            ExprKind::Cast(a) | ExprKind::Unary(_, a) => shape(a),
-            ExprKind::Binary(_, a, b) | ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
-                shape(a) && shape(b)
-            }
-            ExprKind::Cond(a, b, c) => shape(a) && shape(b) && shape(c),
-            _ => false,
-        }
-    }
-    fn bounds(ty: Ty<'_>) -> (i128, i128) {
-        let k = ty.int_kind().unwrap();
-        let bits = k.size() * 8;
-        if k.signed() {
-            (-(1i128 << (bits - 1)), (1i128 << (bits - 1)) - 1)
-        } else {
-            (0, (1i128 << bits) - 1)
-        }
-    }
-    fn checked(e: &Expr<'_>) -> Option<i64> {
-        match e.kind {
-            ExprKind::Int(_) => {}
-            ExprKind::Cast(a) => {
-                if let ExprKind::Float(f) = a.kind {
-                    let (min, max) = bounds(e.ty);
-                    let f = f.trunc();
-                    // Exclusive upper power-of-two limit avoids f64 rounding
-                    // i64::MAX/u64::MAX upward into an unrepresentable value.
-                    if !f.is_finite()
-                        || (e.ty != Ty::Int(IntKind::Bool)
-                            && (f < min as f64 || f >= (max + 1) as f64))
-                    {
-                        return None;
-                    }
-                } else {
-                    checked(a)?;
-                }
-            }
-            ExprKind::Unary(op, a) => {
-                let n = checked(a)?;
-                if op == UnOp::Neg && e.ty.is_signed() && i128::from(n) == bounds(e.ty).0 {
-                    return None;
-                }
-            }
-            ExprKind::Binary(op, a, b) => {
-                let x = checked(a)?;
-                let y = checked(b)?;
-                let signed = a.ty.is_signed();
-                let (min, max) = bounds(a.ty);
-                let exact = match op {
-                    BinOp::Add if signed => Some(i128::from(x) + i128::from(y)),
-                    BinOp::Sub if signed => Some(i128::from(x) - i128::from(y)),
-                    BinOp::Mul if signed => Some(i128::from(x) * i128::from(y)),
-                    BinOp::Div | BinOp::Rem if y == 0 => return None,
-                    BinOp::Div | BinOp::Rem if signed && i128::from(x) == min && y == -1 => {
-                        return None;
-                    }
-                    BinOp::Shl | BinOp::Shr => {
-                        if y < 0 || y >= (a.ty.int_kind()?.size() * 8) as i64 {
-                            return None;
-                        }
-                        if op == BinOp::Shl && signed {
-                            if x < 0 {
-                                return None;
-                            }
-                            Some(i128::from(x) << y)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-                if exact.is_some_and(|n| n < min || n > max) {
-                    return None;
-                }
-            }
-            ExprKind::LogAnd(a, b) => {
-                if checked(a)? != 0 {
-                    checked(b)?;
-                }
-            }
-            ExprKind::LogOr(a, b) => {
-                if checked(a)? == 0 {
-                    checked(b)?;
-                }
-            }
-            ExprKind::Cond(c, a, b) => {
-                checked(if checked(c)? != 0 { a } else { b })?;
-            }
-            _ => return None,
-        }
-        eval_int(e)
-    }
-    shape(e).then(|| checked(e)).flatten()
 }
 
 fn binary_prec(p: &str) -> Option<u8> {
@@ -3942,7 +3830,7 @@ mod integer_layout_tests {
                     Some(value)
                 );
                 if layout == CDataLayout::NATIVE_LP64 {
-                    assert_eq!(eval_int(&e), Some(value));
+                    assert_eq!(eval::eval_int(&e), Some(value));
                 }
             }
         }
@@ -4127,7 +4015,39 @@ mod integer_layout_tests {
                 "{src}"
             );
         }
-        for src in ["(int)(__int128)1", "(int)(void*)1", "(1, 2)"] {
+        for src in [
+            "(int)(__int128)1 + 2",
+            "__builtin_bswap16(0x0100)",
+            "(int)1.5e0",
+        ] {
+            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
+            assert!(
+                integer_constant_control(&e, CDataLayout::NATIVE_LP64).is_some(),
+                "{src}"
+            );
+        }
+        for src in [
+            "(int)(1.5 + 1.0)",
+            "(long)(void *)1",
+            "(int)(__int128)1 << 40",
+        ] {
+            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
+            assert_eq!(
+                integer_constant_control(&e, CDataLayout::NATIVE_LP64),
+                None,
+                "{src}"
+            );
+        }
+        let e = expression(
+            "(int)(((__int128)3 << 64) >> 64) * 2.5",
+            &arena,
+            CDataLayout::NATIVE_LP64,
+        );
+        assert_eq!(
+            broadcast_constant(&e, CDataLayout::NATIVE_LP64),
+            Some(Const::Float(7.5))
+        );
+        for src in ["(int)(void*)1", "(1, 2)"] {
             let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
             assert_eq!(
                 broadcast_constant(&e, CDataLayout::NATIVE_LP64),

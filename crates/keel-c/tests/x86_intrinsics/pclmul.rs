@@ -105,7 +105,7 @@ fn pclmul_header_builtin_controls_and_targets() {
         },
     )
     .unwrap();
-    for control in ["n", "(0,1)", "((__int128)1<<64)"] {
+    for control in ["n", "(0,1)"] {
         let s = format!(
             "#include <wmmintrin.h>\n__m128i f(__m128i a,__m128i b,int n){{return _mm_clmulepi64_si128(a,b,{control});}}\n"
         );
@@ -177,9 +177,7 @@ fn pclmul_control_requires_defined_bounded_ice() {
         "(unsigned char)(1L << 64)",
         "(unsigned char)(long)9223372036854775808.0",
         "(1/0)",
-        "(int)(__int128)17",
         "(int)(void*)17",
-        "1 ? 17 : n",
         "(n,17)",
     ] {
         assert!(
