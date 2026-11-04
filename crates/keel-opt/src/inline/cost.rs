@@ -284,3 +284,348 @@ pub(super) fn profitability_reason(f: &Function, full: bool) -> Option<&'static 
         None
     }
 }
+
+/// One call site and its callee, summarized for the budget check.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SiteCost {
+    /// Instructions inlining adds, from [`inline_cost`].
+    pub(super) insts: usize,
+    /// Stack bytes inlining adds, from [`inline_cost`].
+    pub(super) stack: u64,
+    /// Arguments plus results of the call.
+    pub(super) operands: usize,
+    /// The caller's declared stack bytes, when the caller is in a call cycle.
+    pub(super) recursive_caller_stack: Option<u64>,
+    /// The callee may spend the cheap-helper reserve.
+    pub(super) cheap_helper: bool,
+}
+
+impl SiteCost {
+    /// A callee that costs no more than its call does not count against
+    /// [`MAX_CALLS`].
+    pub(super) fn counts_as_call(&self) -> bool {
+        self.insts > CALL_SITE_COST + self.operands
+    }
+}
+
+/// What one caller has accepted so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct CallerLedger {
+    pub(super) growth: usize,
+    /// Inlined sites that [count as calls](SiteCost::counts_as_call).
+    pub(super) calls: usize,
+    pub(super) stack: u64,
+}
+
+/// What the module has accepted so far, against its ordinary limit and the
+/// separate cheap-helper reserve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ModuleLedger {
+    pub(super) growth: usize,
+    pub(super) limit: usize,
+    pub(super) reserve_growth: usize,
+    pub(super) reserve_sites: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// Inline the site, charging the cheap-helper reserve when `reserve`.
+    Inline { reserve: bool },
+    /// Only module growth denies the site: retry it from the reserve after
+    /// the ordinary schedule.
+    Defer,
+    /// A budget denies the site; the reason names the budget.
+    Reject(&'static str),
+}
+
+/// Applies the growth budgets to one site. `retry` marks a deferred site's
+/// second visit, the only visit that may spend the reserve.
+pub(super) fn budget_verdict(
+    site: &SiteCost,
+    caller: &CallerLedger,
+    module: &ModuleLedger,
+    retry: bool,
+) -> Verdict {
+    let recursive_stack_ok = site.stack == 0
+        || site
+            .recursive_caller_stack
+            .is_none_or(|stack| stack + site.stack <= RECURSIVE_CALLER_STACK);
+    let budget = if !recursive_stack_ok {
+        Some("recursive_caller_stack_budget")
+    } else if caller.calls == MAX_CALLS && site.counts_as_call() {
+        Some("caller_call_count_budget")
+    } else if caller.growth + site.insts > MAX_GROWTH {
+        Some("caller_instruction_growth_budget")
+    } else if module.growth + site.insts > module.limit {
+        Some("module_instruction_growth_budget")
+    } else if caller.stack + site.stack > HARD_STACK {
+        Some("caller_stack_growth_budget")
+    } else {
+        None
+    };
+    let cheap_candidate = site.cheap_helper
+        && recursive_stack_ok
+        && caller.calls < MAX_CALLS
+        && caller.growth + site.insts <= MAX_GROWTH
+        && caller.stack + site.stack <= HARD_STACK;
+    if !retry && budget == Some("module_instruction_growth_budget") && cheap_candidate {
+        return Verdict::Defer;
+    }
+    let reserve = retry
+        && cheap_candidate
+        && module.reserve_growth + site.insts <= CHEAP_MODULE_GROWTH
+        && module.reserve_sites < CHEAP_MODULE_SITES;
+    match budget {
+        Some(reason) if !reserve => Verdict::Reject(reason),
+        _ => Verdict::Inline { reserve },
+    }
+}
+
+/// Charges an inlined site to its caller and to the module budget the
+/// verdict chose.
+pub(super) fn charge(
+    site: &SiteCost,
+    caller: &mut CallerLedger,
+    module: &mut ModuleLedger,
+    reserve: bool,
+) {
+    caller.growth += site.insts;
+    caller.calls += usize::from(site.counts_as_call());
+    caller.stack += site.stack;
+    if reserve {
+        module.reserve_growth += site.insts;
+        module.reserve_sites += 1;
+    } else {
+        module.growth += site.insts;
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    const SITE: SiteCost = SiteCost {
+        insts: 20,
+        stack: 16,
+        operands: 2,
+        recursive_caller_stack: None,
+        cheap_helper: false,
+    };
+    const MODULE: ModuleLedger = ModuleLedger {
+        growth: 0,
+        limit: MAX_MODULE_GROWTH,
+        reserve_growth: 0,
+        reserve_sites: 0,
+    };
+
+    fn verdict(site: SiteCost, caller: CallerLedger, module: ModuleLedger) -> Verdict {
+        budget_verdict(&site, &caller, &module, false)
+    }
+
+    #[test]
+    fn a_site_within_every_budget_inlines_from_the_ordinary_budget() {
+        let caller = CallerLedger::default();
+        assert_eq!(
+            verdict(SITE, caller, MODULE),
+            Verdict::Inline { reserve: false }
+        );
+        let (mut caller, mut module) = (caller, MODULE);
+        charge(&SITE, &mut caller, &mut module, false);
+        assert_eq!(
+            caller,
+            CallerLedger {
+                growth: 20,
+                calls: 1,
+                stack: 16
+            }
+        );
+        assert_eq!((module.growth, module.reserve_growth), (20, 0));
+    }
+
+    #[test]
+    fn each_budget_names_itself_at_its_boundary() {
+        let fits = CallerLedger::default();
+        let cases = [
+            (
+                SiteCost {
+                    recursive_caller_stack: Some(RECURSIVE_CALLER_STACK - 16),
+                    ..SITE
+                },
+                fits,
+                MODULE,
+                None,
+            ),
+            (
+                SiteCost {
+                    recursive_caller_stack: Some(RECURSIVE_CALLER_STACK - 15),
+                    ..SITE
+                },
+                fits,
+                MODULE,
+                Some("recursive_caller_stack_budget"),
+            ),
+            (
+                SITE,
+                CallerLedger {
+                    calls: MAX_CALLS,
+                    ..fits
+                },
+                MODULE,
+                Some("caller_call_count_budget"),
+            ),
+            (
+                SITE,
+                CallerLedger {
+                    growth: MAX_GROWTH - 20,
+                    ..fits
+                },
+                MODULE,
+                None,
+            ),
+            (
+                SITE,
+                CallerLedger {
+                    growth: MAX_GROWTH - 19,
+                    ..fits
+                },
+                MODULE,
+                Some("caller_instruction_growth_budget"),
+            ),
+            (
+                SITE,
+                fits,
+                ModuleLedger {
+                    growth: MAX_MODULE_GROWTH - 19,
+                    ..MODULE
+                },
+                Some("module_instruction_growth_budget"),
+            ),
+            (
+                SITE,
+                CallerLedger {
+                    stack: HARD_STACK - 15,
+                    ..fits
+                },
+                MODULE,
+                Some("caller_stack_growth_budget"),
+            ),
+        ];
+        for (site, caller, module, expected) in cases {
+            let expected = expected.map_or(Verdict::Inline { reserve: false }, Verdict::Reject);
+            assert_eq!(
+                verdict(site, caller, module),
+                expected,
+                "{site:?} {caller:?} {module:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_recursive_stack_cap_ignores_stackless_callees_and_acyclic_callers() {
+        let full = Some(RECURSIVE_CALLER_STACK);
+        for site in [
+            SiteCost {
+                stack: 0,
+                recursive_caller_stack: full,
+                ..SITE
+            },
+            SiteCost {
+                recursive_caller_stack: None,
+                ..SITE
+            },
+        ] {
+            assert_eq!(
+                verdict(site, CallerLedger::default(), MODULE),
+                Verdict::Inline { reserve: false }
+            );
+        }
+    }
+
+    #[test]
+    fn a_callee_no_larger_than_its_call_ignores_the_call_count() {
+        let caller = CallerLedger {
+            calls: MAX_CALLS,
+            ..CallerLedger::default()
+        };
+        let small = SiteCost {
+            insts: CALL_SITE_COST + SITE.operands,
+            ..SITE
+        };
+        assert!(!small.counts_as_call());
+        assert_eq!(
+            verdict(small, caller, MODULE),
+            Verdict::Inline { reserve: false }
+        );
+        let mut charged = CallerLedger::default();
+        charge(&small, &mut charged, &mut { MODULE }, false);
+        assert_eq!(charged.calls, 0);
+        let large = SiteCost {
+            insts: small.insts + 1,
+            ..SITE
+        };
+        assert_eq!(
+            verdict(large, caller, MODULE),
+            Verdict::Reject("caller_call_count_budget")
+        );
+    }
+
+    #[test]
+    fn a_cheap_helper_denied_only_by_module_growth_retries_from_the_reserve() {
+        let cheap = SiteCost {
+            cheap_helper: true,
+            ..SITE
+        };
+        let full = ModuleLedger {
+            growth: MAX_MODULE_GROWTH,
+            ..MODULE
+        };
+        let caller = CallerLedger::default();
+        assert_eq!(verdict(cheap, caller, full), Verdict::Defer);
+        assert_eq!(
+            budget_verdict(&cheap, &caller, &full, true),
+            Verdict::Inline { reserve: true }
+        );
+        let (mut charged, mut module) = (caller, full);
+        charge(&cheap, &mut charged, &mut module, true);
+        assert_eq!(charged.growth, 20);
+        assert_eq!(
+            (module.growth, module.reserve_growth, module.reserve_sites),
+            (MAX_MODULE_GROWTH, 20, 1)
+        );
+        // An ordinary callee, or a reserve without room, gets the module reason.
+        let denied = Verdict::Reject("module_instruction_growth_budget");
+        assert_eq!(verdict(SITE, caller, full), denied);
+        assert_eq!(budget_verdict(&SITE, &caller, &full, true), denied);
+        for spent in [
+            ModuleLedger {
+                reserve_growth: CHEAP_MODULE_GROWTH - 19,
+                ..full
+            },
+            ModuleLedger {
+                reserve_sites: CHEAP_MODULE_SITES,
+                ..full
+            },
+        ] {
+            assert_eq!(budget_verdict(&cheap, &caller, &spent, true), denied);
+        }
+    }
+
+    #[test]
+    fn the_reserve_does_not_lift_caller_budgets() {
+        let cheap = SiteCost {
+            cheap_helper: true,
+            ..SITE
+        };
+        let full = ModuleLedger {
+            growth: MAX_MODULE_GROWTH,
+            ..MODULE
+        };
+        let caller = CallerLedger {
+            growth: MAX_GROWTH,
+            ..CallerLedger::default()
+        };
+        let denied = Verdict::Reject("caller_instruction_growth_budget");
+        assert_eq!(verdict(cheap, caller, full), denied);
+        assert_eq!(budget_verdict(&cheap, &caller, &full, true), denied);
+    }
+}

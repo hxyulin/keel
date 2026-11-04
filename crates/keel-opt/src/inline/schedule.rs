@@ -1,6 +1,10 @@
 //! Freezes templates and call sites, orders the sites and applies budgets.
 use super::clone::{inline_call, two_functions};
-use super::cost::*;
+use super::cost::{
+    CHEAP_SITE_GROWTH, CallerLedger, MAX_MODULE_GROWTH, MAX_SCC_CALLER_INSTRUCTIONS, ModuleLedger,
+    SiteCost, Verdict, budget_verdict, charge, cheap_helper, inline_cost, profitability_reason,
+    small_scc_wrapper, tiny_priority_leaf,
+};
 use super::eligibility::eligibility_reason;
 use super::{
     InlineBudget, InlineCost, InlinePolicy, InlineReport, InlineSkip, recursive_definitions,
@@ -60,11 +64,6 @@ pub(super) fn run_observed_policy_budgeted(
         cheap_reserve,
         cost: cost_policy,
     } = policy;
-    let module_growth_limit = if cheap_reserve {
-        shared.limit
-    } else {
-        MAX_MODULE_GROWTH
-    };
     let flatten = module.functions.iter().any(|f| f.attrs.flatten);
     let roots = if cost_policy == InlineCost::Size {
         crate::assembly_symbols::roots(module)
@@ -181,7 +180,6 @@ pub(super) fn run_observed_policy_budgeted(
     // Only their immutable cost is cached; caller ledgers stay live below.
     let mut template_costs = vec![None; module.functions.len()];
     let mut report = InlineReport::default();
-    let mut module_growth = if cheap_reserve { shared.used } else { 0 };
     let tiny_templates: FxHashSet<_> = templates
         .values()
         .map(|&index| &module.functions[index])
@@ -229,7 +227,7 @@ pub(super) fn run_observed_policy_budgeted(
             !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS
         })
         .collect();
-    let mut ledgers = vec![(0, 0, 0u64); module.functions.len()];
+    let mut ledgers = vec![CallerLedger::default(); module.functions.len()];
     // Preserve the ordinary two phases exactly. Only sites denied solely by
     // module growth enter the separate retry queue; cloned calls never enter it.
     let mut schedule = Vec::new();
@@ -272,15 +270,20 @@ pub(super) fn run_observed_policy_budgeted(
     }
     let ordinary_end = schedule.len();
     let mut deferred = vec![Vec::new(); module.functions.len()];
-    let mut cheap_growth = if cheap_reserve {
-        shared.reserve_used
+    let mut module_ledger = if cheap_reserve {
+        ModuleLedger {
+            growth: shared.used,
+            limit: shared.limit,
+            reserve_growth: shared.reserve_used,
+            reserve_sites: shared.reserve_sites,
+        }
     } else {
-        0
-    };
-    let mut cheap_sites = if cheap_reserve {
-        shared.reserve_sites
-    } else {
-        0
+        ModuleLedger {
+            growth: 0,
+            limit: MAX_MODULE_GROWTH,
+            reserve_growth: 0,
+            reserve_sites: 0,
+        }
     };
     let mut cursor = 0;
     loop {
@@ -307,7 +310,6 @@ pub(super) fn run_observed_policy_budgeted(
         cursor += 1;
         let caller = &module.functions[index];
         let large_scc_caller = large_scc_callers[index];
-        let (mut growth, mut count, mut stack_growth) = ledgers[index];
         let reference = match caller.inst_data(call) {
             InstData::Call { func, .. }
             | InstData::Invoke { func, .. }
@@ -439,71 +441,53 @@ pub(super) fn run_observed_policy_budgeted(
         // that the dominator traversal may omit. Snapshot IR is additional.
         let (cost, stack_cost) =
             *template_costs[callee_index].get_or_insert_with(|| inline_cost(callee));
-        let recursive_stack_ok = !recursive[index]
-            || stack_cost == 0
-            || caller
-                .stack_slots()
-                .map(|(_, s)| u64::from(s.size))
-                .sum::<u64>()
-                + stack_cost
-                <= RECURSIVE_CALLER_STACK;
-        let no_larger_than_call = match caller.inst_data(call) {
-            InstData::Call { args, .. } => {
-                cost <= CALL_SITE_COST + args.len() + caller.inst_results(call).len()
-            }
-            _ => false,
+        let InstData::Call { args, .. } = caller.inst_data(call) else {
+            unreachable!("only direct calls reach the budget check")
         };
-        let budget = if !recursive_stack_ok {
-            Some("recursive_caller_stack_budget")
-        } else if count == MAX_CALLS && !no_larger_than_call {
-            Some("caller_call_count_budget")
-        } else if growth + cost > MAX_GROWTH {
-            Some("caller_instruction_growth_budget")
-        } else if module_growth + cost > module_growth_limit {
-            Some("module_instruction_growth_budget")
-        } else if stack_growth + stack_cost > HARD_STACK {
-            Some("caller_stack_growth_budget")
-        } else {
-            None
+        let site = SiteCost {
+            insts: cost,
+            stack: stack_cost,
+            operands: args.len() + caller.inst_results(call).len(),
+            recursive_caller_stack: recursive[index].then(|| {
+                caller
+                    .stack_slots()
+                    .map(|(_, s)| u64::from(s.size))
+                    .sum::<u64>()
+            }),
+            cheap_helper: cheap_reserve
+                && !wrappers.contains(&callee.name)
+                && cheap_helper(callee, cost, stack_cost),
         };
-        let cheap_candidate = cheap_reserve
-            && !wrappers.contains(&callee.name)
-            && cheap_helper(callee, cost, stack_cost)
-            && recursive_stack_ok
-            && count < MAX_CALLS
-            && growth + cost <= MAX_GROWTH
-            && stack_growth + stack_cost <= HARD_STACK;
-        if !retry && budget == Some("module_instruction_growth_budget") && cheap_candidate {
-            deferred[index].push(call);
-            continue;
-        }
-        let use_cheap = retry
-            && cheap_candidate
-            && cheap_growth + cost <= CHEAP_MODULE_GROWTH
-            && cheap_sites < CHEAP_MODULE_SITES;
-        if let Some(detail) = budget.filter(|_| !use_cheap) {
-            if let Some(sites) = sites.as_deref_mut() {
-                sites.push(InlineSite::new(
-                    caller,
-                    &callee.name,
-                    call,
-                    requested
-                        || explicit_definitions
-                            .as_ref()
-                            .is_some_and(|names| names.contains(&decl.name)),
-                    detail,
-                ));
+        let use_cheap = match budget_verdict(&site, &ledgers[index], &module_ledger, retry) {
+            Verdict::Inline { reserve } => reserve,
+            Verdict::Defer => {
+                deferred[index].push(call);
+                continue;
             }
-            if requested {
-                report.skipped.push(InlineSkip {
-                    caller: caller.name.clone(),
-                    callee: callee.name.clone(),
-                    site: call,
-                    reason: "hard growth safeguard",
-                });
+            Verdict::Reject(detail) => {
+                if let Some(sites) = sites.as_deref_mut() {
+                    sites.push(InlineSite::new(
+                        caller,
+                        &callee.name,
+                        call,
+                        requested
+                            || explicit_definitions
+                                .as_ref()
+                                .is_some_and(|names| names.contains(&decl.name)),
+                        detail,
+                    ));
+                }
+                if requested {
+                    report.skipped.push(InlineSkip {
+                        caller: caller.name.clone(),
+                        callee: callee.name.clone(),
+                        site: call,
+                        reason: "hard growth safeguard",
+                    });
+                }
+                continue;
             }
-            continue;
-        }
+        };
         if let Some(sites) = sites.as_deref_mut() {
             sites.push(InlineSite::new(
                 caller,
@@ -542,24 +526,16 @@ pub(super) fn run_observed_policy_budgeted(
             if let Some(site) = sites.as_deref_mut().and_then(|s| s.last_mut()) {
                 site.experimental_net_growth = Some(actual_net_growth);
             }
-            cheap_growth += cost;
-            cheap_sites += 1;
-            growth += cost;
-        } else {
-            growth += cost;
-            module_growth += cost;
         }
-        count += usize::from(!no_larger_than_call);
-        stack_growth += stack_cost;
+        charge(&site, &mut ledgers[index], &mut module_ledger, use_cheap);
         report.changed = true;
         report.callers.push(index);
-        ledgers[index] = (growth, count, stack_growth);
     }
     if cheap_reserve {
         let budget = shared;
-        budget.used = module_growth;
-        budget.reserve_used = cheap_growth;
-        budget.reserve_sites = cheap_sites;
+        budget.used = module_ledger.growth;
+        budget.reserve_used = module_ledger.reserve_growth;
+        budget.reserve_sites = module_ledger.reserve_sites;
     }
     report
 }
