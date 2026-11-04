@@ -458,12 +458,14 @@ def main():
     target, output = documentation_inventory(outputs[OUTPUT.with_name('v2.rs')], adapters['v2'])
     outputs[target] = output
     for target, output in outputs.items():
+        current = target.read_text() if target.exists() else None
+        if current == output:
+            continue
         if args.check:
-            if target.read_text() != output:
-                raise SystemExit(f'{target} is stale')
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(output)
+            raise SystemExit(f'{target} is stale')
+        # Rewriting identical output would bump mtimes and rebuild dependents.
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(output)
 
 
 if __name__ == '__main__':

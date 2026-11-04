@@ -392,8 +392,9 @@ if __name__ == "__main__":
     for target, output in [(ROOT / 'src/generated.rs', generate(data)),
                            (ROOT.parent / 'keel-asm-ir/src/generated.rs', generate_ids(data)),
                            (ROOT.parent / 'keel-disasm/src/generated.rs', generate_decoder(data))]:
+        if target.exists() and target.read_text() == output:
+            continue
         if args.check:
-            if target.read_text() != output:
-                raise SystemExit(f'{target} is stale; run tools/generate.py')
-        else:
-            target.write_text(output)
+            raise SystemExit(f'{target} is stale; run tools/generate.py')
+        # Rewriting identical output would bump mtimes and rebuild dependents.
+        target.write_text(output)
