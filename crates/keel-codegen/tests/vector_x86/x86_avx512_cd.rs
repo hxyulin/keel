@@ -238,7 +238,7 @@ fn cd_conflict_and_leading_zero_match_independent_and_system_oracles() {
                 if !std::is_x86_feature_detected!("avx512cd")
                     || !std::is_x86_feature_detected!("avx512vl")
                 {
-                    eprintln!("SKIP native CD: unavailable");
+                    keel_test_support::skip_part!("host lacks AVX512CD, AVX512VL");
                     continue;
                 }
                 let output = Command::new("cc")

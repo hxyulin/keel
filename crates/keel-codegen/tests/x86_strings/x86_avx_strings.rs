@@ -564,13 +564,11 @@ fn exact_oracle_instruction_bytes_gnu_and_clang() {
                     continue;
                 }
                 let mut command = if gnu {
-                    let mut c = Command::new(
-                        if std::path::Path::new("/opt/homebrew/bin/x86_64-elf-as").exists() {
-                            "/opt/homebrew/bin/x86_64-elf-as"
-                        } else {
-                            "as"
-                        },
-                    );
+                    let Some(tool) = keel_test_support::gnu_as() else {
+                        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                        continue;
+                    };
+                    let mut c = tool.command();
                     c.arg("--64");
                     c
                 } else {

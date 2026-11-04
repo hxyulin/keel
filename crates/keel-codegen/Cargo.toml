@@ -19,6 +19,7 @@ keel-ir = { path = "../keel-ir" }
 
 [dev-dependencies]
 keel-opt = { path = "../keel-opt" }
+keel-test-support = { path = "../keel-test-support" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 
 # Default builds skip this binary instead of linking an empty one.

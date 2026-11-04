@@ -78,7 +78,7 @@ fn sha256_types_features_aliases_and_spills() {
                 if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                     #[cfg(target_arch = "x86_64")]
                     if !std::is_x86_feature_detected!("sha") {
-                        eprintln!("SKIP native SHA: hardware unavailable");
+                        keel_test_support::skip_part!("host lacks SHA");
                         continue;
                     }
                     let output = Command::new("cc")

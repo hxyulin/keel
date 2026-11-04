@@ -463,6 +463,7 @@ dependencies = [
  "keel-asm-ir",
  "keel-ir",
  "keel-opt",
+ "keel-test-support",
  "object",
  "profiling",
 ]

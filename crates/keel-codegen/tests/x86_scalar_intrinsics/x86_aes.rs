@@ -322,15 +322,17 @@ fn encoding_matches_clang_and_optional_gnu() {
             .arg(dir.join("clang.o")),
     );
     assert_eq!(text(&ours), text(&fs::read(dir.join("clang.o")).unwrap()));
-    if let Ok(as_path) = std::env::var("KEEL_GNU_AS") {
+    if let Some(gnu) = keel_test_support::gnu_as() {
         common::command(
-            Command::new(as_path)
+            gnu.command()
                 .arg("--64")
                 .arg(dir.join("aes.s"))
                 .arg("-o")
                 .arg(dir.join("gas.o")),
         );
         assert_eq!(text(&ours), text(&fs::read(dir.join("gas.o")).unwrap()));
+    } else {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
     }
     for line in [
         "aesenc ymm0,ymm1",
@@ -403,12 +405,14 @@ fn symbolic_memory_relocations_match_independent_assemblers() {
     let dir = common::temp("aes-relocations");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("aes.s"), source).unwrap();
-    for tool in [Some("clang".to_owned()), std::env::var("KEEL_GNU_AS").ok()]
-        .into_iter()
-        .flatten()
-    {
-        let mut command = Command::new(&tool);
-        if tool == "clang" {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    for gnu in std::iter::once(None).chain(gnu.map(Some)) {
+        let tool = gnu.map_or("clang".into(), |gnu| gnu.path().display().to_string());
+        let mut command = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
+        if gnu.is_none() {
             command.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
         } else {
             command.arg("--64");
@@ -457,8 +461,7 @@ fn harness() -> String {
 #[test]
 fn native_software_oracle_fips_vectors_aliases_abi_mxcsr_and_guards() {
     if !std::is_x86_feature_detected!("aes") || !std::is_x86_feature_detected!("sse2") {
-        eprintln!("SKIP: native AES/SSE2 unavailable");
-        return;
+        keel_test_support::skip!("host lacks AES, SSE2");
     }
     let dir = common::temp("aes-native");
     fs::create_dir_all(&dir).unwrap();

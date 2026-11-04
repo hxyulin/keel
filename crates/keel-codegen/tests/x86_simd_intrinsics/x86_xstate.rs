@@ -305,16 +305,13 @@ fn xstate_contract_and_packet() {
             .to_vec()
     };
     assert_eq!(text_bytes(&obj), expected);
-    let gnu = std::env::var("KEEL_XSTATE_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-as".into()
-        } else {
-            "as".into()
-        }
-    });
-    for tool in ["clang", gnu.as_str()] {
-        let mut command = Command::new(tool);
-        if tool == "clang" {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    for gnu in std::iter::once(None).chain(gnu.map(Some)) {
+        let mut command = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
+        if gnu.is_none() {
             command.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
         } else {
             command.arg("--64");

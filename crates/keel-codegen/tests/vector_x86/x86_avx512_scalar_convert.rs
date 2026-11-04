@@ -183,7 +183,7 @@ fn scalar_evex_conversion_flags_upper_bits_and_mxcsr() {
             if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                 #[cfg(target_arch = "x86_64")]
                 if !std::is_x86_feature_detected!("avx512f") {
-                    eprintln!("SKIP native scalar EVEX conversions");
+                    keel_test_support::skip_part!("host lacks AVX512F");
                     continue;
                 }
                 let output = Command::new("cc")

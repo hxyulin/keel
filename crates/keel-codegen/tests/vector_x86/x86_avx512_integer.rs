@@ -164,7 +164,7 @@ fn unmasked_integer512_native_and_spilled_oracle() {
             if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                 #[cfg(target_arch = "x86_64")]
                 if !std::is_x86_feature_detected!("avx512f") {
-                    eprintln!("SKIP native: AVX512F unavailable");
+                    keel_test_support::skip_part!("host lacks AVX512F");
                     continue;
                 }
                 let executable = directory.join(name);

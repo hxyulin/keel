@@ -155,7 +155,7 @@ fn pclmul_all_tiers_allocators_spills_and_object_paths() {
                 if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                     #[cfg(target_arch = "x86_64")]
                     if !std::is_x86_feature_detected!("pclmulqdq") {
-                        eprintln!("SKIP native: PCLMULQDQ unavailable");
+                        keel_test_support::skip_part!("host lacks PCLMULQDQ");
                         continue;
                     }
                     let exe = d.join(format!("run-{name}"));

@@ -248,7 +248,7 @@ fn vl_core_masks_widths_aliases_memory_and_mxcsr() {
             if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
                 #[cfg(target_arch = "x86_64")]
                 if !std::is_x86_feature_detected!("avx512vl") {
-                    eprintln!("SKIP native VL core: AVX512VL unavailable");
+                    keel_test_support::skip_part!("host lacks AVX512VL");
                     continue;
                 }
                 let output = Command::new("cc")
