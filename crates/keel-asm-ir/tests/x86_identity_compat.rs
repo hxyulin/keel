@@ -74,6 +74,17 @@ fn mnemonic_groups_match_binary_search_for_known_names_and_near_misses() {
 }
 
 #[test]
+fn op_constants_match_the_parser() {
+    use keel_asm_ir::x86::{EvexOptions, op};
+    assert_eq!(EvexOptions::NONE, EvexOptions::default());
+    for &(name, constant) in op::ALL {
+        assert_eq!(Opcode::parse(name), Some(constant), "{name}");
+    }
+    assert_eq!(op::FNSTSW, Opcode::X87(X87Opcode::Fnstsw));
+    assert_eq!(op::JNE, Opcode::Jcc(5));
+}
+
+#[test]
 fn original_static_spellings_identities_and_formatting() {
     for line in include_str!("fixtures/x86-static-identities.txt").lines() {
         if line.starts_with('#') {

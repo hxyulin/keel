@@ -17,6 +17,13 @@ fn lowercase(s: &str) -> Cow<'_, str> {
 
 include!("x86/isa/baseline_opcodes.rs");
 
+/// Opcode constants for identities behind payload enums, such as `op::FNSTSW`
+/// for `Opcode::X87(X87Opcode::Fnstsw)`. Unit variants such as `Opcode::Mov`
+/// have no constant here.
+pub mod op {
+    include!("x86/isa/op.rs");
+}
+
 impl Opcode {
     /// Select the SSE4 memory-destination form without promoting the v1
     /// register-destination PEXTRW encoding. Explicit `pextrw.s` stays SSE4.

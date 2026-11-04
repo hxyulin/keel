@@ -45,12 +45,25 @@ pub struct EvexOpcode {
     pub kind: EvexMnemonic,
     pub options: EvexOptions,
 }
+impl EvexOptions {
+    pub const NONE: Self = Self {
+        mask: None,
+        address32: false,
+        zero: false,
+        broadcast: 0,
+        rounding: None,
+    };
+}
 impl EvexOpcode {
+    /// The undecorated form, as `parse` returns it.
+    pub const fn new(kind: EvexMnemonic) -> Self {
+        Self {
+            kind,
+            options: EvexOptions::NONE,
+        }
+    }
     pub fn parse(name: &str) -> Option<Self> {
-        Some(Self {
-            kind: EvexMnemonic::parse(name)?,
-            options: EvexOptions::default(),
-        })
+        EvexMnemonic::parse(name).map(Self::new)
     }
     pub const fn mnemonic(self) -> &'static str {
         self.kind.mnemonic()

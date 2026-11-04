@@ -88,6 +88,9 @@ catalogue, decoding index, 93 v2 metadata entries, 1,226 VEX form adapters,
 67 fixed encodings and opcode feature queries. Public fixed/v2/v3 enums, their
 `ALL` lists, parse aliases and mnemonic mappings are also generated from the
 explicit identity policy. Existing enum order and spellings are preserved.
+`op_constants.py` emits `op.rs`, the `x86::op` module: one constant per static
+payload-table mnemonic, such as `op::FNSTSW`, in `Opcode::parse` precedence. A
+Rust test parses every spelling in `op::ALL` and compares it with the constant.
 
 Mnemonic lookup uses generated displacement hashing with exact spelling
 verification. The encoder dispatches static opcode identities to generated

@@ -4,6 +4,7 @@ import unittest
 
 import generate
 import mnemonic_lookup
+import op_constants
 
 
 class GeneratorTests(unittest.TestCase):
@@ -42,6 +43,15 @@ class GeneratorTests(unittest.TestCase):
             json.loads((generate.ROOT / 'condition-codes.json').read_text()))
         self.assertNotIn('Opcode::Core(CoreOpcode::Int)', mapping)
         self.assertEqual(mapping['Opcode::Mov'], mapping['Opcode::Movabs'])
+
+    def test_op_constants_skip_spellings_an_earlier_table_claims(self):
+        rows = [(['movsd'], None, None), (['movsd'], 'movsd', 'Opcode::V2(V2Opcode::Movsd)'),
+                (['fwait', 'wait'], 'fwait', 'Opcode::Fixed(FixedOpcode::Fwait)'),
+                (['wait'], 'wait', 'Opcode::V3(V3Opcode::Wait)')]
+        self.assertEqual(op_constants.constants(rows),
+                         [('FWAIT', 'fwait', 'Opcode::Fixed(FixedOpcode::Fwait)')])
+        with self.assertRaisesRegex(ValueError, 'no constant name'):
+            op_constants.const_name('9bad')
 
     def test_fixed_width_names_reject_ambiguous_source_size(self):
         rows = [copy.deepcopy(next(r for r in self.adapters['fixed']
