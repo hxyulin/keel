@@ -101,24 +101,25 @@ fn qualified_values_compile_and_execute_without_repeating_effects() {
             }
         }
     }
-    if let Some(export) = std::env::var_os("KEEL_GNU_CONDITIONAL_EXPORT") {
-        let export = std::path::PathBuf::from(export);
-        fs::create_dir_all(&export).unwrap();
-        fs::write(export.join("source.c"), SOURCE).unwrap();
-        fs::copy(dir.join("main.c"), export.join("main.c")).unwrap();
-        for debug in [false, true] {
-            let mut module = compile(SOURCE, Target::X86_64LinuxGnu, debug);
-            for optimize in [false, true] {
-                if optimize {
-                    keel_opt::optimize(&mut module).unwrap();
-                }
-                let assembly = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
-                fs::write(
-                    export.join(format!("conditional-{debug}-{optimize}.o")),
-                    keel_asm::x86::assemble_object(&assembly).unwrap(),
-                )
-                .unwrap();
+    if !keel_test_support::native::active() {
+        keel_test_support::skip!(keel_test_support::native::NOT_X86_LINUX);
+    }
+    for debug in [false, true] {
+        let mut module = compile(SOURCE, Target::X86_64LinuxGnu, debug);
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
             }
+            let assembly = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+            let object = format!("conditional-{debug}-{optimize}.o");
+            keel_test_support::native_program!(format!("conditional-{debug}-{optimize}"))
+                .file(
+                    "main.c",
+                    "extern int test(void); int main(void){return test();}",
+                )
+                .file(&*object, keel_asm::x86::assemble_object(&assembly).unwrap())
+                .link(["main.c", &object])
+                .check();
         }
     }
 }

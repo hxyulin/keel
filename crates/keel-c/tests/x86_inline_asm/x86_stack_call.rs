@@ -28,10 +28,8 @@ fn balanced_stack_calls_keep_the_reserved_register_and_call_barrier() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_STACK_CALL_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(SOURCE).unwrap();
         if optimize {
@@ -110,14 +108,29 @@ fn balanced_stack_calls_keep_the_reserved_register_and_call_barrier() {
                         )
                         .unwrap();
                         assert_eq!(bytes, chunks.finish().unwrap());
-                        if let Some(path) = &export {
-                            std::fs::write(
-                                path.join(format!(
-                                    "{cpu}-{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                                )),
-                                bytes,
-                            )
-                            .unwrap();
+                        if distinct.insert(bytes.clone()) {
+                            let name =
+                                format!("{cpu}-{selection:?}-{allocator:?}-{pool}-opt{optimize}");
+                            let file = format!("{name}.o");
+                            let features: &[&str] = if level == CpuLevel::V3 {
+                                &["avx2"]
+                            } else {
+                                &[]
+                            };
+                            keel_test_support::native_program!(name)
+                                .requires(features)
+                                .file(
+                                    "main.c",
+                                    include_str!("../fixtures/x86_stack_call_runner.c"),
+                                )
+                                .file(
+                                    "callees.s",
+                                    include_str!("../fixtures/x86_stack_call_callees.s"),
+                                )
+                                .file(&*file, bytes)
+                                .link(["-O2", "main.c", "callees.s", &file])
+                                .stdout("reserved-stack-call PASS\n")
+                                .check();
                         }
                     }
                 }

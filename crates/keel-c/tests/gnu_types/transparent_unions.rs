@@ -69,11 +69,7 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
             }
         }
     }
-    if let Some(path) = std::env::var_os("KEEL_TRANSPARENT_UNION_EXPORT") {
-        let path = std::path::PathBuf::from(path);
-        fs::create_dir_all(&path).unwrap();
-        fs::write(path.join("source.c"), SOURCE).unwrap();
-        fs::write(path.join("main.c"), RUNNER).unwrap();
+    if keel_test_support::native::active() {
         let module = keel_c::compile(
             SOURCE,
             "transparent.c",
@@ -84,14 +80,17 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
             },
         )
         .unwrap();
-        fs::write(
-            path.join("generated.o"),
-            keel_asm::x86::assemble_object(
-                &keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap(),
-            )
-            .unwrap(),
+        let object = keel_asm::x86::assemble_object(
+            &keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap(),
         )
         .unwrap();
+        keel_test_support::native_program!("transparent-unions")
+            .file("main.c", RUNNER)
+            .file("generated.o", object)
+            .link(["-O2", "-w", "main.c", "generated.o"])
+            .check();
+    } else {
+        keel_test_support::skip_part!(keel_test_support::native::NOT_X86_LINUX);
     }
 }
 #[test]

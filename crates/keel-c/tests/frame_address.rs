@@ -45,6 +45,23 @@ fn object(module: &Module, target: Target) -> Vec<u8> {
     typed
 }
 
+/// The frame-address runner linked with one x86-64 object.
+fn frame_program(name: String, main: &str, bytes: &[u8]) {
+    let object = format!("{name}.o");
+    keel_test_support::native_program!(name)
+        .file("main.c", main)
+        .file(&*object, bytes)
+        .link([
+            "-O2",
+            "-fno-omit-frame-pointer",
+            "-fno-optimize-sibling-calls",
+            &object,
+            "main.c",
+        ])
+        .stdout("frame-address PASS\n")
+        .check();
+}
+
 fn execute(dir: &Path, compiler: &str, input: &Path, output: &Path) {
     let run = Command::new(compiler)
         .args([
@@ -193,10 +210,8 @@ fn x86_frame_walks_have_text_typed_chunked_parity_across_allocators() {
         float_callee_saved: &[],
     };
     let features = Features::for_level(CpuLevel::V1);
-    let export = std::env::var_os("KEEL_FRAME_ADDRESS_EXPORT");
-    if let Some(path) = &export {
-        fs::create_dir_all(path).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(SOURCE, Target::X86_64LinuxGnu).unwrap();
         if optimize {
@@ -243,14 +258,12 @@ fn x86_frame_walks_have_text_typed_chunked_parity_across_allocators() {
                     )
                     .unwrap();
                     assert_eq!(bytes, chunks.finish().unwrap());
-                    if let Some(path) = &export {
-                        fs::write(
-                            Path::new(path).join(format!(
-                                "{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                            )),
-                            bytes,
-                        )
-                        .unwrap();
+                    if distinct.insert(bytes.clone()) {
+                        frame_program(
+                            format!("{selection:?}-{allocator:?}-{pool}-opt{optimize}"),
+                            RUNNER,
+                            &bytes,
+                        );
                     }
                 }
             }
@@ -278,8 +291,6 @@ int main(void) {
     return 0;
 }
 "#;
-    let export =
-        std::env::var_os("KEEL_FRAME_ADDRESS_EXPORT").map(|p| Path::new(&p).join("inline"));
     for optimize in [false, true] {
         let mut module = compile(source, Target::X86_64LinuxGnu).unwrap();
         if optimize {
@@ -297,12 +308,7 @@ int main(void) {
                 .any(|(_, i)| matches!(function.inst_data(i), InstData::Call { .. }))
         );
         let bytes = object(&module, Target::X86_64LinuxGnu);
-        if let Some(path) = &export {
-            fs::create_dir_all(path).unwrap();
-            fs::write(path.join(format!("inline-opt{optimize}.o")), &bytes).unwrap();
-            fs::write(path.join("source.c"), source).unwrap();
-            fs::write(path.join("main.c"), runner).unwrap();
-        }
+        frame_program(format!("inline-opt{optimize}"), runner, &bytes);
         if Target::host() == Some(Target::X86_64LinuxGnu) {
             let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
                 .join(format!("frame-address-inlined-{optimize}"));

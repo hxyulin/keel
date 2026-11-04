@@ -228,10 +228,6 @@ fn module_asm_has_text_typed_and_chunked_parity_across_codegen_choices() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_FILE_ASM_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
     for debug in [false, true] {
         for optimize in [false, true] {
             let mut module = keel_c::compile(
@@ -264,10 +260,7 @@ fn module_asm_has_text_typed_and_chunked_parity_across_codegen_choices() {
                         selector: &selector,
                         allocator: &allocator,
                     };
-                    for (pool_name, pools) in [
-                        ("normal", &keel_codegen::x86_64::REGISTERS),
-                        ("empty", &empty),
-                    ] {
+                    for pools in [&keel_codegen::x86_64::REGISTERS, &empty] {
                         let text =
                             keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline)
                                 .unwrap();
@@ -289,9 +282,6 @@ fn module_asm_has_text_typed_and_chunked_parity_across_codegen_choices() {
                         )
                         .unwrap();
                         assert_eq!(bytes, chunks.finish().unwrap());
-                        if let Some(path) = &export {
-                            std::fs::write(path.join(format!("{tier:?}-{allocator:?}-{pool_name}-opt{optimize}-debug{debug}.o")), bytes).unwrap();
-                        }
                     }
                 }
             }

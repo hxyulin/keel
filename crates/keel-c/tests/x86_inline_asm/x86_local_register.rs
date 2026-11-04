@@ -1,6 +1,5 @@
 //! Named locals constrain direct extended-asm operands without reserving registers.
 use keel_ir::Target;
-use std::fs;
 
 const SOURCE: &str = include_str!("../fixtures/x86_local_register.c");
 const RUNNER: &str = include_str!("../fixtures/x86_local_register_runner.c");
@@ -125,12 +124,8 @@ fn local_register_objects_preserve_text_typed_and_chunked_parity() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_LOCAL_REGISTER_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("source.c"), source()).unwrap();
-        fs::write(dir.join("main.c"), runner()).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(&source(), Target::X86_64LinuxGnu, false);
         if optimize {
@@ -177,14 +172,14 @@ fn local_register_objects_preserve_text_typed_and_chunked_parity() {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(dir) = &export {
-                        fs::write(
-                            dir.join(format!(
-                                "register-{optimize}-{tier:?}-{allocator:?}-{name}.o"
-                            )),
-                            object,
-                        )
-                        .unwrap();
+                    if distinct.insert(object.clone()) {
+                        let name = format!("register-{optimize}-{tier:?}-{allocator:?}-{name}");
+                        let file = format!("{name}.o");
+                        keel_test_support::native_program!(name)
+                            .file("main.c", runner())
+                            .file(&*file, object)
+                            .link(["-O2", "main.c", &file])
+                            .check();
                     }
                 }
             }

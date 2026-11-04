@@ -117,13 +117,25 @@ unsigned long larger_port(unsigned long a, unsigned long b, unsigned long c) {
         keel_ir::verify_module(&module).unwrap();
         let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
         let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-        if let Some(path) = std::env::var_os("KEEL_X86_PORT_CONSTRAINT_EXPORT") {
-            std::fs::create_dir_all(&path).unwrap();
-            std::fs::write(
-                std::path::Path::new(&path).join(format!("port-opt{optimize}.o")),
-                object,
-            )
-            .unwrap();
-        }
+        keel_test_support::native_program!(format!("port-opt{optimize}"))
+            .file("main.c", PORT_MAIN)
+            .file("port.o", object)
+            .link(["main.c", "port.o"])
+            .check();
     }
 }
+
+/// Checks that each port choice returns the port mixed with the live values.
+const PORT_MAIN: &str = r#"
+unsigned long dynamic_port(unsigned short, unsigned long, unsigned long, unsigned long);
+unsigned long immediate_port(unsigned long, unsigned long, unsigned long);
+unsigned long larger_port(unsigned long, unsigned long, unsigned long);
+int main(void) {
+    unsigned long a = 0x0123456789abcdefUL, b = 0xfedcba9876543210UL, c = 0x5a5aa5a55a5aa5a5UL;
+    if (dynamic_port(0x1234, a, b, c) != (0x1234 ^ a ^ b ^ c)) return 1;
+    if (dynamic_port(0xffff, a, b, c) != (0xffff ^ a ^ b ^ c)) return 2;
+    if (immediate_port(a, b, c) != (255 ^ a ^ b ^ c)) return 3;
+    if (larger_port(a, b, c) != (256 ^ a ^ b ^ c)) return 4;
+    return 0;
+}
+"#;

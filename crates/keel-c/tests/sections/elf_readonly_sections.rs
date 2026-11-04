@@ -147,14 +147,12 @@ fn section_flags_bytes_symbols_and_relocations_match_static_clang() {
                 "{target:?}: {name}"
             );
         }
-        if target == Target::X86_64LinuxGnu
-            && let Some(export) = std::env::var_os("KEEL_ELF_READONLY_EXPORT")
-        {
-            let export = std::path::PathBuf::from(export);
-            fs::create_dir_all(&export).unwrap();
-            fs::write(export.join("source.c"), SOURCE).unwrap();
-            fs::write(export.join("main.c"), MAIN).unwrap();
-            fs::write(export.join("generated.o"), bytes).unwrap();
+        if target == Target::X86_64LinuxGnu {
+            keel_test_support::native_program!("readonly-sections")
+                .file("main.c", MAIN)
+                .file("generated.o", bytes)
+                .link(["main.c", "generated.o"])
+                .check();
         }
     }
 }

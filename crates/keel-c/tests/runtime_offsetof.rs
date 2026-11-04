@@ -145,12 +145,8 @@ fn x86_offset_objects_have_text_typed_and_chunked_parity() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_RUNTIME_OFFSETOF_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("source.c"), SOURCE).unwrap();
-        fs::write(dir.join("main.c"), RUNNER).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(SOURCE, Target::X86_64LinuxGnu).unwrap();
         if optimize {
@@ -197,14 +193,15 @@ fn x86_offset_objects_have_text_typed_and_chunked_parity() {
                     )
                     .unwrap();
                     assert_eq!(bytes, chunks.finish().unwrap());
-                    if let Some(dir) = &export {
-                        fs::write(
-                            dir.join(format!(
-                                "{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                            )),
-                            bytes,
-                        )
-                        .unwrap();
+                    if distinct.insert(bytes.clone()) {
+                        let name = format!("{selection:?}-{allocator:?}-{pool}-opt{optimize}");
+                        let object = format!("{name}.o");
+                        keel_test_support::native_program!(name)
+                            .file("main.c", RUNNER)
+                            .file(&*object, bytes)
+                            .link(["-O2", &object, "main.c"])
+                            .stdout("runtime-offsetof PASS\n")
+                            .check();
                     }
                 }
             }

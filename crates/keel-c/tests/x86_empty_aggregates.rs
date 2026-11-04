@@ -1,6 +1,5 @@
 //! Empty GNU C values have local identity and effects, but no SysV payload.
 use keel_ir::Target;
-use std::fs;
 const SOURCE: &str = include_str!("fixtures/x86_empty_aggregates.c");
 const RUNNER: &str = include_str!("fixtures/x86_empty_aggregates_runner.c");
 fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
@@ -135,12 +134,8 @@ fn empty_aggregate_calls_preserve_object_parity() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_EMPTY_AGGREGATE_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("source.c"), SOURCE).unwrap();
-        fs::write(dir.join("main.c"), RUNNER).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for (optimize, debug) in [(false, false), (true, false), (false, true), (true, true)] {
         let mut module = compile(SOURCE, Target::X86_64LinuxGnu, debug);
         if optimize {
@@ -187,14 +182,15 @@ fn empty_aggregate_calls_preserve_object_parity() {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(dir) = &export {
-                        fs::write(
-                            dir.join(format!(
-                                "empty-{optimize}-{debug}-{tier:?}-{allocator:?}-{name}.o"
-                            )),
-                            object,
-                        )
-                        .unwrap();
+                    if distinct.insert(object.clone()) {
+                        let name =
+                            format!("empty-{optimize}-{debug}-{tier:?}-{allocator:?}-{name}");
+                        let file = format!("{name}.o");
+                        keel_test_support::native_program!(name)
+                            .file("main.c", RUNNER)
+                            .file(&*file, object)
+                            .link(["main.c", &file])
+                            .check();
                     }
                 }
             }

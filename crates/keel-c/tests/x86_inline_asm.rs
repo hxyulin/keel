@@ -93,14 +93,6 @@ static inline void unused_basic(void) { asm("unsupported_unused_instruction"); }
         let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
         let object = keel_asm::x86::assemble_program_object(&program).unwrap();
         assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
-        if let Some(path) = std::env::var_os("KEEL_X86_BASIC_ASM_EXPORT") {
-            std::fs::create_dir_all(&path).unwrap();
-            std::fs::write(
-                std::path::Path::new(&path).join(format!("basic-opt{optimize}.o")),
-                object,
-            )
-            .unwrap();
-        }
     }
 }
 #[test]
@@ -121,15 +113,7 @@ unsigned long kernel_alignment(void) {
         }
         keel_ir::verify_module(&module).unwrap();
         let program = keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
-        let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-        if let Some(path) = std::env::var_os("KEEL_X86_BASIC_ASM_EXPORT") {
-            std::fs::create_dir_all(&path).unwrap();
-            std::fs::write(
-                std::path::Path::new(&path).join(format!("alignment-opt{optimize}.o")),
-                object,
-            )
-            .unwrap();
-        }
+        keel_asm::x86::assemble_program_object(&program).unwrap();
     }
 }
 
@@ -141,10 +125,6 @@ fn scalar_constraints_emit_identical_text_typed_and_chunked_objects() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_INLINE_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
     for debug in [false, true] {
         for optimize in [false, true] {
             let mut m = compile(SOURCE, debug).unwrap();
@@ -169,10 +149,7 @@ fn scalar_constraints_emit_identical_text_typed_and_chunked_objects() {
                             selector: &selector,
                             allocator: &alloc,
                         };
-                        for (pool_name, pools) in [
-                            ("normal", &keel_codegen::x86_64::REGISTERS),
-                            ("empty", &empty),
-                        ] {
+                        for pools in [&keel_codegen::x86_64::REGISTERS, &empty] {
                             let p = keel_codegen::x86_64::compile_program_with_pipeline(
                                 &m, pools, &pipeline,
                             )
@@ -197,9 +174,6 @@ fn scalar_constraints_emit_identical_text_typed_and_chunked_objects() {
                             )
                             .unwrap();
                             assert_eq!(obj, chunks.finish().unwrap());
-                            if let Some(path) = &export {
-                                std::fs::write(path.join(format!("{level:?}-{tier:?}-{alloc:?}-{pool_name}-opt{optimize}-debug{debug}.o")),&obj).unwrap();
-                            }
                         }
                     }
                 }
@@ -341,10 +315,6 @@ fn forced_rematerialization_preserves_fixed_operands() {
     )
     .unwrap();
     assert_eq!(obj, keel_asm::x86::assemble_object(&text).unwrap());
-    if let Some(path) = std::env::var_os("KEEL_X86_INLINE_EXPORT") {
-        std::fs::create_dir_all(&path).unwrap();
-        std::fs::write(std::path::Path::new(&path).join("forced-remat.o"), obj).unwrap();
-    }
 }
 
 #[test]
@@ -1043,20 +1013,17 @@ fn simd_constraints_keep_opaque_outputs_and_full_width_live_values() {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(dir) = std::env::var_os("KEEL_C_ASM_SIMD_EXPORT_DIR") {
-                        let dir = std::path::Path::new(&dir);
-                        std::fs::create_dir_all(dir).unwrap();
-                        std::fs::write(
-                            dir.join(format!("{debug}-{selection:?}-{allocation:?}-{spilled}.o")),
-                            object,
-                        )
-                        .unwrap();
-                        std::fs::write(
-                            dir.join("runner.c"),
-                            include_str!("../../keel-codegen/tests/x86_asm_clobbers/simd_runner.c"),
-                        )
-                        .unwrap();
-                    }
+                    keel_test_support::native_program!(format!(
+                        "simd-{debug}-{selection:?}-{allocation:?}-{spilled}"
+                    ))
+                    .requires(&["avx2"])
+                    .file(
+                        "runner.c",
+                        include_str!("../../keel-codegen/tests/x86_asm_clobbers/simd_runner.c"),
+                    )
+                    .file("simd.o", object)
+                    .link(["-O2", "runner.c", "simd.o"])
+                    .check();
                 }
             }
         }

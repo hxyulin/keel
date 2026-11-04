@@ -31,10 +31,8 @@ fn rsp_reads_survive_stack_changes_without_emitting_a_data_symbol() {
         float_callee_saved: &[],
     };
     let features = Features::for_level(CpuLevel::V1);
-    let export = std::env::var_os("KEEL_X86_STACK_REGISTER_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(SOURCE, Target::X86_64LinuxGnu).unwrap();
         if optimize {
@@ -113,14 +111,18 @@ fn rsp_reads_survive_stack_changes_without_emitting_a_data_symbol() {
                     )
                     .unwrap();
                     assert_eq!(bytes, chunks.finish().unwrap());
-                    if let Some(path) = &export {
-                        std::fs::write(
-                            path.join(format!(
-                                "{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                            )),
-                            bytes,
-                        )
-                        .unwrap();
+                    if distinct.insert(bytes.clone()) {
+                        let name = format!("{selection:?}-{allocator:?}-{pool}-opt{optimize}");
+                        let file = format!("{name}.o");
+                        keel_test_support::native_program!(name)
+                            .file(
+                                "main.c",
+                                include_str!("../fixtures/x86_stack_register_runner.c"),
+                            )
+                            .file(&*file, bytes)
+                            .link(["-O2", "main.c", &file])
+                            .stdout("stack-register PASS\n")
+                            .check();
                     }
                 }
             }

@@ -54,11 +54,8 @@ fn shared_inputs_survive_optimization_allocation_and_emission() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_SHARED_REGISTERS_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("source.c"), SOURCE).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(SOURCE);
         if optimize {
@@ -106,30 +103,41 @@ fn shared_inputs_survive_optimization_allocation_and_emission() {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(dir) = &export {
-                        std::fs::write(
-                            dir.join(format!(
-                                "shared-{optimize}-{selector:?}-{allocator_name}-{pool_name}.o"
-                            )),
+                    if distinct.insert(object.clone()) {
+                        shared_program(
+                            format!("shared-{optimize}-{selector:?}-{allocator_name}-{pool_name}"),
                             object,
-                        )
-                        .unwrap();
+                            0,
+                        );
                     }
                 }
             }
         }
     }
-    if let Some(dir) = &export {
-        // The external execution harness must reject this control: discarding
-        // high bits models loading a narrow initializer after the wide one.
-        let broken = compile(&SOURCE.replace("addq $29,%0", "movzwq %w0,%0; addq $29,%0"));
-        let program = keel_codegen::compile_program(&broken, Target::X86_64LinuxGnu).unwrap();
-        std::fs::write(
-            dir.join("wrong-wide-initializer.control"),
-            keel_asm::x86::assemble_program_object(&program).unwrap(),
+    // The harness must reject this control: discarding high bits models
+    // loading a narrow initializer after the wide one, so shared_mixed fails.
+    let broken = compile(&SOURCE.replace("addq $29,%0", "movzwq %w0,%0; addq $29,%0"));
+    let program = keel_codegen::compile_program(&broken, Target::X86_64LinuxGnu).unwrap();
+    shared_program(
+        "wrong-wide-initializer".to_owned(),
+        keel_asm::x86::assemble_program_object(&program).unwrap(),
+        4,
+    );
+}
+
+/// Links an object defining `guest_main` with a C entry point that returns
+/// its result.
+fn shared_program(name: String, object: Vec<u8>, exit: i32) {
+    let file = format!("{name}.o");
+    keel_test_support::native_program!(name)
+        .file(
+            "main.c",
+            "int guest_main(void);int main(void){return guest_main();}",
         )
-        .unwrap();
-    }
+        .file(&*file, object)
+        .link(["main.c", &file])
+        .exit(exit)
+        .check();
 }
 
 #[test]

@@ -130,16 +130,6 @@ fn bit_search_and_digit_tests_match_native_reference() {
         "extern int test(void);int main(void){return test();}",
     )
     .unwrap();
-    let export = std::env::var_os("KEEL_INTEGER_BUILTINS_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("source.c"), &source).unwrap();
-        fs::copy(
-            Path::new(env!("CARGO_TARGET_TMPDIR")).join("integer-builtins/main.c"),
-            dir.join("main.c"),
-        )
-        .unwrap();
-    }
     for target in Target::NATIVE {
         for debug in [false, true] {
             let mut m = compile(&source, target, debug);
@@ -167,14 +157,16 @@ fn bit_search_and_digit_tests_match_native_reference() {
                         "{target:?}: debug={debug}, optimize={optimize}"
                     );
                 }
-                if target == Target::X86_64LinuxGnu
-                    && let Some(dir) = &export
-                {
-                    fs::write(
-                        dir.join(format!("integer-{debug}-{optimize}.o")),
-                        keel_asm::x86::assemble_object(&assembly).unwrap(),
-                    )
-                    .unwrap();
+                if target == Target::X86_64LinuxGnu {
+                    let object = format!("integer-{debug}-{optimize}.o");
+                    keel_test_support::native_program!(format!("integer-{debug}-{optimize}"))
+                        .file(
+                            "main.c",
+                            "extern int test(void);int main(void){return test();}",
+                        )
+                        .file(&*object, keel_asm::x86::assemble_object(&assembly).unwrap())
+                        .link(["main.c", &object])
+                        .check();
                 }
             }
         }

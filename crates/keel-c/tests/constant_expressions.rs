@@ -152,16 +152,6 @@ fn constants_and_runtime_operations_match_clang_and_native_execution() {
         "extern int test(void);int main(void){return test();}",
     )
     .unwrap();
-    let export = std::env::var_os("KEEL_CONSTANT_EXPRESSIONS_EXPORT").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("source.c"), &source).unwrap();
-        fs::copy(
-            Path::new(env!("CARGO_TARGET_TMPDIR")).join("constant-expressions/main.c"),
-            dir.join("main.c"),
-        )
-        .unwrap();
-    }
     for target in Target::NATIVE {
         for debug in [false, true] {
             let mut m = compile(&source, target, debug);
@@ -189,14 +179,16 @@ fn constants_and_runtime_operations_match_clang_and_native_execution() {
                         "{target:?}: debug={debug}, optimize={optimize}"
                     );
                 }
-                if target == Target::X86_64LinuxGnu
-                    && let Some(dir) = &export
-                {
-                    fs::write(
-                        dir.join(format!("constant-{debug}-{optimize}.o")),
-                        keel_asm::x86::assemble_object(&assembly).unwrap(),
-                    )
-                    .unwrap();
+                if target == Target::X86_64LinuxGnu {
+                    let object = format!("constant-{debug}-{optimize}.o");
+                    keel_test_support::native_program!(format!("constant-{debug}-{optimize}"))
+                        .file(
+                            "main.c",
+                            "extern int test(void);int main(void){return test();}",
+                        )
+                        .file(&*object, keel_asm::x86::assemble_object(&assembly).unwrap())
+                        .link(["main.c", &object])
+                        .check();
                 }
             }
         }

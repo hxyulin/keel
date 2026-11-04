@@ -22,26 +22,27 @@ fn compile(source: &str) -> Result<keel_ir::Module, String> {
 
 #[test]
 fn restoration_trampolines_use_ordinary_cfg_and_survive_codegen() {
-    check_codegen(SOURCE, "KEEL_X86_ASM_GOTO_EXPORT");
+    check_codegen(
+        SOURCE,
+        "goto",
+        include_str!("../fixtures/x86_asm_goto_runner.c"),
+        Some("asm-goto PASS\n"),
+    );
 }
 
 #[test]
 fn goto_outputs_reach_all_successors_after_register_restoration() {
-    let source = include_str!("../fixtures/x86_asm_goto_outputs.c");
-    if let Some(dir) = std::env::var_os("KEEL_X86_ASM_GOTO_OUTPUTS_EXPORT") {
-        let dir = std::path::PathBuf::from(dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("source.c"), source).unwrap();
-        std::fs::write(
-            dir.join("main.c"),
-            include_str!("../fixtures/x86_asm_goto_outputs_main.c"),
-        )
-        .unwrap();
-    }
-    check_codegen(source, "KEEL_X86_ASM_GOTO_OUTPUTS_EXPORT");
+    check_codegen(
+        include_str!("../fixtures/x86_asm_goto_outputs.c"),
+        "outputs",
+        include_str!("../fixtures/x86_asm_goto_outputs_main.c"),
+        None,
+    );
 }
 
-fn check_codegen(source: &str, export_name: &str) {
+/// Checks object parity across codegen choices and links each distinct
+/// object with `main`, which must exit zero and print `stdout` if given.
+fn check_codegen(source: &str, prefix: &str, main: &str, stdout: Option<&str>) {
     let empty = Pools {
         caller_saved: &[],
         callee_saved: &[],
@@ -49,10 +50,7 @@ fn check_codegen(source: &str, export_name: &str) {
         float_callee_saved: &[],
     };
     let features = Features::for_level(CpuLevel::V1);
-    let export = std::env::var_os(export_name).map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
+    let mut distinct = std::collections::HashSet::new();
     for optimize in [false, true] {
         let mut module = compile(source).unwrap();
         if optimize {
@@ -111,14 +109,18 @@ fn check_codegen(source: &str, export_name: &str) {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(path) = &export {
-                        std::fs::write(
-                            path.join(format!(
-                                "{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                            )),
-                            object,
-                        )
-                        .unwrap();
+                    if distinct.insert(object.clone()) {
+                        let name =
+                            format!("{prefix}-{selection:?}-{allocator:?}-{pool}-opt{optimize}");
+                        let file = format!("{name}.o");
+                        let mut program = keel_test_support::native_program!(name)
+                            .file("main.c", main)
+                            .file(&*file, object)
+                            .link(["-O2", "main.c", &file]);
+                        if let Some(expected) = stdout {
+                            program = program.stdout(expected);
+                        }
+                        program.check();
                     }
                 }
             }

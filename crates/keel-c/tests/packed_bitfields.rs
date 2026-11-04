@@ -135,10 +135,8 @@ fn packed_fields_have_text_typed_and_chunked_parity_across_codegen_choices() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let export = std::env::var_os("KEEL_X86_PACKED_BITS_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        std::fs::create_dir_all(path).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     for debug in [false, true] {
         for optimize in [false, true] {
             let mut module = keel_c::compile(
@@ -196,8 +194,20 @@ fn packed_fields_have_text_typed_and_chunked_parity_across_codegen_choices() {
                         )
                         .unwrap();
                         assert_eq!(bytes, chunks.finish().unwrap());
-                        if let Some(path) = &export {
-                            std::fs::write(path.join(format!("{tier:?}-{allocator:?}-{pool_name}-opt{optimize}-debug{debug}.o")), bytes).unwrap();
+                        if distinct.insert(bytes.clone()) {
+                            let name = format!(
+                                "{tier:?}-{allocator:?}-{pool_name}-opt{optimize}-debug{debug}"
+                            );
+                            let object = format!("{name}.o");
+                            keel_test_support::native_program!(name)
+                                .file(
+                                    "oracle.c",
+                                    include_str!("fixtures/packed_bitfields_oracle.c"),
+                                )
+                                .file(&*object, bytes)
+                                .link(["-w", "oracle.c", &object])
+                                .stdout("PASS\n")
+                                .check();
                         }
                     }
                 }

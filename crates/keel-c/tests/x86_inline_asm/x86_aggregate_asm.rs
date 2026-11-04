@@ -8,7 +8,6 @@ use keel_ir::{InstData, Module, Target, Type};
 use std::{fs, path::Path, process::Command};
 
 const SOURCE: &str = include_str!("../fixtures/x86_aggregate_asm.c");
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const RUNNER: &str = include_str!("../fixtures/x86_aggregate_asm_runner.c");
 fn compile(source: &str) -> Result<Module, String> {
     keel_c::compile(
@@ -32,10 +31,8 @@ fn record_operands_preserve_bits_and_all_object_paths() {
         float_callee_saved: &[],
     };
     let features = Features::for_level(CpuLevel::V1);
-    let export = std::env::var_os("KEEL_X86_AGGREGATE_ASM_EXPORT").map(std::path::PathBuf::from);
-    if let Some(path) = &export {
-        fs::create_dir_all(path).unwrap();
-    }
+    // Configurations often produce identical objects; run each distinct one.
+    let mut distinct = std::collections::HashSet::new();
     let reference = Path::new(env!("CARGO_TARGET_TMPDIR")).join("aggregate-asm-reference");
     fs::create_dir_all(&reference).unwrap();
     fs::write(reference.join("source.c"), SOURCE).unwrap();
@@ -137,14 +134,15 @@ fn record_operands_preserve_bits_and_all_object_paths() {
                     )
                     .unwrap();
                     assert_eq!(object, chunks.finish().unwrap());
-                    if let Some(path) = &export {
-                        fs::write(
-                            path.join(format!(
-                                "{selection:?}-{allocator:?}-{pool}-opt{optimize}.o"
-                            )),
-                            object,
-                        )
-                        .unwrap();
+                    if distinct.insert(object.clone()) {
+                        let name = format!("{selection:?}-{allocator:?}-{pool}-opt{optimize}");
+                        let file = format!("{name}.o");
+                        keel_test_support::native_program!(name)
+                            .file("runner.c", RUNNER)
+                            .file(&*file, object)
+                            .link(["-O2", "-no-pie", "runner.c", &file])
+                            .stdout("aggregate-asm PASS\n")
+                            .check();
                     }
                 }
             }
