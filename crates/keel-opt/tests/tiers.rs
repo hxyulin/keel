@@ -1,5 +1,7 @@
 #[path = "tiers/fast.rs"]
 mod fast;
+#[path = "tiers/registry.rs"]
+mod registry;
 #[path = "tiers/unchanged_skip.rs"]
 mod unchanged_skip;
 #[path = "tiers/verification_policy.rs"]
