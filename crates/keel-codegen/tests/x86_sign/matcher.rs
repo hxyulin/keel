@@ -54,7 +54,7 @@ fn closure_boundaries_and_retained_leaves() {
         );
         assert!(select(&f, &mut plan).is_empty());
         let mut plan = Selection::default();
-        plan.conditions.insert(i, (insts[3], false));
+        plan.claim(crate::cover::Cover::ZeroTest, i);
         assert!(select(&f, &mut plan).is_empty());
         for kind in [OperandKind::Use, OperandKind::Def] {
             let mut plan = Selection::default();
@@ -193,7 +193,7 @@ fn closed_sign_select_proofs_and_leaf_occurrences() {
             );
             assert!(select(&f, &mut plan).is_empty());
             let mut plan = Selection::default();
-            plan.conditions.insert(i, (insts[3], false));
+            plan.claim(crate::cover::Cover::ZeroTest, i);
             assert!(select(&f, &mut plan).is_empty());
             for kind in [OperandKind::Use, OperandKind::Def] {
                 let mut plan = Selection::default();

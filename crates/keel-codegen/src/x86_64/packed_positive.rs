@@ -22,12 +22,7 @@ pub(super) fn select(
             if !matches!(func.inst_data(splat), InstData::VectorSplat { .. }) {
                 continue;
             }
-            if chain.iter().any(|&i| {
-                plan.covered(i)
-                    || plan.matches.contains_key(&i)
-                    || plan.conditions.contains_key(&i)
-                    || plan.has_constraint(i)
-            }) {
+            if chain.iter().any(|&i| !plan.is_free(i)) {
                 continue;
             }
             let location = func.inst_loc(load);
@@ -114,6 +109,7 @@ pub(super) fn select(
             for &i in &chain[..5] {
                 plan.cover(i);
             }
+            plan.claim(crate::cover::Cover::X86PackedPositive, widen);
             plan.set_operands(widen, operands);
             result.insert(widen, func.resolve(addr));
         }

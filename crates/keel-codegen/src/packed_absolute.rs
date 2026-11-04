@@ -22,12 +22,7 @@ pub(super) fn select(
             if !matches!(func.inst_data(select), InstData::VectorSelect { .. }) {
                 continue;
             }
-            if chain.iter().any(|&i| {
-                plan.covered(i)
-                    || plan.matches.contains_key(&i)
-                    || plan.conditions.contains_key(&i)
-                    || plan.has_constraint(i)
-            }) {
+            if chain.iter().any(|&i| !plan.is_free(i)) {
                 continue;
             }
             let location = func.inst_loc(first).map(|l| (l.file, l.line));
@@ -76,6 +71,7 @@ pub(super) fn select(
             {
                 continue;
             }
+            plan.claim(crate::cover::Cover::PackedAbs, select);
             plan.cover(compare);
             plan.cover(negate);
             plan.set_operands(select, vec![x]);

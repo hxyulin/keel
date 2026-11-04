@@ -29,10 +29,7 @@ pub(super) fn select(
             }
             if pair.iter().any(|&i| {
                 func.inst_results(i).is_empty()
-                    || plan.covered(i)
-                    || plan.matches.contains_key(&i)
-                    || plan.conditions.contains_key(&i)
-                    || plan.has_constraint(i)
+                    || !plan.is_free(i)
                     || func.resolve(func.first_result(i)) != func.first_result(i)
             }) || func.inst_loc(compare) != func.inst_loc(root)
             {
@@ -88,6 +85,7 @@ pub(super) fn select(
             let Some(selected) = selected else { continue };
             // Only pure compare is suppressed. Loads stay in place, with their
             // original 16-byte instruction, ordering, and debug information.
+            plan.claim(crate::cover::Cover::X86PackedSign, root);
             plan.cover(compare);
             plan.set_operands(
                 root,

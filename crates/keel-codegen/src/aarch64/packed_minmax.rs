@@ -93,15 +93,7 @@ pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashM
             if pair.iter().any(|&i| {
                 let mut raw = Vec::new();
                 f.inst_data(i).for_each_operand(|v| raw.push(f.resolve(v)));
-                plan.covered(i)
-                    || plan.matches.contains_key(&i)
-                    || plan.conditions.contains_key(&i)
-                    || plan.compare_memory.contains_key(&i)
-                    || plan.binary_memory.contains_key(&i)
-                    || plan.division_remainders.contains_key(&i)
-                    || plan.select_compares.contains_key(&i)
-                    || plan.has_constraint(i)
-                    || plan.operands(f, i) != raw
+                !plan.is_free(i) || plan.operands(f, i) != raw
             }) || f.inst_loc(cmp) != f.inst_loc(root)
             {
                 continue;
@@ -174,6 +166,7 @@ pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashM
             if uses[mask.index()] != [(root, mask_operand)] {
                 continue;
             }
+            plan.claim(crate::cover::Cover::Aarch64PackedMinmax, root);
             plan.cover(cmp);
             // Preserve occurrences even when A and B resolve to the same leaf.
             plan.set_operands(root, vec![a, b]);

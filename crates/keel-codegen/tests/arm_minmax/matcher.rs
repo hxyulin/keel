@@ -126,19 +126,19 @@ fn canonical_producers_operand_aliases_and_prior_claims() {
                     );
                 }
                 2 => {
-                    s.conditions.insert(i, (pair[0], false));
+                    s.claim(crate::cover::Cover::ZeroTest, i);
                 }
                 3 => {
-                    s.compare_memory.insert(i, value(0));
+                    s.claim(crate::cover::Cover::X86CompareMemory, i);
                 }
                 4 => {
-                    s.binary_memory.insert(i, value(0));
+                    s.claim(crate::cover::Cover::X86BinaryMemory, i);
                 }
                 5 => {
-                    s.division_remainders.insert(i, pair[0]);
+                    s.claim(crate::cover::Cover::X86DivisionRemainder, i);
                 }
                 6 => {
-                    s.select_compares.insert(i, pair[0]);
+                    s.claim(crate::cover::Cover::Aarch64SelectCompare, i);
                 }
                 7 => s.set_operands(i, vec![]),
                 _ => s.set_operands(i, vec![value(0); 4]),

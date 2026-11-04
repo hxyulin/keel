@@ -1612,37 +1612,34 @@ impl<'a> FunctionCompiler<'a> {
     /// Lowers an instruction that selection or a backend cover claimed;
     /// gives whether there was one.
     fn cover(&mut self, inst: Inst, result: Option<Value>) -> bool {
+        use crate::cover::Cover;
         let func = self.func;
         if self.selection.covered(inst) {
             return true;
         }
-        if let Some(&value) = self.packed_absolute_values.get(&inst) {
-            self.vector_absolute(value, result);
-            return true;
-        }
-        if let Some(&value) = self.packed_sign_values.get(&inst) {
-            match value {
+        match self.selection.owner(inst) {
+            Some(Cover::PackedAbs) => {
+                let value = self.packed_absolute_values[&inst];
+                self.vector_absolute(value, result);
+            }
+            Some(Cover::X86PackedSign) => match self.packed_sign_values[&inst] {
                 packed_sign::Plan::Positive(x) => self.vector_positive64(x, result),
                 packed_sign::Plan::Select { x, otherwise } => {
                     self.vector_sign_select(x, otherwise, result)
                 }
+            },
+            Some(Cover::X86PackedPositive) => {
+                let addr = self.packed_positive_values[&inst];
+                self.vector_positive32(addr, result);
             }
-            return true;
-        }
-        if let Some(&addr) = self.packed_positive_values.get(&inst) {
-            self.vector_positive32(addr, result);
-            return true;
-        }
-        if let Some(&addr) = self.selection.signed_byte_memory.get(&inst) {
-            self.signed_byte_load(addr, result);
-            return true;
-        }
-        if let Some(&addr) = self.packed_low_loads.get(&inst) {
-            if result
-                .is_some_and(|v| func.value_type(v) == Type::Vector(keel_ir::VectorType::I64x4))
-            {
+            Some(Cover::X86SignedByteLoad) => {
+                let addr = self.selection.signed_byte_memory[&inst];
+                self.signed_byte_load(addr, result);
+            }
+            Some(Cover::X86PackedWideLoad) => {
                 // Materialize every address leaf before writing the allocated
                 // full YMM destination; normal completion handles spills.
+                let addr = self.packed_low_loads[&inst];
                 let at = self.mem(addr, S0, Type::Vector(keel_ir::VectorType::I32x4));
                 let d = self.def_freg(result);
                 self.emit(
@@ -1650,30 +1647,64 @@ impl<'a> FunctionCompiler<'a> {
                     [asm_arg(simd_width(d, 256)), asm_arg(&at)],
                 );
                 self.def_done(result, d);
-                return true;
             }
-            let at = self.mem(addr, S0, Type::I64);
-            let d = self.def_freg(result);
-            let opcode = if matches!(
-                func.inst_data(inst),
-                InstData::Convert {
-                    op: ConvertOp::SwidenLow,
-                    ..
-                }
-            ) {
-                Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmovsxdq)
-            } else {
-                Opcode::Movq
-            };
-            self.emit(opcode, [asm_arg(xmm(d)), asm_arg(&at)]);
-            self.def_done(result, d);
-            return true;
+            Some(Cover::X86PackedLowLoad) => {
+                let addr = self.packed_low_loads[&inst];
+                let at = self.mem(addr, S0, Type::I64);
+                let d = self.def_freg(result);
+                let opcode = if matches!(
+                    func.inst_data(inst),
+                    InstData::Convert {
+                        op: ConvertOp::SwidenLow,
+                        ..
+                    }
+                ) {
+                    Opcode::V2(keel_asm_ir::x86::V2Opcode::Pmovsxdq)
+                } else {
+                    Opcode::Movq
+                };
+                self.emit(opcode, [asm_arg(xmm(d)), asm_arg(&at)]);
+                self.def_done(result, d);
+            }
+            Some(Cover::X86LeaMul3) => {
+                let matched = self.selection.matches[&inst].clone();
+                self.selected(result, matched);
+            }
+            // The root's own lowering reads these covers' plans. Address
+            // covers own the covered `ptradd`, which never reaches here.
+            Some(
+                Cover::OffsetAddress
+                | Cover::IndexedAddress
+                | Cover::ZeroTest
+                | Cover::X86DivisionRemainder
+                | Cover::X86BinaryMemory
+                | Cover::X86CompareMemory
+                | Cover::CompareBranch
+                | Cover::X86MaskTest
+                | Cover::X86SelectCompare,
+            ) => return false,
+            Some(
+                cover @ (Cover::Aarch64Ubfx
+                | Cover::Aarch64MultiplyShift
+                | Cover::Aarch64Abs
+                | Cover::Aarch64AbsDiff
+                | Cover::Aarch64PackedMinmax
+                | Cover::Aarch64ExtendedAdd
+                | Cover::Aarch64SelectCompare
+                | Cover::Aarch64PackedLowLoad
+                | Cover::Aarch64ReplicateLoad
+                | Cover::Aarch64VectorImmediate
+                | Cover::Aarch64WideningAdd),
+            ) => unreachable!("AArch64 cover {} on x86", cover.name()),
+            // Generated tree rules and custom selectors.
+            None => {
+                let Some(matched) = self.selection.matches.get(&inst).cloned() else {
+                    return false;
+                };
+                self.selected(result, matched);
+            }
         }
-        if let Some(matched) = self.selection.matches.get(&inst).cloned() {
-            self.selected(result, matched);
-            return true;
-        }
-        false
+        true
     }
 
     /// Lowers one instruction: through a cover that claimed it, a wide or

@@ -12,6 +12,7 @@ pub mod backend_profile;
 
 pub mod aarch64;
 mod abi;
+pub mod cover;
 mod data;
 mod dwarf;
 mod emission;

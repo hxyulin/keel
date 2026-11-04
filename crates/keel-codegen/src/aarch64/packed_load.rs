@@ -18,11 +18,7 @@ pub(super) fn select(
             if !matches!(func.inst_data(splat), InstData::VectorSplat { .. }) {
                 continue;
             }
-            if chain.iter().any(|&i| {
-                selection.covered(i)
-                    || selection.matches.contains_key(&i)
-                    || selection.has_constraint(i)
-            }) {
+            if chain.iter().any(|&i| !selection.is_free(i)) {
                 continue;
             }
             // Keep explicitly distinct source lines as separate boundaries.
@@ -95,6 +91,7 @@ pub(super) fn select(
             // Move only across the adjacent pure splat, retaining the original
             // load's selected address leaves and exact eight-byte footprint.
             let operands = selection.operands(func, load);
+            selection.claim(crate::cover::Cover::Aarch64PackedLowLoad, splat);
             selection.cover(load);
             selection.set_operands(splat, operands);
             selected.insert(splat, func.resolve(addr));

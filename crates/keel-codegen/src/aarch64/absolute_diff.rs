@@ -91,14 +91,7 @@ pub(super) fn select(
             if chain.iter().any(|&i| {
                 let mut raw = Vec::new();
                 f.inst_data(i).for_each_operand(|v| raw.push(f.resolve(v)));
-                plan.covered(i)
-                    || plan.matches.contains_key(&i)
-                    || plan.conditions.contains_key(&i)
-                    || plan.compare_memory.contains_key(&i)
-                    || plan.binary_memory.contains_key(&i)
-                    || plan.division_remainders.contains_key(&i)
-                    || plan.select_compares.contains_key(&i)
-                    || plan.has_constraint(i)
+                !plan.is_free(i)
                     || plan.operands(f, i) != raw
                     || f.inst_loc(i).map(|l| (l.file, l.line)) != loc
             }) {
@@ -201,6 +194,7 @@ pub(super) fn select(
             for &i in &chain[..6] {
                 plan.cover(i);
             }
+            plan.claim(crate::cover::Cover::Aarch64AbsDiff, root);
             plan.set_operands(root, vec![accumulator, left, right]);
             selected.insert(
                 root,

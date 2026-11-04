@@ -38,10 +38,7 @@ pub(super) fn select_wide(
                 || func.resolve(arg) != func.first_result(load)
                 || uses[func.first_result(load).index()] != 1
                 || pair.iter().any(|&i| {
-                    selection.covered(i)
-                        || selection.matches.contains_key(&i)
-                        || selection.has_constraint(i)
-                        || selection.conditions.contains_key(&i)
+                    !selection.is_free(i)
                         || func.inst_loc(i) != func.inst_loc(load)
                         || func.resolve(func.first_result(i)) != func.first_result(i)
                 })
@@ -49,6 +46,7 @@ pub(super) fn select_wide(
                 continue;
             }
             let operands = selection.operands(func, load);
+            selection.claim(crate::cover::Cover::X86PackedWideLoad, widen);
             selection.cover(load);
             selection.set_operands(widen, operands);
             selected.insert(widen, func.resolve(addr));
@@ -75,11 +73,7 @@ pub(super) fn select(
             if !matches!(func.inst_data(splat), InstData::VectorSplat { .. }) {
                 continue;
             }
-            if chain.iter().any(|&i| {
-                selection.covered(i)
-                    || selection.matches.contains_key(&i)
-                    || selection.has_constraint(i)
-            }) {
+            if chain.iter().any(|&i| !selection.is_free(i)) {
                 continue;
             }
             // Keep explicitly distinct source lines as separate boundaries.
@@ -178,6 +172,7 @@ pub(super) fn select(
             } else {
                 splat
             };
+            selection.claim(crate::cover::Cover::X86PackedLowLoad, root);
             selection.set_operands(root, operands);
             selected.insert(root, func.resolve(addr));
         }
@@ -200,9 +195,7 @@ mod tests {
                 let chain: Vec<_> = f.layout_insts().take(4).map(|(_, i)| i).collect();
                 let mut selection = crate::select::Selection::default();
                 match boundary {
-                    0 => {
-                        selection.conditions.insert(chain[at], (chain[0], false));
-                    }
+                    0 => selection.claim(crate::cover::Cover::ZeroTest, chain[at]),
                     1 => selection.cover(chain[at]),
                     2 => {
                         selection.matches.insert(
@@ -281,9 +274,7 @@ mod wide_tests {
                 let chain: Vec<_> = f.layout_insts().take(2).map(|(_, i)| i).collect();
                 let mut selection = crate::select::Selection::default();
                 match boundary {
-                    0 => {
-                        selection.conditions.insert(chain[at], (chain[0], false));
-                    }
+                    0 => selection.claim(crate::cover::Cover::ZeroTest, chain[at]),
                     1 => selection.cover(chain[at]),
                     2 => {
                         selection.matches.insert(

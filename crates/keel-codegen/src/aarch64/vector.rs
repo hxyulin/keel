@@ -1242,6 +1242,7 @@ pub(super) fn select_widening_adds(
             };
             if let Some(accumulator) = accumulator {
                 let source = func.resolve(arg);
+                selection.claim(crate::cover::Cover::Aarch64WideningAdd, inst);
                 selection.cover(producer);
                 selection.set_operands(inst, vec![accumulator, source]);
                 selected.insert(
@@ -1306,6 +1307,7 @@ pub(super) fn select_constant_operands(
         }
         match *func.inst_data(inst) {
             InstData::VectorSplat { arg, .. } if zero_splat(func, inst) => {
+                selection.claim(crate::cover::Cover::Aarch64VectorImmediate, inst);
                 selection.set_operands(inst, vec![]);
                 only_use(selection, arg);
             }
@@ -1324,6 +1326,7 @@ pub(super) fn select_constant_operands(
                     continue;
                 };
                 let width = ty.vector().unwrap().lane_type().bytes().unwrap() * 8;
+                selection.claim(crate::cover::Cover::Aarch64VectorImmediate, inst);
                 selection.set_operands(inst, vec![func.resolve(args[0])]);
                 shifts.insert(inst, (bits % u64::from(width)) as u32);
                 if only_use(selection, amount).is_some() {
@@ -1374,6 +1377,7 @@ pub(super) fn select_replicate_loads(
                 .contains_key(&func.resolve(addr))
             && !matches!(func.value_def(func.resolve(addr)), keel_ir::ValueDef::Result(i, _) if selection.covered(i))
         {
+            selection.claim(crate::cover::Cover::Aarch64ReplicateLoad, inst);
             selection.cover(load);
             selection.set_operands(inst, vec![func.resolve(addr)]);
             selected.insert(inst, func.resolve(addr));

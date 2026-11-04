@@ -1640,87 +1640,120 @@ impl<'a> FunctionCompiler<'a> {
     /// Lowers an instruction that selection or a backend cover claimed;
     /// gives whether there was one.
     fn cover(&mut self, inst: Inst, result: Option<Value>) -> bool {
+        use crate::cover::Cover;
         if self.selection.covered(inst) {
             return true;
         }
-        if let Some(&p) = self.extended_adds.get(&inst) {
-            let a = self.use_reg(p.base, S0);
-            let b = self.use_reg(p.index, S1);
-            let d = self.def_reg(result);
-            self.mach(
-                "add",
-                [
-                    Reg::x(d).into(),
-                    Reg::x(a).into(),
-                    Reg::w(b).into(),
-                    Arg::shift(if p.signed { "sxtw" } else { "uxtw" }, p.shift),
-                ],
-            );
-            self.def_done(result, d);
-            return true;
+        match self.selection.owner(inst) {
+            Some(Cover::Aarch64ExtendedAdd) => {
+                let p = self.extended_adds[&inst];
+                let a = self.use_reg(p.base, S0);
+                let b = self.use_reg(p.index, S1);
+                let d = self.def_reg(result);
+                self.mach(
+                    "add",
+                    [
+                        Reg::x(d).into(),
+                        Reg::x(a).into(),
+                        Reg::w(b).into(),
+                        Arg::shift(if p.signed { "sxtw" } else { "uxtw" }, p.shift),
+                    ],
+                );
+                self.def_done(result, d);
+            }
+            Some(Cover::Aarch64Abs) => {
+                let value = self.absolute_values[&inst];
+                let ty = self.ty(value);
+                let source = self.use_reg(value, S0);
+                let d = self.def_reg(result);
+                self.mach("cmp", [reg(source, ty).into(), Arg::imm(0)]);
+                self.native(
+                    if ty == Type::I64 {
+                        Opcode::CSNEG_64_condsel
+                    } else {
+                        Opcode::CSNEG_32_condsel
+                    },
+                    [
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, source.into()),
+                        (FieldId::Rm, source.into()),
+                        (FieldId::cond, 10),
+                    ],
+                    |out| {
+                        write!(
+                            out,
+                            "csneg\t{}, {}, {}, ge",
+                            reg(d, ty),
+                            reg(source, ty),
+                            reg(source, ty)
+                        )
+                    },
+                );
+                self.def_done(result, d);
+            }
+            Some(Cover::Aarch64AbsDiff) => {
+                let difference = self.absolute_differences[&inst];
+                self.vector_absolute_difference(difference, result);
+            }
+            Some(Cover::PackedAbs) => {
+                let value = self.packed_absolute_values[&inst];
+                self.vector_absolute(value, result);
+            }
+            Some(Cover::Aarch64PackedMinmax) => {
+                let minmax = self.packed_minmax[&inst];
+                self.vector_minmax(minmax, result);
+            }
+            Some(Cover::Aarch64PackedLowLoad) => {
+                let addr = self.packed_low_loads[&inst];
+                let at = self.mem(addr, S0, Type::F64);
+                let d = self.def_freg(result);
+                self.mach("ldr", [Reg::d(d).into(), at.into()]);
+                self.def_done(result, d);
+            }
+            Some(Cover::Aarch64ReplicateLoad) => {
+                let addr = self.replicate_loads[&inst];
+                self.vector_replicate_load(addr, result);
+            }
+            Some(Cover::Aarch64WideningAdd) => {
+                let add = self.widening_adds[&inst];
+                self.vector_widening_add(add, result);
+            }
+            Some(Cover::Aarch64Ubfx | Cover::Aarch64MultiplyShift) => {
+                let matched = self.selection.matches[&inst].clone();
+                self.selected(result, matched);
+            }
+            // The root's own lowering reads these covers' plans. Address
+            // covers own the covered `ptradd`, which never reaches here.
+            Some(
+                Cover::OffsetAddress
+                | Cover::IndexedAddress
+                | Cover::ZeroTest
+                | Cover::CompareBranch
+                | Cover::Aarch64SelectCompare
+                | Cover::Aarch64VectorImmediate,
+            ) => return false,
+            Some(
+                cover @ (Cover::X86DivisionRemainder
+                | Cover::X86LeaMul3
+                | Cover::X86BinaryMemory
+                | Cover::X86CompareMemory
+                | Cover::X86MaskTest
+                | Cover::X86SelectCompare
+                | Cover::X86PackedPositive
+                | Cover::X86PackedSign
+                | Cover::X86PackedLowLoad
+                | Cover::X86PackedWideLoad
+                | Cover::X86SignedByteLoad),
+            ) => unreachable!("x86 cover {} on AArch64", cover.name()),
+            // Generated tree rules and custom selectors.
+            None => {
+                let Some(matched) = self.selection.matches.get(&inst).cloned() else {
+                    return false;
+                };
+                self.selected(result, matched);
+            }
         }
-        if let Some(&value) = self.absolute_values.get(&inst) {
-            let ty = self.ty(value);
-            let source = self.use_reg(value, S0);
-            let d = self.def_reg(result);
-            self.mach("cmp", [reg(source, ty).into(), Arg::imm(0)]);
-            self.native(
-                if ty == Type::I64 {
-                    Opcode::CSNEG_64_condsel
-                } else {
-                    Opcode::CSNEG_32_condsel
-                },
-                [
-                    (FieldId::Rd, d.into()),
-                    (FieldId::Rn, source.into()),
-                    (FieldId::Rm, source.into()),
-                    (FieldId::cond, 10),
-                ],
-                |out| {
-                    write!(
-                        out,
-                        "csneg\t{}, {}, {}, ge",
-                        reg(d, ty),
-                        reg(source, ty),
-                        reg(source, ty)
-                    )
-                },
-            );
-            self.def_done(result, d);
-            return true;
-        }
-        if let Some(&difference) = self.absolute_differences.get(&inst) {
-            self.vector_absolute_difference(difference, result);
-            return true;
-        }
-        if let Some(&value) = self.packed_absolute_values.get(&inst) {
-            self.vector_absolute(value, result);
-            return true;
-        }
-        if let Some(&minmax) = self.packed_minmax.get(&inst) {
-            self.vector_minmax(minmax, result);
-            return true;
-        }
-        if let Some(&addr) = self.packed_low_loads.get(&inst) {
-            let at = self.mem(addr, S0, Type::F64);
-            let d = self.def_freg(result);
-            self.mach("ldr", [Reg::d(d).into(), at.into()]);
-            self.def_done(result, d);
-            return true;
-        }
-        if let Some(&addr) = self.replicate_loads.get(&inst) {
-            self.vector_replicate_load(addr, result);
-            return true;
-        }
-        if let Some(&add) = self.widening_adds.get(&inst) {
-            self.vector_widening_add(add, result);
-            return true;
-        }
-        if let Some(matched) = self.selection.matches.get(&inst).cloned() {
-            self.selected(result, matched);
-            return true;
-        }
-        false
+        true
     }
 
     /// Lowers one instruction: through a cover that claimed it, the i128

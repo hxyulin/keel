@@ -89,9 +89,7 @@ pub(super) fn select(
             let operands_ok = actual == raw || (scaled == Some(i) && actual == [ext_result]);
             f.inst_block(i) != block
                 || f.inst_loc(i) != f.inst_loc(root)
-                || plan.covered(i)
-                || plan.matches.contains_key(&i)
-                || plan.has_constraint(i)
+                || !plan.is_free(i)
                 || !operands_ok
         }) {
             continue;
@@ -118,6 +116,7 @@ pub(super) fn select(
         {
             continue;
         }
+        plan.claim(crate::cover::Cover::Aarch64ExtendedAdd, root);
         plan.cover(extend);
         if let Some(i) = scaled {
             plan.cover(i);

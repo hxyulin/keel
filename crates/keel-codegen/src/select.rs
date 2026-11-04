@@ -2,6 +2,7 @@
 //! A cover is local to a block and consumes single-use nodes. Memory covers
 //! additionally preserve the original access position and exact access width.
 //! Shared DAG nodes remain materialized; selected leaves are live at the root.
+use crate::cover::Cover;
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
@@ -127,6 +128,8 @@ pub struct Selection {
     allocation_folds: HashMap<Inst, Vec<Value>>,
     /// Result-to-input affinities, never constraints: interference wins.
     pub hints: Hints,
+    /// The cover that claimed each root instruction, indexed by instruction.
+    owners: Vec<Option<Cover>>,
 }
 
 /// The input each result would like to share a register with, if any,
@@ -189,15 +192,9 @@ impl Selection {
                 if func.inst_block(and) != block
                     || func.resolve(func.first_result(compare)) != func.first_result(compare)
                     || func.first_result(and) != masked
-                    || [and, compare].into_iter().any(|i| {
-                        func.is_removed(i)
-                            || self.covered(i)
-                            || self.has_constraint(i)
-                            || self.matches.contains_key(&i)
-                            || self.conditions.contains_key(&i)
-                            || self.binary_memory.contains_key(&i)
-                            || self.compare_memory.contains_key(&i)
-                    })
+                    || [and, compare]
+                        .into_iter()
+                        .any(|i| func.is_removed(i) || !self.is_free(i))
                 {
                     continue;
                 }
@@ -220,6 +217,7 @@ impl Selection {
                     {
                         continue;
                     }
+                    self.claim(Cover::X86MaskTest, compare);
                     self.mask_tests.insert(compare, (source, mask as i32));
                     self.set_operands(compare, vec![source]);
                     // The zero RHS is encoded by this recipe. Prevent later
@@ -307,6 +305,7 @@ impl Selection {
         self.set_operands(inst, operands);
         self.indexed_addresses
             .insert(addr, IndexedAddress { base, index, shift });
+        self.claim(Cover::IndexedAddress, address);
         self.cover(address);
         true
     }
@@ -351,7 +350,12 @@ impl Selection {
         folds: impl Fn(&InstData) -> Vec<Value>,
         uses: &[u8],
     ) -> HashSet<Value> {
-        self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func, uses))
+        self.fuse_compare_pairs(
+            func,
+            folds,
+            crate::fold::fused_compare_pairs(func, uses),
+            Cover::CompareBranch,
+        )
     }
 
     /// Move single-use scalar compare inputs to the select's allocation boundary.
@@ -384,9 +388,7 @@ impl Selection {
                         func.value_type(func.first_result(compare)),
                         Type::I32 | Type::I64
                     )
-                    && !self.covered(compare)
-                    && !self.matches.contains_key(&compare)
-                    && !self.has_constraint(compare)
+                    && self.is_free(compare)
                     && func.inst_loc(compare).map(|l| (l.file, l.line))
                         == func.inst_loc(select).map(|l| (l.file, l.line))
                     && matches!(func.inst_data(insts[end - 2]), InstData::Icmp { .. })
@@ -415,8 +417,10 @@ impl Selection {
                 // Memory-CMP address lowering can use rdx for an index.
                 // Keep it outside this staging contract, including outer tests.
                 if !scalar
-                    || self.compare_memory.contains_key(&compare)
-                    || self.conditions.contains_key(&compare)
+                    || matches!(
+                        self.owner(compare),
+                        Some(Cover::X86CompareMemory | Cover::ZeroTest)
+                    )
                 {
                     continue;
                 }
@@ -436,7 +440,7 @@ impl Selection {
         }
         for pair in pairs {
             if self
-                .fuse_compare_pairs(func, &folds, vec![pair])
+                .fuse_compare_pairs(func, &folds, vec![pair], Cover::X86SelectCompare)
                 .contains(&pair.0)
             {
                 self.select_compares.insert(pair.2, pair.1);
@@ -450,7 +454,12 @@ impl Selection {
         folds: impl Fn(&InstData) -> Vec<Value>,
         uses: &[u8],
     ) -> HashSet<Value> {
-        self.fuse_compare_pairs(func, folds, crate::fold::aarch64_compare_pairs(func, uses))
+        self.fuse_compare_pairs(
+            func,
+            folds,
+            crate::fold::aarch64_compare_pairs(func, uses),
+            Cover::CompareBranch,
+        )
     }
 
     /// Delay an integer compare to its sole select consumer. Only cross a
@@ -551,7 +560,7 @@ impl Selection {
         }
         for pair in pairs {
             if self
-                .fuse_compare_pairs(func, &folds, vec![pair])
+                .fuse_compare_pairs(func, &folds, vec![pair], Cover::Aarch64SelectCompare)
                 .contains(&pair.0)
             {
                 self.select_compares.insert(pair.2, pair.1);
@@ -564,6 +573,7 @@ impl Selection {
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
         pairs: Vec<(Value, Inst, Inst)>,
+        cover: Cover,
     ) -> HashSet<Value> {
         let mut fused = HashSet::default();
         for (cond, compare, branch) in pairs {
@@ -588,6 +598,7 @@ impl Selection {
                 }
             }
             args.extend(leaves);
+            self.claim(cover, branch);
             self.set_operands(branch, args);
             self.cover(compare);
             fused.insert(cond);
@@ -623,6 +634,7 @@ impl Selection {
                     continue;
                 };
                 let value = func.resolve(args[1 - side]);
+                self.claim(Cover::Aarch64MultiplyShift, inst);
                 self.matches.insert(
                     inst,
                     Match {
@@ -675,6 +687,36 @@ impl Selection {
 
     pub fn covered(&self, inst: Inst) -> bool {
         self.covered.get(inst.index()).copied().unwrap_or(false)
+    }
+    /// Record that `cover` owns `root`: the backend lowers `root` through
+    /// that cover. Each root has at most one owner. The cover itself covers
+    /// the instructions it consumes and publishes the root's operands.
+    pub(crate) fn claim(&mut self, cover: Cover, root: Inst) {
+        if self.owners.len() <= root.index() {
+            self.owners.resize(root.index() + 1, None);
+        }
+        let owner = &mut self.owners[root.index()];
+        debug_assert!(owner.is_none(), "{root} claimed by {owner:?} and {cover:?}");
+        *owner = Some(cover);
+    }
+    /// The cover that claimed `inst` as its root, if any.
+    pub fn owner(&self, inst: Inst) -> Option<Cover> {
+        self.owners.get(inst.index()).copied().flatten()
+    }
+    /// Every claimed root and its cover, in instruction order.
+    pub fn claims(&self) -> impl Iterator<Item = (Inst, Cover)> + '_ {
+        self.owners
+            .iter()
+            .enumerate()
+            .filter_map(|(i, owner)| owner.map(|cover| (Inst::new(i), cover)))
+    }
+    /// Whether a cover may consume `inst` or claim it as a root: no cover,
+    /// tree match or constraint has a claim on it, and nothing covered it.
+    pub(crate) fn is_free(&self, inst: Inst) -> bool {
+        !self.covered(inst)
+            && self.owner(inst).is_none()
+            && !self.matches.contains_key(&inst)
+            && !self.has_constraint(inst)
     }
     pub fn operands(&self, func: &Function, inst: Inst) -> Vec<Value> {
         if self.covered(inst) || func.inst_data(inst).is_lifetime_marker() {
@@ -839,6 +881,7 @@ impl Selection {
                             }
                         })
                     {
+                        plan.claim(Cover::X86DivisionRemainder, inst);
                         plan.cover(product);
                         plan.set_operands(inst, vec![quotient]);
                         plan.division_remainders.insert(inst, division);
@@ -885,6 +928,7 @@ impl Selection {
                             }
                     });
                     if local {
+                        plan.claim(Cover::ZeroTest, inst);
                         plan.conditions.insert(inst, (compare, cc == IntCC::Eq));
                         plan.set_operands(inst, plan.operands(func, compare));
                         plan.cover(compare);
@@ -960,6 +1004,7 @@ impl Selection {
                         operands[index] = base;
                         plan.set_operands(inst, operands);
                         plan.addresses.insert(addr, (base, offset));
+                        plan.claim(Cover::OffsetAddress, child);
                         plan.cover(child);
                     }
                     continue;
@@ -1036,6 +1081,7 @@ impl Selection {
                             if factor != 3 || func.value_type(input) != ty {
                                 continue;
                             }
+                            plan.claim(Cover::X86LeaMul3, inst);
                             plan.cover(child);
                             plan.matches.insert(
                                 inst,
@@ -1107,6 +1153,7 @@ impl Selection {
                         {
                             continue;
                         }
+                        plan.claim(Cover::Aarch64Ubfx, inst);
                         plan.cover(child);
                         plan.matches.insert(
                             inst,
@@ -1260,10 +1307,7 @@ impl Selection {
                     || uses[value.index()] != 1
                     || [load, consumer].iter().any(|&i| {
                         func.is_removed(i)
-                            || self.covered(i)
-                            || self.matches.contains_key(&i)
-                            || self.has_constraint(i)
-                            || self.conditions.contains_key(&i)
+                            || !self.is_free(i)
                             || func.inst_loc(i) != func.inst_loc(load)
                             || func.resolve(func.first_result(i)) != func.first_result(i)
                     })
@@ -1273,6 +1317,7 @@ impl Selection {
                 // Transfer all selected leaves, including indexed and symbolic
                 // addresses. Never resurrect the covered address's SSA result.
                 let operands = self.operands(func, load);
+                self.claim(Cover::X86SignedByteLoad, consumer);
                 self.set_operands(consumer, operands);
                 self.signed_byte_memory.insert(consumer, func.resolve(addr));
                 self.cover(load);
@@ -1333,8 +1378,10 @@ impl Selection {
                 operands.extend(self.operands(func, load));
                 self.set_operands(consumer, operands);
                 if binary {
+                    self.claim(Cover::X86BinaryMemory, consumer);
                     self.binary_memory.insert(consumer, addr);
                 } else {
+                    self.claim(Cover::X86CompareMemory, consumer);
                     self.compare_memory.insert(consumer, addr);
                 }
                 self.cover(load);
@@ -1356,9 +1403,7 @@ mod signed_byte_tests {
                 let pair: Vec<_> = f.layout_insts().take(2).map(|(_, i)| i).collect();
                 let mut s = Selection::default();
                 match boundary {
-                    0 => {
-                        s.conditions.insert(pair[at], (pair[0], false));
-                    }
+                    0 => s.claim(Cover::ZeroTest, pair[at]),
                     1 => s.cover(pair[at]),
                     2 => {
                         s.matches.insert(
