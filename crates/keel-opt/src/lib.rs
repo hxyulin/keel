@@ -383,7 +383,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_vectorize::MultiLoopReduce,
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,
-    &inline::InlineAggregateReserve,
     &inline::InlineNoninterposable,
     &BUILTINS[17],
     &inline::InlineCheapReserve,

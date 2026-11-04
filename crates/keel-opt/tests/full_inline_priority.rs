@@ -292,8 +292,8 @@ fn wrapper_body_and_initial_caller_size_stay_frozen_across_phases() {
 
 #[test]
 fn ordinary_and_reserve_preserve_layout_order_and_exact_clone_bytes() {
-    // No recursive or exported functions: all three policies have the same
-    // domain. Ordinary/reserve must retain the pre-priority layout result.
+    // No recursive or exported functions: the policies have the same domain.
+    // Ordinary inlining must retain the pre-priority layout result.
     let mut s = leaf("ordinary", 64, 0, "local") + &leaf("tiny", 8, 0, "alwaysinline local");
     s += &caller("caller", "ordinary", 32).replace(" return\n}", " call @tiny()\n return\n}");
     let (ordinary, sites) = run(&s, "inline");
@@ -302,8 +302,6 @@ fn ordinary_and_reserve_preserve_layout_order_and_exact_clone_bytes() {
         ["caller_instruction_growth_budget"]
     );
     assert_eq!(sites[0].callee, "ordinary");
-    let (reserve, _) = run(&s, "inline-aggregate-reserve");
-    assert_eq!(ordinary.to_string(), reserve.to_string());
     // The expected byte result is an ordinary pass with the tiny call's
     // declaration noinline: same original clones, same IDs, same final call.
     let mut expected = keel_ir::parse(&s).unwrap();

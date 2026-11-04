@@ -166,7 +166,6 @@ fn full_uses_the_reserve_and_smaller_tiers_keep_their_pipelines() {
     assert!(keel_opt::OptimizationTier::Full.pipeline().contains(&PASS));
     let source = saturated() + &leaf("helper", 16, "local", true) + &caller("late", "helper", 1);
     assert!(admitted(&run(&source, "inline-noninterposable").1).is_empty());
-    assert!(admitted(&run(&source, "inline-aggregate-reserve").1).is_empty());
 }
 
 #[test]

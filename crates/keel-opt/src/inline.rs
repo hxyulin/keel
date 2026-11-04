@@ -89,7 +89,6 @@ impl Pass for Inline {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: false,
                 cheap_reserve: false,
                 cost: InlineCost::Default,
@@ -122,7 +121,6 @@ impl Pass for InlineSize {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: true,
                 cheap_reserve: false,
                 cost: InlineCost::Size,
@@ -137,7 +135,6 @@ impl Pass for InlineSize {
                 module,
                 None,
                 InlinePolicy {
-                    experimental: false,
                     admit_noninterposable: true,
                     cheap_reserve: false,
                     cost: InlineCost::Size,
@@ -164,7 +161,6 @@ impl Pass for InlineSize {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: true,
                 cheap_reserve: false,
                 cost: InlineCost::Size,
@@ -183,72 +179,9 @@ enum InlineCost {
 
 #[derive(Clone, Copy, Debug)]
 struct InlinePolicy {
-    experimental: bool,
     admit_noninterposable: bool,
     cheap_reserve: bool,
     cost: InlineCost,
-}
-
-/// Explicit research pass. Never included in an optimization tier.
-/// Uses the ordinary clone implementation and legality checks; only a separate
-/// small aggregate-leaf instruction reserve differs. No cleanup or alias-map
-/// reconstruction is performed as part of admission.
-pub struct InlineAggregateReserve;
-impl Pass for InlineAggregateReserve {
-    fn name(&self) -> &'static str {
-        "inline-aggregate-reserve"
-    }
-    fn description(&self) -> &'static str {
-        "experimental bounded aggregate-leaf inlining reserve"
-    }
-    fn run(&self, _: &mut Function) -> bool {
-        false
-    }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, true, false, false).changed)
-    }
-    fn run_module_with_report(
-        &self,
-        module: &mut Module,
-        sites: &mut Vec<InlineSite>,
-    ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), true, false, false).changed)
-    }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report = run_observed_policy(module, sites, true, false, false);
-        Some(report.changed_callers(module, changed))
-    }
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
-        let report = run_observed_policy_scoped(
-            module,
-            sites,
-            InlinePolicy {
-                experimental: true,
-                admit_noninterposable: false,
-                cheap_reserve: false,
-                cost: InlineCost::Default,
-            },
-            Some(&callers),
-        );
-        Some(report.changed_callers(module, changed))
-    }
 }
 
 /// Binding-aware Full integration. Shares ordinary legality, growth budgets
@@ -266,14 +199,14 @@ impl Pass for InlineNoninterposable {
         false
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, false, true, false).changed)
+        Some(run_observed_policy(module, None, true, false).changed)
     }
     fn run_module_with_report(
         &self,
         module: &mut Module,
         sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), false, true, false).changed)
+        Some(run_observed_policy(module, Some(sites), true, false).changed)
     }
     fn run_module_tracked(
         &self,
@@ -281,7 +214,7 @@ impl Pass for InlineNoninterposable {
         sites: Option<&mut Vec<InlineSite>>,
         changed: &mut Vec<bool>,
     ) -> Option<bool> {
-        let report = run_observed_policy(module, sites, false, true, false);
+        let report = run_observed_policy(module, sites, true, false);
         Some(report.changed_callers(module, changed))
     }
     fn run_module_for_functions(
@@ -301,7 +234,6 @@ impl Pass for InlineNoninterposable {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: true,
                 cheap_reserve: false,
                 cost: InlineCost::Default,
@@ -344,7 +276,6 @@ impl Pass for InlineCheapReserve {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: true,
                 cheap_reserve: true,
                 cost: InlineCost::Default,
@@ -355,14 +286,14 @@ impl Pass for InlineCheapReserve {
         Some(report.changed_callers(module, changed))
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, false, true, true).changed)
+        Some(run_observed_policy(module, None, true, true).changed)
     }
     fn run_module_with_report(
         &self,
         module: &mut Module,
         sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), false, true, true).changed)
+        Some(run_observed_policy(module, Some(sites), true, true).changed)
     }
     fn run_module_tracked(
         &self,
@@ -370,7 +301,7 @@ impl Pass for InlineCheapReserve {
         sites: Option<&mut Vec<InlineSite>>,
         changed: &mut Vec<bool>,
     ) -> Option<bool> {
-        let report = run_observed_policy(module, sites, false, true, true);
+        let report = run_observed_policy(module, sites, true, true);
         Some(report.changed_callers(module, changed))
     }
     fn run_module_for_functions(
@@ -390,7 +321,6 @@ impl Pass for InlineCheapReserve {
             module,
             sites,
             InlinePolicy {
-                experimental: false,
                 admit_noninterposable: true,
                 cheap_reserve: true,
                 cost: InlineCost::Default,
@@ -425,36 +355,10 @@ fn cheap_helper(f: &Function, cost: usize, stack: u64) -> bool {
     predicate && calls <= 1 && acyclic_cfg(f)
 }
 
-const RESERVE_SITE_GROWTH: usize = 32;
-const RESERVE_CALLER_SITES: usize = 8;
-const RESERVE_MODULE_SITES: usize = 8;
-
 // Contracting a recursive wrapper still adds branches, stack snapshots and
 // live values to its caller. Keep that exception out of very large functions;
 // ordinary profitable inlining and read-only leaf admission remain available.
 const MAX_SCC_CALLER_INSTRUCTIONS: usize = 8192;
-
-// A bounded structural domain, not a profitability or hotness prediction.
-// All ordinary eligibility/signature/recursion checks run first.
-fn aggregate_leaf(f: &Function, cost: usize, stack_cost: u64) -> bool {
-    cost <= RESERVE_SITE_GROWTH
-        && stack_cost <= 64
-        && f.blocks().count() <= 4
-        && f.sig
-            .params
-            .iter()
-            .any(|p| matches!(p.purpose, Purpose::Sret(_)))
-        && f.sig
-            .params
-            .iter()
-            .any(|p| matches!(&p.purpose, Purpose::ByVal(l) if l.size() <= 16))
-        && !f.layout_insts().any(|(_, i)| {
-            matches!(
-                f.inst_data(i),
-                InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Intrinsic { .. }
-            )
-        })
-}
 
 const MAX_INSTS: usize = 64;
 const MAX_BLOCKS: usize = 8;
@@ -1151,13 +1055,12 @@ fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
 }
 
 fn run_observed(module: &mut Module, sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
-    run_observed_policy(module, sites, false, false, false)
+    run_observed_policy(module, sites, false, false)
 }
 
 fn run_observed_policy(
     module: &mut Module,
     sites: Option<&mut Vec<InlineSite>>,
-    experimental: bool,
     admit_noninterposable: bool,
     cheap_reserve: bool,
 ) -> InlineReport {
@@ -1165,7 +1068,6 @@ fn run_observed_policy(
         module,
         sites,
         InlinePolicy {
-            experimental,
             admit_noninterposable,
             cheap_reserve,
             cost: InlineCost::Default,
@@ -1196,7 +1098,6 @@ fn run_observed_policy_budgeted(
     shared: &mut InlineBudget,
 ) -> InlineReport {
     let InlinePolicy {
-        experimental,
         admit_noninterposable,
         cheap_reserve,
         cost: cost_policy,
@@ -1323,7 +1224,6 @@ fn run_observed_policy_budgeted(
     let mut template_costs = vec![None; module.functions.len()];
     let mut report = InlineReport::default();
     let mut module_growth = if cheap_reserve { shared.used } else { 0 };
-    let mut module_reserve_sites = 0;
     let tiny_templates: FxHashSet<_> = templates
         .values()
         .map(|&index| &module.functions[index])
@@ -1371,7 +1271,7 @@ fn run_observed_policy_budgeted(
             !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS
         })
         .collect();
-    let mut ledgers = vec![(0, 0, 0, 0u64); module.functions.len()];
+    let mut ledgers = vec![(0, 0, 0u64); module.functions.len()];
     // Preserve the ordinary two phases exactly. Only sites denied solely by
     // module growth enter the separate retry queue; cloned calls never enter it.
     let mut schedule = Vec::new();
@@ -1449,7 +1349,7 @@ fn run_observed_policy_budgeted(
         cursor += 1;
         let caller = &module.functions[index];
         let large_scc_caller = large_scc_callers[index];
-        let (mut growth, mut reserve_sites, mut count, mut stack_growth) = ledgers[index];
+        let (mut growth, mut count, mut stack_growth) = ledgers[index];
         let reference = match caller.inst_data(call) {
             InstData::Call { func, .. }
             | InstData::Invoke { func, .. }
@@ -1623,20 +1523,7 @@ fn run_observed_policy_budgeted(
             && cheap_candidate
             && cheap_growth + cost <= CHEAP_MODULE_GROWTH
             && cheap_sites < CHEAP_MODULE_SITES;
-        // Reserve cannot bypass call-count, stack, legality or profitability.
-        // Ordinary growth ledgers retain their exact original limits. Reserve
-        // sites have separate worst-case 8*32/caller and 8*32/module bounds.
-        let use_reserve = experimental
-            && matches!(
-                budget,
-                Some("caller_instruction_growth_budget" | "module_instruction_growth_budget")
-            )
-            && count < MAX_CALLS
-            && stack_growth + stack_cost <= HARD_STACK
-            && reserve_sites < RESERVE_CALLER_SITES
-            && module_reserve_sites < RESERVE_MODULE_SITES
-            && aggregate_leaf(callee, cost, stack_cost);
-        if let Some(detail) = budget.filter(|_| !use_reserve && !use_cheap) {
+        if let Some(detail) = budget.filter(|_| !use_cheap) {
             if let Some(sites) = sites.as_deref_mut() {
                 sites.push(InlineSite::new(
                     caller,
@@ -1667,14 +1554,12 @@ fn run_observed_policy_budgeted(
                 requested,
                 if use_cheap {
                     "cheap_reserve_inlined"
-                } else if use_reserve {
-                    "experimental_reserve_inlined"
                 } else {
                     "inlined"
                 },
             ));
         }
-        let before = (use_reserve || use_cheap).then(|| caller.layout_insts().count());
+        let before = use_cheap.then(|| caller.layout_insts().count());
         if templates.get(&caller.name) == Some(&index) && frozen[index].is_none() {
             frozen[index] = Some(Box::new(caller.clone()));
         }
@@ -1693,26 +1578,15 @@ fn run_observed_policy_budgeted(
                 .checked_sub(before)
                 .expect("reserve inlining unexpectedly shrank layout");
             assert!(
-                actual_net_growth <= cost
-                    && cost
-                        <= if use_cheap {
-                            CHEAP_SITE_GROWTH
-                        } else {
-                            RESERVE_SITE_GROWTH
-                        },
+                actual_net_growth <= cost && cost <= CHEAP_SITE_GROWTH,
                 "reserve emitted net growth exceeds conservative preflight"
             );
             if let Some(site) = sites.as_deref_mut().and_then(|s| s.last_mut()) {
                 site.experimental_net_growth = Some(actual_net_growth);
             }
-            if use_cheap {
-                cheap_growth += cost;
-                cheap_sites += 1;
-                growth += cost;
-            } else {
-                reserve_sites += 1;
-                module_reserve_sites += 1;
-            }
+            cheap_growth += cost;
+            cheap_sites += 1;
+            growth += cost;
         } else {
             growth += cost;
             module_growth += cost;
@@ -1721,7 +1595,7 @@ fn run_observed_policy_budgeted(
         stack_growth += stack_cost;
         report.changed = true;
         report.callers.push(index);
-        ledgers[index] = (growth, reserve_sites, count, stack_growth);
+        ledgers[index] = (growth, count, stack_growth);
     }
     if cheap_reserve {
         let budget = shared;

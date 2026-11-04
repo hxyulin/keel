@@ -28,11 +28,7 @@ fn scalar(attrs: &str, sig: &str, body: &str) -> String {
 
 #[test]
 fn admission_requires_both_explicit_pass_and_definition_contract() {
-    for pass in [
-        "inline",
-        "inline-aggregate-reserve",
-        "inline-noninterposable",
-    ] {
+    for pass in ["inline", "inline-noninterposable"] {
         for attrs in [
             "",
             "alwaysinline",

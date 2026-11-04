@@ -32,12 +32,10 @@ fn retained_lua_leaf_is_full_only_and_keeps_load_flags() {
     let original = keel_ir::parse(LUA).unwrap();
     assert_eq!(original.functions[0].blocks().count(), 14);
     assert_eq!(original.functions[0].layout_insts().count(), 82);
-    for pass in ["inline", "inline-aggregate-reserve"] {
-        assert_eq!(
-            outcome(LUA, pass, "lookup", "index2value"),
-            "profitability_blocks"
-        );
-    }
+    assert_eq!(
+        outcome(LUA, "inline", "lookup", "index2value"),
+        "profitability_blocks"
+    );
     assert_eq!(
         outcome(LUA, "inline-noninterposable", "lookup", "index2value"),
         "inlined"
