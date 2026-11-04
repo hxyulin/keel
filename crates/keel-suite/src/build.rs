@@ -389,7 +389,7 @@ fn source_digest(files: &[PathBuf], stamp: &str) -> Result<String> {
 }
 
 /// Runs `f` on every item, on up to `jobs` threads; stops at the first error.
-fn parallel<T: Sync, R: Send>(
+pub fn parallel<T: Sync, R: Send>(
     items: &[T],
     jobs: usize,
     progress: &ProgressBar,

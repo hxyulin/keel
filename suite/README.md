@@ -42,6 +42,7 @@ cargo suite run lua/fib -n 10 -c clang-O0,keel
 cargo suite show                    # the latest run on this host again
 cargo suite compare aarch64-apple-darwin x86_64-unknown-linux-gnu
 cargo suite test-frontends --out target/frontend-check-1
+cargo suite codegen-diff --baseline old/keel --candidate new/keel
 ```
 
 Global options: `-j N` sets parallel compile jobs (default: one per CPU, or two
@@ -316,6 +317,47 @@ Synthetic compiler regressions belong beside their crate tests. Add a standalone
 harness only for a reusable boundary this infrastructure cannot exercise.
 Temporary probes, progress tracking and report renderers belong in ignored
 directories. Git history retains retired experiments.
+
+## Comparing generated code
+
+```sh
+cargo build --release -p keel && cp target/release/keel target/keel-base
+# Change the compiler, then:
+cargo build --release -p keel
+cargo suite codegen-diff --baseline target/keel-base --candidate target/release/keel \
+    --x86-64-sysroot /path/to/linux-root --expect-identical
+```
+
+`codegen-diff` compiles every translation unit of the selected suites (default:
+all) with both Keel binaries, to assembly, for `aarch64-apple-darwin` and
+`x86_64-unknown-linux-gnu`, in the `keel` and `keel-O` configurations. It uses
+the same downloads, `prepare` commands, defines and include paths as `test` and
+`run`, with each target's `[[build.when]]` entries. The assembly goes to
+`target/keel-suite/codegen-diff/{baseline,candidate}/<target>/<config>/<suite>/`.
+
+For each object it reports identical (byte for byte) or changed. For a changed
+object it lists each function that changed, was added or was removed, with the
+candidate's instruction and byte deltas from `keel asm-metrics`. A function
+whose only differences are comment lines (the IR and allocation notes) is
+listed as `comments`. Differences outside every function, such as data, appear
+as `(outside functions)`. The candidate binary runs `asm-metrics` for both
+sides, so the deltas measure the assembly text alone.
+
+| Option | Effect |
+|--------|--------|
+| `--target aarch64,x86_64` | Targets to compile for |
+| `-c keel,keel-O` | Keel configurations from `suite/configs.toml` |
+| `--x86-64-sysroot DIR` | Linux headers (`DIR/usr/include`), required unless this host is x86-64 Linux |
+| `--aarch64-sysroot DIR` | macOS SDK, required unless this host is an Apple silicon Mac |
+| `--icount` | Record each compile's retired instructions: `/usr/bin/time -l` on macOS, `perf stat -e instructions:u` on Linux |
+| `--expect-identical` | Exit non-zero if any object changed |
+| `--json FILE` | Write the full report, including every changed function |
+| `--show N` | Changed functions to print per object (default 10) |
+
+Use `--expect-identical` as the gate for refactors that must not change
+generated code. Objects that both binaries fail to compile are reported and not
+compared. Retired-instruction totals are per configuration. They come from one
+run, so repeat the run before reading a difference under about one percent.
 
 ## Checking runtime slowdowns
 
