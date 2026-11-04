@@ -276,3 +276,75 @@ fn native_factory_contracts_match_clang() {
         }
     }
 }
+
+/// Whether Clang attaches the attribute `kind` directly to the last top-level
+/// declaration of `h` in its textual AST dump.
+fn clang_names_h(dump: &str, kind: &str) -> bool {
+    let (mut last, mut current, mut children) = (None, None::<bool>, "");
+    for line in dump.lines() {
+        if let Some(decl) = line.strip_prefix("|-").or_else(|| line.strip_prefix("`-")) {
+            last = current.or(last);
+            current = None;
+            let head = decl.split('\'').next().unwrap_or_default();
+            if decl.starts_with("FunctionDecl ") && head.split_whitespace().last() == Some("h") {
+                current = Some(false);
+                children = if line.starts_with('|') { "| " } else { "  " };
+            }
+        } else if let Some(found) = &mut current
+            && let Some(child) = line.strip_prefix(children)
+            && let Some(child) = child
+                .strip_prefix("|-")
+                .or_else(|| child.strip_prefix("`-"))
+        {
+            *found |= child.split_whitespace().next() == Some(kind);
+        }
+    }
+    current.or(last).expect("no FunctionDecl for h")
+}
+
+#[test]
+fn placement_oracle_matches_clang_named_attachment() {
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip!(keel_test_support::NO_CLANG);
+    };
+    let oracle = include_str!("../fixtures/attribute-placement-oracle.tsv");
+    let dir = keel_test_support::TempDir::new("attribute-placement");
+    let rows: Vec<_> = oracle
+        .lines()
+        .map(|l| l.split_once('\t').unwrap())
+        .collect();
+    assert_eq!(rows.len(), 65);
+    for (attr, kind) in [
+        ("noinline", "NoInlineAttr"),
+        ("always_inline", "AlwaysInlineAttr"),
+        ("nothrow", "NoThrowAttr"),
+        ("returns_twice", "ReturnsTwiceAttr"),
+    ] {
+        std::thread::scope(|scope| {
+            for (index, (named, source)) in rows.iter().enumerate() {
+                let path = dir.join(format!("{attr}-{index:02}.c"));
+                std::fs::write(&path, source.replace("noinline", attr)).unwrap();
+                scope.spawn(move || {
+                    let output = clang
+                        .command()
+                        .args(["-std=c11", "-fsyntax-only", "-fno-color-diagnostics"])
+                        .args(["-Xclang", "-ast-dump"])
+                        .arg(&path)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{attr} row {index}: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    let dump = String::from_utf8(output.stdout).unwrap();
+                    assert_eq!(
+                        clang_names_h(&dump, kind),
+                        *named == "1",
+                        "{attr} row {index}: {source}"
+                    );
+                });
+            }
+        });
+    }
+}
