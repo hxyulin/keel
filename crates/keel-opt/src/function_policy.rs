@@ -222,11 +222,6 @@ pub(super) fn run(
             .iter()
             .map(|&index| &scoped[index] as &dyn Pass)
             .collect();
-        match report.as_deref_mut() {
-            Some(report) => crate::run_pipeline_with_context_and_report_raw(
-                module, &passes, context, report, options,
-            ),
-            None => crate::run_pipeline_with_context_raw(module, &passes, context, options),
-        }
+        crate::execute_pipeline(module, &passes, context, report.as_deref_mut(), options)
     })())
 }

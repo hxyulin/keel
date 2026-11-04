@@ -1,5 +1,5 @@
 use keel_ir::{Function, Module};
-use keel_opt::{OptimizationReport, OptimizeOptions, Pass, VectorTarget, VerificationPolicy};
+use keel_opt::{OptimizationReport, OptimizeOptions, Pass, VerificationPolicy};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const IR: &str =
@@ -61,19 +61,13 @@ fn actual_invalid_pass_is_caught_only_when_policy_enables_checks() {
             let mut observed = keel_ir::parse(IR).unwrap();
             keel_ir::verify_module(&plain).unwrap();
             let mut report = OptimizationReport::default();
-            let a = keel_opt::run_pipeline_for_target_with_options(
-                &mut plain,
-                &[&broken],
-                VectorTarget::Portable,
-                options,
-            );
-            let b = keel_opt::run_pipeline_for_target_with_report_and_options(
-                &mut observed,
-                &[&broken],
-                VectorTarget::Portable,
-                &mut report,
-                options,
-            );
+            let a = keel_opt::Pipeline::new(&[&broken])
+                .options(options)
+                .run(&mut plain);
+            let b = keel_opt::Pipeline::new(&[&broken])
+                .options(options)
+                .report(&mut report)
+                .run(&mut observed);
             assert_eq!(a.is_err(), policy.enabled());
             assert_eq!(b.is_err(), policy.enabled());
             if let (Err(a), Err(b)) = (a, b) {
@@ -112,13 +106,10 @@ fn defaults_and_legacy_entrypoints_follow_the_build_configuration() {
     let mut m = keel_ir::parse(IR).unwrap();
     let mut report = OptimizationReport::default();
     assert_eq!(
-        keel_opt::run_pipeline_for_target_with_report(
-            &mut m,
-            &[&RemoveTerminator { module: true }],
-            VectorTarget::Portable,
-            &mut report
-        )
-        .is_err(),
+        keel_opt::Pipeline::new(&[&RemoveTerminator { module: true }])
+            .report(&mut report)
+            .run(&mut m)
+            .is_err(),
         expected
     );
     assert_eq!(report.invocations[0].verification_enabled, expected);
@@ -136,16 +127,13 @@ fn disabled_verification_still_restores_canonical_form_and_resolves_api_aliases(
         keel_ir::verify_module(&m).unwrap();
         let pass = CanonicalConsumer(AtomicUsize::new(0));
         let mut report = OptimizationReport::default();
-        keel_opt::run_pipeline_for_target_with_report_and_options(
-            &mut m,
-            &[&pass, &pass],
-            VectorTarget::Portable,
-            &mut report,
-            OptimizeOptions {
+        keel_opt::Pipeline::new(&[&pass, &pass])
+            .options(OptimizeOptions {
                 verification: policy,
-            },
-        )
-        .unwrap();
+            })
+            .report(&mut report)
+            .run(&mut m)
+            .unwrap();
         assert_eq!(pass.0.load(Ordering::Relaxed), 2);
         assert_eq!(report.invocations[0].restoration_changed, Some(true));
         assert_eq!(report.invocations[1].restoration_changed, None);
@@ -201,17 +189,14 @@ fn verification_checks_only_functions_reported_changed() {
             let f = &mut m.functions[0];
             let ret = f.layout_insts().last().unwrap().1;
             f.remove_inst(ret);
-            let result = keel_opt::run_pipeline_for_target_with_options(
-                &mut m,
-                &[&Touch {
-                    target: if fails { "f" } else { "g" },
-                    module,
-                }],
-                VectorTarget::Portable,
-                OptimizeOptions {
-                    verification: VerificationPolicy::Enabled,
-                },
-            );
+            let result = keel_opt::Pipeline::new(&[&Touch {
+                target: if fails { "f" } else { "g" },
+                module,
+            }])
+            .options(OptimizeOptions {
+                verification: VerificationPolicy::Enabled,
+            })
+            .run(&mut m);
             match result {
                 Err(keel_opt::OptError::Verifier { func, .. }) if fails => assert_eq!(func, "f"),
                 Ok(()) if !fails => {}

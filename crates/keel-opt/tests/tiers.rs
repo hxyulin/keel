@@ -81,15 +81,12 @@ impl Pass for BrokenPass {
 #[test]
 fn custom_pass_failures_identify_the_pass() {
     let mut module = keel_ir::parse(SOURCE).unwrap();
-    let error = keel_opt::run_pipeline_for_target_with_options(
-        &mut module,
-        &[&BrokenPass],
-        keel_opt::VectorTarget::Portable,
-        keel_opt::OptimizeOptions {
+    let error = keel_opt::Pipeline::new(&[&BrokenPass])
+        .options(keel_opt::OptimizeOptions {
             verification: keel_opt::VerificationPolicy::Enabled,
-        },
-    )
-    .unwrap_err();
+        })
+        .run(&mut module)
+        .unwrap_err();
     assert!(matches!(
         error,
         keel_opt::OptError::Verifier { pass: "broken", .. }

@@ -40,13 +40,11 @@ fn signed_sum_all_codegen_paths_features_allocators_and_spills() {
                             .with_wide_preference(true),
                     };
                     let mut module = keel_ir::parse(SOURCE).unwrap();
-                    keel_opt::run_passes_with_context_and_options(
-                        &mut module,
-                        keel_opt::DEFAULT_PIPELINE,
-                        context,
-                        keel_opt::OptimizeOptions::default(),
-                    )
-                    .unwrap();
+                    keel_opt::Pipeline::named(keel_opt::DEFAULT_PIPELINE)
+                        .unwrap()
+                        .context(context)
+                        .run(&mut module)
+                        .unwrap();
                     assert_eq!(module.to_string().contains("i64x4"), features.avx2);
                     let pipeline = CodegenPipeline {
                         selector: &selector,

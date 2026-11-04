@@ -51,7 +51,7 @@ mod tail_calls;
 pub use loop_vectorize::VectorTarget;
 
 /// Per-invocation immutable target context. Legacy entrypoints retain 128-bit policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OptimizationContext {
     pub target: VectorTarget,
     pub capabilities: keel_ir::VectorCapabilities,
@@ -683,9 +683,99 @@ impl fmt::Display for OptError {
     }
 }
 
+/// One optimizer invocation: the passes, their target context, scoped
+/// options and an optional report. [`Pipeline::run`] is the single entry
+/// point; the `optimize*` and `run_*` functions are shorthands for it.
+pub struct Pipeline<'a> {
+    passes: Vec<&'a dyn Pass>,
+    context: OptimizationContext,
+    options: OptimizeOptions,
+    report: Option<&'a mut OptimizationReport>,
+}
+
+impl fmt::Debug for Pipeline<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let passes: Vec<_> = self.passes.iter().map(|pass| pass.name()).collect();
+        f.debug_struct("Pipeline")
+            .field("passes", &passes)
+            .field("context", &self.context)
+            .field("options", &self.options)
+            .field("report", &self.report.is_some())
+            .finish()
+    }
+}
+
+impl<'a> Pipeline<'a> {
+    /// Custom or built-in passes, with the portable context and default options.
+    pub fn new(passes: &[&'a dyn Pass]) -> Self {
+        Self {
+            passes: passes.to_vec(),
+            context: OptimizationContext::default(),
+            options: OptimizeOptions::default(),
+            report: None,
+        }
+    }
+
+    /// Registered passes by name.
+    pub fn named(names: &[&str]) -> Result<Self, OptError> {
+        let passes = names
+            .iter()
+            .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::new(&passes))
+    }
+
+    pub fn context(mut self, context: OptimizationContext) -> Self {
+        self.context = context;
+        self
+    }
+
+    pub fn options(mut self, options: OptimizeOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Records each invocation. Partial observations remain available if a
+    /// verifier fails; observation performs exactly the ordinary checks. Each
+    /// observation records its policy, so one report may span several runs.
+    pub fn report(mut self, report: &'a mut OptimizationReport) -> Self {
+        self.report = Some(report);
+        self
+    }
+
+    /// Runs the passes in order, restoring declared canonical entry
+    /// requirements and honoring function optimization attributes.
+    pub fn run(mut self, module: &mut Module) -> Result<(), OptError> {
+        if module.special_entry_contract().is_some() {
+            return Ok(());
+        }
+        if let Some(result) = function_policy::run(
+            module,
+            &self.passes,
+            self.context,
+            self.report.as_deref_mut(),
+            self.options,
+        ) {
+            return result;
+        }
+        execute_pipeline(
+            module,
+            &self.passes,
+            self.context,
+            self.report,
+            self.options,
+        )
+    }
+}
+
+/// Runs [`DEFAULT_PIPELINE`].
+pub fn optimize(module: &mut Module) -> Result<(), OptError> {
+    run_passes(module, DEFAULT_PIPELINE)
+}
+
 /// Runs the named passes, in order, on every function in `module`.
 pub fn run_passes(module: &mut Module, names: &[&str]) -> Result<(), OptError> {
-    run_passes_for_target(module, names, VectorTarget::Portable)
+    Pipeline::named(names)?.run(module)
 }
 
 /// Runs named passes with target SIMD capabilities; ordinary passes ignore the target.
@@ -694,36 +784,25 @@ pub fn run_passes_for_target(
     names: &[&str],
     target: VectorTarget,
 ) -> Result<(), OptError> {
-    run_passes_for_target_with_options(module, names, target, OptimizeOptions::default())
+    Pipeline::named(names)?.context(target.into()).run(module)
 }
 
-/// Named pipeline with a scoped repeated-verification policy.
-pub fn run_passes_for_target_with_options(
+/// Observed counterpart to [`run_passes_for_target`].
+pub fn run_passes_for_target_with_report(
     module: &mut Module,
     names: &[&str],
     target: VectorTarget,
-    options: OptimizeOptions,
+    report: &mut OptimizationReport,
 ) -> Result<(), OptError> {
-    let passes = names
-        .iter()
-        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
-        .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_for_target_with_options(module, &passes, target, options)
+    Pipeline::named(names)?
+        .context(target.into())
+        .report(report)
+        .run(module)
 }
 
-/// Runs custom or built-in passes, restoring declared canonical entry
-/// requirements and applying the default repeated-verification policy.
+/// Runs custom or built-in passes with the portable context.
 pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), OptError> {
-    run_pipeline_for_target(module, passes, VectorTarget::Portable)
-}
-
-/// Runs a custom pipeline with target SIMD capabilities and default verification.
-pub fn run_pipeline_for_target(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    target: VectorTarget,
-) -> Result<(), OptError> {
-    run_pipeline_for_target_with_options(module, passes, target, OptimizeOptions::default())
+    Pipeline::new(passes).run(module)
 }
 
 /// Per-function change tracking. A function's version is renewed whenever
@@ -829,42 +908,8 @@ impl Drop for ClearAnalyses {
     }
 }
 
-/// Custom pipeline with scoped options; canonical restoration always runs.
-pub fn run_pipeline_for_target_with_options(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    target: VectorTarget,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    run_pipeline_with_context_and_options(module, passes, target.into(), options)
-}
-
-pub fn run_pipeline_with_context_and_options(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    context: OptimizationContext,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    if module.special_entry_contract().is_some() {
-        return Ok(());
-    }
-    if let Some(result) = function_policy::run(module, passes, context, None, options) {
-        return result;
-    }
-    run_pipeline_with_context_raw(module, passes, context, options)
-}
-
-fn run_pipeline_with_context_raw(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    context: OptimizationContext,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    execute_pipeline(module, passes, context, None, options)
-}
-
 /// One mutation/verification state machine; observation only measures its boundaries.
-fn execute_pipeline(
+pub(crate) fn execute_pipeline(
     module: &mut Module,
     passes: &[&dyn Pass],
     context: OptimizationContext,
@@ -1093,123 +1138,4 @@ fn execute_pipeline(
         }
     }
     Ok(())
-}
-
-/// Runs [`DEFAULT_PIPELINE`].
-pub fn optimize(module: &mut Module) -> Result<(), OptError> {
-    run_passes(module, DEFAULT_PIPELINE)
-}
-
-/// Opt-in counterpart to `run_passes_for_target`. Partial observations remain
-/// available if a verifier fails; this performs exactly the ordinary checks.
-pub fn run_passes_for_target_with_report(
-    module: &mut Module,
-    names: &[&str],
-    target: VectorTarget,
-    report: &mut OptimizationReport,
-) -> Result<(), OptError> {
-    run_passes_for_target_with_report_and_options(
-        module,
-        names,
-        target,
-        report,
-        OptimizeOptions::default(),
-    )
-}
-
-/// Observed named pipeline with scoped options, matching the ordinary runner.
-pub fn run_passes_for_target_with_report_and_options(
-    module: &mut Module,
-    names: &[&str],
-    target: VectorTarget,
-    report: &mut OptimizationReport,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    let passes = names
-        .iter()
-        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
-        .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_for_target_with_report_and_options(module, &passes, target, report, options)
-}
-
-/// Observed custom pipeline; order and verifier policy match the ordinary runner.
-pub fn run_pipeline_for_target_with_report(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    target: VectorTarget,
-    report: &mut OptimizationReport,
-) -> Result<(), OptError> {
-    run_pipeline_for_target_with_report_and_options(
-        module,
-        passes,
-        target,
-        report,
-        OptimizeOptions::default(),
-    )
-}
-
-/// Observed custom pipeline with scoped options. Each observation records its
-/// policy so a report may contain invocations from multiple pipeline calls.
-pub fn run_pipeline_for_target_with_report_and_options(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    target: VectorTarget,
-    report: &mut OptimizationReport,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    run_pipeline_with_context_and_report_and_options(module, passes, target.into(), report, options)
-}
-
-pub fn run_pipeline_with_context_and_report_and_options(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    context: OptimizationContext,
-    report: &mut OptimizationReport,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    if module.special_entry_contract().is_some() {
-        return Ok(());
-    }
-    if let Some(result) = function_policy::run(module, passes, context, Some(report), options) {
-        return result;
-    }
-    run_pipeline_with_context_and_report_raw(module, passes, context, report, options)
-}
-
-fn run_pipeline_with_context_and_report_raw(
-    module: &mut Module,
-    passes: &[&dyn Pass],
-    context: OptimizationContext,
-    report: &mut OptimizationReport,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    execute_pipeline(module, passes, context, Some(report), options)
-}
-
-/// Named pipeline using an explicit capability context.
-pub fn run_passes_with_context_and_options(
-    module: &mut Module,
-    names: &[&str],
-    context: OptimizationContext,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    let passes = names
-        .iter()
-        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
-        .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_with_context_and_options(module, &passes, context, options)
-}
-/// Observed named pipeline using exactly the ordinary context dispatch.
-pub fn run_passes_with_context_and_report_and_options(
-    module: &mut Module,
-    names: &[&str],
-    context: OptimizationContext,
-    report: &mut OptimizationReport,
-    options: OptimizeOptions,
-) -> Result<(), OptError> {
-    let passes = names
-        .iter()
-        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
-        .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_with_context_and_report_and_options(module, &passes, context, report, options)
 }

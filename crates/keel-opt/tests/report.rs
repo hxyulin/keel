@@ -96,13 +96,11 @@ fn changed_false_is_separate_from_canonical_restoration() {
     let mut plain = module.clone();
     keel_opt::run_pipeline(&mut plain, &[&Noop, &Noop]).unwrap();
     let mut report = OptimizationReport::default();
-    keel_opt::run_pipeline_for_target_with_report(
-        &mut module,
-        &[&Noop, &Noop],
-        VectorTarget::X86Sse2,
-        &mut report,
-    )
-    .unwrap();
+    keel_opt::Pipeline::new(&[&Noop, &Noop])
+        .context(VectorTarget::X86Sse2.into())
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
     assert_eq!(plain.to_string(), module.to_string());
     let p = &report.invocations[0];
     assert!(!p.changed);
@@ -145,21 +143,15 @@ fn errors_match_and_stop_pipeline_without_extra_passes() {
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
     };
-    let expected = keel_opt::run_pipeline_for_target_with_options(
-        &mut plain,
-        &[&Break, &Noop],
-        VectorTarget::Portable,
-        options,
-    )
-    .unwrap_err();
-    let error = keel_opt::run_pipeline_for_target_with_report_and_options(
-        &mut observed,
-        &[&Break, &Noop],
-        VectorTarget::Portable,
-        &mut report,
-        options,
-    )
-    .unwrap_err();
+    let expected = keel_opt::Pipeline::new(&[&Break, &Noop])
+        .options(options)
+        .run(&mut plain)
+        .unwrap_err();
+    let error = keel_opt::Pipeline::new(&[&Break, &Noop])
+        .options(options)
+        .report(&mut report)
+        .run(&mut observed)
+        .unwrap_err();
     assert_eq!(expected.to_string(), error.to_string());
     assert_eq!(report.invocations.len(), 1);
     assert!(report.invocations[0].changed);
@@ -368,13 +360,10 @@ fn deterministic_cache_distinguishes_configured_pass_instances() {
         let passes: &[&dyn Pass] = &[&a, &a, &b];
         if observed {
             let mut report = OptimizationReport::default();
-            keel_opt::run_pipeline_for_target_with_report(
-                &mut module,
-                passes,
-                VectorTarget::Portable,
-                &mut report,
-            )
-            .unwrap();
+            keel_opt::Pipeline::new(passes)
+                .report(&mut report)
+                .run(&mut module)
+                .unwrap();
             let skipped = &report.invocations[1];
             assert!(!skipped.changed);
             assert_eq!(skipped.before, skipped.after);
@@ -442,19 +431,13 @@ fn module_changes_and_verification_failures_preserve_plain_report_parity() {
         let options = keel_opt::OptimizeOptions {
             verification: keel_opt::VerificationPolicy::Enabled,
         };
-        let a = keel_opt::run_pipeline_for_target_with_options(
-            &mut plain,
-            &[&pass, &Noop],
-            VectorTarget::Portable,
-            options,
-        );
-        let b = keel_opt::run_pipeline_for_target_with_report_and_options(
-            &mut observed,
-            &[&pass, &Noop],
-            VectorTarget::Portable,
-            &mut report,
-            options,
-        );
+        let a = keel_opt::Pipeline::new(&[&pass, &Noop])
+            .options(options)
+            .run(&mut plain);
+        let b = keel_opt::Pipeline::new(&[&pass, &Noop])
+            .options(options)
+            .report(&mut report)
+            .run(&mut observed);
         assert_eq!(
             a.as_ref().err().map(ToString::to_string),
             b.as_ref().err().map(ToString::to_string)
@@ -505,21 +488,15 @@ fn failed_canonical_restoration_does_not_execute_or_report_the_requested_pass() 
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
     };
-    let a = keel_opt::run_pipeline_for_target_with_options(
-        &mut plain,
-        &[&MustNotRun],
-        VectorTarget::Portable,
-        options,
-    )
-    .unwrap_err();
-    let b = keel_opt::run_pipeline_for_target_with_report_and_options(
-        &mut observed,
-        &[&MustNotRun],
-        VectorTarget::Portable,
-        &mut report,
-        options,
-    )
-    .unwrap_err();
+    let a = keel_opt::Pipeline::new(&[&MustNotRun])
+        .options(options)
+        .run(&mut plain)
+        .unwrap_err();
+    let b = keel_opt::Pipeline::new(&[&MustNotRun])
+        .options(options)
+        .report(&mut report)
+        .run(&mut observed)
+        .unwrap_err();
     assert_eq!(a.to_string(), b.to_string());
     assert!(a.to_string().contains("canonicalize"));
     assert!(report.invocations.is_empty());

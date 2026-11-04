@@ -210,8 +210,8 @@ fall back to scalar execution.
 The first cost gate uses packed operation availability, fixed register pressure
 limits (24 expression values, four streams), and a trip-count threshold. It is
 not a full target cost model. `VectorTarget::{Portable,Aarch64Neon,X86Sse2}`
-configures `run_passes_for_target` or `run_pipeline_for_target`; existing optimizer
-APIs default to the portable intersection. The driver supplies the selected target
+configures `run_passes_for_target` or a `Pipeline` context; optimizer APIs
+without a target default to the portable intersection. The driver supplies the selected target
 for `cc`/`compile`, including explicit pipelines. `keel opt --target <triple>`
 selects that target's gate; without a target, `opt` uses portable capabilities.
 For example, i32 multiplication vectorizes for NEON but remains scalar for the
@@ -370,10 +370,9 @@ operations are described with the [AArch64 backend](../targets/aarch64/README.md
 `keel_ir::VectorCapabilities` separates the maximum accepted value width, the
 complete signed-i32 sum recipe width and the preferred width.
 `keel_opt::OptimizationContext` pairs it with a `VectorTarget`, and
-`run_passes_with_context_and_options` and `run_pipeline_with_context_and_options`
-accept it. Existing target APIs keep a 128-bit policy. A pass that overrides
-`run_with_context` and requires canonical form must also override
-`run_canonical_with_context`.
+`Pipeline::context` accepts it. APIs that take only a `VectorTarget` keep a
+128-bit policy. A pass that overrides `run_with_context` and requires canonical
+form must also override `run_canonical_with_context`.
 
 `keel_codegen::x86_features::vector_capabilities(target, selector)` projects
 the selector's effective features, including explicit additions and removals,

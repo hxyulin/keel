@@ -239,24 +239,18 @@ impl Options {
         target: keel_opt::VectorTarget,
     ) -> Result<(), String> {
         let context = self.optimization_context(target)?;
+        let pipeline = keel_opt::Pipeline::named(names)
+            .map_err(|e| e.to_string())?
+            .context(context)
+            .options(self.optimizer_options());
         let Some(path) = &self.opt_report else {
-            return keel_opt::run_passes_with_context_and_options(
-                module,
-                names,
-                context,
-                self.optimizer_options(),
-            )
-            .map_err(|e| e.to_string());
+            return pipeline.run(module).map_err(|e| e.to_string());
         };
         let mut report = keel_opt::OptimizationReport::default();
-        keel_opt::run_passes_with_context_and_report_and_options(
-            module,
-            names,
-            context,
-            &mut report,
-            self.optimizer_options(),
-        )
-        .map_err(|e| e.to_string())?;
+        pipeline
+            .report(&mut report)
+            .run(module)
+            .map_err(|e| e.to_string())?;
         // Never overwrite an input, output, previous report, symlink, or device.
         // Path conflicts are checked before compilation; create_new also guards races.
         use std::io::Write;

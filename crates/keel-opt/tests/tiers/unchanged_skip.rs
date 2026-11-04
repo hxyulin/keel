@@ -1,5 +1,5 @@
 use keel_ir::{Function, Module};
-use keel_opt::{OptimizationReport, Pass, VectorTarget};
+use keel_opt::{OptimizationReport, Pass};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const IR: &str = "func @f(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}\n\
@@ -61,13 +61,10 @@ fn runs(passes: &[&dyn Pass], observer: &Observer) -> usize {
     keel_opt::run_pipeline(&mut plain, passes).unwrap();
     let plain_runs = observer.0.swap(0, Ordering::Relaxed);
     let mut report = OptimizationReport::default();
-    keel_opt::run_pipeline_for_target_with_report(
-        &mut module,
-        passes,
-        VectorTarget::Portable,
-        &mut report,
-    )
-    .unwrap();
+    keel_opt::Pipeline::new(passes)
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
     // The observed runner skips the same runs and still reports each one.
     assert_eq!(observer.0.load(Ordering::Relaxed), plain_runs);
     let functions = module.functions.len();
@@ -146,13 +143,10 @@ fn run_verified(source: &str, passes: &[&dyn Pass]) {
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
     };
-    keel_opt::run_pipeline_for_target_with_options(
-        &mut module,
-        passes,
-        VectorTarget::Portable,
-        options,
-    )
-    .unwrap();
+    keel_opt::Pipeline::new(passes)
+        .options(options)
+        .run(&mut module)
+        .unwrap();
 }
 
 #[test]

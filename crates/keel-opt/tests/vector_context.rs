@@ -54,18 +54,22 @@ fn context_preserves_custom_dispatch_and_observation() {
         let mut observed = ordinary.clone();
         let mut legacy = ordinary.clone();
         let options = OptimizeOptions::default();
-        keel_opt::run_pipeline_with_context_and_options(&mut ordinary, &[&pass], context, options)
+        keel_opt::Pipeline::new(&[&pass])
+            .context(context)
+            .options(options)
+            .run(&mut ordinary)
             .unwrap();
         let mut report = OptimizationReport::default();
-        keel_opt::run_pipeline_with_context_and_report_and_options(
-            &mut observed,
-            &[&pass],
-            context,
-            &mut report,
-            options,
-        )
-        .unwrap();
-        keel_opt::run_pipeline_for_target(&mut legacy, &[&pass], context.target).unwrap();
+        keel_opt::Pipeline::new(&[&pass])
+            .context(context)
+            .options(options)
+            .report(&mut report)
+            .run(&mut observed)
+            .unwrap();
+        keel_opt::Pipeline::new(&[&pass])
+            .context(context.target.into())
+            .run(&mut legacy)
+            .unwrap();
         assert_eq!(calls.load(Ordering::Relaxed), 3);
         assert_eq!(ordinary.to_string(), observed.to_string());
         assert_eq!(ordinary.to_string(), legacy.to_string());
@@ -80,22 +84,18 @@ const SUM: &str = include_str!("fixtures/signed_widen_sum.ir");
 fn optimized(source: &str, context: OptimizationContext, names: &[&str]) -> String {
     let mut module = parse(source).unwrap();
     let mut observed = module.clone();
-    keel_opt::run_passes_with_context_and_options(
-        &mut module,
-        names,
-        context,
-        OptimizeOptions::default(),
-    )
-    .unwrap();
+    keel_opt::Pipeline::named(names)
+        .unwrap()
+        .context(context)
+        .run(&mut module)
+        .unwrap();
     let mut report = OptimizationReport::default();
-    keel_opt::run_passes_with_context_and_report_and_options(
-        &mut observed,
-        names,
-        context,
-        &mut report,
-        OptimizeOptions::default(),
-    )
-    .unwrap();
+    keel_opt::Pipeline::named(names)
+        .unwrap()
+        .context(context)
+        .report(&mut report)
+        .run(&mut observed)
+        .unwrap();
     assert_eq!(module.to_string(), observed.to_string());
     keel_ir::verify_module(&module).unwrap();
     module.to_string()
@@ -265,22 +265,18 @@ fn context_hooks_and_deterministic_cache_are_scoped_to_one_invocation() {
                 capabilities: context.capabilities.with_wide_preference(prefer),
                 ..context
             };
-            keel_opt::run_pipeline_with_context_and_options(
-                &mut module,
-                &[&pass, &pass],
-                context,
-                options,
-            )
-            .unwrap();
+            keel_opt::Pipeline::new(&[&pass, &pass])
+                .context(context)
+                .options(options)
+                .run(&mut module)
+                .unwrap();
             let mut report = OptimizationReport::default();
-            keel_opt::run_pipeline_with_context_and_report_and_options(
-                &mut module,
-                &[&pass, &pass],
-                context,
-                &mut report,
-                options,
-            )
-            .unwrap();
+            keel_opt::Pipeline::new(&[&pass, &pass])
+                .context(context)
+                .options(options)
+                .report(&mut report)
+                .run(&mut module)
+                .unwrap();
             assert_eq!(report.invocations.len(), 2);
             assert_eq!(report.invocations[1].pass_ns, 0);
         }
@@ -423,11 +419,8 @@ fn function_permissions_override_vector_context_without_widening_neighbors() {
         target: VectorTarget::X86Sse2,
         capabilities: VectorCapabilities::BASELINE,
     };
-    keel_opt::run_pipeline_with_context_and_options(
-        &mut module,
-        &[&Observe],
-        context,
-        OptimizeOptions::default(),
-    )
-    .unwrap();
+    keel_opt::Pipeline::new(&[&Observe])
+        .context(context)
+        .run(&mut module)
+        .unwrap();
 }

@@ -70,15 +70,14 @@ fn compile(
     let mut m = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&m).unwrap();
     if optimize {
-        keel_opt::run_passes_for_target_with_options(
-            &mut m,
-            keel_opt::DEFAULT_PIPELINE,
-            keel_opt::VectorTarget::X86Sse2,
-            keel_opt::OptimizeOptions {
+        keel_opt::Pipeline::named(keel_opt::DEFAULT_PIPELINE)
+            .unwrap()
+            .context(keel_opt::VectorTarget::X86Sse2.into())
+            .options(keel_opt::OptimizeOptions {
                 verification: keel_opt::VerificationPolicy::Enabled,
-            },
-        )
-        .unwrap();
+            })
+            .run(&mut m)
+            .unwrap();
     }
     let pipeline = CodegenPipeline {
         selector: &selection,
