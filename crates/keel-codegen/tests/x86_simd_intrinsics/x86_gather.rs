@@ -181,7 +181,7 @@ fn all_gather_forms_scale_alias_spill_matrix_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
             }
         }
     }

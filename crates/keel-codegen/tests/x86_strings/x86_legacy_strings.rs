@@ -431,7 +431,7 @@ fn check_string_exports(exhaustive: bool) {
                     {
                         continue;
                     }
-                    let (_, _) = object(
+                    object(
                         s,
                         a,
                         empty,

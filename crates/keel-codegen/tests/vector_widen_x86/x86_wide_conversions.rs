@@ -227,7 +227,7 @@ fn wide_conversion_reduction_matrix_emits_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3));
+                object(s, a, empty, Features::for_level(CpuLevel::V3));
             }
         }
     }

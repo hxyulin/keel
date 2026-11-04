@@ -224,7 +224,7 @@ fn vector_wrapper_sseup_emission_exports_and_baseline() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) = object(s, a, empty, true);
+                object(s, a, empty, true);
             }
         }
     }

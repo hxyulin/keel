@@ -170,7 +170,7 @@ fn q_varargs_register_save_and_overflow_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) = object(s, a, empty);
+                object(s, a, empty);
             }
         }
     }

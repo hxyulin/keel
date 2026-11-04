@@ -236,8 +236,7 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) =
-                    object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
+                object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
             }
         }
     }

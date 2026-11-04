@@ -182,7 +182,7 @@ fn masked_memory_typed_alias_spill_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
+                object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
             }
         }
     }

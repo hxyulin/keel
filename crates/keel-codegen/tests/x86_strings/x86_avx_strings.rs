@@ -430,8 +430,7 @@ fn check_string_exports(exhaustive: bool) {
                     {
                         continue;
                     }
-                    let (_, _) =
-                        object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
+                    object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
                     configurations += 1;
                 }
             }
