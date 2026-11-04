@@ -58,28 +58,11 @@ fn run() -> Result<(), String> {
     let module = keel_ir::parse(&src).map_err(|e| format!("{input}: {e}"))?;
     let llvm = export(&module, target)?;
     if let Some(path) = output.filter(|s| s != "-") {
-        // Only publish a complete successful translation. A same-directory
-        // temporary file plus rename also avoids truncation on write failure.
-        let path = Path::new(&path);
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let tmp = parent.join(format!(".keel-llvm-{}.tmp", std::process::id()));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-            .map_err(|e| e.to_string())?;
-        let result = (|| {
-            file.write_all(llvm.as_bytes())?;
-            file.sync_all()?;
-            std::fs::rename(&tmp, path)
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
-        }
-        result.map_err(|e| e.to_string())?;
+        // Only publish a complete successful translation.
+        keel_util::fs::replace(Path::new(&path), None, |file| {
+            file.write_all(llvm.as_bytes())
+        })
+        .map_err(|e| e.to_string())?;
     } else {
         std::io::stdout()
             .write_all(llvm.as_bytes())

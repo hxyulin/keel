@@ -680,52 +680,22 @@ fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
     Ok(())
 }
 
+/// Write `path` through a fresh temporary file. A signed output is an
+/// executable, so it also gets mode 0755.
 fn install_output(
     path: &Path,
     sign: bool,
     write: impl FnOnce(&mut std::fs::File) -> Result<()>,
 ) -> Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temp = None;
-    for n in 0..100 {
-        let p = parent.join(format!(".keel-link-{}-{n}", std::process::id()));
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&p)
-        {
-            Ok(f) => {
-                temp = Some((p, f));
-                break;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return fail(e.to_string()),
-        }
-    }
-    let (temp, mut file) = temp.ok_or("could not allocate output temporary file")?;
-    let result = (|| {
-        write(&mut file)?;
+    // Never mmap the output: Darwin can cache a signature at mmap time. The
+    // helper closes this fully signed inode before it replaces the
+    // destination, so a running executable keeps its previous inode intact.
+    keel_util::fs::replace(path, sign.then_some(0o755), |file| {
+        write(file).map_err(std::io::Error::other)?;
         if sign {
-            sign::sign(&mut file)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                file.set_permissions(std::fs::Permissions::from_mode(0o755))
-                    .map_err(|e| e.to_string())?;
-            }
+            sign::sign(file).map_err(std::io::Error::other)?;
         }
-        // Never mmap the output: Darwin can cache a signature at mmap time.
-        // Close this fresh, fully signed inode before atomically replacing the
-        // destination; a running executable keeps its previous inode intact.
-        drop(file);
-        std::fs::rename(&temp, path).map_err(|e| e.to_string())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
 }

@@ -26,6 +26,7 @@ serde_json = "1"
 # The comparison harness links the native backend from the same source tree.
 keel-codegen = { path = "../keel-codegen" }
 keel-asm = { path = "../keel-asm" }
+keel-util = { path = "../keel-util" }
 
 [dev-dependencies]
 # Kernel C sources are compiled to Keel IR in-process for differential tests.

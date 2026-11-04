@@ -75,26 +75,10 @@ fn run() -> Result<(), String> {
             .write_all(text.as_bytes())
             .map_err(|e| e.to_string());
     }
-    let path = Path::new(&output);
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let tmp = parent.join(format!(".keel-llvm-import-{}.tmp", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .map_err(|e| e.to_string())?;
-    let result = (|| {
-        file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result.map_err(|e| e.to_string())
+    keel_util::fs::replace(Path::new(&output), None, |file| {
+        file.write_all(text.as_bytes())
+    })
+    .map_err(|e| e.to_string())
 }
 fn main() {
     if let Err(e) = run() {

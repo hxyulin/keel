@@ -277,12 +277,16 @@ fn cli_whole_module_buffering_and_errors() {
     assert!(!result.status.success());
     assert!(result.stdout.is_empty());
     assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "sentinel");
-    assert!(
-        !dir.parent()
-            .unwrap()
-            .join(format!(".keel-llvm-{child_pid}.tmp"))
-            .exists()
+    let temporary = format!(
+        ".{}.{child_pid}.",
+        dir.file_name().unwrap().to_string_lossy()
     );
+    assert!(!std::fs::read_dir(dir.parent().unwrap()).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(&temporary)
+    }));
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -154,12 +154,11 @@ fn direct_signed_output_matches_buffered_and_failure_preserves_destination() {
     assert!(keel_link::write_signed(&invalid, &new).is_err());
     assert_eq!(signed, std::fs::read(&new).unwrap());
 
-    assert!(!std::fs::read_dir(&root).unwrap().any(|p| {
-        p.unwrap()
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".keel-link-")
-    }));
+    assert!(
+        !std::fs::read_dir(&root)
+            .unwrap()
+            .any(|p| p.unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 

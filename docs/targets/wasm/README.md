@@ -153,8 +153,8 @@ promise.
 
 Frontend, verifier, unsupported-feature, export and memory errors leave any existing
 destination untouched. Once validated bytes exist, the driver writes them to a
-unique temporary file in the destination directory, syncs and closes it, then
-renames it over the destination. On failure the temporary is removed and the old
+unique temporary file in the destination directory, syncs and closes it,
+renames it over the destination, then syncs the directory. On failure the temporary is removed and the old
 destination remains. Inputs are unmapped first, so the output path may equal the
 input path. A symlink or hard-link destination is replaced as a directory entry;
 the file it pointed to is left unchanged.

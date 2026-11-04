@@ -705,37 +705,12 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
     for warning in &executable.warnings {
         eprintln!("keel link: warning: {warning}");
     }
-    // Write beside the destination and install only after the complete image is
-    // written. create_new prevents collisions with concurrent linker processes.
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    let temporary = output.with_file_name(format!(".keel-elf-{}-{stamp}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|e| format!("{}: {e}", temporary.display()))?;
-    let result = (|| -> std::io::Result<()> {
+    let mode = if relocatable { 0o644 } else { 0o755 };
+    keel_util::fs::replace(&output, Some(mode), |file| {
         use std::io::Write;
-        file.write_all(&executable.bytes)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(if relocatable {
-                0o644
-            } else {
-                0o755
-            }))?;
-        }
-        drop(file);
-        std::fs::rename(&temporary, &output)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|e| format!("{}: {e}", output.display()))
+        file.write_all(&executable.bytes)
+    })
+    .map_err(|e| format!("{}: {e}", output.display()))
 }
 
 #[cfg(test)]

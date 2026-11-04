@@ -71,10 +71,11 @@ The library API is `keel_link::archive::build(&[Input], archive::Target)`,
 returning archive bytes without filesystem access, or
 `archive::write(&[Input], archive::Target, &Path)`. The library also permits an
 empty indexed archive. `write` validates/builds first, writes a create-new
-sibling temporary file, closes it, then renames it over the destination.
-Read, validation, write and installation errors preserve existing outputs;
-a temporary file is removed after failed installation. Durability across power
-loss is not promised, matching the linker's rename-based installation model.
+sibling temporary file, syncs and closes it, renames it over the destination,
+then syncs the directory. Read, validation, write and installation errors
+preserve existing outputs; a temporary file is removed after failed
+installation. Every linker and driver output that is replaced this way uses
+`keel_util::fs::replace`.
 
 ## Object validation
 

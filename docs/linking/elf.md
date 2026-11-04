@@ -65,8 +65,8 @@ x86-64 Linux library directories. Cross links consult only explicit paths and
 The library API is `keel_link::elf::link(&[Input], elf::Options)`, which returns
 image bytes and warnings without filesystem access. The CLI maps or reads the
 inputs, writes a temporary file beside the destination, sets executable
-permissions on Unix (ordinary file permissions for `-r`) and renames it into place; a failed link preserves an
-existing output. Allocated image size is limited to 512 MiB.
+permissions on Unix (mode 0644 for `-r`), syncs it and renames it into place; a
+failed link preserves an existing output. Allocated image size is limited to 512 MiB.
 
 For bounded GNU script final linking through the library API, see
 [GNU linker scripts](gnu-scripts.md).

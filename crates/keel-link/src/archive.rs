@@ -264,30 +264,13 @@ fn append(out: &mut Vec<u8>, name: &str, bytes: &[u8], darwin: bool) -> Result<u
     Ok(data)
 }
 
-/// Validate/build in memory, then atomically replace a destination using a
-/// create-new temporary file in the same directory. Failures preserve output.
+/// Validate and build in memory, then replace `output` whole. Failures
+/// leave an existing `output` unchanged.
 pub fn write(inputs: &[Input<'_>], target: Target, output: &Path) -> Result<()> {
     use std::io::Write;
     let bytes = build(inputs, target)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_nanos();
-    let temporary = output.with_file_name(format!(".keel-archive-{}-{stamp}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|e| format!("{}: {e}", temporary.display()))?;
-    let result = (|| -> std::io::Result<()> {
-        file.write_all(&bytes)?;
-        drop(file);
-        std::fs::rename(&temporary, output)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|e| format!("{}: {e}", output.display()))
+    keel_util::fs::replace(output, None, |file| file.write_all(&bytes))
+        .map_err(|e| format!("{}: {e}", output.display()))
 }
 
 // Generic ObjectSymbol::section() deliberately maps malformed references and

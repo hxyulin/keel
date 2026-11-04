@@ -51,8 +51,8 @@ running the output requires macOS arm64.
 The `keel-link` crate takes named object/archive bytes and explicit `Dylib`
 interfaces. `link` returns a **not yet signed** Mach-O image plus warnings.
 `write_signed` and the streaming `link_signed` write a sibling temporary file,
-sign it in process, and atomically install the executable only after signing
-succeeds. `Input.name` is only a diagnostic label and is never opened.
+sign it in process, sync it, and atomically install the executable only after
+signing succeeds. `Input.name` is only a diagnostic label and is never opened.
 
 ## Code signing
 

@@ -2,12 +2,7 @@
 use super::{Options as DriverOptions, input};
 use keel_ir::{Module, Target};
 use keel_wasm::{Export, Wasm32MemoryOptions, Wasm32RuntimeOptions};
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::Path,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{io::Write, path::Path};
 
 pub(super) struct Options {
     pub exports: Vec<String>,
@@ -189,30 +184,6 @@ fn emit(opts: &DriverOptions, module: &Module) -> Result<(), String> {
 }
 
 fn publish(output: &Path, bytes: &[u8]) -> Result<(), String> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    // create_new never overwrites another invocation's temporary file. Keep the
-    // temporary beside the destination so rename stays on the same filesystem.
-    let (temporary, mut file) = loop {
-        let temporary = output.with_file_name(format!(
-            ".keel-wasm-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-        {
-            Ok(file) => break (temporary, file),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("{}: {e}", output.display())),
-        }
-    };
-    let result = file.write_all(bytes).and_then(|()| file.sync_all());
-    drop(file);
-    let result = result.and_then(|()| std::fs::rename(&temporary, output));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result.map_err(|e| format!("{}: {e}", output.display()))
+    keel_util::fs::replace(output, None, |file| file.write_all(bytes))
+        .map_err(|e| format!("{}: {e}", output.display()))
 }

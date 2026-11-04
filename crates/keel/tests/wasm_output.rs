@@ -31,7 +31,7 @@ impl Temp {
                     .unwrap()
                     .file_name()
                     .to_string_lossy()
-                    .starts_with(".keel-wasm-")
+                    .ends_with(".tmp")
             );
         }
     }

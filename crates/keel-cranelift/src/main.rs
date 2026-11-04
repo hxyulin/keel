@@ -83,28 +83,10 @@ fn run() -> Result<(), String> {
             .write_all(&bytes)
             .map_err(|e| e.to_string());
     }
-    // Publish through a same-directory temporary file and rename, so an
-    // existing output survives any failure.
-    let path = Path::new(&output);
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let tmp = parent.join(format!(".keel-cranelift-{}.tmp", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .map_err(|e| format!("{}: {e}", tmp.display()))?;
-    let result = (|| {
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result.map_err(|e| e.to_string())
+    // Publish through a temporary file, so an existing output survives any
+    // failure.
+    keel_util::fs::replace(Path::new(&output), None, |file| file.write_all(&bytes))
+        .map_err(|e| e.to_string())
 }
 
 fn main() {

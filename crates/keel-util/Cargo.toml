@@ -1,6 +1,6 @@
 [package]
 name = "keel-util"
-description = "LEB128 encoding shared by Keel crates"
+description = "LEB128 encoding and atomic file replacement shared by Keel crates"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
