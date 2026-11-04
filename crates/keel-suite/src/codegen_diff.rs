@@ -55,7 +55,7 @@ pub struct Options {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Target {
+pub(crate) enum Target {
     /// aarch64-apple-darwin
     Aarch64,
     /// x86_64-unknown-linux-gnu
@@ -64,7 +64,7 @@ pub enum Target {
 }
 
 impl Target {
-    fn triple(self) -> &'static str {
+    pub(crate) fn triple(self) -> &'static str {
         match self {
             Target::Aarch64 => "aarch64-apple-darwin",
             Target::X86_64 => "x86_64-unknown-linux-gnu",
@@ -72,7 +72,7 @@ impl Target {
     }
 
     /// The `os` and `arch` that `[[build.when]]` entries match.
-    fn os_arch(self) -> (&'static str, &'static str) {
+    pub(crate) fn os_arch(self) -> (&'static str, &'static str) {
         match self {
             Target::Aarch64 => ("macos", "aarch64"),
             Target::X86_64 => ("linux", "x86_64"),
@@ -190,13 +190,111 @@ struct Size {
 }
 
 /// One translation unit in one target and configuration.
-struct Job<'a> {
-    suite: &'a Suite,
-    work: &'a Path,
-    source: &'a Path,
-    unit: usize,
-    target: Target,
-    config: &'a Config,
+pub(crate) struct Job<'a> {
+    pub(crate) suite: &'a Suite,
+    pub(crate) work: &'a Path,
+    pub(crate) source: &'a Path,
+    pub(crate) unit: usize,
+    pub(crate) target: Target,
+    pub(crate) config: &'a Config,
+}
+
+impl Job<'_> {
+    /// The source path relative to the suite's work directory or the root.
+    pub(crate) fn relative(&self, root: &Path) -> String {
+        self.source
+            .strip_prefix(self.work)
+            .or_else(|_| self.source.strip_prefix(root))
+            .unwrap_or(self.source)
+            .display()
+            .to_string()
+    }
+
+    /// The `keel cc` command for this job, writing `out`.
+    pub(crate) fn cc(&self, keel: &Path, sysroot: Option<&Path>, out: &Path) -> Vec<String> {
+        let build = &self.suite.manifest.build;
+        let (os, arch) = self.target.os_arch();
+        let mut argv = vec![keel.display().to_string(), "cc".into()];
+        argv.extend(build.define_flags_for(os, arch));
+        argv.extend(build.include_flags());
+        argv.extend(self.config.flags.iter().cloned());
+        argv.extend(["--target".into(), self.target.triple().into()]);
+        if let Some(dir) = sysroot {
+            argv.extend(["--sysroot".into(), dir.display().to_string()]);
+        }
+        argv.extend([
+            self.source.display().to_string(),
+            "-o".into(),
+            out.display().to_string(),
+        ]);
+        argv
+    }
+}
+
+/// The sysroot to pass for each target that is not this host's.
+pub(crate) fn sysroots(
+    targets: &[Target],
+    aarch64: Option<&Path>,
+    x86_64: Option<&Path>,
+) -> Result<Vec<(Target, PathBuf)>> {
+    let host = keel_ir::Target::host().map(|t| t.triple());
+    let mut sysroots = Vec::new();
+    for (target, sysroot) in [(Target::Aarch64, aarch64), (Target::X86_64, x86_64)] {
+        if !targets.contains(&target) {
+            continue;
+        }
+        match sysroot {
+            Some(dir) => sysroots.push((
+                target,
+                dir.canonicalize()
+                    .with_context(|| dir.display().to_string())?,
+            )),
+            None if host != Some(target.triple()) => {
+                let flag = match target {
+                    Target::Aarch64 => "--aarch64-sysroot",
+                    Target::X86_64 => "--x86-64-sysroot",
+                };
+                bail!(
+                    "this host is not {}: give its headers with {flag}, or leave it out with --target",
+                    target.triple()
+                );
+            }
+            None => {}
+        }
+    }
+    Ok(sysroots)
+}
+
+/// Every translation unit in every target and configuration, largest first,
+/// so the largest inputs do not finish last on one thread.
+pub(crate) fn units<'a>(
+    prepared: &'a [(&'a Suite, build::Sources)],
+    targets: &[Target],
+    configs: &'a [Config],
+) -> Vec<Job<'a>> {
+    let mut work: Vec<(u64, Job)> = Vec::new();
+    for (suite, sources) in prepared {
+        for (unit, source) in sources.pre.iter().enumerate() {
+            let size = fs::metadata(source).map_or(0, |m| m.len());
+            for &target in targets {
+                for config in configs {
+                    work.push((
+                        size,
+                        Job {
+                            suite,
+                            work: &sources.work,
+                            source,
+                            unit,
+                            target,
+                            config,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    work.sort_by_key(|(size, _)| std::cmp::Reverse(*size));
+    work.into_iter().map(|(_, job)| job).collect()
 }
 
 struct Tools {
@@ -212,30 +310,11 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
         bail!("codegen-diff preprocesses for each target; use the native input mode");
     }
     let resolve = |p: &Path| p.canonicalize().with_context(|| p.display().to_string());
-    let host = keel_ir::Target::host().map(|t| t.triple());
-    let mut sysroots = Vec::new();
-    for (target, sysroot) in [
-        (Target::Aarch64, &options.aarch64_sysroot),
-        (Target::X86_64, &options.x86_64_sysroot),
-    ] {
-        if !options.target.contains(&target) {
-            continue;
-        }
-        match sysroot {
-            Some(dir) => sysroots.push((target, resolve(dir)?)),
-            None if host != Some(target.triple()) => {
-                let flag = match target {
-                    Target::Aarch64 => "--aarch64-sysroot",
-                    Target::X86_64 => "--x86-64-sysroot",
-                };
-                bail!(
-                    "this host is not {}: give its headers with {flag}, or leave it out with --target",
-                    target.triple()
-                );
-            }
-            None => {}
-        }
-    }
+    let sysroots = sysroots(
+        &options.target,
+        options.aarch64_sysroot.as_deref(),
+        options.x86_64_sysroot.as_deref(),
+    )?;
     if options.icount && !cfg!(any(target_os = "macos", target_os = "linux")) {
         bail!("--icount needs macOS or Linux");
     }
@@ -278,30 +357,7 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
         }
     }
 
-    let mut work: Vec<(u64, Job)> = Vec::new();
-    for (suite, sources) in &prepared {
-        for (unit, source) in sources.pre.iter().enumerate() {
-            let size = fs::metadata(source).map_or(0, |m| m.len());
-            for &target in &options.target {
-                for config in &selected {
-                    work.push((
-                        size,
-                        Job {
-                            suite,
-                            work: &sources.work,
-                            source,
-                            unit,
-                            target,
-                            config,
-                        },
-                    ));
-                }
-            }
-        }
-    }
-    // The largest inputs first, so they do not finish last on one thread.
-    work.sort_by_key(|(size, _)| std::cmp::Reverse(*size));
-    let work: Vec<Job> = work.into_iter().map(|(_, job)| job).collect();
+    let work = units(&prepared, &options.target, &selected);
     let progress = bar(work.len(), "codegen-diff".into());
     let objects = build::parallel(&work, jobs, &progress, |job| {
         compare(root, &tools, job).with_context(|| {
@@ -359,11 +415,6 @@ fn binary(path: &Path) -> Result<Binary> {
 
 /// Compiles one job with both binaries and compares the outputs.
 fn compare(root: &Path, tools: &Tools, job: &Job) -> Result<Object> {
-    let relative = job
-        .source
-        .strip_prefix(job.work)
-        .or_else(|_| job.source.strip_prefix(root))
-        .unwrap_or(job.source);
     let stem = job.source.file_stem().unwrap().to_string_lossy();
     let name = format!("unit-{}-{stem}.s", job.unit);
     let path = |side: &str| {
@@ -380,7 +431,7 @@ fn compare(root: &Path, tools: &Tools, job: &Job) -> Result<Object> {
     let cand = compile(tools, &tools.candidate, job, &cand_path)?;
     let mut object = Object {
         suite: job.suite.name.clone(),
-        source: relative.display().to_string(),
+        source: job.relative(root),
         target: job.target.triple(),
         config: job.config.name.clone(),
         status: Status::Identical,
@@ -460,8 +511,6 @@ struct Compiled {
 
 fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled> {
     fs::create_dir_all(out.parent().unwrap())?;
-    let build = &job.suite.manifest.build;
-    let (os, arch) = job.target.os_arch();
     let mut argv: Vec<String> = Vec::new();
     if tools.icount {
         if cfg!(target_os = "macos") {
@@ -472,20 +521,9 @@ fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled
             );
         }
     }
-    argv.extend([keel.display().to_string(), "cc".into()]);
-    argv.extend(build.define_flags_for(os, arch));
-    argv.extend(build.include_flags());
-    argv.extend(job.config.flags.iter().cloned());
-    argv.extend(["--target".into(), job.target.triple().into()]);
-    if let Some((_, dir)) = tools.sysroots.iter().find(|(t, _)| *t == job.target) {
-        argv.extend(["--sysroot".into(), dir.display().to_string()]);
-    }
-    argv.extend([
-        job.source.display().to_string(),
-        "-o".into(),
-        out.display().to_string(),
-    ]);
-    let output = build::run(&argv, &job.work.join(&build.dir), None)?;
+    let sysroot = tools.sysroots.iter().find(|(t, _)| *t == job.target);
+    argv.extend(job.cc(keel, sysroot.map(|(_, dir)| dir.as_path()), out));
+    let output = build::run(&argv, &job.work.join(&job.suite.manifest.build.dir), None)?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     let retired = tools
         .icount
