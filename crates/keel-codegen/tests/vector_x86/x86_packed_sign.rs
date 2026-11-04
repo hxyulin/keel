@@ -4,7 +4,8 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
-use std::{fs, path::PathBuf};
+use keel_test_support::native_program;
+use std::fs;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -196,21 +197,72 @@ fn fixture() -> (String, String) {
     );
     (ir, c)
 }
+/// Runs one ELF+C oracle on x86-64 Linux, or exports it.
+fn native(stem: &str, text: String, object: Vec<u8>, c: &str) {
+    native_program!(stem)
+        .file("oracle.s", text)
+        .file("oracle.o", object)
+        .file("oracle.c", c)
+        .link([
+            "-O2",
+            "-march=x86-64",
+            "-msse2",
+            "-mno-avx",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "oracle.c",
+            "oracle.o",
+        ])
+        .check();
+}
+
+/// The `.text` bytes of an x86-64 ELF object.
+fn text_section(object: &[u8]) -> Vec<u8> {
+    use object::{Object, ObjectSection};
+    object::File::parse(object)
+        .unwrap()
+        .section_by_name(".text")
+        .unwrap()
+        .data()
+        .unwrap()
+        .to_vec()
+}
+
+/// Checks that Clang assembles Keel's text to the same count of the sign
+/// recipe (shuffle, sign shift, XOR/AND/XOR) as Keel's own object.
+fn clang_recipe_matches(stem: &str, text: &str, object: &[u8]) {
+    const RECIPE: [u8; 24] = [
+        0x66, 0x45, 0x0f, 0x70, 0xee, 0xf5, 0x66, 0x41, 0x0f, 0x72, 0xe5, 0x1f, 0x45, 0x0f, 0x57,
+        0xf7, 0x45, 0x0f, 0x54, 0xee, 0x45, 0x0f, 0x57, 0xef,
+    ];
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip_part!(keel_test_support::NO_CLANG);
+        return;
+    };
+    let dir = keel_test_support::TempDir::new("sign-recipe");
+    fs::write(dir.join("oracle.s"), text).unwrap();
+    let output = clang
+        .command()
+        .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+        .arg(dir.join("oracle.s"))
+        .arg("-o")
+        .arg(dir.join("oracle.o"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{stem}: {output:?}");
+    let count = |bytes: &[u8]| bytes.windows(RECIPE.len()).filter(|w| *w == RECIPE).count();
+    let ours = count(&text_section(object));
+    let theirs = count(&text_section(&fs::read(dir.join("oracle.o")).unwrap()));
+    assert!(
+        (ours > 0 || stem.starts_with("controlled-")) && ours == theirs,
+        "sign recipe mismatch: {stem}: Keel={ours}, Clang={theirs}"
+    );
+}
+
 #[test]
 fn export_linux_oracles() {
-    let dir = std::env::var_os("KEEL_SIGN64_EVIDENCE").map(PathBuf::from);
     let (ir, c) = fixture();
-    if let Some(dir) = &dir {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.keel"), &ir).unwrap();
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("../x86_sign/run_native.py"),
-        )
-        .unwrap();
-    }
-    let mut count = 0;
-    let mut stems = Vec::new();
     for sel in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -227,14 +279,9 @@ fn export_linux_oracles() {
                 assert_eq!(text.matches("psrad\t").count(), 32);
                 assert_eq!(text.matches("pcmpgtd\t").count(), 2);
                 assert_eq!(text.matches("andnps\t").count(), 4);
-                if let Some(dir) = &dir {
-                    let stem = format!("{sel:?}-{alloc:?}-{pool}");
-                    stems.push(stem.clone());
-                    fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                    fs::write(dir.join(format!("{stem}.o")), object).unwrap();
-                    fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
-                }
-                count += 1;
+                let stem = format!("{sel:?}-{alloc:?}-{pool}");
+                clang_recipe_matches(&stem, &text, &object);
+                native(&stem, text, object, &c);
             }
         }
     }
@@ -248,14 +295,9 @@ fn export_linux_oracles() {
         let (text, obj) =
             compile_allocator(&m, &sel, &Controlled, &keel_codegen::x86_64::REGISTERS);
         assert_eq!(text.matches("psrad\t").count(), 15);
-        if let Some(dir) = &dir {
-            let stem = format!("controlled-{sel:?}");
-            stems.push(stem.clone());
-            fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-            fs::write(dir.join(format!("{stem}.o")), obj).unwrap();
-            fs::write(dir.join(format!("{stem}.c")), &controlled_c).unwrap();
-        }
-        count += 1;
+        let stem = format!("controlled-{sel:?}");
+        clang_recipe_matches(&stem, &text, &obj);
+        native(&stem, text, obj, &controlled_c);
     }
     let (ir, c) = controlled_select_fixture();
     let m = keel_ir::parse(&ir).unwrap();
@@ -272,44 +314,9 @@ fn export_linux_oracles() {
         );
         assert_eq!(text.matches("psrad\t").count(), 2 * SELECT_LAYOUTS.len());
         assert_eq!(text.matches("andnps\t").count(), 0);
-        if let Some(dir) = &dir {
-            let stem = format!("select-controlled-{sel:?}");
-            stems.push(stem.clone());
-            fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-            fs::write(dir.join(format!("{stem}.o")), obj).unwrap();
-            fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
-        }
-        count += 1;
-    }
-    if let (Some(dir), Some(input)) = (&dir, std::env::var_os("KEEL_SIGN64_KERNEL_IR")) {
-        let src = fs::read_to_string(input).unwrap();
-        let m = keel_ir::parse(&src).unwrap();
-        let (text, object) = compile(
-            &m,
-            &SelectionTier::Full,
-            AllocationTier::Full,
-            &keel_codegen::x86_64::REGISTERS,
-        );
-        stems.push("kernel".to_string());
-        fs::write(dir.join("kernel.s"), text).unwrap();
-        fs::write(dir.join("kernel.o"), object).unwrap();
-        fs::write(dir.join("kernel.c"), include_str!("../x86_sign/kernel.c")).unwrap();
-        count += 1;
-    }
-    if let Some(dir) = &dir {
-        assert_eq!(stems.len(), count);
-        fs::write(dir.join("expected-count.json"), format!("{count}\n")).unwrap();
-        fs::write(dir.join("expected-stems.json"), format!("{:?}\n", stems)).unwrap();
-        fs::write(
-            dir.join("seal_export.py"),
-            include_str!("../x86_sign/seal_export.py"),
-        )
-        .unwrap();
-        fs::write(
-            dir.join("check_encodings.py"),
-            include_str!("../x86_sign/check_encodings.py"),
-        )
-        .unwrap();
+        let stem = format!("select-controlled-{sel:?}");
+        clang_recipe_matches(&stem, &text, &obj);
+        native(&stem, text, obj, &c);
     }
 }
 

@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::EntityRef;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -217,23 +218,18 @@ fn xstate_contract_and_packet() {
             );
         }
     }
-    let export = std::env::var_os("KEEL_X86_XSTATE_EXPORT_DIR").map(PathBuf::from);
-    let d = export
-        .clone()
-        .unwrap_or_else(|| common::temp("xstate-packet"));
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("test.c"), include_str!("../x86_xstate/test.c")).unwrap();
-    fs::write(d.join("README.md"), include_str!("../x86_xstate/README.md")).unwrap();
+    let d = keel_test_support::TempDir::new("xstate");
+    let test_c = include_str!("../x86_xstate/test.c");
+    let probe_s = include_str!("../x86_xstate/probe.S");
+    let builtin_c = include_str!("../x86_xstate/builtin.c");
+    fs::write(d.join("test.c"), test_c).unwrap();
     fs::write(
         d.join("encoding.S"),
         include_str!("../x86_xstate/encoding.S"),
     )
     .unwrap();
-    fs::write(d.join("builtin.c"), include_str!("../x86_xstate/builtin.c")).unwrap();
-    fs::write(d.join("test.ir"), source(true)).unwrap();
-    fs::write(d.join("probe.S"), include_str!("../x86_xstate/probe.S")).unwrap();
-    fs::write(d.join("run.py"), include_str!("../x86_xstate/run.py")).unwrap();
-    let mut names = String::new();
+    fs::write(d.join("builtin.c"), builtin_c).unwrap();
+    fs::write(d.join("probe.S"), probe_s).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -246,14 +242,32 @@ fn xstate_contract_and_packet() {
                 ("custom", &CUSTOM),
             ] {
                 let (obj, text) = compile(s, a, p, Features::for_level(CpuLevel::V3)).unwrap();
-                let name = format!("{s:?}-{a:?}-{pool}");
-                names += &format!("{name}\n");
-                fs::write(d.join(format!("{name}.o")), obj).unwrap();
-                fs::write(d.join(format!("{name}.s")), text).unwrap();
+                // Every object runs 7 masks, 28 patterns, 57,344 live calls,
+                // 8 fault cases and 8 raw MXCSR cases; see x86_xstate/README.md.
+                native_program!(format!("{s:?}-{a:?}-{pool}"))
+                    .requires(&["xsave", "avx"])
+                    .file("test.c", test_c)
+                    .file("probe.S", probe_s)
+                    .file("builtin.c", builtin_c)
+                    .file("keel.s", text)
+                    .file("keel.o", obj)
+                    .compile(["-O2", "-mxsave", "-c", "builtin.c", "-o", "builtin.o"])
+                    .link([
+                        "-O2",
+                        "-fno-vectorize",
+                        "-fno-slp-vectorize",
+                        "-mavx",
+                        "-mno-red-zone",
+                        "test.c",
+                        "probe.S",
+                        "builtin.o",
+                        "keel.o",
+                    ])
+                    .stdout("PASS xstate masks=7 patterns=28 live=57344 faults=8 raw=8\n")
+                    .check();
             }
         }
     }
-    fs::write(d.join("objects.txt"), names).unwrap();
     common::command(
         Command::new("clang")
             .args([
@@ -343,43 +357,4 @@ fn xstate_contract_and_packet() {
     let builtin = text_bytes(&fs::read(d.join("builtin.o")).unwrap());
     assert!(builtin.windows(4).any(|b| b == [0x48, 0x0f, 0xae, 0x27]));
     assert!(builtin.windows(4).any(|b| b == [0x48, 0x0f, 0xae, 0x2f]));
-    common::command(Command::new("python3").arg(d.join("run.py")).arg("--seal"));
-    common::command(Command::new("python3").arg(d.join("run.py")).arg("--check"));
-    let victim = d.join("Baseline-Fast-normal.o");
-    let original = fs::read(&victim).unwrap();
-    fs::write(&victim, b"tampered").unwrap();
-    let rejected = Command::new("python3")
-        .arg(d.join("run.py"))
-        .arg("--check")
-        .output()
-        .unwrap();
-    fs::write(&victim, original).unwrap();
-    assert!(
-        !rejected.status.success()
-            && String::from_utf8_lossy(&rejected.stderr).contains("packet hash mismatch")
-    );
-    assert!(
-        !Command::new("python3")
-            .arg("-O")
-            .arg(d.join("run.py"))
-            .arg("--check")
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    for flag in ["-O", "-OO"] {
-        fs::write(d.join("results.json"), b"stale acceptance").unwrap();
-        let rejected = Command::new("python3")
-            .arg(flag)
-            .arg(d.join("run.py"))
-            .output()
-            .unwrap();
-        assert!(!rejected.status.success());
-        assert!(String::from_utf8_lossy(&rejected.stderr).contains("optimized Python"));
-        assert!(!d.join("results.json").exists());
-    }
-    if export.is_none() {
-        fs::remove_dir_all(d).unwrap();
-    }
 }
