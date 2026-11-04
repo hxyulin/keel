@@ -136,6 +136,7 @@ mod neon;
 mod output;
 mod packed_load;
 mod packed_minmax;
+mod plan;
 mod scalar_neon;
 mod structured;
 mod vector;
@@ -991,6 +992,9 @@ impl<'a> FunctionCompiler<'a> {
             false,
         )
     }
+    /// Checks the function, then plans it in phases: call area, inline
+    /// assembly, allocation pools, selection and covers, allocation, spill
+    /// area, IR stack slots and the frame size.
     fn new_for_target(
         func: &'a Function,
         symbols: &'a crate::symbols::Symbols<'a>,
@@ -1005,202 +1009,22 @@ impl<'a> FunctionCompiler<'a> {
             func: func.name.clone(),
             message,
         };
-        if !linux
-            && func
-                .layout_insts()
-                .any(|(_, i)| matches!(func.inst_data(i), InstData::VaArg { ty: Type::I128, .. }))
-        {
-            return Err(err("va_arg.i128 requires AArch64 Linux".into()));
-        }
-        if linux && func.personality.is_some() {
-            return Err(err(
-                "exception handling on AArch64 Linux is not supported yet".into(),
-            ));
-        }
-        let (CallConv::C | CallConv::Fast) = func.sig.cc;
+        plan::preflight(func, symbols, linux).map_err(err)?;
         let param_kinds = param_kinds(&func.sig.params);
         let (param_locs, incoming) = abi::arg_locs_for(&param_kinds, param_kinds.len(), linux);
-        match func.sig.returns.as_slice() {
-            [] => {}
-            // The C ABI has the callee extend these to 32 bits. Private
-            // cc(fast) edges only require the declared narrow value.
-            [
-                AbiParam {
-                    ty: Type::I8 | Type::I16,
-                    ext: ArgExt::None,
-                    ..
-                },
-            ] if func.sig.cc == CallConv::C && !linux => {
-                return Err(err(
-                    "an i8/i16 return value needs `sext` or `uext`: C callers expect 32 bits"
-                        .into(),
-                ));
-            }
-            [_] => {}
-            _ => {
-                return Err(err(
-                    "multiple return values are not supported by the C convention".into(),
-                ));
-            }
-        }
-        for (_, callee) in func.callees() {
-            let what = || format!("call to @{}", callee.name);
-            check_call_signature(
-                what,
-                &callee.sig,
-                !linux && symbols.is_external(&callee.name),
-            )
-            .map_err(err)?;
-        }
-        // The target of an indirect call may be an external function.
-        for (_, sig) in func.signatures() {
-            check_call_signature(|| format!("indirect call {sig}"), sig, !linux).map_err(err)?;
-        }
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match. Raw IR
         // use counts never change while selecting this function.
         let facts = crate::kinds::FunctionFacts::new(func);
-        let (present, uses) = (facts.kinds, &facts.machine_uses);
-        for (_, inst) in func.layout_insts().filter(|_| present.intrinsic) {
-            if matches!(func.inst_data(inst), InstData::X86RflagsRegion { .. })
-                || matches!(func.inst_data(inst), InstData::Intrinsic { id,.. } if id.is_x86_target())
-            {
-                return Err(err(
-                    "x86 architectural intrinsic (including F16C) is not supported on AArch64"
-                        .into(),
-                ));
-            }
-        }
-
-        for (_, inst) in func.layout_insts().filter(|_| present.high_multiply) {
-            if let InstData::Binary {
-                op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
-                args,
-            } = func.inst_data(inst)
-                && func.value_type(func.resolve(args[0])) == Type::I128
-            {
-                return Err(err(format!("{op} on i128 is not supported yet")));
-            }
-            if let InstData::Overflow {
-                op: op @ (OverflowOp::Umul | OverflowOp::Smul),
-                args,
-            } = func.inst_data(inst)
-                && func.value_type(func.resolve(args[0])) == Type::I128
-            {
-                return Err(err(format!("{op} on i128 is not supported yet")));
-            }
-        }
-
+        let present = facts.kinds;
+        plan::check_instructions(func, present).map_err(err)?;
         let eh = if present.landing_pad {
             ExceptionTable::new(func).map_err(err)?
         } else {
             ExceptionTable::default()
         };
-
-        // A tail call's arguments must all go in registers: the caller's
-        // frame, where stack arguments would go, is gone by the jump.
-        for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
-            let (args, sig) = match func.inst_data(inst) {
-                InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
-                InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
-                _ => continue,
-            };
-            let kinds = arg_kinds(func, &sig.params, args);
-            let (locs, stack) = abi::arg_locs_for(&kinds, sig.params.len(), linux);
-            let in_regs = locs
-                .iter()
-                .all(|loc| matches!(loc, ArgLoc::Value(Slot::Reg(_))));
-            if stack > 0 || !in_regs {
-                return Err(err(format!(
-                    "`{}` needs stack or struct arguments, which tail calls do not support",
-                    func.display_inst(inst)
-                )));
-            }
-            // An sret result may have to be loaded into registers on return,
-            // which the callee would not do.
-            if func
-                .sig
-                .params
-                .iter()
-                .any(|p| matches!(p.purpose, Purpose::Sret(_)))
-            {
-                return Err(err(
-                    "a function returning a struct cannot make tail calls".into()
-                ));
-            }
-        }
-
-        // The bottom of the frame holds what calls need: their stack
-        // arguments, copies of big structs passed by value, and a slot for
-        // an `sret` address.
-        let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
-        let mut call_layouts = HashMap::default();
-        for (_, inst) in func.layout_insts().filter(|_| present.call) {
-            let (args, params) = match func.inst_data(inst) {
-                InstData::Call { func: callee, args }
-                | InstData::Invoke {
-                    func: callee, args, ..
-                } => (args, &func.callee(*callee).sig.params),
-                InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
-                _ => continue,
-            };
-            if !linux
-                && args
-                    .iter()
-                    .skip(params.len())
-                    .any(|&v| func.value_type(func.resolve(v)) == Type::I128)
-            {
-                return Err(err(
-                    "variadic i128 arguments are unsupported on AArch64 Darwin".into(),
-                ));
-            }
-            // Up to four named scalars take at most eight registers of a
-            // class: they need neither stack nor copies.
-            if args.len() == params.len()
-                && args.len() <= 4
-                && params.iter().all(|p| p.purpose == Purpose::Normal)
-            {
-                continue;
-            }
-            let kinds = arg_kinds(func, params, args);
-            let layout = abi::CallLayout::new(&kinds, params.len(), linux);
-            outgoing = outgoing.max(layout.stack_bytes);
-            copies = copies.max(layout.copy_bytes);
-            needs_sret_save |= layout
-                .locations
-                .iter()
-                .any(|loc| matches!(loc, ArgLoc::SretRegs(_)));
-            call_layouts.insert(inst, layout);
-        }
-        let copy_base = (outgoing as usize).next_multiple_of(16);
-        let mut offset = copy_base + copies as usize;
-        let sret_save = needs_sret_save.then(|| {
-            offset = offset.next_multiple_of(8) + 8;
-            offset - 8
-        });
-        let mut param_areas = Vec::new();
-        for (loc, param) in param_locs.iter().zip(&func.sig.params) {
-            param_areas.push(match loc {
-                ArgLoc::InRegs(_) | ArgLoc::SretRegs(_) => {
-                    let layout = param.layout().expect("a struct");
-                    offset = offset.next_multiple_of(layout.align().max(8) as usize);
-                    let area = offset;
-                    offset += layout.size().next_multiple_of(8) as usize;
-                    Some(area)
-                }
-                _ => None,
-            });
-        }
-        let variadic_area = if linux && func.sig.variadic {
-            offset = offset.next_multiple_of(16);
-            let area = offset;
-            offset += 192;
-            Some(area)
-        } else {
-            None
-        };
-        let spill_base = offset.next_multiple_of(8);
-
+        plan::check_tail_calls(func, present, linux).map_err(err)?;
+        let calls = plan::CallArea::plan(func, present, &param_locs, linux).map_err(err)?;
         let moves_sp = present.intrinsic
             && func.layout_insts().any(|(_, inst)| {
                 matches!(
@@ -1211,270 +1035,44 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 )
             });
-        // Callee-saved registers inline assembly clobbers: saved by the
-        // prologue, and never allocated, so no value lives in one across
-        // the assembly.
-        let (mut asm_saved, mut asm_float_saved) = (Vec::new(), Vec::new());
-        let mut has_inline_asm = false;
-        let mut asm_plans = HashMap::default();
-        for (_, inst) in func.layout_insts().filter(|_| present.inline_asm) {
-            let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
-                continue;
-            };
-            has_inline_asm = true;
-            let at = |message: String| err(format!("`{}`: {message}", func.display_inst(inst)));
-            for (&constraint, &arg) in asm.inputs.iter().zip(args) {
-                if let AsmOperand::Tied(out) = constraint
-                    && func.value_type(func.resolve(arg)) != asm.outputs[out as usize].1
-                {
-                    return Err(at("different-width asm ties require the x86 backend".into()));
-                }
-            }
-            asm_plans.insert(inst, AsmPlan::new(func, asm, args).map_err(at)?);
-            for clobber in &asm.clobbers {
-                let AsmClobber::Reg(r) = *clobber else {
-                    continue;
-                };
-                match (r.float, r.num) {
-                    (false, 18) => return Err(at("x18 is reserved by the platform".into())),
-                    (false, 29) => return Err(at("x29 is the frame pointer".into())),
-                    (false, BASE) if moves_sp => {
-                        return Err(at(
-                            "x19 is the base pointer of a function that allocates stack".into(),
-                        ));
-                    }
-                    (false, n) if REGISTERS.callee_saved.contains(&n) => asm_saved.push(n),
-                    (true, n) if REGISTERS.float_callee_saved.contains(&n) => {
-                        asm_float_saved.push(n)
-                    }
-                    _ => {}
-                }
-            }
-        }
-        let has_tls_getter = present.symbol_addr
-            && symbols.has_thread_locals()
-            && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
-                InstData::SymbolAddr { symbol } => symbols
-                    .data_object(func.symbol_name(*symbol))
-                    .is_some_and(|data| data.thread_local),
-                _ => false,
-            });
-        // A scalar integer private leaf never runs the wide-ABI staging or
-        // call helpers that reserve x0-x7. Let it compute in its argument/result
-        // bank directly. Respect custom pools, including forced-spill tests.
-        let argument_bank = !linux
-            && func.sig.cc == CallConv::Fast
-            && !has_tls_getter
-            && module.files.is_empty()
-            && func.personality.is_none()
-            && incoming == 0
-            && func.num_stack_slots() == 0
-            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
-            && pools.caller_saved == REGISTERS.caller_saved
-            && pools.callee_saved == REGISTERS.callee_saved
-            && pools.float_caller_saved == REGISTERS.float_caller_saved
-            && pools.float_callee_saved == REGISTERS.float_callee_saved
-            && (0..func.num_values()).all(|i| {
-                matches!(
-                    func.value_type(Value::new(i)),
-                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
-                )
-            })
-            && !func.layout_insts().any(|(_, i)| {
-                let d = func.inst_data(i);
-                is_call(func, d)
-                    || matches!(
-                        d,
-                        InstData::Intrinsic { .. }
-                            | InstData::InlineAsm { .. }
-                            | InstData::ReturnCall { .. }
-                            | InstData::ReturnCallIndirect { .. }
-                            | InstData::LandingPad { .. }
-                    )
-            });
-        let mut private_callers = Vec::new();
-        if argument_bank {
-            private_callers.extend(0..8);
-        }
-        private_callers.extend_from_slice(pools.caller_saved);
-        let callee_saved: Vec<u8> = (pools.callee_saved.iter().copied())
-            .filter(|&r| !(moves_sp && r == BASE) && !asm_saved.contains(&r))
-            .collect();
-        let float_callee_saved: Vec<u8> = (pools.float_callee_saved.iter().copied())
-            .filter(|r| !asm_float_saved.contains(r))
-            .collect();
-        let pools = Pools {
-            caller_saved: &private_callers,
-            callee_saved: &callee_saved,
-            float_callee_saved: &float_callee_saved,
-            ..*pools
-        };
-        let mut selection = {
-            backend_scope!(Selection);
-            pipeline.selector.select_with_uses(
-                func,
-                crate::select::Target::Aarch64,
-                &|data| {
-                    folded_imm(func, data)
-                        .map(|(v, _)| v)
-                        .into_iter()
-                        .chain(folded_divisor(func, data))
-                        .collect()
-                },
-                uses,
-            )
-        };
-        // Each cover is anchored at an instruction kind; without one it
-        // selects nothing and leaves the selection untouched.
-        let absolute_values = if present.select {
-            absolute::select(func, &mut selection, uses)
-        } else {
-            HashMap::default()
-        };
-        let absolute_differences = if present.widen_low {
-            absolute_diff::select(func, &mut selection)
-        } else {
-            HashMap::default()
-        };
-        let packed_absolute_values = if present.vector_select {
-            crate::packed_absolute::select(&facts, &mut selection)
-        } else {
-            HashMap::default()
-        };
-        let packed_minmax = if present.vector_icmp {
-            packed_minmax::select(func, &mut selection)
-        } else {
-            HashMap::default()
-        };
-        // Inline assembly may observe the leaves; such functions keep them.
-        let extended_adds = if present.ptradd && !present.inline_asm {
-            extended_add::select(func, &mut selection, uses)
-        } else {
-            HashMap::default()
-        };
-        if present.select {
-            selection.fuse_aarch64_selects(
-                func,
-                |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
-                uses,
-            );
-        }
-        let (packed_low_loads, replicate_loads) = if present.vector_splat {
-            (
-                packed_load::select(&facts, &mut selection),
-                vector::select_replicate_loads(&facts, &mut selection),
-            )
-        } else {
-            (HashMap::default(), HashMap::default())
-        };
-        let constant_shifts = if present.vector_splat {
-            vector::select_constant_operands(&facts, &mut selection)
-        } else {
-            HashMap::default()
-        };
-        let widening_adds = if present.widen_low {
-            vector::select_widening_adds(&facts, &mut selection)
-        } else {
-            HashMap::default()
-        };
-        let fused_compares = if present.compare && present.brif {
-            backend_scope!(CompareFusion);
-            selection.fuse_aarch64_compares(
-                func,
-                |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
-                uses,
-            )
-        } else {
-            HashSet::default()
-        };
-        let calls = present.call && !leaf_summaries.is_empty();
-        for (_, inst) in func.layout_insts().filter(|_| calls) {
-            if let InstData::Call { func: callee, .. } = func.inst_data(inst) {
-                let decl = func.callee(*callee);
-                if let Some((sig, preserved)) = leaf_summaries.get(&decl.name)
-                    && &decl.sig == sig
-                {
-                    selection.preserved_call_gprs.insert(inst, *preserved);
-                }
-            }
-        }
-        let is_call = |data: &InstData| is_call(func, data);
-        let returns_twice = |data: &InstData| lowering::returns_twice(func, data);
-        let input = crate::regalloc::AllocationInput {
-            func,
-            pools: &pools,
-            selection: &selection,
-            is_call: &is_call,
-            returns_twice: &returns_twice,
-        };
-        let mut alloc = pipeline.allocator.allocate(&input);
-        alloc.finish(&input);
-        alloc.validate(&input).map_err(err)?;
-        if moves_sp {
-            asm_saved.push(BASE);
-        }
-        for (used, extra) in [
-            (&mut alloc.callee_saved_used, asm_saved),
-            (&mut alloc.float_callee_saved_used, asm_float_saved),
-        ] {
-            used.extend(extra);
-            used.sort_unstable();
-            used.dedup();
-        }
-        let mut vector_spills = HashMap::default();
-        let has_vectors = (0..func.num_values()).any(|i| {
-            func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
-        });
-        if has_vectors {
-            for i in 0..func.num_values() {
-                let v = Value::new(i);
-                if func.value_type(v).is_vector()
-                    && let Some(Loc::Stack(slot)) = alloc.loc(v)
-                {
-                    vector_spills.insert(slot, func.value_type(v).bytes().unwrap());
-                }
-            }
-        }
-        let copy_temp = has_vectors.then_some(alloc.spill_slots);
-        if let Some(slot) = copy_temp {
-            vector_spills.insert(slot, 16);
-        }
-        let offset =
-            spill_base + 8 * (alloc.spill_slots as usize + if has_vectors { 2 } else { 0 });
-        if offset > MAX_SLOT_OFFSET {
-            return Err(err(format!(
-                "{offset} bytes of spill slots is too many for this allocator"
-            )));
-        }
+        let asm = plan::InlineAsmPlans::plan(func, present, moves_sp).map_err(err)?;
+        let has_tls_getter = plan::has_tls_getter(func, symbols, present);
+        let argument_bank =
+            plan::argument_bank(func, module, pools, incoming, has_tls_getter, linux);
+        let allocation_pools = plan::AllocationPools::plan(pools, argument_bank, &asm, moves_sp);
+        let pools = allocation_pools.pools(pools);
+        let covers = plan::Covers::select(func, pipeline, &facts, leaf_summaries);
+        let mut alloc = plan::allocate(func, &pools, &covers.selection, pipeline).map_err(err)?;
+        let plan::InlineAsmPlans {
+            asm_saved,
+            asm_float_saved,
+            has_inline_asm,
+            asm_plans,
+        } = asm;
+        plan::add_saved_registers(&mut alloc, asm_saved, asm_float_saved, moves_sp);
+        let spills = plan::SpillArea::plan(func, &alloc, calls.spill_base).map_err(err)?;
         // `sp` is 16-byte aligned and slot alignment is at most 16, so an
         // aligned offset gives an aligned address.
         let (stack_slot_offsets, offset) =
-            crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
+            crate::stack_frame::SlotOffsets::layout(func, spills.end, !module.files.is_empty());
         let frame_size = offset.next_multiple_of(16);
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
-        let frameless = func.sig.cc == CallConv::Fast
-            && !has_tls_getter
-            && module.files.is_empty()
-            && func.personality.is_none()
-            && frame_size == 0
-            && incoming == 0
-            && alloc.callee_saved_used.is_empty()
-            && alloc.float_callee_saved_used.is_empty()
-            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
-            && !func.layout_insts().any(|(_, i)| {
-                let d = func.inst_data(i);
-                is_call(d)
-                    || matches!(
-                        d,
-                        InstData::Intrinsic { .. }
-                            | InstData::InlineAsm { .. }
-                            | InstData::ReturnCall { .. }
-                            | InstData::ReturnCallIndirect { .. }
-                            | InstData::LandingPad { .. }
-                    )
-            });
+        let frameless = plan::frameless(func, module, has_tls_getter, frame_size, incoming, &alloc);
+        let plan::Covers {
+            selection,
+            absolute_values,
+            absolute_differences,
+            packed_absolute_values,
+            packed_minmax,
+            extended_adds,
+            packed_low_loads,
+            replicate_loads,
+            constant_shifts,
+            widening_adds,
+            fused_compares,
+        } = covers;
         let folded_values = {
             backend_scope!(Folding);
 
@@ -1496,7 +1094,7 @@ impl<'a> FunctionCompiler<'a> {
         );
         Ok(Self {
             linux,
-            variadic_area,
+            variadic_area: calls.variadic_area,
             #[cfg(feature = "experimental-dispatch")]
             dispatch_tails,
             func,
@@ -1508,7 +1106,7 @@ impl<'a> FunctionCompiler<'a> {
             fused_compares,
             has_inline_asm,
             asm_plans,
-            call_layouts,
+            call_layouts: calls.call_layouts,
             selection,
             replicate_loads,
             constant_shifts,
@@ -1520,12 +1118,12 @@ impl<'a> FunctionCompiler<'a> {
             widening_adds,
             absolute_differences,
             stack_slot_offsets,
-            copy_base,
-            sret_save,
-            param_areas,
-            spill_base,
-            vector_spills,
-            copy_temp,
+            copy_base: calls.copy_base,
+            sret_save: calls.sret_save,
+            param_areas: calls.param_areas,
+            spill_base: calls.spill_base,
+            vector_spills: spills.vector_spills,
+            copy_temp: spills.copy_temp,
             base: if moves_sp { "x19" } else { "sp" },
             variadic_offset: 16 + (incoming as usize).next_multiple_of(8),
             frame_size,
