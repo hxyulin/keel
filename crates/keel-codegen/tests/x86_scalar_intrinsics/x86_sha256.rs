@@ -133,11 +133,7 @@ impl keel_codegen::regalloc::RegisterAllocator for PinWideSimd0 {
             })
             .unwrap();
         let value = input.func.inst_results(load)[0];
-        assert!(
-            !allocation.locs[0]
-                .iter()
-                .any(|loc| *loc == Some(Loc::FReg(0)))
-        );
+        assert!(!allocation.locs[0].contains(&Some(Loc::FReg(0))));
         allocation.locs[0][value.index()] = Some(Loc::FReg(0));
         assert_eq!(allocation.loc(value), Some(Loc::FReg(0)));
         allocation

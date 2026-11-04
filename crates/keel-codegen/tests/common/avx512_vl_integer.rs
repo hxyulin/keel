@@ -143,14 +143,11 @@ pub fn fixtures() -> (String, String, String) {
                         let val = if op.starts_with("pabs") {
                             format!("(x&(UINT64_C(1)<<{}))?((~x+1)&mask):x", bits - 1)
                         } else if mul {
-                            format!(
-                                "{}",
-                                if op == "pmuldq" {
+                            (if op == "pmuldq" {
                                     "(uint64_t)((int64_t)(int32_t)load(a+lane*8,4)*(int64_t)(int32_t)load(b+lane*8,4))"
                                 } else {
                                     "load(a+lane*8,4)*load(b+lane*8,4)"
-                                }
-                            )
+                                }).to_string()
                         } else {
                             format!("truth(x,y,z,{control},{bits})")
                         };

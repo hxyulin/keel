@@ -140,7 +140,7 @@ fn bw_reduce_portable_permissions_and_exact_scalar_returns() {
             let index: usize = func.name.strip_prefix("case_").unwrap().parse().unwrap();
             assert_eq!(
                 func.sig.returns.iter().map(|p| p.ty).collect::<Vec<_>>(),
-                vec![if (index / 16) % 2 == 0 {
+                vec![if (index / 16).is_multiple_of(2) {
                     Type::I8
                 } else {
                     Type::I16

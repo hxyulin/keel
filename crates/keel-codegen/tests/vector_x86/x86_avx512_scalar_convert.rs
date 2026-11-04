@@ -148,12 +148,12 @@ fn scalar_evex_conversion_flags_upper_bits_and_mxcsr() {
     keel_ir::verify_module(&module).unwrap();
     for f in &module.functions {
         for (_, i) in f.layout_insts() {
-            if let InstData::Intrinsic { id, .. } = f.inst_data(i) {
-                if id.x86_avx512_scalar_convert().is_some() {
-                    assert!(!id.info().pure);
-                    assert_eq!(f.inst_data(i).memory_effects(), MemoryEffects::Barrier);
-                    assert!(f.inst_data(i).may_trap());
-                }
+            if let InstData::Intrinsic { id, .. } = f.inst_data(i)
+                && id.x86_avx512_scalar_convert().is_some()
+            {
+                assert!(!id.info().pure);
+                assert_eq!(f.inst_data(i).memory_effects(), MemoryEffects::Barrier);
+                assert!(f.inst_data(i).may_trap());
             }
         }
     }

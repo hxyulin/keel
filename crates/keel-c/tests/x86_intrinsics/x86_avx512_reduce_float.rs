@@ -126,19 +126,18 @@ fn avx512_float_reduction_tree_masks_and_feature_legality() {
         let masks: Vec<_> = function
             .layout_insts()
             .filter_map(|(_, inst)| match function.inst_data(inst) {
-                InstData::Intrinsic { id, args }
-                    if matches!(
-                        id,
+                InstData::Intrinsic {
+                    id:
                         Intrinsic::X86Avx512MaskAddps
-                            | Intrinsic::X86Avx512MaskAddpd
-                            | Intrinsic::X86Avx512MaskMulps
-                            | Intrinsic::X86Avx512MaskMulpd
-                            | Intrinsic::X86Avx512MaskMinps
-                            | Intrinsic::X86Avx512MaskMinpd
-                            | Intrinsic::X86Avx512MaskMaxps
-                            | Intrinsic::X86Avx512MaskMaxpd
-                    ) =>
-                {
+                        | Intrinsic::X86Avx512MaskAddpd
+                        | Intrinsic::X86Avx512MaskMulps
+                        | Intrinsic::X86Avx512MaskMulpd
+                        | Intrinsic::X86Avx512MaskMinps
+                        | Intrinsic::X86Avx512MaskMinpd
+                        | Intrinsic::X86Avx512MaskMaxps
+                        | Intrinsic::X86Avx512MaskMaxpd,
+                    args,
+                } => {
                     let value = function.resolve(args[1]);
                     let ValueDef::Result(def, _) = function.value_def(value) else {
                         panic!("tree mask must be constant")

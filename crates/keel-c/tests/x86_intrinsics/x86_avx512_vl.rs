@@ -80,7 +80,7 @@ fn fixtures() -> (String, String) {
                 )
             };
             let check = if floating {
-                format!("memcmp(out,want,65)")
+                "memcmp(out,want,65)".to_string()
             } else {
                 "memcmp(out,want,66)".into()
             };

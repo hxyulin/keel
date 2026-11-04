@@ -61,7 +61,7 @@ fn fixtures() -> (String, String) {
                             _ => format!("{prefix}_{stem}_epi{bits}(a,{c})"),
                         };
                         let loadcount = if kind == 1 {
-                            format!("__m128i c=*(const __m128i*)cp;")
+                            "__m128i c=*(const __m128i*)cp;".to_string()
                         } else if kind == 2 {
                             format!("__m{width}i c=*(const __m{width}i*)cp;")
                         } else {

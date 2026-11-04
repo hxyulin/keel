@@ -212,10 +212,10 @@ fn ir(cases: &[common::Case]) -> String {
             source += &format!(" intrinsic {}(v1,v6,{mask})\n", d.name);
         }
         for (offset, value) in [(64, "v6"), (128, "v7"), (192, "v8"), (256, "v4")] {
-            if offset == 128 || offset == 192 {
-                if !matches!(d.kind, X86Avx512BwKind::Binary | X86Avx512BwKind::Move) {
-                    continue;
-                }
+            if (offset == 128 || offset == 192)
+                && !matches!(d.kind, X86Avx512BwKind::Binary | X86Avx512BwKind::Move)
+            {
+                continue;
             }
             source += &format!(
                 " t{offset} = iconst.i64 {offset}\n p{offset} = ptradd v3,t{offset}\n store align 1 {value},p{offset}\n"

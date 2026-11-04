@@ -13,8 +13,11 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
+/// API name, width, lane bits, floating, recipe, maximum control, operation
+/// and plain-form flag.
+type ApiShape = (&'static str, u32, u32, bool, &'static str, u32, u32, bool);
 // Public API shapes are explicit and independent of intrinsic metadata.
-const APIS: [(&str, u32, u32, bool, &str, u32, u32, bool); 58] = [
+const APIS: [ApiShape; 58] = [
     (
         "permutex2var_epi32",
         128,
