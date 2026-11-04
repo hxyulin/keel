@@ -9,6 +9,7 @@
 //! cargo suite compare aarch64-apple-darwin x86_64-unknown-linux-gnu
 //! cargo suite codegen-diff --baseline old/keel --candidate new/keel
 //! cargo suite ab --baseline main --candidate HEAD --placements 4
+//! cargo suite stats --pass sccp
 //! ```
 
 mod ab;
@@ -21,6 +22,7 @@ mod manifest;
 mod report;
 mod run;
 mod slowdown;
+mod stats;
 mod style;
 
 use anyhow::{Result, bail};
@@ -112,6 +114,8 @@ enum Command {
     CodegenDiff(codegen_diff::Options),
     /// Time two keel compilers' builds against each other and give a verdict.
     Ab(ab::Options),
+    /// Total the optimizer's `--opt-report` over every suite file, per pass.
+    Stats(stats::Options),
     /// Check compatible same-host runtime runs for slowdowns.
     Regressions {
         a: String,
@@ -159,6 +163,7 @@ fn run(cli: Cli) -> Result<bool> {
         Command::Check { groups, python } => checks::run(&root, &groups, &python),
         Command::CodegenDiff(options) => codegen_diff::run(&root, options, jobs, cli.input_mode),
         Command::Ab(options) => ab::run(&root, options, jobs, cli.input_mode),
+        Command::Stats(options) => stats::run(&root, options, jobs, cli.input_mode),
         Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {
             list(&root)?;

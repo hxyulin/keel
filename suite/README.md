@@ -43,6 +43,7 @@ cargo suite show                    # the latest run on this host again
 cargo suite compare aarch64-apple-darwin x86_64-unknown-linux-gnu
 cargo suite test-frontends --out target/frontend-check-1
 cargo suite codegen-diff --baseline old/keel --candidate new/keel
+cargo suite stats --pass gvn          # where the optimizer's passes change code
 ```
 
 Global options: `-j N` sets parallel compile jobs (default: one per CPU, or two
@@ -359,6 +360,39 @@ Use `--expect-identical` as the gate for refactors that must not change
 generated code. Objects that both binaries fail to compile are reported and not
 compared. Retired-instruction totals are per configuration. They come from one
 run, so repeat the run before reading a difference under about one percent.
+
+## Optimizer pass statistics
+
+```sh
+cargo suite stats                                   # every suite, keel-O, this host's target
+cargo suite stats lua --pass loop-vectorize --show 50
+cargo suite stats -c keel-O --target x86_64 --x86-64-sysroot /path/to/linux-root --json stats.json
+```
+
+`stats` compiles every translation unit of the selected suites once, with
+`keel cc --opt-report`, and totals the reports. It uses the same inputs and
+flags as `codegen-diff`, for one target and one configuration. Without
+`--keel`, it builds a release `keel` from this checkout. Outputs and reports go
+to `target/keel-suite/stats/<suite>/`.
+
+The pass table lists passes in pipeline order. A pass that runs several times
+in the pipeline has one row.
+
+| Column | Meaning |
+|--------|---------|
+| `runs` | Invocations, one per function or per module |
+| `changed` | Invocations that reported a change |
+| `functions` | Distinct functions that a function-scope invocation changed |
+| `modules` | Module-scope invocations that reported a change |
+| `insts`, `blocks`, `params` | IR instructions, blocks and block parameters after minus before, summed over changed invocations |
+| `time` | Wall-clock time in the pass, summed over invocations |
+
+The inline table counts call sites by outcome: `inlined`, or the first check
+that failed, for ordinary calls and for `alwaysinline` callees. `--pass NAME`
+also lists the functions that pass changed, largest instruction change first.
+`--json FILE` writes both tables, with each pass's totals per suite. The counts
+describe optimizer IR. They do not include instruction selection, register
+allocation or spill code.
 
 ## Timing two compilers
 
