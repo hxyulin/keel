@@ -5,6 +5,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::native_program;
 use object::{Object, ObjectSection};
 use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
@@ -54,6 +55,18 @@ fn profiles() -> Vec<(&'static str, Features)> {
         ("v3-avx2", Features { avx2: false, ..v3 }),
     ]
 }
+/// The CPU features an object compiled for `features` may use.
+fn required(features: Features) -> Vec<&'static str> {
+    [
+        (features.sse41, "sse4.1"),
+        (features.avx, "avx"),
+        (features.avx2, "avx2"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect()
+}
+
 fn compile(
     src: &str,
     sel: SelectionTier,
@@ -275,11 +288,9 @@ fn constraints_and_debug_boundaries_are_preserved() {
     }
 }
 
-/// Export a portable ELF+C bundle; root runs it on Linux under the shared lock.
+/// Runs an ELF+C oracle per configuration on x86-64 Linux, or exports it.
 #[test]
 fn linux_oracle_bundle_exact_footprint_indexed_live_alias_and_spills() {
-    use std::fs;
-    let evidence = std::env::var_os("KEEL_WIDE_LOAD_EVIDENCE").map(std::path::PathBuf::from);
     let mut ir = String::new();
     let mut c = String::from(
         r#"#include <stdint.h>
@@ -370,15 +381,6 @@ static void on_fault(int sig) {fault_seen=sig;siglongjmp(fault_env,1);}
     c += &format!(
         "int main(void){{if(!__builtin_cpu_supports(\"avx2\"))return 77;signal(SIGSEGV,on_fault);size_t n=(size_t)sysconf(_SC_PAGESIZE);unsigned char*p=mmap(0,3*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(p==MAP_FAILED||mprotect(p,n,PROT_NONE)||mprotect(p+2*n,n,PROT_NONE))return 1;unsigned char*start=p+n,*end=p+2*n;uint32_t state=0x12345678U;{checks}munmap(p,3*n);puts(\"passed 5 signed m128 shapes: guard/unaligned/alias/live/indexed/spill\");return 0;}}\n"
     );
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.keel"), &ir).unwrap();
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("../x86_widen/run_native.py"),
-        )
-        .unwrap();
-    }
 
     for (profile, features) in profiles() {
         for sel in [
@@ -398,12 +400,24 @@ static void on_fault(int sig) {fault_seen=sig;siglongjmp(fault_env,1);}
                         if features.avx && features.avx2 { 5 } else { 0 },
                         "{text}"
                     );
-                    if let Some(dir) = &evidence {
-                        let name = format!("{profile}-{sel:?}-{alloc:?}-{pool}");
-                        fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        fs::write(dir.join(format!("{name}.o")), obj).unwrap();
-                        fs::write(dir.join(format!("{name}.c")), &c).unwrap();
-                    }
+                    native_program!(format!("{profile}-{sel:?}-{alloc:?}-{pool}"))
+                        .requires(&required(features))
+                        .requires(&["avx2"])
+                        .file("oracle.s", text)
+                        .file("oracle.o", obj)
+                        .file("oracle.c", &c)
+                        .link([
+                            "-O2",
+                            "-march=x86-64",
+                            "-msse2",
+                            "-mno-avx",
+                            "-Wall",
+                            "-Wextra",
+                            "-Werror",
+                            "oracle.c",
+                            "oracle.o",
+                        ])
+                        .check();
                 }
             }
         }

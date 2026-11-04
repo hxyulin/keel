@@ -145,7 +145,8 @@ fn all_integer_widening_pairs_stay_packed_with_baseline_sse2() {
 }
 
 use keel_codegen::regalloc::{Allocation, AllocationInput, Loc};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 
 const TINY: Pools = Pools {
     caller_saved: &[6, 7],
@@ -435,52 +436,17 @@ fn check_oracle_c(stem: &str, c: &str) {
     fs::remove_file(path).unwrap();
 }
 
+/// Runs the C oracle against Keel's object on x86-64 Linux, or exports it.
+/// The Keel source and assembly ride along for diagnosis.
 fn oracle(stem: &str, source: &str, c: &str, asm: &str, object: &[u8]) {
-    let dir = std::env::var_os("KEEL_X86_WIDEN_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-widen-x86-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
-    for (extension, bytes) in [
-        ("keel", source.as_bytes()),
-        ("c", c.as_bytes()),
-        ("s", asm.as_bytes()),
-        ("o", object),
-    ] {
-        fs::write(dir.join(format!("{stem}.{extension}")), bytes).unwrap();
-    }
-    fs::write(
-        dir.join("run_native.py"),
-        include_str!("x86_widen/run_native.py"),
-    )
-    .unwrap();
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-    {
-        let exe = dir.join(stem);
-        command(
-            Command::new("clang")
-                .args(["-O2", "-msse2", "-mno-avx"])
-                .arg(dir.join(format!("{stem}.c")))
-                .arg(dir.join(format!("{stem}.o")))
-                .arg("-o")
-                .arg(&exe),
-        );
-        command(&mut Command::new(exe));
-    }
-    if std::env::var_os("KEEL_X86_WIDEN_EVIDENCE").is_none() {
-        // Tests may share this process, so remove only this oracle's files.
-        for extension in ["keel", "c", "s", "o", ""] {
-            let path = if extension.is_empty() {
-                dir.join(stem)
-            } else {
-                dir.join(format!("{stem}.{extension}"))
-            };
-            if path.exists() {
-                fs::remove_file(path).unwrap();
-            }
-        }
-    }
+    let (c_file, object_file) = (format!("{stem}.c"), format!("{stem}.o"));
+    native_program!(stem)
+        .file(format!("{stem}.keel"), source)
+        .file(format!("{stem}.s"), asm)
+        .file(&*c_file, c)
+        .file(&*object_file, object)
+        .link(["-O2", "-msse2", "-mno-avx", &c_file, &object_file])
+        .check();
 }
 
 #[test]
@@ -696,12 +662,7 @@ fn widening_recipe_encodings_match_independent_clang_sse2_assembler() {
             recipes += "\n";
         }
     }
-    let dir = std::env::var_os("KEEL_X86_WIDEN_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-widen-recipes-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("widen-recipes");
     fs::write(dir.join("recipes.s"), &recipes).unwrap();
     command(
         Command::new("clang")
@@ -728,11 +689,6 @@ fn widening_recipe_encodings_match_independent_clang_sse2_assembler() {
             .to_vec()
     };
     assert_eq!(bytes(&ours), bytes(&clang));
-    if std::env::var_os("KEEL_X86_WIDEN_EVIDENCE").is_some() {
-        fs::write(dir.join("recipes-keel.o"), ours).unwrap();
-    } else {
-        fs::remove_dir_all(dir).unwrap();
-    }
 }
 
 fn profiles() -> Vec<(&'static str, Features)> {
@@ -930,12 +886,7 @@ fn signed_dword_register_encodings_match_clang_and_effective_feature_guards() {
             encoded = Some(object);
         }
     }
-    let dir = std::env::var_os("KEEL_X86_WIDEN_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-pmovsxdq-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("pmovsxdq");
     fs::write(dir.join("pmovsxdq.s"), asm).unwrap();
     command(
         Command::new("clang")
@@ -958,9 +909,4 @@ fn signed_dword_register_encodings_match_clang_and_effective_feature_guards() {
         bytes(&ours),
         bytes(&fs::read(dir.join("pmovsxdq-clang.o")).unwrap())
     );
-    if std::env::var_os("KEEL_X86_WIDEN_EVIDENCE").is_some() {
-        fs::write(dir.join("pmovsxdq-keel.o"), ours).unwrap();
-    } else {
-        fs::remove_dir_all(dir).unwrap();
-    }
 }

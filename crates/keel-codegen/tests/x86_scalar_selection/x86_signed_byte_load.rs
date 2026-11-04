@@ -5,6 +5,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::native_program;
 use std::fs;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -133,7 +134,6 @@ fn exact_shape_and_negative_gates() {
 
 #[test]
 fn linux_oracle_all_bytes_edges_addresses_calls_and_spills() {
-    let evidence = std::env::var_os("KEEL_SEXT8_EVIDENCE").map(std::path::PathBuf::from);
     let mut ir = String::from(
         "decl @clobber()\ndata @cell = align 1 { i8 0 }\nfunc @return_i32(ptr)->i32 {\nblock0(v0:ptr):\n v1 = load.i8 v0\n v2 = sext.i32 v1\n return v2\n}\nfunc @symbolic()->i32 {\nblock0:\n v0 = symbol_addr @cell\n v1 = load.i8 v0\n v2 = sext.i32 v1\n return v2\n}\n",
     );
@@ -253,19 +253,10 @@ for(unsigned k=0;k<32;k++)if(output[k]!=0xa5)return 18;
     c += &format!(
         "int main(void){{struct sigaction action={{0}};action.sa_sigaction=fault;action.sa_flags=SA_SIGINFO;sigemptyset(&action.sa_mask);if(sigaction(SIGSEGV,&action,0))return 19;size_t n=(size_t)sysconf(_SC_PAGESIZE);unsigned char*p=mmap(0,3*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(p==MAP_FAILED||mprotect(p,n,PROT_NONE)||mprotect(p+2*n,n,PROT_NONE))return 1;unsigned char*start=p+n,*end=p+2*n;{checks}return 0;}}\n"
     );
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.keel"), &ir).unwrap();
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("../x86_widen/run_native.py"),
-        )
-        .unwrap();
-    }
-    for (level, name) in [
-        (CpuLevel::V1, "v1"),
-        (CpuLevel::V2, "v2"),
-        (CpuLevel::V3, "v3"),
+    for (level, name, required) in [
+        (CpuLevel::V1, "v1", &[][..]),
+        (CpuLevel::V2, "v2", &["sse4.2"]),
+        (CpuLevel::V3, "v3", &["avx2"]),
     ] {
         for sel in [
             SelectionTier::Baseline,
@@ -287,12 +278,23 @@ for(unsigned k=0;k<32;k++)if(output[k]!=0xa5)return 18;
                                 && l.contains("byte ptr [")),
                         "{text}"
                     );
-                    if let Some(dir) = &evidence {
-                        let name = format!("{name}-{sel:?}-{alloc:?}-{pool}");
-                        fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        fs::write(dir.join(format!("{name}.o")), obj).unwrap();
-                        fs::write(dir.join(format!("{name}.c")), &c).unwrap();
-                    }
+                    native_program!(format!("{name}-{sel:?}-{alloc:?}-{pool}"))
+                        .requires(required)
+                        .file("oracle.s", text)
+                        .file("oracle.o", obj)
+                        .file("oracle.c", &c)
+                        .link([
+                            "-O2",
+                            "-march=x86-64",
+                            "-msse2",
+                            "-mno-avx",
+                            "-Wall",
+                            "-Wextra",
+                            "-Werror",
+                            "oracle.c",
+                            "oracle.o",
+                        ])
+                        .check();
                 }
             }
         }

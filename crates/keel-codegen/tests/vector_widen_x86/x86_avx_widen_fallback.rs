@@ -5,7 +5,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
-use std::{fs, path::PathBuf};
+use keel_test_support::native_program;
 
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -91,48 +91,24 @@ fn compile(
 }
 
 fn export(stem: &str, ir: &str, c: &str, text: &str, object: &[u8]) {
-    let dir = std::env::var_os("KEEL_AVX_FALLBACK_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-avx-fallback-{}", std::process::id()))
-        });
-    fs::create_dir_all(&dir).unwrap();
-    for (ext, bytes) in [
-        ("keel", ir.as_bytes()),
-        ("c", c.as_bytes()),
-        ("s", text.as_bytes()),
-        ("o", object),
-    ] {
-        fs::write(dir.join(format!("{stem}.{ext}")), bytes).unwrap();
-    }
-    fs::write(
-        dir.join("run_native.py"),
-        include_str!("../x86_widen/run_native.py"),
-    )
-    .unwrap();
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("avx2") {
-        use std::process::Command;
-        let exe = dir.join(format!("{stem}.native"));
-        let build = Command::new("clang")
-            .args([
-                "-O2",
-                "-march=x86-64",
-                "-mno-avx",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-            ])
-            .arg(dir.join(format!("{stem}.c")))
-            .arg(dir.join(format!("{stem}.o")))
-            .arg("-o")
-            .arg(&exe)
-            .output()
-            .unwrap();
-        assert!(build.status.success(), "{build:?}");
-        let run = Command::new(exe).output().unwrap();
-        assert!(run.status.success(), "{stem}: {run:?}");
-    }
+    let (c_file, object_file) = (format!("{stem}.c"), format!("{stem}.o"));
+    native_program!(stem)
+        .requires(&["avx2"])
+        .file(format!("{stem}.keel"), ir)
+        .file(format!("{stem}.s"), text)
+        .file(&*c_file, c)
+        .file(&*object_file, object)
+        .link([
+            "-O2",
+            "-march=x86-64",
+            "-mno-avx",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            &c_file,
+            &object_file,
+        ])
+        .check();
 }
 
 #[test]

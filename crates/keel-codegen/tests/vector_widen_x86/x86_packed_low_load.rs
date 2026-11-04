@@ -6,6 +6,7 @@ use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
+use keel_test_support::native_program;
 
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -191,11 +192,9 @@ fn constraints_and_debug_boundaries_are_preserved() {
     }
 }
 
-/// Export a portable ELF+C bundle; root runs it on Linux under the shared lock.
+/// Runs an ELF+C oracle per configuration on x86-64 Linux, or exports it.
 #[test]
 fn linux_oracle_bundle_exact_footprint_indexed_live_alias_and_spills() {
-    use std::fs;
-    let evidence = std::env::var_os("KEEL_LOW64_EVIDENCE").map(std::path::PathBuf::from);
     let mut ir = String::new();
     let mut c = String::from(
         r#"#include <stdint.h>
@@ -273,26 +272,29 @@ typedef void (*Fn)(const void*,void*,uint64_t);
     c += &format!(
         "int main(void){{size_t n=(size_t)sysconf(_SC_PAGESIZE);unsigned char*p=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);if(p==MAP_FAILED||mprotect(p+n,n,PROT_NONE))return 1;unsigned char*end=p+n;{checks}munmap(p,2*n);puts(\"passed 24 exact-low64 shapes: guard/unaligned/alias/live/indexed/spill\");return 0;}}\n"
     );
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.keel"), &ir).unwrap();
-        fs::write(
-            dir.join("run_native.py"),
-            include_str!("../x86_widen/run_native.py").replace(
-                "target/packed-widen-20261021/lock.jsonl",
-                "target/clang-gap-round2-20261021/lock.jsonl",
-            ),
-        )
-        .unwrap();
-    }
-    if let Some(dir) = &evidence {
-        let control = ir.replace("load.i64 align", "load.i64 volatile align");
-        let (text, obj) = compile(&control, SelectionTier::Full, AllocationTier::Full, false);
-        assert_eq!(direct_loads(&text), 0);
-        fs::write(dir.join("control.s"), text).unwrap();
-        fs::write(dir.join("control.o"), obj).unwrap();
-        fs::write(dir.join("control.c"), &c).unwrap();
-    }
+    let run = |name: &str, text: String, obj: Vec<u8>| {
+        native_program!(name)
+            .file("oracle.s", text)
+            .file("oracle.o", obj)
+            .file("oracle.c", &c)
+            .link([
+                "-O2",
+                "-march=x86-64",
+                "-msse2",
+                "-mno-avx",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "oracle.c",
+                "oracle.o",
+            ])
+            .stdout("passed 24 exact-low64 shapes: guard/unaligned/alias/live/indexed/spill\n")
+            .check();
+    };
+    let control = ir.replace("load.i64 align", "load.i64 volatile align");
+    let (text, obj) = compile(&control, SelectionTier::Full, AllocationTier::Full, false);
+    assert_eq!(direct_loads(&text), 0);
+    run("control", text, obj);
     for sel in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -302,12 +304,7 @@ typedef void (*Fn)(const void*,void*,uint64_t);
             for spill in [false, true] {
                 let (text, obj) = compile(&ir, sel, alloc, spill);
                 assert_eq!(direct_loads(&text), 24, "{sel:?}/{alloc:?}/{spill}: {text}");
-                if let Some(dir) = &evidence {
-                    let name = format!("{sel:?}-{alloc:?}-spill{spill}");
-                    fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                    fs::write(dir.join(format!("{name}.o")), obj).unwrap();
-                    fs::write(dir.join(format!("{name}.c")), &c).unwrap();
-                }
+                run(&format!("{sel:?}-{alloc:?}-spill{spill}"), text, obj);
             }
         }
     }
