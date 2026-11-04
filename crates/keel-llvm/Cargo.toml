@@ -10,5 +10,8 @@ keel-ir = { path = "../keel-ir" }
 libloading = "0.9"
 regex = "1"
 
+[dev-dependencies]
+keel-test-support = { path = "../keel-test-support" }
+
 [lints]
 workspace = true

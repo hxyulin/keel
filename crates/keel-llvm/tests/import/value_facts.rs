@@ -1,15 +1,6 @@
 //! LLVM load-result metadata, including poison masking and scope isolation.
-use super::translated;
+use super::{importer, translated};
 use keel_ir::{InstData, ValueFacts};
-use std::path::Path;
-fn importer() -> Option<keel_llvm::import::Importer> {
-    let Some(path) = std::env::var_os("KEEL_TEST_LIBLLVM") else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to the trusted LLVM 23 runtime");
-        return None;
-    };
-    // SAFETY: the test environment explicitly selects the trusted LLVM 23 runtime.
-    Some(unsafe { keel_llvm::import::Importer::load(Path::new(&path)) }.unwrap())
-}
 fn load_facts(module: &keel_ir::Module) -> Vec<(String, Option<ValueFacts>)> {
     module
         .functions

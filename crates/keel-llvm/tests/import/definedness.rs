@@ -1,25 +1,18 @@
 //! Defined LLVM executions must not acquire traps or stronger pointer promises.
-use keel_llvm::import::Importer;
+use super::importer;
 use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
 
-fn importer() -> Option<Importer> {
-    let Some(path) = std::env::var_os("KEEL_TEST_LIBLLVM") else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to the trusted LLVM 23 library");
-        return None;
-    };
-    // SAFETY: the test environment explicitly supplies the trusted LLVM 23 runtime.
-    Some(unsafe { Importer::load(Path::new(&path)) }.expect("load test LLVM 23"))
-}
+const NO_KEEL: &str = "Keel executable not given; set KEEL_TEST_KEEL";
 
 fn executable_host() -> bool {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         true
     } else {
-        eprintln!("skipped execution: definedness fixtures require Apple arm64");
+        keel_test_support::skip_part!("definedness fixtures execute only on arm64 macOS");
         false
     }
 }
@@ -172,7 +165,7 @@ fn scalar_refinement_matches_allowed_outcomes_and_freeze_stability() {
             );
         }
     } else {
-        eprintln!("skipped native refinement execution: set KEEL_TEST_KEEL");
+        keel_test_support::skip_part!(NO_KEEL);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -232,7 +225,7 @@ fn richer_boundary_facts_preserve_defined_execution_and_masked_ranges() {
             );
         }
     } else {
-        eprintln!("skipped native richer-fact execution: set KEEL_TEST_KEEL");
+        keel_test_support::skip_part!(NO_KEEL);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -292,7 +285,7 @@ fn load_result_facts_preserve_masked_poison_and_independent_memory_reads() {
             );
         }
     } else {
-        eprintln!("skipped native local-fact execution: set KEEL_TEST_KEEL");
+        keel_test_support::skip_part!(NO_KEEL);
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -384,10 +377,7 @@ fn masked_dividend_refinement_totalizes_signed_overflow() {
         return;
     }
     let Some(keel) = std::env::var_os("KEEL_TEST_KEEL") else {
-        eprintln!(
-            "skipped native division execution: set KEEL_TEST_KEEL to a built Keel executable"
-        );
-        return;
+        keel_test_support::skip!(NO_KEEL);
     };
     let dir =
         std::env::temp_dir().join(format!("keel-definedness-division-{}", std::process::id()));

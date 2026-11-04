@@ -1,12 +1,7 @@
 //! Memory/pointer contract transport and definedness boundaries.
-use super::translated;
+use super::{importer, translated};
 use keel_ir::{InstData, MemoryAccess as A, MemorySummary};
-use std::{path::PathBuf, process::Command};
-fn importer() -> Option<keel_llvm::import::Importer> {
-    let path = std::env::var_os("KEEL_TEST_LIBLLVM")?;
-    // SAFETY: the test environment supplies the trusted LLVM 23 runtime.
-    Some(unsafe { keel_llvm::import::Importer::load(&PathBuf::from(path)) }.unwrap())
-}
+use std::process::Command;
 
 #[test]
 fn capture_components_locations_and_return_noalias_survive_roundtrip() {
@@ -205,7 +200,6 @@ fn allocation_and_capture_facts_on_one_indirect_call_do_not_affect_another() {
 #[test]
 fn llvm23_memory_encoding_and_conservative_regions() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -281,7 +275,6 @@ fn llvm23_memory_encoding_and_conservative_regions() {
 #[test]
 fn pointer_promises_require_definedness_and_keep_capture_separate() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -310,7 +303,6 @@ fn pointer_promises_require_definedness_and_keep_capture_separate() {
 #[test]
 fn direct_and_indirect_site_contracts_do_not_escape_the_call() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -371,7 +363,6 @@ fn direct_and_indirect_site_contracts_do_not_escape_the_call() {
 #[test]
 fn masked_nonnull_pointer_and_overflow_do_not_become_preconditions() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -392,7 +383,6 @@ fn masked_nonnull_pointer_and_overflow_do_not_become_preconditions() {
 #[test]
 fn parameter_noalias_is_definition_scoped_and_return_noalias_is_distinct() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -467,7 +457,6 @@ fn capture_component_cross_product_roundtrips_without_strengthening() {
 #[test]
 fn direct_fixed_stack_lifetimes_survive_import_and_export() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(
@@ -505,7 +494,6 @@ fn readable_pointer_does_not_invent_nonnull_and_local_nocallback_is_not_assumed(
         "{llvm}"
     );
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM");
         return;
     };
     let module = translated(

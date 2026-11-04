@@ -512,6 +512,7 @@ name = "keel-llvm"
 version = "0.1.0"
 dependencies = [
  "keel-ir",
+ "keel-test-support",
  "libloading",
  "regex",
 ]

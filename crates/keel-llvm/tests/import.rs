@@ -14,8 +14,13 @@ fn translated(importer: &keel_llvm::import::Importer, body: &str) -> keel_ir::Mo
         .unwrap();
     keel_ir::parse(&text).unwrap()
 }
+/// The LLVM 23 importer from `KEEL_TEST_LIBLLVM`, or `None` after recording a
+/// skip.
 fn importer() -> Option<keel_llvm::import::Importer> {
-    let path = std::env::var_os("KEEL_TEST_LIBLLVM")?;
+    let Some(path) = std::env::var_os("KEEL_TEST_LIBLLVM") else {
+        keel_test_support::skip_part!("LLVM 23 not found; set KEEL_TEST_LIBLLVM");
+        return None;
+    };
     // SAFETY: the test environment supplies the trusted LLVM 23 runtime.
     Some(
         unsafe { keel_llvm::import::Importer::load(&PathBuf::from(path)) }
@@ -25,7 +30,6 @@ fn importer() -> Option<keel_llvm::import::Importer> {
 #[test]
 fn scalar_flags_and_boolean_refinement() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
         return;
     };
     let src =
@@ -68,7 +72,6 @@ fn local_and_odr_freeze_definitions_keep_attributes_and_contracts() {
 #[test]
 fn memory_alignment_and_volatility_survive_import() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
         return;
     };
     let source = format!(
@@ -112,7 +115,6 @@ fn memory_alignment_and_volatility_survive_import() {
 #[test]
 fn function_and_declaration_attributes_survive_import() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
         return;
     };
     let source = format!(
@@ -175,7 +177,6 @@ fn function_and_declaration_attributes_survive_import() {
 #[test]
 fn call_site_attributes_do_not_become_callee_promises() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
         return;
     };
     let source = format!(
@@ -198,7 +199,6 @@ fn call_site_attributes_do_not_become_callee_promises() {
 #[test]
 fn contradictory_frequency_hints_do_not_reject_valid_llvm() {
     let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
         return;
     };
     let source = format!("{HEADER}define void @mixed() cold hot {{ ret void }}");
