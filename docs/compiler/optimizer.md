@@ -4,9 +4,10 @@
 through `Pass::run_module`. This page states each pass's contract: what it
 does, which tiers run it, what it preserves and where it stops. The tier
 pipelines are defined in code by `OptimizationTier::pipeline`,
-`BALANCED_PIPELINE`, `SIZE_PIPELINE`, `FULL_ROUND` and `FULL_EPILOGUE` in
-`crates/keel-opt/src/lib.rs`; [optimization levels](optimization-levels.md)
-summarizes them. Pass-specific admission rules live in each pass module's
+`BALANCED_PIPELINE`, `SIZE_PIPELINE` and `DEFAULT_PIPELINE` in
+`crates/keel-opt/src/lib.rs`. Balanced and Size join shared round arrays, and
+Full repeats `FULL_ROUND` three times before `FULL_EPILOGUE`.
+[Optimization levels](optimization-levels.md) summarizes the tiers. Pass-specific admission rules live in each pass module's
 rustdoc.
 
 ## Pass manager

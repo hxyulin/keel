@@ -461,48 +461,25 @@ impl OptimizationTier {
     }
 }
 
-/// Balanced release pipeline. Loop expansion remains in Full. GCM is also
-/// omitted here: its placement after promotion regressed Lua dispatch in the
-/// balanced schedule; Full retains its separately measured pass ordering.
-pub const BALANCED_PIPELINE: &[&str] = &[
-    "private-aggregate-cleanup",
-    "inline-noninterposable",
+/// Scalar and memory cleanup shared by the Balanced and Size rounds. The first
+/// Balanced round also expands small memory intrinsics after `gvn`.
+const RELEASE_ROUND_SCALAR: [&str; 6] = [
     "simplify-cfg",
     "canonicalize",
     "instcombine",
     "call-contracts",
     "simplify-cfg",
     "gvn",
-    "small-memory",
+];
+const RELEASE_ROUND_MEMORY: [&str; 5] = [
     "stack-forward",
     "load-reuse",
     "stack-promote",
     "phi-simplify",
     "dce",
-    "inline-noninterposable",
-    "simplify-cfg",
-    "canonicalize",
-    "instcombine",
-    "call-contracts",
-    "simplify-cfg",
-    "gvn",
-    "stack-forward",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
-    "inline-noninterposable",
-    "simplify-cfg",
-    "canonicalize",
-    "instcombine",
-    "call-contracts",
-    "simplify-cfg",
-    "gvn",
-    "stack-forward",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
+];
+/// Known-bit, call and reachability cleanup closing Balanced and Size.
+const RELEASE_EPILOGUE: [&str; 12] = [
     "constant-args",
     "known-bits",
     "canonicalize",
@@ -517,60 +494,46 @@ pub const BALANCED_PIPELINE: &[&str] = &[
     "tail-calls",
 ];
 
+const BALANCED_PARTS: &[&[&str]] = &[
+    &["private-aggregate-cleanup"],
+    &["inline-noninterposable"],
+    &RELEASE_ROUND_SCALAR,
+    &["small-memory"],
+    &RELEASE_ROUND_MEMORY,
+    &["inline-noninterposable"],
+    &RELEASE_ROUND_SCALAR,
+    &RELEASE_ROUND_MEMORY,
+    &["inline-noninterposable"],
+    &RELEASE_ROUND_SCALAR,
+    &RELEASE_ROUND_MEMORY,
+    &RELEASE_EPILOGUE,
+];
+
+/// Balanced release pipeline: three rounds of binding-aware inlining and
+/// scalar/memory cleanup. Loop expansion remains in Full. GCM is also
+/// omitted here: its placement after promotion regressed Lua dispatch in the
+/// balanced schedule; Full retains its separately measured pass ordering.
+pub const BALANCED_PIPELINE: &[&str] = &concat::<{ total_len(BALANCED_PARTS) }>(BALANCED_PARTS);
+
+// The first Size round cleans up before any inlining.
+const SIZE_PARTS: &[&[&str]] = &[
+    &["private-aggregate-cleanup"],
+    &RELEASE_ROUND_SCALAR,
+    &RELEASE_ROUND_MEMORY,
+    &["inline-size"],
+    &RELEASE_ROUND_SCALAR,
+    &RELEASE_ROUND_MEMORY,
+    &["inline-size"],
+    &RELEASE_ROUND_SCALAR,
+    &RELEASE_ROUND_MEMORY,
+    &RELEASE_EPILOGUE,
+];
+
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining
 /// exposes dead branches. Omits memory expansion, code motion, unrolling and vectorization.
 /// Mandatory frontend inlining still runs to satisfy language/operand contracts.
 /// This is an IR growth policy, not a guarantee about final machine-code size.
-pub const SIZE_PIPELINE: &[&str] = &[
-    "private-aggregate-cleanup",
-    "simplify-cfg",
-    "canonicalize",
-    "instcombine",
-    "call-contracts",
-    "simplify-cfg",
-    "gvn",
-    "stack-forward",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
-    "inline-size",
-    "simplify-cfg",
-    "canonicalize",
-    "instcombine",
-    "call-contracts",
-    "simplify-cfg",
-    "gvn",
-    "stack-forward",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
-    "inline-size",
-    "simplify-cfg",
-    "canonicalize",
-    "instcombine",
-    "call-contracts",
-    "simplify-cfg",
-    "gvn",
-    "stack-forward",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
-    "constant-args",
-    "known-bits",
-    "canonicalize",
-    "instcombine",
-    "simplify-cfg",
-    "dce",
-    "empty-calls",
-    "dce",
-    "unused-functions",
-    "private-aggregate-cleanup",
-    "internal-fast-calls",
-    "tail-calls",
-];
+pub const SIZE_PIPELINE: &[&str] = &concat::<{ total_len(SIZE_PARTS) }>(SIZE_PARTS);
 
 pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result<(), OptError> {
     run_passes(module, tier.pipeline())
@@ -594,8 +557,6 @@ const FULL_ROUND: [&str; 16] = [
     "loop-vectorize",
     "loop-reduce",
 ];
-
-const FULL_ROUNDS: usize = 3;
 
 const FULL_EPILOGUE: [&str; 26] = [
     "load-reuse",
@@ -643,26 +604,45 @@ const FULL_EPILOGUE: [&str; 26] = [
 // Also do this before freezing the first inliner templates: scalar cleanup
 // removes aggregate homes and avoids charging byval snapshots at every site.
 // Retain the late invocation for signatures exposed by intervening rewrites.
-const fn full_pipeline() -> [&'static str; 1 + FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()]
-{
-    let mut passes = [""; 1 + FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
-    passes[0] = "private-aggregate-cleanup";
-    let mut i = 0;
-    while i < FULL_ROUND.len() * FULL_ROUNDS {
-        passes[1 + i] = FULL_ROUND[i % FULL_ROUND.len()];
-        i += 1;
-    }
-    let mut j = 0;
-    while j < FULL_EPILOGUE.len() {
-        passes[1 + i + j] = FULL_EPILOGUE[j];
-        j += 1;
-    }
-    passes
-}
+const FULL_PARTS: &[&[&str]] = &[
+    &["private-aggregate-cleanup"],
+    &FULL_ROUND,
+    &FULL_ROUND,
+    &FULL_ROUND,
+    &FULL_EPILOGUE,
+];
 
 /// The passes `keel compile -O` runs: private aggregate cleanup, three bounded
 /// rounds, then memory/loop, known-bit, call and reachability cleanup.
-pub const DEFAULT_PIPELINE: &[&str] = &full_pipeline();
+pub const DEFAULT_PIPELINE: &[&str] = &concat::<{ total_len(FULL_PARTS) }>(FULL_PARTS);
+
+const fn total_len(parts: &[&[&str]]) -> usize {
+    let mut total = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        total += parts[i].len();
+        i += 1;
+    }
+    total
+}
+
+/// Joins pipeline parts; `N` must be their total length.
+const fn concat<const N: usize>(parts: &[&[&'static str]]) -> [&'static str; N] {
+    let mut passes = [""; N];
+    let mut next = 0;
+    let mut i = 0;
+    while i < parts.len() {
+        let mut j = 0;
+        while j < parts[i].len() {
+            passes[next] = parts[i][j];
+            next += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    assert!(next == N);
+    passes
+}
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {
     PASSES.iter().copied().find(|p| p.name() == name)
