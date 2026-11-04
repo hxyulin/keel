@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::VectorType;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 
 // f64x1 remains in every pointer-based numerical corpus. Its C value ABI
 // is an explicit rejection roster, not an interchangeable sixth C shape.
@@ -284,10 +285,6 @@ fn d_matrix_boundary_smoke() {
 
 fn check_d_matrix(exhaustive: bool) {
     use object::{Object, ObjectSection};
-    let export = exhaustive
-        .then(|| std::env::var_os("KEEL_X86_D8_EXPORT_DIR"))
-        .flatten()
-        .map(PathBuf::from);
     let dir = common::temp(if exhaustive { "x86-d8" } else { "x86-d8-smoke" });
     let mut configurations = 0;
     // Clang assembles each distinct text once. Every configuration still
@@ -311,11 +308,6 @@ fn check_d_matrix(exhaustive: bool) {
                 ])
                 .arg(dir.join("reference.c")),
         );
-        if let Some(d) = &export {
-            fs::create_dir_all(d).unwrap();
-            fs::write(d.join(format!("{kind}.ir")), &source).unwrap();
-            fs::write(d.join(format!("{kind}.c")), &c).unwrap();
-        }
         // Features::default() emits the same text as NONE in every configuration.
         for (feature, features) in [
             ("none", Features::NONE),
@@ -349,15 +341,20 @@ fn check_d_matrix(exhaustive: bool) {
                         {
                             continue;
                         }
-                        let (text, typed, parsed) =
-                            compile_prepared(&prepared, s, a, pools, features);
+                        let (text, typed, _) = compile_prepared(&prepared, s, a, pools, features);
                         configurations += 1;
                         let name = format!("{kind}-{feature}-{s:?}-{a:?}-{pool}");
-                        if let Some(d) = &export {
-                            fs::write(d.join(format!("{name}.s")), &text).unwrap();
-                            fs::write(d.join(format!("{name}.typed.o")), &typed).unwrap();
-                            fs::write(d.join(format!("{name}.text.o")), parsed).unwrap();
+                        let mut flags = vec!["-O2", "-fno-fast-math", "-ffp-contract=off"];
+                        if features.avx2 {
+                            flags.extend(["-mavx2", "-DKEEL_D8_AVX2"]);
                         }
+                        native_program!(name.clone())
+                            .requires(&common::cpu_features(features))
+                            .file("test.s", &text)
+                            .file("test.o", &typed)
+                            .file("reference.c", &c)
+                            .link(flags.into_iter().chain(["reference.c", "test.o", "-lm"]))
+                            .check();
                         // Independent assembler oracle for every emitted function.
                         let clang = oracles.entry(text.clone()).or_insert_with(|| {
                             fs::write(dir.join("test.s"), &text).unwrap();

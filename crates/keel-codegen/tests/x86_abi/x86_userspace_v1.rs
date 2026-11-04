@@ -5,8 +5,9 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::native_program;
 use object::{Object, ObjectSymbol};
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::collections::BTreeSet;
 
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -93,11 +94,6 @@ fn undefined(object: &[u8]) -> BTreeSet<String> {
 
 #[test]
 fn scalar_fallbacks_are_baseline_at_every_tier_and_keep_v2_v3_selection() {
-    let export = std::env::var_os("KEEL_V1_EXPORT_DIR").map(PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("scalars.c"), harness()).unwrap();
-    }
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for s in [
             SelectionTier::Baseline,
@@ -113,24 +109,12 @@ fn scalar_fallbacks_are_baseline_at_every_tier_and_keep_v2_v3_selection() {
                     );
                     assert_eq!(text.contains("\tpopcnt\t"), level != CpuLevel::V1);
                     assert_eq!(text.contains("\troundsd\t"), level != CpuLevel::V1);
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &export
-                    {
-                        let name = format!("{s:?}-{a:?}-{spilled}");
-                        fs::write(dir.join(format!("{name}.o")), &object).unwrap();
-                    }
-                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    if level != CpuLevel::V3
-                        || (std::is_x86_feature_detected!("avx2")
-                            && std::is_x86_feature_detected!("fma")
-                            && std::is_x86_feature_detected!("bmi1"))
-                    {
-                        execute(
-                            &format!("{level:?}-{s:?}-{a:?}-{spilled}"),
-                            &object,
-                            &harness(),
-                        );
-                    }
+                    execute(
+                        &format!("{level:?}-{s:?}-{a:?}-{spilled}"),
+                        level,
+                        &object,
+                        &harness(),
+                    );
                 }
             }
         }
@@ -167,18 +151,12 @@ fn helpers_are_explicit_link_requirements_and_fma_preserves_fusion() {
                         expected.extend(["fma".into(), "fmaf".into()]);
                     }
                     assert_eq!(undefined(&object), expected);
-                    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                    if level != CpuLevel::V3
-                        || (std::is_x86_feature_detected!("avx2")
-                            && std::is_x86_feature_detected!("fma")
-                            && std::is_x86_feature_detected!("bmi1"))
-                    {
-                        execute(
-                            &format!("helpers-{level:?}-{s:?}-{a:?}-{spilled}"),
-                            &object,
-                            HELPER_HARNESS,
-                        );
-                    }
+                    execute(
+                        &format!("helpers-{level:?}-{s:?}-{a:?}-{spilled}"),
+                        level,
+                        &object,
+                        HELPER_HARNESS,
+                    );
                 }
             }
         }
@@ -271,40 +249,23 @@ fn harness() -> String {
     c + "return 0;}\n"
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn execute(name: &str, object: &[u8], harness: &str) {
-    use std::process::Command;
-    let dir = std::env::temp_dir().join(format!("keel-v1-{}-{name}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("scalars.o"), object).unwrap();
-    fs::write(dir.join("scalars.c"), harness).unwrap();
-    let output = Command::new("cc")
-        .args([
+/// Runs a strict-v1 harness against `object`, compiled at `level`.
+fn execute(name: &str, level: CpuLevel, object: &[u8], harness: &str) {
+    native_program!(name)
+        .requires(&crate::common::cpu_features(Features::for_level(level)))
+        .file("scalars.o", object)
+        .file("scalars.c", harness)
+        .link([
             "-O0",
             "-march=x86-64",
             "-fno-builtin",
             "scalars.c",
             "scalars.o",
             "-lm",
-            "-o",
-            "run",
         ])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        Command::new(dir.join("run")).status().unwrap().success(),
-        "{name}"
-    );
-    fs::remove_dir_all(dir).unwrap();
+        .check();
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const HELPER_HARNESS: &str = r#"
 #include <stdint.h>
 #include <math.h>

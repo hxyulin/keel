@@ -3,10 +3,8 @@
 use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
+use keel_test_support::{native, native_program};
 use object::{Object, ObjectSymbol};
-use std::fs;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use std::process::Command;
 
 fn representative() -> String {
     let mut ir = String::new();
@@ -36,10 +34,6 @@ fn compile(source: &str, s: SelectionTier, a: AllocationTier, spilled: bool) -> 
 
 #[test]
 fn strict_v2_cumulative_vectors_abi_and_representative_operations() {
-    let export = std::env::var_os("KEEL_V2_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-    }
     let (abi, abi_c) = common::abi_fixture(false);
     let source = common::fixture() + &abi;
     for s in [
@@ -59,58 +53,38 @@ fn strict_v2_cumulative_vectors_abi_and_representative_operations() {
                         .symbols()
                         .all(|sym| !sym.is_undefined() || sym.name().unwrap().is_empty())
                 );
-                let (abi_object, abi_text) = compile(&source, s, a, spilled);
+                let (abi_object, _) = compile(&source, s, a, spilled);
+                let name = format!("{s:?}-{a:?}-{spilled}");
+                execute(&format!("ops-{name}"), &ops, FOOTPRINTS);
+                execute(&format!("abi-{name}"), &abi_object, &abi_c);
                 // `source` already compiles the vector corpus. The separate
-                // vector object only feeds the export and the native harness.
-                let vectors = (export.is_some()
-                    || cfg!(all(target_os = "linux", target_arch = "x86_64")))
-                .then(|| compile(&common::fixture(), s, a, spilled));
-                if let Some(dir) = &export {
-                    let (vectors, vector_text) = vectors.as_ref().unwrap();
-                    for (kind, object, assembly) in [
-                        ("ops", &ops, &text),
-                        ("abi", &abi_object, &abi_text),
-                        ("vectors", vectors, vector_text),
-                    ] {
-                        let stem = format!("{kind}-{s:?}-{a:?}-{spilled}");
-                        fs::write(dir.join(format!("{stem}.o")), object).unwrap();
-                        fs::write(dir.join(format!("{stem}.s")), assembly).unwrap();
-                    }
+                // vector object only feeds the native harness.
+                if native::active() {
+                    let (vectors, _) = compile(&common::fixture(), s, a, spilled);
+                    execute(&format!("vectors-{name}"), &vectors, &common::harness());
                 }
-                #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                {
-                    let name = format!("{s:?}-{a:?}-{spilled}");
-                    execute(&format!("ops-{name}"), &ops, FOOTPRINTS);
-                    let (vectors, _) = vectors.as_ref().unwrap();
-                    execute(&format!("vectors-{name}"), vectors, &common::harness());
-                    execute(&format!("abi-{name}"), &abi_object, &abi_c);
-                }
-                #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-                let _ = (vectors, abi_object, &abi_c);
             }
         }
     }
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+/// Runs a C harness against a strict-v2 `object`.
 fn execute(name: &str, object: &[u8], c: &str) {
-    let dir = common::temp(&format!("v2-{name}"));
-    fs::write(dir.join("test.o"), object).unwrap();
-    fs::write(dir.join("test.c"), c).unwrap();
-    common::command(
-        Command::new("cc")
-            .args(["-O2", "-march=x86-64-v2", "-ffp-contract=off"])
-            .arg(dir.join("test.c"))
-            .arg(dir.join("test.o"))
-            .arg("-lm")
-            .arg("-o")
-            .arg(dir.join("test")),
-    );
-    common::command(&mut Command::new(dir.join("test")));
-    fs::remove_dir_all(dir).unwrap();
+    native_program!(name)
+        .requires(&common::cpu_features(Features::for_level(CpuLevel::V2)))
+        .file("test.o", object)
+        .file("test.c", c)
+        .link([
+            "-O2",
+            "-march=x86-64-v2",
+            "-ffp-contract=off",
+            "test.c",
+            "test.o",
+            "-lm",
+        ])
+        .check();
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const FOOTPRINTS: &str = r#"
 #define _GNU_SOURCE
 #include <stdint.h>
@@ -156,12 +130,9 @@ fn long_mode_lahf_sahf_low_status_bits() {
     let object =
         keel_asm::x86::assemble_object_with_features(assembly, Features::for_level(CpuLevel::V2))
             .unwrap();
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     execute(
         "status-bits",
         &object,
         "extern unsigned status_bits(unsigned); int main(void){for(unsigned i=0;i<256;i++)if(status_bits(i)!=((i&0xd5)|2))return 1;return 0;}",
     );
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    let _ = object;
 }

@@ -1,11 +1,10 @@
 //! Bounded strict-v3 join: mixed-width SysV transport through the shared SIMD bank.
 //! Architectural FP/mask/gather semantics stay in their existing finite suites.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use crate::common;
 use crate::userspace;
 use keel_asm_ir::x86::CpuLevel;
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
-use std::fs;
+use keel_test_support::native_program;
 
 fn mixed() -> (String, String) {
     // Eight shared SIMD argument registers, then a narrow and a wide stack
@@ -119,12 +118,6 @@ fn mixed() -> (String, String) {
 #[test]
 fn strict_v3_mixed_width_register_stack_calls_tails_and_live_spills() {
     let (ir, c) = mixed();
-    let export = std::env::var_os("KEEL_V3_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("mixed.ir"), &ir).unwrap();
-        fs::write(d.join("mixed.c"), &c).unwrap();
-    }
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -134,29 +127,23 @@ fn strict_v3_mixed_width_register_stack_calls_tails_and_live_spills() {
             for spilled in [false, true] {
                 let (object, text) = userspace::compile(&ir, CpuLevel::V3, s, a, spilled);
                 assert!(text.contains("ymm"));
-                if let Some(d) = &export {
-                    let stem = format!("mixed-{s:?}-{a:?}-{spilled}");
-                    fs::write(d.join(format!("{stem}.o")), &object).unwrap();
-                    fs::write(d.join(format!("{stem}.s")), &text).unwrap();
-                }
-                #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-                if std::is_x86_feature_detected!("avx2") {
-                    use std::process::Command;
-                    let d = common::temp("strict-v3-mixed");
-                    fs::write(d.join("test.o"), &object).unwrap();
-                    fs::write(d.join("test.c"), &c).unwrap();
-                    for compiler in ["clang", "gcc"] {
-                        common::command(
-                            Command::new(compiler)
-                                .args(["-O2", "-march=x86-64-v3", "-ffp-contract=off"])
-                                .arg(d.join("test.c"))
-                                .arg(d.join("test.o"))
-                                .arg("-o")
-                                .arg(d.join("test")),
-                        );
-                        common::command(&mut Command::new(d.join("test")));
-                    }
-                    fs::remove_dir_all(d).unwrap();
+                for compiler in ["cc", "gcc"] {
+                    native_program!(format!("mixed-{s:?}-{a:?}-{spilled}-{compiler}"))
+                        .requires(&["avx2"])
+                        .file("test.s", &text)
+                        .file("test.o", &object)
+                        .file("test.c", &c)
+                        .step([
+                            compiler,
+                            "-O2",
+                            "-march=x86-64-v3",
+                            "-ffp-contract=off",
+                            "test.c",
+                            "test.o",
+                            "-o",
+                            "program",
+                        ])
+                        .check();
                 }
             }
         }
@@ -195,35 +182,15 @@ fn strict_v3_count_and_endian_assembly_exact_widths() {
             .is_err()
     );
     let object = keel_asm::x86::assemble_object_with_features(&assembly, features).unwrap();
-    if let Some(d) = std::env::var_os("KEEL_V3_EXPORT_DIR") {
-        let d = std::path::PathBuf::from(d);
-        fs::create_dir_all(&d).unwrap();
-        fs::write(d.join("count-endian.o"), &object).unwrap();
-        fs::write(d.join("count-endian.s"), &assembly).unwrap();
-    }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("lzcnt")
-        && std::is_x86_feature_detected!("bmi1")
-        && std::is_x86_feature_detected!("movbe")
-    {
-        use std::process::Command;
-        let d = common::temp("strict-v3-count-endian");
-        fs::write(d.join("test.o"), object).unwrap();
-        fs::write(d.join("test.c"), COUNT_ENDIAN).unwrap();
-        common::command(
-            Command::new("cc")
-                .args(["-O2", "-march=x86-64-v3"])
-                .arg(d.join("test.c"))
-                .arg(d.join("test.o"))
-                .arg("-o")
-                .arg(d.join("test")),
-        );
-        common::command(&mut Command::new(d.join("test")));
-        fs::remove_dir_all(d).unwrap();
-    }
+    native_program!("count-endian")
+        .requires(&common::cpu_features(features))
+        .file("test.s", &assembly)
+        .file("test.o", object)
+        .file("test.c", COUNT_ENDIAN)
+        .link(["-O2", "-march=x86-64-v3", "test.c", "test.o"])
+        .check();
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const COUNT_ENDIAN: &str = r#"
 #define _GNU_SOURCE
 #include <stdint.h>
