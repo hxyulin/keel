@@ -129,8 +129,8 @@ schedule, not an unbounded fixed-point loop. Fast retains its own bounded pipeli
 4. Run `cargo suite run <name>` to check that benchmark outputs agree and to
    take a first timing.
 
-`suite/c/benchmark_platforms.py` discovers native-C manifests too; a new workload is
-only built there when selected explicitly with `--apps`.
+`suite/c/benchmark_platforms.py` reads the manifests through `cargo suite manifest`;
+a new workload is only built there when selected explicitly with `--apps`.
 
 ### `suite.toml` format
 
@@ -185,6 +185,11 @@ Commands are split at whitespace and run without a shell. Available variables:
 | `{gen}`     | `{work}/gen`, for what `prepare` generates             |
 | `{defines}` | the `-D` flags, one argument each                      |
 | `{libs}`    | the `-l` flags, one argument each                      |
+
+`cargo suite manifest [suites] [--target aarch64|x86_64]` prints the manifests
+as JSON for scripts. It applies the `[[build.when]]` entries for the target
+(default: this host) to `defines` and `libs`, drops `when`, and leaves the
+variables in commands and paths unexpanded.
 
 ## Results
 

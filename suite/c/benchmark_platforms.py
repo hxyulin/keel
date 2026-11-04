@@ -8,12 +8,14 @@ boundary uses its own emitter; other compilers use -c. Shared mode excludes
 preprocessing. Linking, compiler construction and dependency setup are excluded
 from both compile boundaries. No LTO, native CPU tuning or PGO.
 
+The application manifests come from `cargo suite manifest`, which applies each
+suite.toml's host-specific entries; --manifest reads that JSON from a file.
+
 The report keeps every timing row and each configuration's median. Runtime
 comparisons of two Keel compilers belong to `cargo suite ab`, which owns the
 timing controls and statistics.
 """
 import argparse
-import copy
 import gzip
 import hashlib
 import json
@@ -27,16 +29,38 @@ import shutil
 import statistics
 import subprocess
 import time
-try:
-    import tomllib
-except ImportError:
-    from pip._vendor import tomli as tomllib
 
 DEFAULT_APPS = ['lua', 'quickjs', 'sqlite']
 
 
-def discover_apps(root):
-    return sorted(p.parent.name for p in (root / 'suite/c').glob('*/suite.toml'))
+def host_os_arch():
+    """This host as `cargo suite manifest` names it."""
+    system = {'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), platform.system().lower())
+    machine = 'aarch64' if platform.machine() == 'arm64' else platform.machine()
+    return system, machine
+
+
+def load_manifest(root, path=None):
+    """The resolved suite manifests: `path`, or `cargo suite manifest` run in `root`.
+
+    Their [[build.when]] entries must have been applied for this host."""
+    if path is None:
+        proc = subprocess.run(['cargo', 'suite', 'manifest'], cwd=root, capture_output=True)
+        if proc.returncode:
+            raise RuntimeError('cargo suite manifest failed:\n' + proc.stderr.decode(errors='replace'))
+        text = proc.stdout
+    else:
+        text = Path(path).read_bytes()
+    manifest = json.loads(text)
+    if manifest.get('schema_version') != 1:
+        raise ValueError('suite manifest schema must be 1')
+    if (manifest['os'], manifest['arch']) != host_os_arch():
+        raise ValueError(f"suite manifest is for {manifest['os']} {manifest['arch']}, not this host")
+    return manifest
+
+
+def discover_apps(manifest):
+    return sorted(manifest['suites'])
 
 
 def prepare_argv(template, expand, defines, libs, clang):
@@ -165,6 +189,8 @@ def main():
     p.add_argument('--clang', default='clang')
     p.add_argument('--gcc')
     p.add_argument('--apps', nargs='+', help='manifest names under suite/c/ (default: lua quickjs sqlite)')
+    p.add_argument('--manifest', type=Path,
+                   help='`cargo suite manifest` output to read (default: run it in --root)')
     p.add_argument('--configs', nargs='+', help='selected named configurations; must include clang-O2')
     p.add_argument('--candidate-configs', type=Path,
                    help='additional named Keel compilers/flags as JSON; existing configurations cannot be replaced')
@@ -191,7 +217,8 @@ def main():
         p.error('--gcc-native-preprocess and --normalize-prepared require --input-mode shared')
     chosen_apps = args.apps or DEFAULT_APPS
     root, work = args.root.resolve(), args.work.resolve()
-    unknown = set(chosen_apps) - set(discover_apps(root))
+    manifest = load_manifest(root, args.manifest)
+    unknown = set(chosen_apps) - set(discover_apps(manifest))
     if unknown:
         p.error('unknown application manifests: ' + ', '.join(sorted(unknown)))
     if len(set(chosen_apps)) != len(chosen_apps):
@@ -242,18 +269,8 @@ def main():
         return text.replace('{suite}', str(root / 'suite/c' / app)).replace('{work}', str(root / 'target/suite' / app)).replace('{bin}', str(binary)).replace('{gen}', str(gen))
 
     def spec(app):
-        m = tomllib.loads((root / 'suite/c' / app / 'suite.toml').read_text())
-        b = copy.deepcopy(m['build'])
-        host_os = {'Darwin': 'macos', 'Linux': 'linux'}.get(platform.system(), platform.system().lower())
-        for extra in b.get('when', []):
-            if extra.get('os', host_os) != host_os:
-                continue
-            arch = 'aarch64' if platform.machine() == 'arm64' else platform.machine()
-            if extra.get('arch', arch) != arch:
-                continue
-            for k in ['defines', 'includes', 'libs']:
-                b.setdefault(k, []).extend(extra.get(k, []))
-        return m, b
+        m = manifest['suites'][app]
+        return m, m['build']
 
     try:
         report['compiler_versions']['clang'] = run([clang, '--version'], 'toolchain', pinned=False)[0].stdout.decode()

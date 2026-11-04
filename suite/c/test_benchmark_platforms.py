@@ -21,6 +21,25 @@ class Preparation(unittest.TestCase):
                                    '-DNAME=two words', 'source.c', '-o', '/tmp/generated files/tool', '-lm'])
 
 
+def resolved_manifest(suites):
+    """`cargo suite manifest` output for this host."""
+    system, machine = benchmark.host_os_arch()
+    return {'schema_version': 1, 'os': system, 'arch': machine, 'suites': suites}
+
+
+class Manifest(unittest.TestCase):
+    def test_reads_this_hosts_resolved_manifest(self):
+        with tempfile.TemporaryDirectory(prefix='keel-app-manifest-') as temporary:
+            path = Path(temporary) / 'manifest.json'
+            path.write_text(json.dumps(resolved_manifest({'b': {}, 'a': {}})))
+            self.assertEqual(benchmark.discover_apps(benchmark.load_manifest(None, path)), ['a', 'b'])
+            other = resolved_manifest({})
+            other['os'] = 'plan9'
+            path.write_text(json.dumps(other))
+            with self.assertRaisesRegex(ValueError, 'not this host'):
+                benchmark.load_manifest(None, path)
+
+
 class OptimizationMatrix(unittest.TestCase):
     def test_ablation_keeps_optimizer_and_isa_fixed(self):
         matrix = benchmark.optimization_configs('/compiler')
@@ -48,22 +67,21 @@ class NativeHarness(unittest.TestCase):
             (app / 'right/unit.c').write_text('int right(void) { return 7; }\n')
             (app / 'driver.c').write_text('#include <stdio.h>\nint left(void); int right(void);\nint main(void) { if (left() != right()) return 9; puts("checked"); return '
                                          + str(int(reference_fail)) + '; }\n')
-            (app / 'suite.toml').write_text('''description = "harness integration"
-[build]
-dir = "."
-std = "c11"
-sources = ["{suite}/driver.c", "{suite}/left/unit.c", "{suite}/right/unit.c"]
-defines = ["VALUE=7"]
-binary = "sample"
-[test]
-run = ["{bin}"]
-compare = "clang-O2"
-''')
+            # The runner hashes suite.toml to detect stale preparation; it
+            # reads the build from the resolved manifest.
+            (app / 'suite.toml').write_text('# resolved in manifest.json\n')
+            sample = {'description': 'harness integration', 'fetch': [], 'bench': [],
+                      'build': {'dir': '.', 'std': 'c11', 'defines': ['VALUE=7'], 'includes': [],
+                                'libs': [], 'prepare': [], 'exclude': [], 'binary': 'sample',
+                                'sources': ['{suite}/driver.c', '{suite}/left/unit.c',
+                                            '{suite}/right/unit.c']},
+                      'test': {'run': ['{bin}'], 'compare': 'clang-O2'}}
             # This unselected suite must neither download nor prepare sources.
-            other = root / 'suite/c/unselected'
-            other.mkdir()
-            (other / 'suite.toml').write_text('intentionally not a valid selected manifest')
-            self.assertEqual(benchmark.discover_apps(root), ['sample', 'unselected'])
+            unselected = {'description': 'unselected', 'bench': [],
+                          'fetch': [{'url': 'https://invalid.example/never.tar.gz', 'sha256': '0'}],
+                          'build': {**sample['build'], 'binary': 'unselected'}}
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps(resolved_manifest({'sample': sample, 'unselected': unselected})))
             candidate = root / 'candidate.json'
             broken = root / 'broken-keel'
             broken.write_text('#!/bin/sh\nexit 23\n')
@@ -72,6 +90,7 @@ compare = "clang-O2"
             output = root / 'result'
             command = [sys.executable, str(Path(benchmark.__file__).resolve()), '--root', str(root),
                        '--work', str(output), '--keel', sys.executable, '--apps', 'sample',
+                       '--manifest', str(manifest),
                        '--configs', 'clang-O2', '--checks-only', '--input-mode', input_mode]
             if fail:
                 command[command.index('--checks-only'):command.index('--checks-only')] = ['keel-broken']

@@ -4,6 +4,7 @@
 //!
 //! ```text
 //! cargo suite list
+//! cargo suite manifest --target x86_64 lua   # resolved manifests as JSON
 //! cargo suite test lua sqlite        # keel and keel -O, against the tests
 //! cargo suite run lua/fib -n 10      # every configuration, timed
 //! cargo suite compare aarch64-apple-darwin x86_64-unknown-linux-gnu
@@ -63,6 +64,14 @@ enum Color {
 enum Command {
     /// List the suites, their benchmarks and the configurations.
     List,
+    /// Print suite manifests as JSON, with `[[build.when]]` applied for one target.
+    Manifest {
+        /// Suites to print (default: all).
+        suites: Vec<String>,
+        /// Target whose `[[build.when]]` entries apply (default: this host's OS and architecture).
+        #[arg(long, value_enum)]
+        target: Option<codegen_diff::Target>,
+    },
     /// Test suite runners by component, without application builds or timings.
     Check {
         /// Components to check (default: all).
@@ -167,6 +176,16 @@ fn run(cli: Cli) -> Result<bool> {
         Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {
             list(&root)?;
+            Ok(true)
+        }
+        Command::Manifest { suites, target } => {
+            let all = manifest::load_suites(&root)?;
+            let chosen = choose(&all, &suites)?;
+            let (os, arch) = target.map_or((std::env::consts::OS, std::env::consts::ARCH), |t| {
+                t.os_arch()
+            });
+            let json = manifest::resolved_json(&chosen, os, arch);
+            println!("{}", serde_json::to_string_pretty(&json)?);
             Ok(true)
         }
         Command::Test {

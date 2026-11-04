@@ -2,7 +2,7 @@
 //! per program. `suite/README.md` describes the format.
 
 use anyhow::{Context, Result, anyhow, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -78,7 +78,7 @@ pub struct Manifest {
 }
 
 /// An archive to download, check and unpack into the work directory.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fetch {
     pub url: String,
@@ -136,28 +136,53 @@ impl When {
 }
 
 impl Build {
-    fn when(&self) -> impl Iterator<Item = &When> {
-        self.when
-            .iter()
-            .filter(|w| w.applies(std::env::consts::OS, std::env::consts::ARCH))
-    }
-
     pub fn define_flags(&self) -> Vec<String> {
         self.define_flags_for(std::env::consts::OS, std::env::consts::ARCH)
     }
 
     /// The defines for a build on `os` and `arch`, which need not be the host's.
     pub fn define_flags_for(&self, os: &str, arch: &str) -> Vec<String> {
+        self.defines_for(os, arch)
+            .iter()
+            .map(|d| format!("-D{d}"))
+            .collect()
+    }
+
+    /// The defines, without `-D`, with the `[[build.when]]` entries for `os`
+    /// and `arch` appended.
+    fn defines_for(&self, os: &str, arch: &str) -> Vec<String> {
         let extra = self
             .when
             .iter()
             .filter(|w| w.applies(os, arch))
             .flat_map(|w| &w.defines);
-        self.defines
+        self.defines.iter().chain(extra).cloned().collect()
+    }
+
+    /// The libraries, without `-l`, likewise.
+    fn libs_for(&self, os: &str, arch: &str) -> Vec<String> {
+        let extra = self
+            .when
             .iter()
-            .chain(extra)
-            .map(|d| format!("-D{d}"))
-            .collect()
+            .filter(|w| w.applies(os, arch))
+            .flat_map(|w| &w.libs);
+        self.libs.iter().chain(extra).cloned().collect()
+    }
+
+    /// This build for `os` and `arch`, with its `[[build.when]]` entries
+    /// applied.
+    pub fn resolve(&self, os: &str, arch: &str) -> ResolvedBuild<'_> {
+        ResolvedBuild {
+            dir: &self.dir,
+            std: &self.std,
+            defines: self.defines_for(os, arch),
+            includes: &self.includes,
+            libs: self.libs_for(os, arch),
+            prepare: &self.prepare,
+            sources: &self.sources,
+            exclude: &self.exclude,
+            binary: &self.binary,
+        }
     }
 
     pub fn include_flags(&self) -> Vec<String> {
@@ -165,35 +190,52 @@ impl Build {
     }
 
     pub fn lib_flags(&self) -> Vec<String> {
-        let extra = self.when().flat_map(|w| &w.libs);
-        self.libs
+        self.libs_for(std::env::consts::OS, std::env::consts::ARCH)
             .iter()
-            .chain(extra)
             .map(|l| format!("-l{l}"))
             .collect()
     }
 }
 
+/// A [`Build`] for one host, as `cargo suite manifest` prints it: the same
+/// fields without `when`, whose entries are merged into `defines` and `libs`.
+#[derive(Serialize)]
+pub struct ResolvedBuild<'a> {
+    dir: &'a str,
+    std: &'a str,
+    defines: Vec<String>,
+    includes: &'a [String],
+    libs: Vec<String>,
+    prepare: &'a [String],
+    sources: &'a [String],
+    exclude: &'a [String],
+    binary: &'a str,
+}
+
 /// The program's own tests: each command must succeed.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Test {
     /// Where the commands run, relative to the work directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dir: Option<String>,
     pub run: Vec<String>,
     /// A file fed to each command's standard input.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stdin: Option<String>,
     /// A configuration whose output each command's must equal.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub compare: Option<String>,
 }
 
 /// A timed workload. Every configuration must print the same as the
 /// baseline before it is timed.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bench {
     pub name: String,
     pub run: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stdin: Option<String>,
 }
 
@@ -292,6 +334,34 @@ impl Suite {
         });
         Ok(files)
     }
+}
+
+/// The selected suites' manifests for `os` and `arch`, as the JSON that
+/// `cargo suite manifest` prints. Commands and paths keep their `{name}`
+/// variables.
+pub fn resolved_json(suites: &[&Suite], os: &str, arch: &str) -> serde_json::Value {
+    let suites: serde_json::Map<String, serde_json::Value> = suites
+        .iter()
+        .map(|suite| {
+            let m = &suite.manifest;
+            let mut entry = serde_json::json!({
+                "description": m.description,
+                "fetch": m.fetch,
+                "build": m.build.resolve(os, arch),
+                "bench": m.bench,
+            });
+            if let Some(test) = &m.test {
+                entry["test"] = serde_json::json!(test);
+            }
+            (suite.name.clone(), entry)
+        })
+        .collect();
+    serde_json::json!({
+        "schema_version": 1,
+        "os": os,
+        "arch": arch,
+        "suites": suites,
+    })
 }
 
 /// Substitutes `{name}` in commands. A word that is just a list variable
@@ -401,6 +471,38 @@ mod tests {
         let flag = "-DLONGDOUBLE_TYPE=double".to_string();
         assert!(sqlite.define_flags_for("linux", "x86_64").contains(&flag));
         assert!(!sqlite.define_flags_for("macos", "aarch64").contains(&flag));
+    }
+
+    /// The printed manifest applies `[[build.when]]` for the requested host
+    /// and drops the entries themselves.
+    #[test]
+    fn resolved_manifest() {
+        let suites = load_suites(&root()).unwrap();
+        let lua: Vec<&Suite> = suites.iter().filter(|s| s.name == "lua").collect();
+        let json = resolved_json(&lua, "linux", "x86_64");
+        assert_eq!(
+            (json["os"].as_str(), json["arch"].as_str()),
+            (Some("linux"), Some("x86_64"))
+        );
+        let build = &json["suites"]["lua"]["build"];
+        let defines: Vec<&str> = build["defines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d.as_str().unwrap())
+            .collect();
+        assert!(defines.contains(&"LUA_USE_LINUX"));
+        assert!(!defines.contains(&"LUA_USE_MACOSX"));
+        assert!(build.get("when").is_none());
+        assert_eq!(build["binary"], lua[0].manifest.build.binary.as_str());
+        let mac = resolved_json(&lua, "macos", "aarch64");
+        assert!(
+            mac["suites"]["lua"]["build"]["defines"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d == "LUA_USE_MACOSX")
+        );
     }
 
     #[test]
