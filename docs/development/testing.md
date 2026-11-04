@@ -17,6 +17,8 @@ python3 tools/test.py linker --test archive        # One integration-test target
 python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
 python3 tools/test.py --dry-run                    # Print packages and commands without building
 python3 tools/test.py full                         # Merge-boundary workspace verification
+python3 tools/test.py lint                         # Merge-boundary format and clippy checks
+python3 tools/test.py generators                   # Generated-file staleness and generator tests
 ```
 
 GNU assembler oracle tests require GNU binutils. On macOS, `as` is Apple's
@@ -24,10 +26,23 @@ assembler, so set `KEEL_GNU_AS` to the absolute path of an x86-64 GNU
 cross-assembler before running the workspace suite. These tests retain both
 the Clang and GNU comparisons; they do not skip a missing oracle silently.
 
-All main-workspace crates inherit the lint policy in the root manifest. Run
-`cargo fmt --all --check` and
-`cargo clippy --workspace --all-targets --all-features -- -D warnings` to check
-formatting and the full lint configuration, including experimental features.
+All main-workspace crates inherit the lint policy in the root manifest.
+`tools/test.py lint` runs `cargo fmt --all --check`, then
+`cargo clippy --workspace --all-targets -- -D warnings` on default features,
+then the same clippy command with every workspace feature enabled except
+`profile-with-tracy`, which builds the Tracy C++ client. Run it at each merge
+boundary.
+
+`tools/test.py generators` runs `generate.py --check` for the x86 tables in
+`tools/x86-isa` and the AArch64 tables in `crates/keel-asm/tools`, then each
+directory's `test_*.py` unit tests. A generated file that differs from its
+inputs fails the check. Run it when a generator, its inputs or a generated file
+changes. Both generators rewrite only outputs whose content changed, so a no-op
+regeneration does not trigger rebuilds.
+
+Both modes run every step even after a failure, then list each step's result.
+They accept `--dry-run`, `--cargo` and `--report`, and cannot be combined with
+test components or test selection options.
 
 Use component and test-target selections during development. Full workspace
 verification belongs at a merge/fast-forward boundary or an explicitly requested

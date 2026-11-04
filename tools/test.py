@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Run Rust tests by component or conservatively select consumers of changed files."""
+"""Run Rust tests by component or conservatively select consumers of changed files.
+
+The lint and generators scopes run repository checks instead of Rust tests."""
 from __future__ import annotations
 
 import argparse
@@ -26,6 +28,11 @@ SCOPES = {
     "optimizer": {"keel-opt"},
     "codegen": {"keel-codegen"},
 }
+CHECK_SCOPES = ("lint", "generators")
+# profile-with-tracy builds the Tracy C++ client; the lint lane skips it.
+LINT_SKIPPED_FEATURES = {"profile-with-tracy"}
+# Each directory holds a generate.py with --check and its test_*.py unit tests.
+GENERATOR_DIRECTORIES = ("tools/x86-isa", "crates/keel-asm/tools")
 
 
 # Core backend contracts, not a feature-completion inventory. Feature work should
@@ -201,6 +208,36 @@ def component_packages(scopes: list[str], packages: dict, include_consumers: boo
     return consumers(selected, packages) if include_consumers else selected
 
 
+def lint_features(packages: dict) -> list[str]:
+    """Every workspace feature except skipped ones and features that enable them."""
+    return [
+        f"{name}/{feature}"
+        for name, package in sorted(packages.items())
+        for feature, enables in sorted(package.get("features", {}).items())
+        if feature != "default" and feature not in LINT_SKIPPED_FEATURES
+        and not any(value.split("/")[-1] in LINT_SKIPPED_FEATURES for value in enables)
+    ]
+
+
+def check_commands(scopes: list[str], cargo: str, python: str,
+                   features: list[str]) -> list[tuple[str, list[str]]]:
+    """Labelled lint and generator commands, in run order."""
+    plan = []
+    if "lint" in scopes:
+        clippy = [cargo, "clippy", "--workspace", "--all-targets"]
+        plan += [("format", [cargo, "fmt", "--all", "--check"]),
+                 ("clippy, default features", [*clippy, "--", "-D", "warnings"])]
+        if features:
+            plan.append(("clippy, experimental features",
+                         [*clippy, "--features", ",".join(features), "--", "-D", "warnings"]))
+    if "generators" in scopes:
+        for directory in GENERATOR_DIRECTORIES:
+            plan += [(f"{directory} generator check", [python, f"{directory}/generate.py", "--check"]),
+                     (f"{directory} unit tests",
+                      [python, "-m", "unittest", "discover", "-s", directory, "-p", "test_*.py"])]
+    return plan
+
+
 def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: bool,
              unit: bool = False, targets: list[str] | None = None,
              doctest_packages: list[str] | None = None) -> list[list[str]]:
@@ -236,7 +273,7 @@ def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: 
 
 def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("scopes", nargs="*", metavar="COMPONENT", help="one or more of: " + ", ".join(["full", *SCOPES]) + " (default: full)")
+    parser.add_argument("scopes", nargs="*", metavar="COMPONENT", help="one or more of: " + ", ".join(["full", *SCOPES]) + " (default: full); or the checks " + ", ".join(CHECK_SCOPES))
     parser.add_argument("--changed", metavar="BASE", help="include committed, staged, unstaged and untracked changes since BASE")
     coverage = parser.add_mutually_exclusive_group()
     coverage.add_argument("--consumers", action="store_true", help="also test transitive consumers of named components")
@@ -252,9 +289,15 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--report", type=Path, help="write command timings and exit codes as JSON")
     args = parser.parse_args(argv)
     args.scopes = args.scopes or ["full"]
-    unknown = set(args.scopes) - {"full", *SCOPES}
+    unknown = set(args.scopes) - {"full", *SCOPES, *CHECK_SCOPES}
     if unknown:
         parser.error("unknown component: " + ", ".join(sorted(unknown)))
+    checks = set(args.scopes) & set(CHECK_SCOPES)
+    if checks:
+        if set(args.scopes) - checks:
+            parser.error(" and ".join(CHECK_SCOPES) + " cannot be combined with test components")
+        if args.changed or args.consumers or args.direct or args.unit or args.test or args.quick:
+            parser.error(" and ".join(CHECK_SCOPES) + " take no test selection options")
     if "full" in args.scopes and len(args.scopes) > 1:
         parser.error("full cannot be combined with named components")
     if (args.direct or args.consumers) and args.scopes == ["full"]:
@@ -264,6 +307,30 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def run_checks(args: argparse.Namespace, packages: dict) -> int:
+    """Run every check, then list each result so a failed step is easy to find."""
+    plan = check_commands(args.scopes, args.cargo, sys.executable, lint_features(packages))
+    records = []
+    for label, command in plan:
+        print(f"== {label}\n+ " + shlex.join(command), flush=True)
+        if args.dry_run:
+            continue
+        started = time.monotonic()
+        result = subprocess.run(command, cwd=ROOT)
+        records.append({"label": label, "command": command,
+                        "seconds": time.monotonic() - started, "returncode": result.returncode})
+    if args.dry_run:
+        return 0
+    print("Results:")
+    for record in records:
+        status = "ok" if record["returncode"] == 0 else f"FAILED (exit {record['returncode']})"
+        print(f"  {status}: {record['label']}")
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps({"checks": args.scopes, "commands": records}, indent=2) + "\n")
+    return int(any(r["returncode"] for r in records))
+
+
 def main() -> int:
     args = arguments()
     metadata = json.loads(subprocess.check_output(
@@ -271,6 +338,8 @@ def main() -> int:
     members = set(metadata["workspace_members"])
     packages = {p["name"]: {**p, "directory": str(Path(p["manifest_path"]).parent.relative_to(ROOT))}
                 for p in metadata["packages"] if p["id"] in members}
+    if set(args.scopes) <= set(CHECK_SCOPES):
+        return run_checks(args, packages)
     if args.changed:
         tracked = subprocess.check_output(
             ["git", "diff", "--name-only", "--no-renames", "-z", args.changed, "--"], cwd=ROOT)

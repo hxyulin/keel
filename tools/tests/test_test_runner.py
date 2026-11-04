@@ -4,6 +4,7 @@ import contextlib
 import io
 from pathlib import Path
 import unittest
+from unittest import mock
 import tempfile
 
 SPEC = importlib.util.spec_from_file_location("test_runner", Path(__file__).parents[1] / "test.py")
@@ -287,6 +288,74 @@ class SelectionTests(unittest.TestCase):
     def test_cargo_full_keeps_default_tests_and_doctests(self):
         commands = runner.commands("cargo", "cargo", "test-fast", ["ir"], False)
         self.assertEqual(commands, [["cargo", "test", "--profile", "test-fast", "--no-fail-fast", "-p", "ir"]])
+
+
+class CheckScopeTests(unittest.TestCase):
+    packages = {
+        "cli": {"features": {"default": ["extra"], "extra": [], "verify-each": ["opt/verify-each"],
+                             "profile-with-tracy": ["dep:tracy-client"],
+                             "trace-all": ["codegen/profile-with-tracy"]}},
+        "opt": {"features": {"verify-each": []}},
+        "plain": {"features": {}},
+    }
+
+    def test_lint_features_skip_tracy_and_features_that_enable_it(self):
+        self.assertEqual(runner.lint_features(self.packages),
+                         ["cli/extra", "cli/verify-each", "opt/verify-each"])
+
+    def test_lint_runs_format_and_both_clippy_passes_with_denied_warnings(self):
+        plan = runner.check_commands(["lint"], "cargo", "python3", ["opt/verify-each", "cli/extra"])
+        commands = dict(plan)
+        self.assertEqual([label for label, _ in plan],
+                         ["format", "clippy, default features", "clippy, experimental features"])
+        self.assertEqual(commands["format"], ["cargo", "fmt", "--all", "--check"])
+        for label in ["clippy, default features", "clippy, experimental features"]:
+            self.assertEqual(commands[label][:4], ["cargo", "clippy", "--workspace", "--all-targets"])
+            self.assertEqual(commands[label][-3:], ["--", "-D", "warnings"])
+        self.assertNotIn("--features", commands["clippy, default features"])
+        experimental = commands["clippy, experimental features"]
+        self.assertEqual(experimental[experimental.index("--features") + 1], "opt/verify-each,cli/extra")
+        self.assertEqual(len(runner.check_commands(["lint"], "cargo", "python3", [])), 2)
+
+    def test_generators_check_outputs_and_run_unit_tests_for_each_generator(self):
+        plan = runner.check_commands(["generators"], "cargo", "python3", [])
+        self.assertEqual(len(plan), 2 * len(runner.GENERATOR_DIRECTORIES))
+        commands = [command for _, command in plan]
+        for directory in ["tools/x86-isa", "crates/keel-asm/tools"]:
+            with self.subTest(directory=directory):
+                self.assertIn(["python3", f"{directory}/generate.py", "--check"], commands)
+                self.assertIn(["python3", "-m", "unittest", "discover", "-s", directory,
+                               "-p", "test_*.py"], commands)
+                self.assertTrue((runner.ROOT / directory / "generate.py").is_file())
+
+    def test_a_failed_check_does_not_stop_later_checks_and_is_named_in_results(self):
+        args = runner.arguments(["lint"])
+        failing = "clippy, experimental features"
+        labels = {tuple(command): label for label, command in runner.check_commands(
+            ["lint"], args.cargo, runner.sys.executable, runner.lint_features(self.packages))}
+        ran = []
+
+        def run(command, cwd):
+            ran.append(labels[tuple(command)])
+            return mock.Mock(returncode=101 if ran[-1] == failing else 0)
+
+        output = io.StringIO()
+        with mock.patch.object(runner.subprocess, "run", run), contextlib.redirect_stdout(output):
+            self.assertEqual(runner.run_checks(args, self.packages), 1)
+        self.assertEqual(ran, ["format", "clippy, default features", failing])
+        results = output.getvalue().split("Results:\n", 1)[1]
+        self.assertIn(f"FAILED (exit 101): {failing}", results)
+        self.assertIn("ok: format", results)
+
+    def test_check_scopes_combine_with_each_other_but_not_with_test_selection(self):
+        self.assertEqual(runner.arguments(["lint", "generators"]).scopes, ["lint", "generators"])
+        for args in [["lint", "codegen"], ["generators", "full"], ["lint", "--quick"],
+                     ["lint", "--changed", "main"], ["generators", "--unit"],
+                     ["lint", "--test", "run"]]:
+            with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    runner.arguments(args)
+                self.assertEqual(error.exception.code, 2)
 
 
 if __name__ == "__main__":
