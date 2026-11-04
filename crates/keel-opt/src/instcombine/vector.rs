@@ -1,6 +1,7 @@
 //! Bounded, bit-preserving lane rewrites. No memory or architectural operations
 //! are inspected or created; floating lanes are transported without arithmetic.
-use super::{Fold, Uses, bits};
+use super::{Fold, Uses};
+use crate::ir_match::int_bits;
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InstData as D, Type, Value, ValueDef, VectorBinaryOp as B,
     VectorReduceOp, VectorType,
@@ -21,7 +22,7 @@ fn splat(f: &Function, v: Value) -> Option<Value> {
 }
 
 fn splat_bits(f: &Function, v: Value) -> Option<u128> {
-    bits(f, splat(f, v)?)
+    int_bits(f, splat(f, v)?)
 }
 
 pub(super) fn simplify(f: &Function, data: &D, uses: Uses<'_>) -> Option<Fold> {

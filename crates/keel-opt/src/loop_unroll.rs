@@ -6,6 +6,7 @@
 //! up to two extra same-width additive recurrences are forwarded sequentially.
 //! Whole iterations are cloned in order, including both loads, before beginning
 //! the next iteration; only the non-observable wrapping sum is reassociated.
+use crate::ir_match::int_const;
 use keel_ir::dominators::DominatorTree;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
@@ -49,12 +50,6 @@ struct Candidate {
 fn def(f: &Function, v: Value) -> Option<Inst> {
     match f.value_def(f.resolve(v)) {
         ValueDef::Result(i, _) => Some(i),
-        _ => None,
-    }
-}
-fn constant(f: &Function, v: Value) -> Option<i64> {
-    match f.inst_data(def(f, v)?) {
-        D::Iconst { imm, .. } => Some(*imm),
         _ => None,
     }
 }
@@ -127,7 +122,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     };
     if dest.block != header
         || dest.args.len() != params.len()
-        || constant(f, dest.args[0]) != Some(0)
+        || int_const(f, dest.args[0]) != Some(0)
         || !invariant(f, dom, pre, dest.args[1])
     {
         return None;
@@ -178,8 +173,8 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     };
     if f.inst_block(step) != body
-        || !((f.resolve(args[0]) == iv && constant(f, args[1]) == Some(1))
-            || (f.resolve(args[1]) == iv && constant(f, args[0]) == Some(1)))
+        || !((f.resolve(args[0]) == iv && int_const(f, args[1]) == Some(1))
+            || (f.resolve(args[1]) == iv && int_const(f, args[0]) == Some(1)))
     {
         return None;
     }

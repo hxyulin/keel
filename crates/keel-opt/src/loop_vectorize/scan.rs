@@ -82,7 +82,7 @@ fn analyze(
         return None;
     };
     // Normalize the constant to the right without depending on canonicalization.
-    if constant(f, character_args[0]).is_some() {
+    if int_const(f, character_args[0]).is_some() {
         character_args.swap(0, 1);
         predicate = match predicate {
             IntCC::Ult => IntCC::Ugt,
@@ -166,7 +166,7 @@ fn analyze(
     else {
         return None;
     };
-    if f.resolve(base) != pointer || constant(f, offset) != Some(1) {
+    if f.resolve(base) != pointer || int_const(f, offset) != Some(1) {
         return None;
     }
     let offset_inst = def(f, offset)?;

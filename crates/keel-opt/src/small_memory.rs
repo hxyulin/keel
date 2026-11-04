@@ -1,4 +1,5 @@
 //! Bounded expansion of ordinary memory intrinsics before register allocation.
+use crate::ir_match::int_const;
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic, MemoryFlags,
     Type, Value, ValueDef, VectorType,
@@ -178,7 +179,7 @@ fn expand_memcmp_equality(f: &mut Function, at: Inst, args: &[Value]) -> bool {
     if args.len() != 3 || f.value_type(result) != Type::I32 {
         return false;
     }
-    let Some(size) = integer(f, args[2]) else {
+    let Some(size) = int_const(f, args[2]) else {
         return false;
     };
     if !(0..=MAX_BYTES).contains(&size) {
@@ -199,8 +200,8 @@ fn expand_memcmp_equality(f: &mut Function, at: Inst, args: &[Value]) -> bool {
         else {
             return false;
         };
-        if !((f.resolve(args[0]) == result && integer(f, args[1]) == Some(0))
-            || (f.resolve(args[1]) == result && integer(f, args[0]) == Some(0)))
+        if !((f.resolve(args[0]) == result && int_const(f, args[1]) == Some(0))
+            || (f.resolve(args[1]) == result && int_const(f, args[0]) == Some(0)))
         {
             return false;
         }
@@ -268,16 +269,6 @@ fn expand_memcmp_equality(f: &mut Function, at: Inst, args: &[Value]) -> bool {
     true
 }
 
-fn integer(f: &Function, value: Value) -> Option<i64> {
-    let ValueDef::Result(i, _) = f.value_def(f.resolve(value)) else {
-        return None;
-    };
-    match f.inst_data(i) {
-        InstData::Iconst { imm, .. } => Some(*imm),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod memcmp_tests {
     use super::*;
@@ -322,7 +313,7 @@ mod memcmp_tests {
                             } = f.inst_data(ai)
                         {
                             base = args[0];
-                            offset = integer(f, args[1]).unwrap();
+                            offset = int_const(f, args[1]).unwrap();
                         }
                         let side = if base == f.block_params(f.entry_block().unwrap())[0] {
                             0

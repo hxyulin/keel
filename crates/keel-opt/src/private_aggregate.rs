@@ -11,7 +11,7 @@
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryEffects,
-    MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value, ValueDef,
+    MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value,
 };
 
 /// Keep cleanup coupled to transport: modules without a rewritten signature
@@ -446,9 +446,8 @@ pub fn run(m: &mut Module) -> usize {
                     args,
                 } => {
                     if let Some(&(words, off)) = homes.get(&f.resolve(args[0]))
-                        && let ValueDef::Result(k, _) = f.value_def(f.resolve(args[1]))
-                        && let InstData::Iconst { imm, .. } = f.inst_data(k)
-                        && let Ok(delta) = usize::try_from(*imm)
+                        && let Some(imm) = crate::ir_match::int_const(f, args[1])
+                        && let Ok(delta) = usize::try_from(imm)
                         && let Some(off) = off.checked_add(delta).filter(|&o| o <= 16)
                     {
                         let result = f.first_result(i);

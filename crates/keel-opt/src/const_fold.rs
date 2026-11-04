@@ -104,10 +104,6 @@ pub(crate) fn fold_overflow<'a>(
     ])
 }
 
-pub(crate) fn constant_data(func: &Function, value: Value) -> Option<InstData> {
-    constant_ref(func, value).cloned()
-}
-
 /// The `iconst` or `fconst` defining `value`, borrowed: the folding lookup.
 pub(crate) fn constant_ref(func: &Function, value: Value) -> Option<&InstData> {
     let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
@@ -252,15 +248,9 @@ fn mask(ty: Type) -> u64 {
 /// The value of `v` if it is an `iconst` of i8 to i64 (i128 does not fit
 /// the `i64` immediate's arithmetic here).
 pub(crate) fn constant(func: &Function, v: Value) -> Option<Const> {
-    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
-        return None;
-    };
-    match *func.inst_data(inst) {
-        InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
-            Some(Const::new(ty, imm as u64))
-        }
-        _ => None,
-    }
+    let imm = crate::ir_match::int_const(func, v)?;
+    let ty = func.value_type(func.resolve(v));
+    (ty != Type::I128).then(|| Const::new(ty, imm as u64))
 }
 
 fn binary(op: BinaryOp, a: Const, b: Const) -> Option<Const> {

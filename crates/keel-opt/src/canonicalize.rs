@@ -38,10 +38,7 @@ fn shift(func: &Function, value: Value, expected: BinaryOp) -> Option<(Value, Va
     if op != expected || func.value_type(value) != func.value_type(source) {
         return None;
     }
-    let InstData::Iconst { imm, .. } = crate::const_fold::constant_data(func, count)? else {
-        return None;
-    };
-    Some((source, count, imm))
+    Some((source, count, crate::ir_match::int_const(func, count)?))
 }
 
 fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {

@@ -4,6 +4,7 @@
 //! lifetime and access checks. Propagation never follows aliased definitions,
 //! negative offsets or offsets beyond the one-past address of a fixed slot.
 
+use crate::ir_match::int_const;
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{BinaryOp, Function, Inst, InstData, StackSlot, Value};
 
@@ -27,7 +28,7 @@ pub(crate) fn propagate(
                 args,
             } = *f.inst_data(i)
                 && let Some(&(slot, offset)) = addresses.get(&f.resolve(args[0]))
-                && let Some(n) = constant(f, args[1]).and_then(|n| usize::try_from(n).ok())
+                && let Some(n) = int_const(f, args[1]).and_then(|n| usize::try_from(n).ok())
                 && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
                 && f.resolve(f.first_result(i)) == f.first_result(i)
             {
@@ -37,12 +38,5 @@ pub(crate) fn propagate(
         if addresses.len() == before {
             break;
         }
-    }
-}
-
-pub(crate) fn constant(f: &Function, v: Value) -> Option<i64> {
-    match crate::const_fold::constant_ref(f, v)? {
-        InstData::Iconst { imm, .. } => Some(*imm),
-        _ => None,
     }
 }

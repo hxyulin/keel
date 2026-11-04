@@ -9,6 +9,7 @@
 //! callers: read-only restricted pointers may alias. Both roots must retain
 //! their definition-only entry contracts and have only recognized address uses.
 //! Inlined/cloned parameters have no such entry contract; never synthesize one.
+use crate::ir_match::int_const;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{BinaryOp, Function, InstData, Type, Value, ValueDef};
 
@@ -179,13 +180,7 @@ impl AliasInfo {
 }
 
 fn constant_offset(func: &Function, v: Value) -> Option<i64> {
-    if let ValueDef::Result(i, _) = func.value_def(func.resolve(v))
-        && let InstData::Iconst { ty: Type::I64, imm } = *func.inst_data(i)
-    {
-        Some(imm)
-    } else {
-        None
-    }
+    int_const(func, v).filter(|_| func.value_type(func.resolve(v)) == Type::I64)
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
 //! The separate loop-reduce passes handle read-only wrapping integer sums.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
-use crate::ir_match::int_bits;
+use crate::ir_match::{int_bits, int_const};
 use keel_ir::dominators::DominatorTree;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
@@ -182,12 +182,6 @@ fn def(f: &Function, v: Value) -> Option<Inst> {
         _ => None,
     }
 }
-fn constant(f: &Function, v: Value) -> Option<i64> {
-    match f.inst_data(def(f, v)?) {
-        D::Iconst { imm, .. } => Some(*imm),
-        _ => None,
-    }
-}
 fn invariant(f: &Function, dom: &DominatorTree, pre: Block, v: Value) -> bool {
     let b = match f.value_def(f.resolve(v)) {
         ValueDef::Result(i, _) => f.inst_block(i),
@@ -286,13 +280,13 @@ impl Analyze<'_> {
                 return None;
             };
             let (index, amount) = match op {
-                B::Shl if constant(self.f, args[1]) == Some(i64::from(bytes.trailing_zeros())) => {
+                B::Shl if int_const(self.f, args[1]) == Some(i64::from(bytes.trailing_zeros())) => {
                     (args[0], args[1])
                 }
-                B::Imul if constant(self.f, args[1]) == Some(i64::from(bytes)) => {
+                B::Imul if int_const(self.f, args[1]) == Some(i64::from(bytes)) => {
                     (args[0], args[1])
                 }
-                B::Imul if constant(self.f, args[0]) == Some(i64::from(bytes)) => {
+                B::Imul if int_const(self.f, args[0]) == Some(i64::from(bytes)) => {
                     (args[1], args[0])
                 }
                 _ => return None,
@@ -593,8 +587,8 @@ fn analyze(
     let D::Binary { op: B::Iadd, args } = *f.inst_data(step) else {
         return None;
     };
-    if !((f.resolve(args[0]) == iv && constant(f, args[1]) == Some(1))
-        || (f.resolve(args[1]) == iv && constant(f, args[0]) == Some(1)))
+    if !((f.resolve(args[0]) == iv && int_const(f, args[1]) == Some(1))
+        || (f.resolve(args[1]) == iv && int_const(f, args[0]) == Some(1)))
     {
         return None;
     }
@@ -692,10 +686,10 @@ fn analyze(
                 n < 0
             }
     };
-    if constant(f, start).is_some_and(negative) || constant(f, bound).is_some_and(negative) {
+    if int_const(f, start).is_some_and(negative) || int_const(f, bound).is_some_and(negative) {
         return None;
     }
-    if let (Some(start), Some(bound)) = (constant(f, start), constant(f, bound)) {
+    if let (Some(start), Some(bound)) = (int_const(f, start), int_const(f, bound)) {
         let (start, bound) = (unsigned(start), unsigned(bound));
         if bound < start || bound - start < u64::from(shape.lanes()) * 4 {
             return None;
@@ -1009,7 +1003,7 @@ fn reduce_body(
     let shift = iconst(f, setup, ty, i64::from(group.trailing_zeros()));
     let groups = bin(f, setup, B::Ushr, count, shift);
     let length = bin(f, setup, B::Shl, groups, shift);
-    let end = if constant(f, c.start) == Some(0) {
+    let end = if int_const(f, c.start) == Some(0) {
         length
     } else {
         bin(f, setup, B::Iadd, c.start, length)
@@ -1052,7 +1046,7 @@ fn reduce_body(
         invariants.insert(v, splat);
         if narrow_selects
             && f.value_type(scalar) == Type::I64
-            && let Some(imm) = constant(f, scalar)
+            && let Some(imm) = int_const(f, scalar)
             && (i32::try_from(imm).is_ok() || u32::try_from(imm).is_ok())
         {
             let bits = iconst(f, setup, Type::I32, imm as i32 as i64);
@@ -1095,7 +1089,7 @@ fn reduce_body(
     for base in bases {
         let pointer = f.append_block_param(vector, Type::Ptr);
         pointers.insert(base, pointer);
-        let start = if constant(f, c.start) == Some(0) {
+        let start = if int_const(f, c.start) == Some(0) {
             base
         } else {
             let index = if ty == Type::I64 {
@@ -1219,7 +1213,7 @@ fn reduce_body(
                 // Every accepted select predicate is an integer comparison:
                 // its vector mask is canonical, so selecting zero needs only
                 // a packed AND, with no second mask normalization or blending.
-                D::Select { args } if constant(f, args[2]) == Some(0) => D::VectorBinary {
+                D::Select { args } if int_const(f, args[2]) == Some(0) => D::VectorBinary {
                     op: V::And,
                     args: [
                         select_mask(f, vector, c, &mapping, args[0], shape),
@@ -1351,7 +1345,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let bytes = c.stream_bytes;
     let zero = iconst(f, guard, ty, 0);
     let min = iconst(f, guard, ty, lanes * 4);
-    let from_zero = constant(f, c.start) == Some(0);
+    let from_zero = int_const(f, c.start) == Some(0);
     let count = if from_zero {
         c.bound
     } else {
@@ -1931,8 +1925,8 @@ fn normalize_multi_recurrences(f: &mut Function) -> bool {
             def(f, value).is_some_and(|i| {
                 matches!(*f.inst_data(i),
                 D::Binary { op: B::Iadd, args } if
-                (f.resolve(args[0]) == accumulator && constant(f, args[1]) == Some(1)) ||
-                (f.resolve(args[1]) == accumulator && constant(f, args[0]) == Some(1)))
+                (f.resolve(args[0]) == accumulator && int_const(f, args[1]) == Some(1)) ||
+                (f.resolve(args[1]) == accumulator && int_const(f, args[0]) == Some(1)))
             })
         };
         if !unit(f, back_dest.args[0], iv) {
@@ -2050,7 +2044,7 @@ fn normalize_multi_recurrences(f: &mut Function) -> bool {
                 },
             );
             let mut delta = f.first_result(difference);
-            if constant(f, start) != Some(0) {
+            if int_const(f, start) != Some(0) {
                 let zero = f.insert_inst(
                     keel_ir::InsertPoint::Before(anchor),
                     D::iconst(f.value_type(iv), 0),

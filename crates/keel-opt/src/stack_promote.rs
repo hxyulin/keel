@@ -3,7 +3,7 @@
 //! No uninitialized SSA values are invented: a forward must analysis
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
-use crate::stack_address::constant;
+use crate::ir_match::int_const;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value};
 
@@ -294,7 +294,7 @@ fn splat_byte(f: &Function, value: Value) -> Option<u8> {
     if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
         return None;
     }
-    let imm = constant(f, value)?;
+    let imm = int_const(f, value)?;
     let byte = imm as u8;
     let mask = u64::MAX >> (64 - width(ty) * 8);
     ((imm as u64 & mask) == repeated_byte(byte, ty) as u64).then_some(byte)

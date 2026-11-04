@@ -17,6 +17,7 @@ mod constant_division;
 mod vector;
 
 use crate::const_fold::{self, constant_ref as constant};
+use crate::ir_match::int_bits;
 use crate::scratch::Scratch;
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
@@ -111,16 +112,6 @@ enum Fold {
     Value(Value),
     Data(InstData),
     Multi([InstData; 2]),
-}
-
-fn bits(func: &Function, v: Value) -> Option<u128> {
-    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
-        return None;
-    };
-    let InstData::Iconst { ty, imm } = *func.inst_data(inst) else {
-        return None;
-    };
-    Some((imm as i128 as u128) & mask(ty))
 }
 
 fn mask(ty: Type) -> u128 {
@@ -310,7 +301,7 @@ const DEPTH: u32 = 3;
 
 /// A constant shift or rotate amount, reduced modulo the operated width.
 fn count(func: &Function, value: Value, width: u32) -> Option<u32> {
-    bits(func, value).map(|n| (n % u128::from(width)) as u32)
+    int_bits(func, value).map(|n| (n % u128::from(width)) as u32)
 }
 
 /// Bits that may be one in integer `value`, looking through at most `depth`
@@ -417,11 +408,11 @@ fn bits_and_shifts(
             if set & possible(func, b, DEPTH) == 0 {
                 return Some(zero(ty));
             }
-            let c = bits(func, b)?;
+            let c = int_bits(func, b)?;
             (set & !c == 0).then_some(Fold::Value(a))
         }
         BinaryOp::Or => {
-            let c = bits(func, b)?;
+            let c = int_bits(func, b)?;
             (possible(func, a, DEPTH) & !c == 0).then_some(Fold::Value(b))
         }
         BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
@@ -485,7 +476,7 @@ fn compare(func: &mut Function, inst: Inst, cond: IntCC, a: Value, b: Value) -> 
         return None;
     }
     let full = mask(ty);
-    let k = bits(func, b);
+    let k = int_bits(func, b);
     if matches!(cond, IntCC::Eq | IntCC::Ne)
         && let Some((op, [x, y])) = binary(func, a)
     {
@@ -495,7 +486,7 @@ fn compare(func: &mut Function, inst: Inst, cond: IntCC, a: Value, b: Value) -> 
             crate::canonicalize::normalize(func, &mut data);
             return Some(Fold::Data(data));
         }
-        let target = match (op, k, bits(func, y)) {
+        let target = match (op, k, int_bits(func, y)) {
             (BinaryOp::Iadd, Some(k), Some(c)) => Some(k.wrapping_sub(c)),
             (BinaryOp::Isub, Some(k), Some(c)) => Some(k.wrapping_add(c)),
             (BinaryOp::Xor, Some(k), Some(c)) => Some(k ^ c),
@@ -682,7 +673,7 @@ fn algebra(
     // The use count is consulted last, once the shape matches.
     if let Some((inner_op, args)) = binary(func, a)
         && inner_op == op
-        && let (Some(c1), Some(c2)) = (bits(func, args[1]), bits(func, b))
+        && let (Some(c1), Some(c2)) = (int_bits(func, args[1]), int_bits(func, b))
         && uses.single(func, a)
     {
         let combined = match op {
@@ -717,13 +708,13 @@ fn offsets(
         BinaryOp::Isub => Some(c.wrapping_neg()),
         _ => None,
     };
-    let outer = offset(op, bits(func, b)?)?;
+    let outer = offset(op, int_bits(func, b)?)?;
     // The use count is consulted last, once the shape matches.
     let (inner_op, [x, k]) = binary(func, a)?;
     if (inner_op == BinaryOp::Ptradd) != (op == BinaryOp::Ptradd) {
         return None;
     }
-    let inner = offset(inner_op, bits(func, k)?)?;
+    let inner = offset(inner_op, int_bits(func, k)?)?;
     if !uses.single(func, a) {
         return None;
     }
@@ -802,7 +793,7 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
     if a == b {
         return Some(Fold::Value(a));
     }
-    if let Some(c) = bits(func, cond) {
+    if let Some(c) = int_bits(func, cond) {
         return Some(Fold::Value(if c == 0 { b } else { a }));
     }
     if !full {
@@ -815,7 +806,7 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
             cond: cc @ (IntCC::Eq | IntCC::Ne),
             args: [x, zero],
         } = *func.inst_data(test)
-        && bits(func, zero) == Some(0)
+        && int_bits(func, zero) == Some(0)
         && func.value_type(x).bytes().is_some_and(|n| n <= 8)
         && func.value_type(x).is_int()
     {
@@ -830,7 +821,7 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
     // A 0/1 condition selecting 1 or 0 is the condition at the result width.
     let from = func.value_type(cond);
     if ty.is_int()
-        && (bits(func, a), bits(func, b)) == (Some(1), Some(0))
+        && (int_bits(func, a), int_bits(func, b)) == (Some(1), Some(0))
         && possible(func, cond, DEPTH) & !1 == 0
     {
         return Some(match ty.bytes().cmp(&from.bytes()) {
@@ -927,7 +918,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
     }
     match data {
         InstData::Binary { op, args: [a, b] } if !op.is_float() => {
-            let (x, y) = (bits(func, a), bits(func, b));
+            let (x, y) = (int_bits(func, a), int_bits(func, b));
             let identity = match op {
                 BinaryOp::Iadd | BinaryOp::Or | BinaryOp::Xor if y == Some(0) => {
                     Some((Rule::IdentityZero, Fold::Value(a)))
@@ -986,7 +977,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                         )
                         && func.value_type(extended) == ty
                         && func.value_type(literal) == ty
-                        && bits(func, literal).is_some_and(|m| {
+                        && int_bits(func, literal).is_some_and(|m| {
                             let source_mask = mask(func.value_type(source));
                             m & source_mask == source_mask
                         })
@@ -1084,7 +1075,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                 let sign = 1u128 << (8 * from.bytes().unwrap() - 1);
                 if args.into_iter().any(|literal| {
                     func.value_type(literal) == from
-                        && bits(func, literal).is_some_and(|m| m & sign == 0)
+                        && int_bits(func, literal).is_some_and(|m| m & sign == 0)
                 }) {
                     return Some((
                         Rule::NonnegativeSignExtend,
@@ -1105,7 +1096,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             if op == ConvertOp::Trunc
                 && full
                 && let Some((inner, [x, y])) = binary(func, arg)
-                && let Some(c) = bits(func, y)
+                && let Some(c) = int_bits(func, y)
                 && match inner {
                     BinaryOp::And => c & mask(ty) == mask(ty),
                     BinaryOp::Or | BinaryOp::Xor => c & mask(ty) == 0,
@@ -1125,7 +1116,8 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
                     arg: number,
                     ..
                 } = *func.inst_data(base_inst)
-                && let (Some(number), Some(offset)) = (bits(func, number), bits(func, offset))
+                && let (Some(number), Some(offset)) =
+                    (int_bits(func, number), int_bits(func, offset))
             {
                 return Some((
                     Rule::ConstantAddress,
@@ -1201,7 +1193,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             ));
         }
         InstData::Icmp { cond, args: [a, b] } if matches!(cond, IntCC::Eq | IntCC::Ne) => {
-            if bits(func, b) == Some(0) {
+            if int_bits(func, b) == Some(0) {
                 if let Some(source) = widening_source(func, a) {
                     let zero = func.insert_inst(
                         InsertPoint::Before(inst),
