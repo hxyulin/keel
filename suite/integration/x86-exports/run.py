@@ -8,6 +8,11 @@ packet to a scratch directory, runs its build steps and its program, and
 compares the exit status and standard output with the manifest. A packet whose
 CPU features the host lacks, or whose build tool is missing, is skipped.
 
+A packet of kind "cpl0" holds privileged payload objects. The runner passes a
+copy of it to suite/integration/x86-cpl0/descriptor_campaign.py, which links
+each object into a QEMU guest; these packets also run on hosts other than
+x86-64 Linux. They are skipped when QEMU or GNU binutils are missing.
+
     python3 suite/integration/x86-exports/run.py <dir> [--cc clang] [--jobs N]
 
 The exit status is 1 when any packet fails or no packet is found.
@@ -28,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 VERSION = 1
+CAMPAIGN = Path(__file__).resolve().parent.parent / "x86-cpl0" / "descriptor_campaign.py"
+NOT_NATIVE = "requires x86-64 Linux"
 
 # is_x86_feature_detected! names that /proc/cpuinfo spells differently.
 CPUINFO_NAMES = {
@@ -44,6 +51,18 @@ FEATURES = {
     "vpclmulqdq", "aes", "sha", "cmpxchg16b", "xsave", "xsaveopt", "xsavec",
     "avx512f", "avx512cd", "avx512bw", "avx512dq", "avx512vl",
 }
+
+
+@dataclass
+class Tools:
+    """The programs a packet may need, as names or paths."""
+    cc: str
+    qemu: str = "qemu-system-x86_64"
+    binutils_prefix: str = ""
+    native: bool = True
+
+    def binutils(self) -> dict[str, str]:
+        return {name: self.binutils_prefix + name for name in ("as", "ld", "objcopy", "objdump")}
 
 
 @dataclass
@@ -73,6 +92,13 @@ def load_manifest(path: Path) -> dict:
     for key in ("test", "name", "features", "files", "build", "run", "exit"):
         if key not in manifest:
             raise ValueError(f"manifest lacks {key!r}")
+    kind = manifest.setdefault("kind", "native")
+    if kind == "cpl0":
+        if not manifest.get("campaign"):
+            raise ValueError("cpl0 manifest lacks 'campaign'")
+        return manifest
+    if kind != "native":
+        raise ValueError(f"unknown packet kind {kind!r}")
     unknown = sorted(set(manifest["features"]) - FEATURES)
     if unknown:
         raise ValueError(f"unknown CPU features {unknown}")
@@ -85,34 +111,64 @@ def find_packets(root: Path) -> list[Path]:
     return sorted(path.parent for path in root.rglob("manifest.json"))
 
 
-def run_packet(packet: Path, root: Path, cc: str, flags: set[str], timeout: float,
+def run_packet(packet: Path, root: Path, tools: Tools, flags: set[str], timeout: float,
                keep: Path | None) -> Result:
     label = str(packet.relative_to(root))
     try:
         manifest = load_manifest(packet / "manifest.json")
     except (OSError, ValueError) as error:
         return Result(label, "fail", f"bad manifest: {error}")
-    missing = missing_features(manifest["features"], flags)
-    if missing:
-        return Result(label, "skip", f"host lacks {missing[0]}")
-    for step in manifest["build"]:
-        tool = cc if step[0] == "cc" else step[0]
+    if manifest["kind"] == "cpl0":
+        needed = [tools.qemu, *tools.binutils().values()]
+    else:
+        if not tools.native:
+            return Result(label, "skip", NOT_NATIVE)
+        missing = missing_features(manifest["features"], flags)
+        if missing:
+            return Result(label, "skip", f"host lacks {missing[0]}")
+        needed = [tools.cc if step[0] == "cc" else step[0] for step in manifest["build"]]
+    for tool in needed:
         if shutil.which(tool) is None:
             return Result(label, "skip", f"{tool} not found")
     for name in manifest["files"]:
         if not (packet / name).is_file():
             return Result(label, "fail", f"missing file {name}")
+    run_in = _run_campaign if manifest["kind"] == "cpl0" else _run_in
     if keep is not None:
         work = keep / label
         shutil.rmtree(work, ignore_errors=True)
         work.parent.mkdir(parents=True, exist_ok=True)
-        return _run_in(packet, work, manifest, label, cc, timeout)
+        return run_in(packet, work, manifest, label, tools, timeout)
     with tempfile.TemporaryDirectory(prefix="keel-x86-export-") as scratch:
-        return _run_in(packet, Path(scratch) / "packet", manifest, label, cc, timeout)
+        return run_in(packet, Path(scratch) / "packet", manifest, label, tools, timeout)
 
 
-def _run_in(packet: Path, work: Path, manifest: dict, label: str, cc: str,
+def _run_campaign(packet: Path, work: Path, manifest: dict, label: str, tools: Tools,
+                  timeout: float) -> Result:
+    """Runs a cpl0 packet through descriptor_campaign.py; exit 0 is a pass."""
+    shutil.copytree(packet, work)
+    (work / "manifest.json").unlink()
+    campaign = manifest["campaign"]
+    binutils = tools.binutils()
+    argv = [sys.executable, str(CAMPAIGN), "--exports", str(work),
+            "--qemu", tools.qemu, "--as", binutils["as"], "--ld", binutils["ld"],
+            "--objcopy", binutils["objcopy"], "--objdump", binutils["objdump"]]
+    if campaign != "observe":
+        argv.append(f"--{campaign}")
+    try:
+        done = subprocess.run(argv, cwd=work, capture_output=True, text=True,
+                              timeout=timeout * 10)
+    except subprocess.TimeoutExpired as error:
+        return Result(label, "fail", f"timed out after {timeout * 10:g} s: {error.cmd}")
+    if done.returncode != 0:
+        return Result(label, "fail", f"campaign {campaign} exited {done.returncode}\n"
+                      f"{done.stdout}{done.stderr}")
+    return Result(label, "pass")
+
+
+def _run_in(packet: Path, work: Path, manifest: dict, label: str, tools: Tools,
             timeout: float) -> Result:
+    cc = tools.cc
     shutil.copytree(packet, work)
     try:
         for step in manifest["build"]:
@@ -146,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("dir", type=Path, help="the KEEL_TEST_EXPORT_DIR the tests wrote")
     parser.add_argument("--cc", default=os.environ.get("KEEL_CLANG") or "clang",
                         help="C compiler for 'cc' build steps (default: $KEEL_CLANG or clang)")
+    parser.add_argument("--qemu", default="qemu-system-x86_64",
+                        help="QEMU for cpl0 packets (default: qemu-system-x86_64)")
+    parser.add_argument("--binutils-prefix", default=None,
+                        help="prefix of the GNU as, ld, objcopy and objdump for cpl0 packets "
+                             "(default: none on Linux, x86_64-elf- elsewhere)")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--timeout", type=float, default=120, help="seconds per step")
     parser.add_argument("--filter", default="", help="run packets whose path contains this text")
@@ -154,19 +215,21 @@ def main(argv: list[str] | None = None) -> int:
                         help=argparse.SUPPRESS)
     parser.add_argument("--any-host", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if not args.any_host and not native_host():
-        print("run.py needs an x86-64 Linux host", file=sys.stderr)
-        return 2
+    native = args.any_host or native_host()
+    prefix = args.binutils_prefix
+    if prefix is None:
+        prefix = "" if platform.system() == "Linux" else "x86_64-elf-"
+    tools = Tools(args.cc, args.qemu, prefix, native)
     root = args.dir.resolve()
     packets = [p for p in find_packets(root) if args.filter in str(p.relative_to(root))]
     if not packets:
         print(f"no packets under {root}", file=sys.stderr)
         return 1
-    flags = host_flags(args.cpuinfo)
+    flags = host_flags(args.cpuinfo) if native else set()
     keep = args.keep.resolve() if args.keep else None
     with concurrent.futures.ThreadPoolExecutor(max(1, args.jobs)) as pool:
         results = list(pool.map(
-            lambda packet: run_packet(packet, root, args.cc, flags, args.timeout, keep),
+            lambda packet: run_packet(packet, root, tools, flags, args.timeout, keep),
             packets))
     counts = collections.Counter(result.status for result in results)
     for result in results:

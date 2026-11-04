@@ -288,6 +288,11 @@ a packet when the host lacks one of its CPU features or a build tool. Add
 directories. The manifest format is documented in
 `crates/keel-test-support/src/native.rs`.
 
+Packets of kind `cpl0` hold privileged payloads for the QEMU campaigns in
+`suite/integration/x86-cpl0`; see its README. The runner runs them on any host
+with QEMU and GNU binutils. On a host other than x86-64 Linux it skips the
+native packets and still runs the `cpl0` ones.
+
 ## Parallel execution
 
 Install `cargo-nextest` to run test binaries in parallel:

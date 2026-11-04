@@ -111,6 +111,86 @@ class Runner(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no packets", output)
 
+    def cpl0_tools(self, campaign_status=0):
+        """Fake QEMU, binutils and campaign script; the campaign logs its argv."""
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for name in ("qemu", "fake-as", "fake-ld", "fake-objcopy", "fake-objdump"):
+            path = bin_dir / name
+            path.write_text("#!/bin/sh\nexit 0\n")
+            path.chmod(0o755)
+        campaign = self.root / "campaign.py"
+        campaign.write_text(
+            "import pathlib, sys\n"
+            f"pathlib.Path({str(self.root / 'argv.txt')!r}).write_text(' '.join(sys.argv[1:]))\n"
+            "exports = pathlib.Path(sys.argv[sys.argv.index('--exports') + 1])\n"
+            "assert not (exports / 'manifest.json').exists()\n"
+            f"sys.exit({campaign_status})\n")
+        return campaign, ["--qemu", str(bin_dir / "qemu"),
+                          "--binutils-prefix", str(bin_dir / "fake-")]
+
+    def cpl0_packet(self, name, campaign):
+        directory = self.exports / "keel-codegen" / "x86_system.cpl0" / name
+        directory.mkdir(parents=True)
+        (directory / "msr-Baseline-Fast-false.o").write_bytes(b"\x7fELF")
+        body = dict(version=1, kind="cpl0", campaign=campaign, test="keel-codegen::x86_system",
+                    name=name, features=[], files=["msr-Baseline-Fast-false.o"], build=[],
+                    run=[], exit=0, stdout=None)
+        (directory / "manifest.json").write_text(json.dumps(body))
+
+    def test_cpl0_packet_runs_its_campaign(self):
+        campaign, options = self.cpl0_tools()
+        self.cpl0_packet("msr", "msr")
+        self.cpl0_packet("observe", "observe")
+        original = run.CAMPAIGN
+        run.CAMPAIGN = campaign
+        try:
+            code, output = self.main(*options, "--filter", "msr")
+            self.assertEqual(code, 0, output)
+            argv = (self.root / "argv.txt").read_text()
+            self.assertIn("--msr", argv)
+            self.assertIn("fake-objdump", argv)
+            code, output = self.main(*options, "--filter", "observe")
+            self.assertEqual(code, 0, output)
+            self.assertNotIn("--observe", (self.root / "argv.txt").read_text())
+        finally:
+            run.CAMPAIGN = original
+        self.assertIn("1 passed, 0 failed, 0 skipped of 1 packets", output)
+
+    def test_failing_campaign_fails_and_missing_qemu_skips(self):
+        campaign, options = self.cpl0_tools(campaign_status=1)
+        self.cpl0_packet("msr", "msr")
+        original = run.CAMPAIGN
+        run.CAMPAIGN = campaign
+        try:
+            code, output = self.main(*options)
+            self.assertEqual(code, 1, output)
+            self.assertIn("campaign msr exited 1", output)
+            code, output = self.main(*options, "--qemu", "keel-no-such-qemu")
+        finally:
+            run.CAMPAIGN = original
+        self.assertEqual(code, 0, output)
+        self.assertIn("skipped 1: keel-no-such-qemu not found", output)
+
+    def test_native_packets_skip_on_other_hosts(self):
+        self.packet("native", stdout="hi\n")
+        output = io.StringIO()
+        original = run.native_host
+        run.native_host = lambda: False
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                code = run.main([str(self.exports), "--cc", str(self.cc)])
+        finally:
+            run.native_host = original
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertIn("skipped 1: requires x86-64 Linux", output.getvalue())
+
+    def test_unknown_kind_fails(self):
+        self.packet("kind", kind="kernel")
+        code, output = self.main()
+        self.assertEqual(code, 1)
+        self.assertIn("unknown packet kind 'kernel'", output)
+
     def test_feature_names_follow_cpuinfo_spelling(self):
         flags = run.host_flags(self.cpuinfo)
         self.assertEqual(run.missing_features(["sse3", "sse4.2", "lzcnt"], flags), ["lzcnt"])

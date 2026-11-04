@@ -16,11 +16,19 @@
 //! On any other host without `KEEL_TEST_EXPORT_DIR`, `check` records the skip
 //! [`NOT_X86_LINUX`].
 //!
+//! A program marked with [`Program::cpl0`] holds privileged payload objects
+//! for one campaign of `suite/integration/x86-cpl0/descriptor_campaign.py`.
+//! Its code must never run in a host process, so `check` only exports it, and
+//! records the skip [`CPL0_EXPORT_ONLY`] when `KEEL_TEST_EXPORT_DIR` is unset.
+//! The runner passes the packet directory to the campaign, which links each
+//! object into a QEMU guest.
+//!
 //! # Manifest
 //!
 //! ```json
 //! {
 //!   "version": 1,
+//!   "kind": "native",
 //!   "test": "keel-codegen::x86_fp_intrinsics::x86_fma::fma_exports",
 //!   "name": "fma-Baseline-Fast",
 //!   "features": ["avx2", "fma"],
@@ -38,6 +46,9 @@
 //! the packet is skipped when that program is missing. Feature names are the
 //! ones `is_x86_feature_detected!` accepts. `stdout` is `null` when any output
 //! is accepted.
+//!
+//! A CPL0 packet has `"kind": "cpl0"` and a `"campaign"` key naming the
+//! campaign mode, such as `"msr"`. Its `build` and `run` lists are empty.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -49,6 +60,10 @@ use crate::{NO_CLANG, TempDir, clang, test_name};
 
 /// The skip reason on a host that cannot run x86-64 Linux programs.
 pub const NOT_X86_LINUX: &str = "requires x86-64 Linux; set KEEL_TEST_EXPORT_DIR to export";
+
+/// The skip reason for a CPL0 program when `KEEL_TEST_EXPORT_DIR` is unset.
+pub const CPL0_EXPORT_ONLY: &str =
+    "CPL0 payloads run under QEMU; set KEEL_TEST_EXPORT_DIR to export";
 
 /// CPU feature names a manifest may list.
 pub const FEATURES: &[&str] = &[
@@ -112,6 +127,7 @@ pub struct Program {
     package: String,
     test: String,
     name: String,
+    campaign: Option<String>,
     features: BTreeSet<&'static str>,
     files: Vec<(String, Vec<u8>)>,
     build: Vec<Vec<String>>,
@@ -134,6 +150,7 @@ impl Program {
             package: package.to_owned(),
             test: test_name(module),
             name,
+            campaign: None,
             features: BTreeSet::new(),
             files: Vec::new(),
             build: Vec::new(),
@@ -141,6 +158,22 @@ impl Program {
             exit: 0,
             stdout: None,
         }
+    }
+
+    /// Makes this a CPL0 packet for the `descriptor_campaign.py` mode
+    /// `campaign`, such as `"msr"`. Its files are the payload objects the
+    /// campaign expects; build steps and the run command are not used.
+    pub fn cpl0(mut self, campaign: &str) -> Self {
+        assert!(
+            !campaign.is_empty()
+                && campaign
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b == b'-'),
+            "campaign {campaign:?} must be a lowercase mode name"
+        );
+        self.campaign = Some(campaign.to_owned());
+        self.run.clear();
+        self
     }
 
     /// Requires CPU features, named as `is_x86_feature_detected!` names them.
@@ -227,6 +260,12 @@ impl Program {
             );
             self.export(root);
         }
+        if self.campaign.is_some() {
+            if export.is_none() {
+                record_once(&self.package, &self.test, CPL0_EXPORT_ONLY);
+            }
+            return;
+        }
         if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             if export.is_none() {
                 record_once(&self.package, &self.test, NOT_X86_LINUX);
@@ -243,6 +282,16 @@ impl Program {
     /// The manifest text.
     pub fn manifest(&self) -> String {
         let mut text = String::from("{\n  \"version\": 1,\n");
+        match &self.campaign {
+            Some(campaign) => {
+                let _ = writeln!(
+                    text,
+                    "  \"kind\": \"cpl0\",\n  \"campaign\": {},",
+                    json(campaign)
+                );
+            }
+            None => text.push_str("  \"kind\": \"native\",\n"),
+        }
         let _ = writeln!(
             text,
             "  \"test\": {},",
@@ -468,6 +517,7 @@ mod tests {
             concat!(
                 "{\n",
                 "  \"version\": 1,\n",
+                "  \"kind\": \"native\",\n",
                 "  \"test\": \"keel-test-support::keel_test_support::native::tests::manifest_lists_files_steps_and_expectations\",\n",
                 "  \"name\": \"fma-Baseline\",\n",
                 "  \"features\": [\"avx2\", \"fma\"],\n",
@@ -497,6 +547,22 @@ mod tests {
             .join("one");
         assert_eq!(fs::read_to_string(packet.join("a.c")).unwrap(), "x");
         assert!(packet.join("manifest.json").is_file());
+    }
+
+    #[test]
+    fn cpl0_manifest_names_the_campaign_and_has_no_steps() {
+        let manifest = native_program!("msr")
+            .cpl0("msr")
+            .file("msr-Baseline-Fast-false.o", [0x7f])
+            .manifest();
+        assert!(
+            manifest.contains("  \"kind\": \"cpl0\",\n  \"campaign\": \"msr\",\n"),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains("  \"build\": [],\n  \"run\": [],"),
+            "{manifest}"
+        );
     }
 
     #[test]
