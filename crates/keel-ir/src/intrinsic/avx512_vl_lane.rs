@@ -1,5 +1,6 @@
 //! F+VL bit transport retains independent merge values and encoded widths.
 use super::{Intrinsic, Type, VectorType};
+use keel_asm_ir::x86::EvexMnemonic;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum X86Avx512VlLaneKind {
     ScalarInt,
@@ -11,7 +12,7 @@ pub enum X86Avx512VlLaneKind {
 #[derive(Clone, Copy, Debug)]
 pub struct X86Avx512VlLane {
     pub name: &'static str,
-    pub opcode: &'static str,
+    pub opcode: EvexMnemonic,
     pub kind: X86Avx512VlLaneKind,
     pub input: Type,
     pub output: VectorType,
@@ -24,7 +25,7 @@ impl Intrinsic {
         Some(match self {
             Self::X86Avx512VlBroadcastd128 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastd128",
-                opcode: "vpbroadcastd",
+                opcode: EvexMnemonic::Vpbroadcastd,
                 kind: X86Avx512VlLaneKind::ScalarInt,
                 input: Type::I32,
                 output: VectorType::I32x4,
@@ -34,7 +35,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastq128 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastq128",
-                opcode: "vpbroadcastq",
+                opcode: EvexMnemonic::Vpbroadcastq,
                 kind: X86Avx512VlLaneKind::ScalarInt,
                 input: Type::I64,
                 output: VectorType::I64x2,
@@ -44,7 +45,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastss128 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastss128",
-                opcode: "vbroadcastss",
+                opcode: EvexMnemonic::Vbroadcastss,
                 kind: X86Avx512VlLaneKind::ScalarFloat,
                 input: Type::F32,
                 output: VectorType::F32x4,
@@ -54,7 +55,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastd256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastd256",
-                opcode: "vpbroadcastd",
+                opcode: EvexMnemonic::Vpbroadcastd,
                 kind: X86Avx512VlLaneKind::ScalarInt,
                 input: Type::I32,
                 output: VectorType::I32x8,
@@ -64,7 +65,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastq256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastq256",
-                opcode: "vpbroadcastq",
+                opcode: EvexMnemonic::Vpbroadcastq,
                 kind: X86Avx512VlLaneKind::ScalarInt,
                 input: Type::I64,
                 output: VectorType::I64x4,
@@ -74,7 +75,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastss256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastss256",
-                opcode: "vbroadcastss",
+                opcode: EvexMnemonic::Vbroadcastss,
                 kind: X86Avx512VlLaneKind::ScalarFloat,
                 input: Type::F32,
                 output: VectorType::F32x8,
@@ -84,7 +85,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastsd256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastsd256",
-                opcode: "vbroadcastsd",
+                opcode: EvexMnemonic::Vbroadcastsd,
                 kind: X86Avx512VlLaneKind::ScalarFloat,
                 input: Type::F64,
                 output: VectorType::F64x4,
@@ -94,7 +95,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcasti32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcasti32x4_256",
-                opcode: "vbroadcasti32x4",
+                opcode: EvexMnemonic::Vbroadcasti32x4,
                 kind: X86Avx512VlLaneKind::BroadcastBlock,
                 input: Type::Vector(VectorType::I32x4),
                 output: VectorType::I32x8,
@@ -108,7 +109,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlExtracti32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_extracti32x4_256",
-                opcode: "vextracti32x4",
+                opcode: EvexMnemonic::Vextracti32x4,
                 kind: X86Avx512VlLaneKind::ExtractBlock,
                 input: Type::Vector(VectorType::I32x8),
                 output: VectorType::I32x4,
@@ -123,7 +124,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlInserti32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_inserti32x4_256",
-                opcode: "vinserti32x4",
+                opcode: EvexMnemonic::Vinserti32x4,
                 kind: X86Avx512VlLaneKind::InsertBlock,
                 input: Type::Vector(VectorType::I32x4),
                 output: VectorType::I32x8,
@@ -139,7 +140,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlBroadcastf32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_broadcastf32x4_256",
-                opcode: "vbroadcastf32x4",
+                opcode: EvexMnemonic::Vbroadcastf32x4,
                 kind: X86Avx512VlLaneKind::BroadcastBlock,
                 input: Type::Vector(VectorType::F32x4),
                 output: VectorType::F32x8,
@@ -153,7 +154,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlExtractf32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_extractf32x4_256",
-                opcode: "vextractf32x4",
+                opcode: EvexMnemonic::Vextractf32x4,
                 kind: X86Avx512VlLaneKind::ExtractBlock,
                 input: Type::Vector(VectorType::F32x8),
                 output: VectorType::F32x4,
@@ -168,7 +169,7 @@ impl Intrinsic {
             },
             Self::X86Avx512VlInsertf32x4256 => X86Avx512VlLane {
                 name: "x86_avx512vl_insertf32x4_256",
-                opcode: "vinsertf32x4",
+                opcode: EvexMnemonic::Vinsertf32x4,
                 kind: X86Avx512VlLaneKind::InsertBlock,
                 input: Type::Vector(VectorType::F32x4),
                 output: VectorType::F32x8,

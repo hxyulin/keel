@@ -117,7 +117,7 @@ fn harness() -> String {
             "extern void {name}(const void*,const void*,void*);extern void unused_{name}(const void*,const void*,void*);__attribute__((noinline))static void ref_{name}(const void*p,const void*q,void*out){{{ct} aa[{n}],bb[{n}];memcpy(aa,p,{bytes});memcpy(bb,q,{bytes});{vt} a={load}(aa),b={load}({}),e;",
             if case.alias { "aa" } else { "bb" }
         );
-        let op = case.id.x86_legacy_fp_misc_opcode().unwrap();
+        let op = case.id.x86_legacy_fp_misc_opcode().unwrap().to_string();
         if op.contains("comis") {
             c += &format!(
                 "unsigned char cf,pf,zf;__asm__ volatile(\"{op} %4,%3;setb %0;setp %1;sete %2\":\"=qm\"(cf),\"=qm\"(pf),\"=qm\"(zf):\"x\"(a),\"x\"(b):\"cc\",\"memory\");uint32_t flags=cf|pf<<2|zf<<6;memcpy(out,&flags,4);}}\n"

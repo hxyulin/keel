@@ -39,9 +39,13 @@ pub(super) fn validate(
         return Err("AVX512 mask intrinsic signature mismatch");
     }
     let name = id.x86_avx512_mask_opcode().expect("masked vector opcode");
-    if name.starts_with("vcmp") || name.starts_with("vpcmp") {
+    if name.mnemonic().starts_with("vcmp") || name.mnemonic().starts_with("vpcmp") {
         let index = if args.len() == 3 { 2 } else { 3 };
-        let maximum = if name.starts_with("vpcmp") { 7 } else { 31 };
+        let maximum = if name.mnemonic().starts_with("vpcmp") {
+            7
+        } else {
+            31
+        };
         if !iconst(func, args[index]).is_some_and(|value| (0..=maximum).contains(&value)) {
             return Err("AVX512 comparison requires a constant predicate in its declared range");
         }
@@ -60,8 +64,8 @@ pub(super) fn k1() -> Register {
         width: 64,
     }
 }
-pub(super) fn opcode(name: &str, masked: bool) -> Opcode {
-    let mut op = EvexOpcode::parse(name).expect("registered AVX512 mask opcode");
+pub(super) fn opcode(mnemonic: EvexMnemonic, masked: bool) -> Opcode {
+    let mut op = EvexOpcode::new(mnemonic);
     if masked {
         op.options.mask = Some(1);
     }
@@ -106,7 +110,7 @@ impl FunctionCompiler<'_> {
             .expect("vector operand or result");
         let width = (ty.bytes().expect("vector width") * 8) as u16;
         let name = id.x86_avx512_mask_opcode().expect("masked vector opcode");
-        let compare = name.starts_with("vcmp") || name.starts_with("vpcmp");
+        let compare = name.mnemonic().starts_with("vcmp") || name.mnemonic().starts_with("vpcmp");
         if compare {
             self.avx512_stage_vector(args[0], FS0);
             self.avx512_stage_vector(args[1], FS1);

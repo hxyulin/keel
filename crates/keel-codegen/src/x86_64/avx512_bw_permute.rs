@@ -63,7 +63,10 @@ impl FunctionCompiler<'_> {
             );
             self.avx512_stage_vector(args[0], FS1);
             self.avx512_bw_stage_mask(args[1]);
-            self.emit(avx512_mask::opcode("vmovdqu16", true), [v(FS1), v(FS0)]);
+            self.emit(
+                avx512_mask::opcode(EvexMnemonic::Vmovdqu16, true),
+                [v(FS1), v(FS0)],
+            );
             FS1
         } else {
             self.avx512_stage_vector(args[0], FS0);

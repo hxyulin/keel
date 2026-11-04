@@ -38,7 +38,7 @@ impl FunctionCompiler<'_> {
             }
         }
         self.emit(
-            Opcode::parse(name).unwrap(),
+            name,
             [
                 asm_arg(xmm(FS1)),
                 asm_arg(xmm(FS2)),

@@ -25,6 +25,7 @@ fn fixtures() -> (String, String) {
         .filter(|id| id.x86_avx512_scalar_convert().is_some())
     {
         let (opcode, index) = id.x86_avx512_scalar_convert().unwrap();
+        let opcode = opcode.mnemonic();
         let info = id.info();
         let flags = opcode.contains("comis");
         let int_to_float = opcode.starts_with("vcvtsi2") || opcode.starts_with("vcvtusi2");

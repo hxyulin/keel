@@ -38,8 +38,9 @@ impl FunctionCompiler<'_> {
         let (name, immediate, control) = id.x86_avx512_special().expect("special intrinsic");
         let width = (self.ty(args[0]).bytes().expect("floating vector width") * 8) as u16;
         let independent_fixup =
-            id.x86_avx512_vl_special().is_some() && name.starts_with("vfixupimm");
-        let binary = name.starts_with("vscalef") || name.starts_with("vfixupimm");
+            id.x86_avx512_vl_special().is_some() && name.mnemonic().starts_with("vfixupimm");
+        let binary =
+            name.mnemonic().starts_with("vscalef") || name.mnemonic().starts_with("vfixupimm");
         if independent_fixup {
             self.avx512_stage_vector(args[2], FS0);
             self.avx512_stage_vector(args[3], FS1);
@@ -52,12 +53,12 @@ impl FunctionCompiler<'_> {
             }
         }
         self.avx512_stage_mask(args[1]);
-        let mut op = EvexOpcode::parse(name).expect("AVX512F special opcode");
+        let mut op = EvexOpcode::new(name);
         op.options.mask = Some(1);
         if let Some(index) = control {
             op.options.rounding = match iconst(self.func, args[index]).expect("validated control") {
                 4 => None,
-                value if name.starts_with("vscalef") => Some(match value {
+                value if name.mnemonic().starts_with("vscalef") => Some(match value {
                     8 => Rounding::Nearest,
                     9 => Rounding::Down,
                     10 => Rounding::Up,
@@ -101,9 +102,9 @@ impl FunctionCompiler<'_> {
                 self.ty(args[0]),
                 Type::Vector(keel_ir::VectorType::F64x2 | keel_ir::VectorType::F64x4)
             ) {
-                "vmovupd"
+                EvexMnemonic::Vmovupd
             } else {
-                "vmovups"
+                EvexMnemonic::Vmovups
             };
             self.emit(
                 avx512_mask::opcode(move_opcode, true),

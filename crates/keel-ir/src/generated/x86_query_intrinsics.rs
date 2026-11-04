@@ -2,6 +2,7 @@
 // Reviewed compiler policy in query-bindings.json; not inferred ISA semantics.
 use super::{Intrinsic, IntrinsicInfo};
 use crate::Type;
+use keel_asm_ir::x86::{Opcode, op};
 
 const _: () = {
     assert!(Intrinsic::X86Sgdt as usize == 687);
@@ -448,22 +449,22 @@ impl Intrinsic {
     /// Opcode, operand bits, exact write bytes; zero means register.
     /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
     /// See query-bindings.json for contracts.
-    pub fn x86_descriptor_query(self) -> Option<(&'static str, u16, usize)> {
+    pub fn x86_descriptor_query(self) -> Option<(Opcode, u16, usize)> {
         Some(match self {
-            Self::X86Sgdt => ("sgdt", 80, 10),
-            Self::X86Sidt => ("sidt", 80, 10),
-            Self::X86SldtMem => ("sldt", 16, 2),
-            Self::X86Sldt16 => ("sldt", 16, 0),
-            Self::X86Sldt32 => ("sldt", 32, 0),
-            Self::X86Sldt64 => ("sldt", 64, 0),
-            Self::X86StrMem => ("str", 16, 2),
-            Self::X86Str16 => ("str", 16, 0),
-            Self::X86Str32 => ("str", 32, 0),
-            Self::X86Str64 => ("str", 64, 0),
-            Self::X86SmswMem => ("smsw", 16, 2),
-            Self::X86Smsw16 => ("smsw", 16, 0),
-            Self::X86Smsw32 => ("smsw", 32, 0),
-            Self::X86Smsw64 => ("smsw", 64, 0),
+            Self::X86Sgdt => (op::SGDT, 80, 10),
+            Self::X86Sidt => (op::SIDT, 80, 10),
+            Self::X86SldtMem => (op::SLDT, 16, 2),
+            Self::X86Sldt16 => (op::SLDT, 16, 0),
+            Self::X86Sldt32 => (op::SLDT, 32, 0),
+            Self::X86Sldt64 => (op::SLDT, 64, 0),
+            Self::X86StrMem => (op::STR, 16, 2),
+            Self::X86Str16 => (op::STR, 16, 0),
+            Self::X86Str32 => (op::STR, 32, 0),
+            Self::X86Str64 => (op::STR, 64, 0),
+            Self::X86SmswMem => (op::SMSW, 16, 2),
+            Self::X86Smsw16 => (op::SMSW, 16, 0),
+            Self::X86Smsw32 => (op::SMSW, 32, 0),
+            Self::X86Smsw64 => (op::SMSW, 64, 0),
             _ => return None,
         })
     }
@@ -473,24 +474,24 @@ impl Intrinsic {
     /// at its declared width. Successful wide LAR bits 19:16 are undefined.
     /// Only captured ZF is returned; no general FLAGS preservation is promised.
     /// See query-bindings.json for contracts.
-    pub fn x86_selector_query(self) -> Option<(&'static str, u16, bool)> {
+    pub fn x86_selector_query(self) -> Option<(Opcode, u16, bool)> {
         Some(match self {
-            Self::X86Lar16 => ("lar", 16, false),
-            Self::X86Lar16Mem => ("lar", 16, true),
-            Self::X86Lar32 => ("lar", 32, false),
-            Self::X86Lar32Mem => ("lar", 32, true),
-            Self::X86Lar64 => ("lar", 64, false),
-            Self::X86Lar64Mem => ("lar", 64, true),
-            Self::X86Lsl16 => ("lsl", 16, false),
-            Self::X86Lsl16Mem => ("lsl", 16, true),
-            Self::X86Lsl32 => ("lsl", 32, false),
-            Self::X86Lsl32Mem => ("lsl", 32, true),
-            Self::X86Lsl64 => ("lsl", 64, false),
-            Self::X86Lsl64Mem => ("lsl", 64, true),
-            Self::X86Verr => ("verr", 0, false),
-            Self::X86VerrMem => ("verr", 0, true),
-            Self::X86Verw => ("verw", 0, false),
-            Self::X86VerwMem => ("verw", 0, true),
+            Self::X86Lar16 => (op::LAR, 16, false),
+            Self::X86Lar16Mem => (op::LAR, 16, true),
+            Self::X86Lar32 => (op::LAR, 32, false),
+            Self::X86Lar32Mem => (op::LAR, 32, true),
+            Self::X86Lar64 => (op::LAR, 64, false),
+            Self::X86Lar64Mem => (op::LAR, 64, true),
+            Self::X86Lsl16 => (op::LSL, 16, false),
+            Self::X86Lsl16Mem => (op::LSL, 16, true),
+            Self::X86Lsl32 => (op::LSL, 32, false),
+            Self::X86Lsl32Mem => (op::LSL, 32, true),
+            Self::X86Lsl64 => (op::LSL, 64, false),
+            Self::X86Lsl64Mem => (op::LSL, 64, true),
+            Self::X86Verr => (op::VERR, 0, false),
+            Self::X86VerrMem => (op::VERR, 0, true),
+            Self::X86Verw => (op::VERW, 0, false),
+            Self::X86VerwMem => (op::VERW, 0, true),
             _ => return None,
         })
     }

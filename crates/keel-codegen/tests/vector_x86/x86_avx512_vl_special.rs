@@ -203,6 +203,7 @@ fn vl_special_control_bounds_raw_effects_and_per_function_features() {
         assert!(inst.is_pinned() && inst.may_trap() && !id.info().pure);
         assert_eq!(inst.memory_effects(), MemoryEffects::Barrier);
         if let Some((name, _, Some(index))) = id.x86_avx512_vl_special() {
+            let name = name.mnemonic();
             let maximum = if name.starts_with("vgetmant") {
                 15
             } else {

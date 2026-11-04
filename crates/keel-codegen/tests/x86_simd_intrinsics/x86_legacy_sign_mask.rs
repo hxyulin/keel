@@ -80,7 +80,8 @@ fn harness() -> String {
     for case in cases() {
         let i = case.id.info();
         let a = i.params[0].vector().unwrap();
-        let op = case.id.x86_legacy_sign_mask_opcode().unwrap();
+        let op = case.id.x86_legacy_sign_mask_opcode().unwrap().to_string();
+        let op = op.as_str();
         let kind = match op {
             "vpermilps" => 0,
             "vpermilpd" => 1,

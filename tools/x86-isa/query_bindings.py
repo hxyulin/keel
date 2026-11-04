@@ -9,10 +9,10 @@ import re
 import system_intrinsics
 
 GROUPS = {
-    'descriptor_query': ('x86_descriptor_query', "(&'static str, u16, usize)",
+    'descriptor_query': ('x86_descriptor_query', '(Opcode, u16, usize)',
                          'Opcode, operand bits, exact write bytes; zero means register.\n'
                          'Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.'),
-    'selector_query': ('x86_selector_query', "(&'static str, u16, bool)",
+    'selector_query': ('x86_selector_query', '(Opcode, u16, bool)',
                        'Opcode, destination width or zero for verify, exact m16 pointer form.\n'
                        'Pinned even with unused results. Failed LAR/LSL preserve the old destination\n'
                        'at its declared width. Successful wide LAR bits 19:16 are undefined.\n'
@@ -94,7 +94,8 @@ def generate(schema, root):
     rows = validate(schema, root)
     lines = [system_intrinsics.HEADER,
              '// Reviewed compiler policy in query-bindings.json; not inferred ISA semantics.',
-             'use super::{Intrinsic, IntrinsicInfo};', 'use crate::Type;', '',
+             'use super::{Intrinsic, IntrinsicInfo};', 'use crate::Type;',
+             'use keel_asm_ir::x86::{Opcode, op};', '',
              'const _: () = {']
     lines += [f'    assert!(Intrinsic::{r["variant"]} as usize == {r["id"]});' for r in rows]
     lines += ['};', '']
@@ -108,9 +109,9 @@ def generate(schema, root):
             if b['kind'] != kind:
                 continue
             if kind == 'descriptor_query':
-                value = f'("{b["mnemonic"]}", {b["bits"]}, {b["write_bytes"]})'
+                value = f'(op::{b["mnemonic"].upper()}, {b["bits"]}, {b["write_bytes"]})'
             elif kind == 'selector_query':
-                value = f'("{b["mnemonic"]}", {b["bits"]}, {str(b["memory"]).lower()})'
+                value = f'(op::{b["mnemonic"].upper()}, {b["bits"]}, {str(b["memory"]).lower()})'
             else:
                 value = f'({str(b["output"]).lower()}, {b["bits"]}, {str(b["immediate"]).lower()})'
             lines += [f'            Self::{row["variant"]} => {value},']

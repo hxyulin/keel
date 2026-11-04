@@ -1,5 +1,6 @@
 //! Narrowing conversions retain encoded source width and zero unused result bytes.
 use super::{Intrinsic, Type, VectorType};
+use keel_asm_ir::x86::EvexMnemonic;
 #[derive(Clone, Copy, Debug)]
 pub struct X86Avx512VlNarrow {
     pub name: &'static str,
@@ -8,14 +9,14 @@ pub struct X86Avx512VlNarrow {
     pub result: VectorType,
     pub store: bool,
     pub memory_bytes: u16,
-    pub opcode: &'static str,
+    pub opcode: EvexMnemonic,
     pub params: &'static [Type],
     pub returns: &'static [Type],
 }
 impl Intrinsic {
     pub fn x86_avx512_vl_narrow(self) -> Option<X86Avx512VlNarrow> {
         macro_rules! row {
-            ($name:literal,$width:literal,$source:ident,$result:ident,$store:literal,$bytes:literal,$opcode:literal) => {{
+            ($name:literal,$width:literal,$source:ident,$result:ident,$store:literal,$bytes:literal,$opcode:ident) => {{
                 const S: Type = Type::Vector(VectorType::$source);
                 const R: Type = Type::Vector(VectorType::$result);
                 X86Avx512VlNarrow {
@@ -25,7 +26,7 @@ impl Intrinsic {
                     result: VectorType::$result,
                     store: $store,
                     memory_bytes: $bytes,
-                    opcode: $opcode,
+                    opcode: EvexMnemonic::$opcode,
                     params: if $store {
                         &[Type::Ptr, S, Type::I8]
                     } else {
@@ -43,7 +44,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovdb"
+                Vpmovdb
             ),
             Self::X86Avx512VlPmovdbStore128 => row!(
                 "x86_avx512vl_pmovdbstore128",
@@ -52,7 +53,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovdb"
+                Vpmovdb
             ),
             Self::X86Avx512VlPmovdw128 => row!(
                 "x86_avx512vl_pmovdw128",
@@ -61,7 +62,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovdw"
+                Vpmovdw
             ),
             Self::X86Avx512VlPmovdwStore128 => row!(
                 "x86_avx512vl_pmovdwstore128",
@@ -70,7 +71,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovdw"
+                Vpmovdw
             ),
             Self::X86Avx512VlPmovqb128 => row!(
                 "x86_avx512vl_pmovqb128",
@@ -79,7 +80,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 2,
-                "vpmovqb"
+                Vpmovqb
             ),
             Self::X86Avx512VlPmovqbStore128 => row!(
                 "x86_avx512vl_pmovqbstore128",
@@ -88,7 +89,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 2,
-                "vpmovqb"
+                Vpmovqb
             ),
             Self::X86Avx512VlPmovqw128 => row!(
                 "x86_avx512vl_pmovqw128",
@@ -97,7 +98,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 4,
-                "vpmovqw"
+                Vpmovqw
             ),
             Self::X86Avx512VlPmovqwStore128 => row!(
                 "x86_avx512vl_pmovqwstore128",
@@ -106,7 +107,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 4,
-                "vpmovqw"
+                Vpmovqw
             ),
             Self::X86Avx512VlPmovqd128 => row!(
                 "x86_avx512vl_pmovqd128",
@@ -115,7 +116,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 8,
-                "vpmovqd"
+                Vpmovqd
             ),
             Self::X86Avx512VlPmovqdStore128 => row!(
                 "x86_avx512vl_pmovqdstore128",
@@ -124,7 +125,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 8,
-                "vpmovqd"
+                Vpmovqd
             ),
             Self::X86Avx512VlPmovsdb128 => row!(
                 "x86_avx512vl_pmovsdb128",
@@ -133,7 +134,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovsdb"
+                Vpmovsdb
             ),
             Self::X86Avx512VlPmovsdbStore128 => row!(
                 "x86_avx512vl_pmovsdbstore128",
@@ -142,7 +143,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovsdb"
+                Vpmovsdb
             ),
             Self::X86Avx512VlPmovsdw128 => row!(
                 "x86_avx512vl_pmovsdw128",
@@ -151,7 +152,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovsdw"
+                Vpmovsdw
             ),
             Self::X86Avx512VlPmovsdwStore128 => row!(
                 "x86_avx512vl_pmovsdwstore128",
@@ -160,7 +161,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovsdw"
+                Vpmovsdw
             ),
             Self::X86Avx512VlPmovsqb128 => row!(
                 "x86_avx512vl_pmovsqb128",
@@ -169,7 +170,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 2,
-                "vpmovsqb"
+                Vpmovsqb
             ),
             Self::X86Avx512VlPmovsqbStore128 => row!(
                 "x86_avx512vl_pmovsqbstore128",
@@ -178,7 +179,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 2,
-                "vpmovsqb"
+                Vpmovsqb
             ),
             Self::X86Avx512VlPmovsqw128 => row!(
                 "x86_avx512vl_pmovsqw128",
@@ -187,7 +188,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 4,
-                "vpmovsqw"
+                Vpmovsqw
             ),
             Self::X86Avx512VlPmovsqwStore128 => row!(
                 "x86_avx512vl_pmovsqwstore128",
@@ -196,7 +197,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 4,
-                "vpmovsqw"
+                Vpmovsqw
             ),
             Self::X86Avx512VlPmovsqd128 => row!(
                 "x86_avx512vl_pmovsqd128",
@@ -205,7 +206,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 8,
-                "vpmovsqd"
+                Vpmovsqd
             ),
             Self::X86Avx512VlPmovsqdStore128 => row!(
                 "x86_avx512vl_pmovsqdstore128",
@@ -214,7 +215,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 8,
-                "vpmovsqd"
+                Vpmovsqd
             ),
             Self::X86Avx512VlPmovusdb128 => row!(
                 "x86_avx512vl_pmovusdb128",
@@ -223,7 +224,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovusdb"
+                Vpmovusdb
             ),
             Self::X86Avx512VlPmovusdbStore128 => row!(
                 "x86_avx512vl_pmovusdbstore128",
@@ -232,7 +233,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovusdb"
+                Vpmovusdb
             ),
             Self::X86Avx512VlPmovusdw128 => row!(
                 "x86_avx512vl_pmovusdw128",
@@ -241,7 +242,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovusdw"
+                Vpmovusdw
             ),
             Self::X86Avx512VlPmovusdwStore128 => row!(
                 "x86_avx512vl_pmovusdwstore128",
@@ -250,7 +251,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovusdw"
+                Vpmovusdw
             ),
             Self::X86Avx512VlPmovusqb128 => row!(
                 "x86_avx512vl_pmovusqb128",
@@ -259,7 +260,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 2,
-                "vpmovusqb"
+                Vpmovusqb
             ),
             Self::X86Avx512VlPmovusqbStore128 => row!(
                 "x86_avx512vl_pmovusqbstore128",
@@ -268,7 +269,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 2,
-                "vpmovusqb"
+                Vpmovusqb
             ),
             Self::X86Avx512VlPmovusqw128 => row!(
                 "x86_avx512vl_pmovusqw128",
@@ -277,7 +278,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 4,
-                "vpmovusqw"
+                Vpmovusqw
             ),
             Self::X86Avx512VlPmovusqwStore128 => row!(
                 "x86_avx512vl_pmovusqwstore128",
@@ -286,7 +287,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 4,
-                "vpmovusqw"
+                Vpmovusqw
             ),
             Self::X86Avx512VlPmovusqd128 => row!(
                 "x86_avx512vl_pmovusqd128",
@@ -295,7 +296,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 8,
-                "vpmovusqd"
+                Vpmovusqd
             ),
             Self::X86Avx512VlPmovusqdStore128 => row!(
                 "x86_avx512vl_pmovusqdstore128",
@@ -304,7 +305,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 8,
-                "vpmovusqd"
+                Vpmovusqd
             ),
             Self::X86Avx512VlPmovdb256 => row!(
                 "x86_avx512vl_pmovdb256",
@@ -313,7 +314,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 8,
-                "vpmovdb"
+                Vpmovdb
             ),
             Self::X86Avx512VlPmovdbStore256 => row!(
                 "x86_avx512vl_pmovdbstore256",
@@ -322,7 +323,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 8,
-                "vpmovdb"
+                Vpmovdb
             ),
             Self::X86Avx512VlPmovdw256 => row!(
                 "x86_avx512vl_pmovdw256",
@@ -331,7 +332,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 16,
-                "vpmovdw"
+                Vpmovdw
             ),
             Self::X86Avx512VlPmovdwStore256 => row!(
                 "x86_avx512vl_pmovdwstore256",
@@ -340,7 +341,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 16,
-                "vpmovdw"
+                Vpmovdw
             ),
             Self::X86Avx512VlPmovqb256 => row!(
                 "x86_avx512vl_pmovqb256",
@@ -349,7 +350,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovqb"
+                Vpmovqb
             ),
             Self::X86Avx512VlPmovqbStore256 => row!(
                 "x86_avx512vl_pmovqbstore256",
@@ -358,7 +359,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovqb"
+                Vpmovqb
             ),
             Self::X86Avx512VlPmovqw256 => row!(
                 "x86_avx512vl_pmovqw256",
@@ -367,7 +368,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovqw"
+                Vpmovqw
             ),
             Self::X86Avx512VlPmovqwStore256 => row!(
                 "x86_avx512vl_pmovqwstore256",
@@ -376,7 +377,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovqw"
+                Vpmovqw
             ),
             Self::X86Avx512VlPmovqd256 => row!(
                 "x86_avx512vl_pmovqd256",
@@ -385,7 +386,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 16,
-                "vpmovqd"
+                Vpmovqd
             ),
             Self::X86Avx512VlPmovqdStore256 => row!(
                 "x86_avx512vl_pmovqdstore256",
@@ -394,7 +395,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 16,
-                "vpmovqd"
+                Vpmovqd
             ),
             Self::X86Avx512VlPmovsdb256 => row!(
                 "x86_avx512vl_pmovsdb256",
@@ -403,7 +404,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 8,
-                "vpmovsdb"
+                Vpmovsdb
             ),
             Self::X86Avx512VlPmovsdbStore256 => row!(
                 "x86_avx512vl_pmovsdbstore256",
@@ -412,7 +413,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 8,
-                "vpmovsdb"
+                Vpmovsdb
             ),
             Self::X86Avx512VlPmovsdw256 => row!(
                 "x86_avx512vl_pmovsdw256",
@@ -421,7 +422,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 16,
-                "vpmovsdw"
+                Vpmovsdw
             ),
             Self::X86Avx512VlPmovsdwStore256 => row!(
                 "x86_avx512vl_pmovsdwstore256",
@@ -430,7 +431,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 16,
-                "vpmovsdw"
+                Vpmovsdw
             ),
             Self::X86Avx512VlPmovsqb256 => row!(
                 "x86_avx512vl_pmovsqb256",
@@ -439,7 +440,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovsqb"
+                Vpmovsqb
             ),
             Self::X86Avx512VlPmovsqbStore256 => row!(
                 "x86_avx512vl_pmovsqbstore256",
@@ -448,7 +449,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovsqb"
+                Vpmovsqb
             ),
             Self::X86Avx512VlPmovsqw256 => row!(
                 "x86_avx512vl_pmovsqw256",
@@ -457,7 +458,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovsqw"
+                Vpmovsqw
             ),
             Self::X86Avx512VlPmovsqwStore256 => row!(
                 "x86_avx512vl_pmovsqwstore256",
@@ -466,7 +467,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovsqw"
+                Vpmovsqw
             ),
             Self::X86Avx512VlPmovsqd256 => row!(
                 "x86_avx512vl_pmovsqd256",
@@ -475,7 +476,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 16,
-                "vpmovsqd"
+                Vpmovsqd
             ),
             Self::X86Avx512VlPmovsqdStore256 => row!(
                 "x86_avx512vl_pmovsqdstore256",
@@ -484,7 +485,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 16,
-                "vpmovsqd"
+                Vpmovsqd
             ),
             Self::X86Avx512VlPmovusdb256 => row!(
                 "x86_avx512vl_pmovusdb256",
@@ -493,7 +494,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 8,
-                "vpmovusdb"
+                Vpmovusdb
             ),
             Self::X86Avx512VlPmovusdbStore256 => row!(
                 "x86_avx512vl_pmovusdbstore256",
@@ -502,7 +503,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 8,
-                "vpmovusdb"
+                Vpmovusdb
             ),
             Self::X86Avx512VlPmovusdw256 => row!(
                 "x86_avx512vl_pmovusdw256",
@@ -511,7 +512,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 16,
-                "vpmovusdw"
+                Vpmovusdw
             ),
             Self::X86Avx512VlPmovusdwStore256 => row!(
                 "x86_avx512vl_pmovusdwstore256",
@@ -520,7 +521,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 16,
-                "vpmovusdw"
+                Vpmovusdw
             ),
             Self::X86Avx512VlPmovusqb256 => row!(
                 "x86_avx512vl_pmovusqb256",
@@ -529,7 +530,7 @@ impl Intrinsic {
                 I8x16,
                 false,
                 4,
-                "vpmovusqb"
+                Vpmovusqb
             ),
             Self::X86Avx512VlPmovusqbStore256 => row!(
                 "x86_avx512vl_pmovusqbstore256",
@@ -538,7 +539,7 @@ impl Intrinsic {
                 I8x16,
                 true,
                 4,
-                "vpmovusqb"
+                Vpmovusqb
             ),
             Self::X86Avx512VlPmovusqw256 => row!(
                 "x86_avx512vl_pmovusqw256",
@@ -547,7 +548,7 @@ impl Intrinsic {
                 I16x8,
                 false,
                 8,
-                "vpmovusqw"
+                Vpmovusqw
             ),
             Self::X86Avx512VlPmovusqwStore256 => row!(
                 "x86_avx512vl_pmovusqwstore256",
@@ -556,7 +557,7 @@ impl Intrinsic {
                 I16x8,
                 true,
                 8,
-                "vpmovusqw"
+                Vpmovusqw
             ),
             Self::X86Avx512VlPmovusqd256 => row!(
                 "x86_avx512vl_pmovusqd256",
@@ -565,7 +566,7 @@ impl Intrinsic {
                 I32x4,
                 false,
                 16,
-                "vpmovusqd"
+                Vpmovusqd
             ),
             Self::X86Avx512VlPmovusqdStore256 => row!(
                 "x86_avx512vl_pmovusqdstore256",
@@ -574,7 +575,7 @@ impl Intrinsic {
                 I32x4,
                 true,
                 16,
-                "vpmovusqd"
+                Vpmovusqd
             ),
             _ => return None,
         })

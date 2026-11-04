@@ -37,7 +37,12 @@ fn typed_bridge_diagnostics_pinning_and_v1_objects() {
         assert!(m.to_string().contains(&format!("x86_sse_{name}128")));
         let id = keel_ir::Intrinsic::from_name(&format!("x86_sse_{name}128")).unwrap();
         assert!(!id.info().pure);
-        assert_eq!(id.x86_legacy_raw_fp_opcode(), Some(name));
+        assert_eq!(
+            id.x86_legacy_raw_fp_opcode()
+                .map(|op| op.to_string())
+                .as_deref(),
+            Some(name)
+        );
         let input = if name == "cvtdq2ps" {
             keel_ir::VectorType::I32x4
         } else {

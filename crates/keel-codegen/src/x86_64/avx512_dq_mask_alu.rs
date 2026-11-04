@@ -52,7 +52,7 @@ impl FunctionCompiler<'_> {
             let b = self.use_reg(args[1], S1);
             self.emit(transfer, [asm_arg(k(2)), asm_arg(r32(b))]);
         }
-        let opcode = Opcode::parse(d.opcode).expect("imported DQ mask opcode");
+        let opcode = d.opcode;
         if d.kind == Kind::Test {
             self.emit(opcode, [asm_arg(k(1)), asm_arg(k(2))]);
             // Capture both flags before any integer packing modifies FLAGS.

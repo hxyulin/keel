@@ -46,7 +46,7 @@ impl FunctionCompiler<'_> {
         let name = id
             .x86_avx512_scalar_fma_opcode()
             .expect("scalar FMA intrinsic");
-        let mut op = EvexOpcode::parse(name).expect("scalar FMA opcode");
+        let mut op = EvexOpcode::new(name);
         op.options.mask = Some(1);
         let control = iconst(self.func, args[5]).expect("validated FMA rounding");
         if control != 4 {
@@ -65,9 +65,9 @@ impl FunctionCompiler<'_> {
         // merge and retain the FMA's upper lanes through VMOVSS/SD source one.
         self.scalar_fma_stage(args[0], FS1);
         let move_name = if self.ty(args[0]) == Type::Vector(keel_ir::VectorType::F32x4) {
-            "vmovss"
+            EvexMnemonic::Vmovss
         } else {
-            "vmovsd"
+            EvexMnemonic::Vmovsd
         };
         self.emit(
             avx512_mask::opcode(move_name, true),

@@ -137,7 +137,7 @@ impl FunctionCompiler<'_> {
     ) {
         let source = self.ty(args[0]);
         let target = self.func.value_type(result.unwrap());
-        let opcode = Opcode::parse(id.x86_raw_fp_opcode().unwrap()).unwrap();
+        let opcode = id.x86_raw_fp_opcode().unwrap();
         if source.is_int() {
             let r = self.use_reg(args[0], S0);
             self.emit(
@@ -190,7 +190,7 @@ impl FunctionCompiler<'_> {
             }
         }
         self.emit(
-            Opcode::parse(id.x86_fp_compare_opcode().unwrap()).unwrap(),
+            id.x86_fp_compare_opcode().unwrap(),
             [
                 asm_arg(simd(FS0, ty)),
                 asm_arg(simd(FS1, ty)),
@@ -224,12 +224,11 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         let ty = self.ty(args[0]);
-        let name = id
+        let opcode = id
             .x86_pure_bits_opcode()
             .or_else(|| id.x86_legacy_sign_mask_opcode())
-            .or_else(|| id.is_x86_legacy_ptest().then_some("ptest"))
+            .or_else(|| id.is_x86_legacy_ptest().then_some(op::PTEST))
             .unwrap();
-        let opcode = Opcode::parse(name).unwrap();
         for (arg, scratch) in args.iter().copied().zip([FS1, FS2]) {
             let t = self.ty(arg);
             let r = self.use_freg(arg, scratch);
@@ -237,31 +236,26 @@ impl FunctionCompiler<'_> {
                 self.emit(movs(t), [asm_arg(simd(scratch, t)), asm_arg(simd(r, t))]);
             }
         }
-        if name.starts_with("vperm") {
+        let cross_lane = matches!(opcode, op::VPERMD | op::VPERMPS);
+        if cross_lane || matches!(opcode, op::VPERMILPS | op::VPERMILPD) {
             self.emit(
                 opcode,
                 [
                     asm_arg(simd(FS0, ty)),
-                    asm_arg(simd(
-                        if matches!(name, "vpermd" | "vpermps") {
-                            FS2
-                        } else {
-                            FS1
-                        },
-                        ty,
-                    )),
-                    asm_arg(simd(
-                        if matches!(name, "vpermd" | "vpermps") {
-                            FS1
-                        } else {
-                            FS2
-                        },
-                        ty,
-                    )),
+                    asm_arg(simd(if cross_lane { FS2 } else { FS1 }, ty)),
+                    asm_arg(simd(if cross_lane { FS1 } else { FS2 }, ty)),
                 ],
             );
             self.def_vector_from_fs0(result, ty);
-        } else if name.contains("movmsk") {
+        } else if matches!(
+            opcode,
+            op::VMOVMSKPS
+                | op::VMOVMSKPD
+                | op::VPMOVMSKB
+                | Opcode::Movmskps
+                | Opcode::Movmskpd
+                | Opcode::Pmovmskb
+        ) {
             let d = self.def_reg(result);
             self.emit(opcode, [asm_arg(r32(d)), asm_arg(simd(FS1, ty))]);
             self.def_done(result, d);
@@ -286,11 +280,10 @@ impl FunctionCompiler<'_> {
 impl FunctionCompiler<'_> {
     pub(super) fn native_fp_misc(&mut self, id: Intrinsic, args: &[Value], result: Option<Value>) {
         let ty = self.ty(args[0]);
-        let name = id
+        let opcode = id
             .x86_fp_misc_opcode()
             .or_else(|| id.x86_fp_horizontal_dot_opcode())
             .unwrap();
-        let opcode = Opcode::parse(name).unwrap();
         for (arg, scratch) in args
             .iter()
             .copied()
@@ -303,7 +296,10 @@ impl FunctionCompiler<'_> {
                 self.emit(movs(ty), [asm_arg(simd(scratch, ty)), asm_arg(simd(r, ty))]);
             }
         }
-        if name.contains("comis") {
+        if matches!(
+            opcode,
+            op::VCOMISS | Opcode::Vucomiss | op::VCOMISD | Opcode::Vucomisd
+        ) {
             self.emit(opcode, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
             // Preserve all three result flags before an ALU instruction changes them.
             for (cc, r) in [(2, S0), (10, S1), (4, S2)] {
@@ -357,7 +353,7 @@ impl FunctionCompiler<'_> {
     ) {
         let source = self.ty(args[0]);
         let target = self.func.value_type(result.unwrap());
-        let opcode = Opcode::parse(id.x86_legacy_raw_fp_opcode().unwrap()).unwrap();
+        let opcode = id.x86_legacy_raw_fp_opcode().unwrap();
         if source.is_int() {
             let r = self.use_reg(args[0], S0);
             self.emit(Opcode::Xorps, [asm_arg(xmm(FS0)), asm_arg(xmm(FS0))]);
@@ -397,12 +393,11 @@ impl FunctionCompiler<'_> {
     ) {
         let ty = self.ty(args[0]);
         let compare = id.is_x86_legacy_fp_compare();
-        let name = id
+        let opcode = id
             .x86_legacy_fp_misc_opcode()
             .or_else(|| id.x86_legacy_fp_compare_opcode())
             .or_else(|| id.x86_legacy_fp_v2_opcode())
             .unwrap();
-        let opcode = Opcode::parse(name).unwrap();
         for (arg, scratch) in args
             .iter()
             .copied()
@@ -418,7 +413,10 @@ impl FunctionCompiler<'_> {
                 self.emit(movs(ty), [asm_arg(xmm(scratch)), asm_arg(xmm(r))]);
             }
         }
-        if name.contains("comis") {
+        if matches!(
+            opcode,
+            Opcode::Comiss | Opcode::Ucomiss | Opcode::Comisd | Opcode::Ucomisd
+        ) {
             self.emit(opcode, [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);
             for (cc, r) in [(2, S0), (10, S1), (4, S2)] {
                 self.emit(Opcode::Setcc(cc), [asm_arg(r8(r))]);

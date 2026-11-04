@@ -18,7 +18,7 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let op = Opcode::parse(id.x86_aes_opcode().unwrap()).unwrap();
+        let op = id.x86_aes_opcode().unwrap();
         let dst = asm_arg(simd(FS0, ty));
         let src = asm_arg(simd(if unary { FS0 } else { FS1 }, ty));
         if id == Intrinsic::X86Aeskeygenassist128 {

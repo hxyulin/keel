@@ -5,7 +5,7 @@ use super::*;
 impl FunctionCompiler<'_> {
     pub(super) fn native_owned_x87_stack(&mut self, id: Intrinsic) {
         let op = id.x86_owned_x87_stack().expect("owned stack opcode");
-        let opcode = Opcode::parse(op.mnemonic).expect("baseline x87 opcode");
+        let opcode = op.mnemonic;
         if let Some(index) = op.stack_index {
             let register = Register {
                 class: RegisterClass::X87,

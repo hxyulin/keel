@@ -23,7 +23,10 @@ fn sources() -> (String, String) {
         if id.x86_avx512_vl_permute().is_some() {
             continue;
         }
-        let Some((opcode, kind)) = id.x86_avx512_permute() else {
+        let Some((opcode, kind)) = id
+            .x86_avx512_permute()
+            .map(|(op, kind)| (op.mnemonic(), kind))
+        else {
             continue;
         };
         let shape = id.info().returns[0].vector().unwrap();

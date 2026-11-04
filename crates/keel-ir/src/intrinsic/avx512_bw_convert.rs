@@ -16,14 +16,14 @@ pub struct X86Avx512BwConvert {
     pub word: VectorType,
     pub mask: Type,
     pub memory_bytes: u16,
-    pub opcode: &'static str,
+    pub opcode: EvexMnemonic,
     pub params: &'static [Type],
     pub returns: &'static [Type],
 }
 impl Intrinsic {
     pub fn x86_avx512_bw_convert(self) -> Option<X86Avx512BwConvert> {
         macro_rules! descriptor {
-            ($kind:ident,$name:literal,$width:literal,$byte:ident,$word:ident,$mask:ident,$opcode:literal) => {{
+            ($kind:ident,$name:literal,$width:literal,$byte:ident,$word:ident,$mask:ident,$opcode:ident) => {{
                 const B: Type = Type::Vector(VectorType::$byte);
                 const W: Type = Type::Vector(VectorType::$word);
                 const M: Type = Type::$mask;
@@ -36,7 +36,7 @@ impl Intrinsic {
                     word: VectorType::$word,
                     mask: M,
                     memory_bytes: $width / 16,
-                    opcode: $opcode,
+                    opcode: EvexMnemonic::$opcode,
                     params: match $kind {
                         Widen => &[W, M, B],
                         WidenLoad => &[Type::Ptr, W, M],
@@ -59,7 +59,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovsxbwLoad128 => descriptor!(
                 WidenLoad,
@@ -68,7 +68,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovzxbw128 => descriptor!(
                 Widen,
@@ -77,7 +77,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovzxbwLoad128 => descriptor!(
                 WidenLoad,
@@ -86,7 +86,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovwb128 => descriptor!(
                 Narrow,
@@ -95,7 +95,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovwbStore128 => descriptor!(
                 NarrowStore,
@@ -104,7 +104,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovswb128 => descriptor!(
                 Narrow,
@@ -113,7 +113,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovswbStore128 => descriptor!(
                 NarrowStore,
@@ -122,7 +122,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovuswb128 => descriptor!(
                 Narrow,
@@ -131,7 +131,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             Self::X86Avx512BwPmovuswbStore128 => descriptor!(
                 NarrowStore,
@@ -140,7 +140,7 @@ impl Intrinsic {
                 I8x16,
                 I16x8,
                 I8,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             Self::X86Avx512BwPmovsxbw256 => descriptor!(
                 Widen,
@@ -149,7 +149,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovsxbwLoad256 => descriptor!(
                 WidenLoad,
@@ -158,7 +158,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovzxbw256 => descriptor!(
                 Widen,
@@ -167,7 +167,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovzxbwLoad256 => descriptor!(
                 WidenLoad,
@@ -176,7 +176,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovwb256 => descriptor!(
                 Narrow,
@@ -185,7 +185,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovwbStore256 => descriptor!(
                 NarrowStore,
@@ -194,7 +194,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovswb256 => descriptor!(
                 Narrow,
@@ -203,7 +203,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovswbStore256 => descriptor!(
                 NarrowStore,
@@ -212,7 +212,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovuswb256 => descriptor!(
                 Narrow,
@@ -221,7 +221,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             Self::X86Avx512BwPmovuswbStore256 => descriptor!(
                 NarrowStore,
@@ -230,7 +230,7 @@ impl Intrinsic {
                 I8x16,
                 I16x16,
                 I16,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             Self::X86Avx512BwPmovsxbw512 => descriptor!(
                 Widen,
@@ -239,7 +239,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovsxbwLoad512 => descriptor!(
                 WidenLoad,
@@ -248,7 +248,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovsxbw"
+                Vpmovsxbw
             ),
             Self::X86Avx512BwPmovzxbw512 => descriptor!(
                 Widen,
@@ -257,7 +257,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovzxbwLoad512 => descriptor!(
                 WidenLoad,
@@ -266,7 +266,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovzxbw"
+                Vpmovzxbw
             ),
             Self::X86Avx512BwPmovwb512 => descriptor!(
                 Narrow,
@@ -275,7 +275,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovwbStore512 => descriptor!(
                 NarrowStore,
@@ -284,7 +284,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovwb"
+                Vpmovwb
             ),
             Self::X86Avx512BwPmovswb512 => descriptor!(
                 Narrow,
@@ -293,7 +293,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovswbStore512 => descriptor!(
                 NarrowStore,
@@ -302,7 +302,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovswb"
+                Vpmovswb
             ),
             Self::X86Avx512BwPmovuswb512 => descriptor!(
                 Narrow,
@@ -311,7 +311,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             Self::X86Avx512BwPmovuswbStore512 => descriptor!(
                 NarrowStore,
@@ -320,7 +320,7 @@ impl Intrinsic {
                 I8x32,
                 I16x32,
                 I32,
-                "vpmovuswb"
+                Vpmovuswb
             ),
             _ => return None,
         })

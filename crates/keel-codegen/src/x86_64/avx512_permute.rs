@@ -46,7 +46,7 @@ impl FunctionCompiler<'_> {
         if matches!(kind, K::TwoIndex | K::TwoTable) {
             self.avx512_stage_vector(args[4], FS2);
         }
-        let op = Opcode::Evex(EvexOpcode::parse(name).expect("AVX512F permutation opcode"));
+        let op = Opcode::Evex(EvexOpcode::new(name));
         let z = |r| asm_arg(simd_width(r, width));
         let computed = match kind {
             K::Full => {
@@ -104,9 +104,9 @@ impl FunctionCompiler<'_> {
         self.avx512_stage_mask(args[1]);
         let shape = self.ty(args[0]).vector().expect("permutation vector");
         let name = if shape.lane_type().bytes() == Some(8) {
-            "vmovupd"
+            EvexMnemonic::Vmovupd
         } else {
-            "vmovups"
+            EvexMnemonic::Vmovups
         };
         self.emit(avx512_mask::opcode(name, true), [z(merge), z(computed)]);
         let d = self.def_freg(result);

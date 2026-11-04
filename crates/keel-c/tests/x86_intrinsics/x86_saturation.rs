@@ -104,7 +104,11 @@ fn architectural_mapping_order_and_header_composition() {
     for (wrapper, op, _) in OPS {
         let name = format!("x86_sse2_{op}128");
         let id = keel_ir::Intrinsic::from_name(&name).unwrap();
-        assert_eq!(id.x86_packed_pair(), Some((op, 0)));
+        assert_eq!(
+            id.x86_packed_pair()
+                .map(|(opcode, tier)| (opcode.to_string(), tier)),
+            Some((op.to_string(), 0))
+        );
         let m = compile(&format!("#include <emmintrin.h>\nextern __m128i left(void),right(void); __m128i f(void){{return _mm_{wrapper}(left(),right());}}"), target).unwrap();
         let ir = m.to_string();
         assert_eq!(ir.matches(&name).count(), 1, "{ir}");

@@ -41,7 +41,7 @@ impl FunctionCompiler<'_> {
         let d = id.x86_avx512_dq_special().expect("DQ special descriptor");
         let ty = Type::Vector(d.vector);
         let immediate = iconst(self.func, args[d.immediate]).expect("validated DQ immediate");
-        let mut opcode = EvexOpcode::parse(d.opcode).expect("imported DQ special");
+        let mut opcode = EvexOpcode::new(d.opcode);
         opcode.options.mask = Some(1);
         if d.sae
             .is_some_and(|index| iconst(self.func, args[index]) == Some(8))

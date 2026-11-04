@@ -21,7 +21,6 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let opcode = Opcode::parse(opcode).unwrap();
         if sad {
             let control = iconst(self.func, args[2]).unwrap();
             if tier == 2 {

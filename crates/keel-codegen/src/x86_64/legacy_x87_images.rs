@@ -4,7 +4,7 @@
 use super::*;
 impl FunctionCompiler<'_> {
     pub(super) fn native_legacy_x87_image(&mut self, id: Intrinsic, args: &[Value]) {
-        let (op, bits, _) = id.x86_legacy_x87_image().unwrap();
+        let (opcode, bits, _) = id.x86_legacy_x87_image().unwrap();
         // GPR-only address preparation cannot touch x87, SIMD, CW or SW. Live
         // F80 values already have memory homes. Unlike FXRSTOR, FRSTOR/FLDENV
         // have no GPR/SIMD clobbers; allocator call-clobber spilling is unnecessary.
@@ -12,20 +12,17 @@ impl FunctionCompiler<'_> {
         // Keep WAIT explicit in both typed and text output. LLVM's assembler
         // misplaces 66 before WAIT for `data16 fstenv/fsave`; the FN spelling
         // ensures every consumer applies the override to the memory instruction.
-        let op = match op {
-            "fstenv" => {
+        let opcode = match opcode {
+            op::FSTENV => {
                 self.emit(op::FWAIT, []);
-                "fnstenv"
+                op::FNSTENV
             }
-            "fsave" => {
+            op::FSAVE => {
                 self.emit(op::FWAIT, []);
-                "fnsave"
+                op::FNSAVE
             }
             other => other,
         };
-        self.emit(
-            Opcode::parse(op).unwrap(),
-            [asm_arg(sized(memory(r64(address), 0), bits))],
-        );
+        self.emit(opcode, [asm_arg(sized(memory(r64(address), 0), bits))]);
     }
 }

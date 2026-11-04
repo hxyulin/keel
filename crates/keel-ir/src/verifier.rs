@@ -17,6 +17,7 @@ use crate::{
     DataInit, DataItem, DataLayout, DataObject, DebugScope, DebugType, DebugTypeData,
     FunctionAttrs, Module,
 };
+use keel_asm_ir::x86::EvexMnemonic;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1947,7 +1948,7 @@ impl Verifier<'_> {
                 }
                 if id
                     .x86_avx512_vl_convert()
-                    .is_some_and(|(op, _, _, _)| op == "vcvtps2ph")
+                    .is_some_and(|(op, _, _, _)| op == EvexMnemonic::Vcvtps2ph)
                 {
                     let control =
                         args.get(3)
@@ -2100,7 +2101,7 @@ impl Verifier<'_> {
                 if id.is_x86_avx512_vl_core() && id.info().returns == [Type::I8] {
                     let maximum = if id
                         .x86_avx512_mask_opcode()
-                        .is_some_and(|name| name.starts_with("vpcmp"))
+                        .is_some_and(|name| name.mnemonic().starts_with("vpcmp"))
                     {
                         7
                     } else {

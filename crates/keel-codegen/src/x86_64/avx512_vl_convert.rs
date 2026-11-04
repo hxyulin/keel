@@ -46,7 +46,7 @@ impl FunctionCompiler<'_> {
         self.avx512_stage_vector(args[0], FS0);
         self.avx512_stage_mask(args[1]);
         let opcode = avx512_mask::opcode(name, true);
-        if name == "vcvtps2ph" {
+        if name == EvexMnemonic::Vcvtps2ph {
             // Bits 3..7 are ignored by hardware, not SAE decorators.
             let control = iconst(self.func, args[3]).expect("validated imm8");
             self.emit(

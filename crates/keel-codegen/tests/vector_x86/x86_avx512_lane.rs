@@ -165,7 +165,7 @@ fn reference(case: &Case) -> String {
     };
     let target = case.target();
     let targetbytes = target.bytes().unwrap();
-    let opcode = case.id.x86_avx512_lane_opcode().unwrap();
+    let opcode = case.id.x86_avx512_lane_opcode().unwrap().mnemonic();
     let control = case.control.unwrap_or(0);
     let mask = "%{%%k1%}";
     let mut asm = String::from("kmovw %k[k],%%k1\\n\\t ");
@@ -252,7 +252,7 @@ static unsigned faults(operation fn,void*merge,void*a,void*b,void*out,unsigned k
         let control = case.control.unwrap_or(0);
         let abytes = case.a().and_then(Type::bytes).unwrap_or(0);
         let bbytes = case.b().and_then(Type::bytes).unwrap_or(0);
-        let opcode = case.id.x86_avx512_lane_opcode().unwrap();
+        let opcode = case.id.x86_avx512_lane_opcode().unwrap().mnemonic();
         harness += &format!(
             "extern void {name}(void*,void*,void*,void*,{c_mask});\nstatic void call_{name}(void*m,void*a,void*b,void*out,unsigned k){{{name}(m,a,b,out,({c_mask})k);}}\n"
         );
@@ -384,7 +384,13 @@ fn formatexpectedload(case: &Case, width: u32, control: i64) -> String {
         format!(
             "memcpy(expected+i*{width},i>={control}*4&&i<({control}+1)*4?a+(i-{control}*4)*{width}:b+i*{width},{width});"
         )
-    } else if case.id.x86_avx512_lane_opcode().unwrap().contains("x4") {
+    } else if case
+        .id
+        .x86_avx512_lane_opcode()
+        .unwrap()
+        .mnemonic()
+        .contains("x4")
+    {
         format!("memcpy(expected+i*{width},a+(i%4)*{width},{width});")
     } else {
         format!("memcpy(expected+i*{width},a,{width});")

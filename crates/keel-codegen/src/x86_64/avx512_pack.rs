@@ -42,14 +42,14 @@ impl FunctionCompiler<'_> {
             descriptor.opcode
         } else {
             match id {
-                X86Avx512Compressd | X86Avx512CompressStored => "vpcompressd",
-                X86Avx512Compressq | X86Avx512CompressStoreq => "vpcompressq",
-                X86Avx512Compressps | X86Avx512CompressStoreps => "vcompressps",
-                X86Avx512Compresspd | X86Avx512CompressStorepd => "vcompresspd",
-                X86Avx512Expandd | X86Avx512ExpandLoadd => "vpexpandd",
-                X86Avx512Expandq | X86Avx512ExpandLoadq => "vpexpandq",
-                X86Avx512Expandps | X86Avx512ExpandLoadps => "vexpandps",
-                X86Avx512Expandpd | X86Avx512ExpandLoadpd => "vexpandpd",
+                X86Avx512Compressd | X86Avx512CompressStored => EvexMnemonic::Vpcompressd,
+                X86Avx512Compressq | X86Avx512CompressStoreq => EvexMnemonic::Vpcompressq,
+                X86Avx512Compressps | X86Avx512CompressStoreps => EvexMnemonic::Vcompressps,
+                X86Avx512Compresspd | X86Avx512CompressStorepd => EvexMnemonic::Vcompresspd,
+                X86Avx512Expandd | X86Avx512ExpandLoadd => EvexMnemonic::Vpexpandd,
+                X86Avx512Expandq | X86Avx512ExpandLoadq => EvexMnemonic::Vpexpandq,
+                X86Avx512Expandps | X86Avx512ExpandLoadps => EvexMnemonic::Vexpandps,
+                X86Avx512Expandpd | X86Avx512ExpandLoadpd => EvexMnemonic::Vexpandpd,
                 _ => unreachable!("AVX512 packed lane intrinsic"),
             }
         };

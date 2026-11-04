@@ -45,7 +45,7 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         let (name, immediate, control) = id.x86_avx512_scalar().expect("scalar EVEX intrinsic");
-        let compare = name.starts_with("vcmp");
+        let compare = name.mnemonic().starts_with("vcmp");
         if compare {
             self.scalar_evex_stage(args[0], FS1);
             self.scalar_evex_stage(args[1], FS2);
@@ -56,7 +56,7 @@ impl FunctionCompiler<'_> {
             self.scalar_evex_stage(args[3], FS2);
             self.avx512_stage_mask(args[1]);
         }
-        let mut op = EvexOpcode::parse(name).expect("scalar EVEX opcode");
+        let mut op = EvexOpcode::new(name);
         op.options.mask = Some(1);
         if let Some(index) = control {
             let value = iconst(self.func, args[index]).expect("validated control");

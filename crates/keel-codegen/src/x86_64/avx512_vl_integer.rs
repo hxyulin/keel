@@ -91,9 +91,9 @@ impl FunctionCompiler<'_> {
         self.emit(
             avx512_mask::opcode(
                 if d.vector.lane_type() == Type::I32 {
-                    "vmovdqa32"
+                    EvexMnemonic::Vmovdqa32
                 } else {
-                    "vmovdqa64"
+                    EvexMnemonic::Vmovdqa64
                 },
                 true,
             ),

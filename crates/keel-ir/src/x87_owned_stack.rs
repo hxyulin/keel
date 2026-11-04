@@ -1,11 +1,12 @@
 //! Principal-opcode leaves inside the caller-owned legacy x87 region.
 //! Registry appends are owned by root; descriptors do not allocate IDs.
 use crate::Intrinsic;
+use keel_asm_ir::x86::{Opcode, op};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnedX87StackOp {
     pub name: &'static str,
-    pub mnemonic: &'static str,
+    pub mnemonic: Opcode,
     pub stack_index: Option<u8>,
     pub bytes: [u8; 2],
     pub top_delta: i8,
@@ -15,7 +16,7 @@ pub struct OwnedX87StackOp {
 const fn free(name: &'static str, i: u8) -> OwnedX87StackOp {
     OwnedX87StackOp {
         name,
-        mnemonic: "ffree",
+        mnemonic: op::FFREE,
         stack_index: Some(i),
         bytes: [0xdd, 0xc0 + i],
         top_delta: 0,
@@ -35,7 +36,7 @@ pub const OWNED_X87_STACK_OPS: [OwnedX87StackOp; 11] = [
     free("x86_x87_ffree7", 7),
     OwnedX87StackOp {
         name: "x86_x87_fdecstp",
-        mnemonic: "fdecstp",
+        mnemonic: op::FDECSTP,
         stack_index: None,
         bytes: [0xd9, 0xf6],
         top_delta: -1,
@@ -43,7 +44,7 @@ pub const OWNED_X87_STACK_OPS: [OwnedX87StackOp; 11] = [
     },
     OwnedX87StackOp {
         name: "x86_x87_fincstp",
-        mnemonic: "fincstp",
+        mnemonic: op::FINCSTP,
         stack_index: None,
         bytes: [0xd9, 0xf7],
         top_delta: 1,
@@ -51,7 +52,7 @@ pub const OWNED_X87_STACK_OPS: [OwnedX87StackOp; 11] = [
     },
     OwnedX87StackOp {
         name: "x86_x87_fnop",
-        mnemonic: "fnop",
+        mnemonic: op::FNOP,
         stack_index: None,
         bytes: [0xd9, 0xd0],
         top_delta: 0,

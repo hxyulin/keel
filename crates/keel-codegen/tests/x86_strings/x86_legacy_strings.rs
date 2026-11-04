@@ -50,10 +50,9 @@ impl Case {
 fn cases(fixture: Fixture) -> Vec<Case> {
     let wide = fixture == Fixture::Wide;
     let mut v = Vec::new();
-    for id in Intrinsic::ALL
-        .into_iter()
-        .filter(|i| i.is_x86_string() && !i.x86_string_info().unwrap().0.starts_with('v'))
-    {
+    for id in Intrinsic::ALL.into_iter().filter(|i| {
+        i.is_x86_string() && !i.x86_string_info().unwrap().0.to_string().starts_with('v')
+    }) {
         let (_, _, kind) = id.x86_string_info().unwrap();
         if wide && kind != 1 {
             continue;
@@ -139,6 +138,8 @@ fn harness(fixture: Fixture) -> String {
     for ca in cases(fixture) {
         let info = ca.id.info();
         let (op, index, kind) = ca.id.x86_string_info().unwrap();
+        let op = op.to_string();
+        let op = op.as_str();
         let name = ca.name();
         let out = info.returns[0].bytes().unwrap();
         let len = if index == 4 {

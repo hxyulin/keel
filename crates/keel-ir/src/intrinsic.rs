@@ -10,6 +10,7 @@
 //! `tools/x86-isa/system-intrinsics.json`; their lowering stays in the backends.
 
 use crate::{Type, VectorType};
+use keel_asm_ir::x86::{EvexMnemonic, Opcode, op};
 use std::fmt;
 
 #[macro_use]
@@ -123,79 +124,79 @@ impl X86Avx512PermuteKind {
 
 impl Intrinsic {
     /// DQ sign-bit extraction and zero/all-one lane expansion.
-    pub fn x86_avx512_dq_bridge(self) -> Option<(&'static str, VectorType)> {
+    pub fn x86_avx512_dq_bridge(self) -> Option<(EvexMnemonic, VectorType)> {
         Some(match self {
-            Self::X86Avx512DqMovd2m128 => ("vpmovd2m", VectorType::I32x4),
-            Self::X86Avx512DqMovq2m128 => ("vpmovq2m", VectorType::I64x2),
-            Self::X86Avx512DqMovm2d128 => ("vpmovm2d", VectorType::I32x4),
-            Self::X86Avx512DqMovm2q128 => ("vpmovm2q", VectorType::I64x2),
-            Self::X86Avx512DqMovd2m256 => ("vpmovd2m", VectorType::I32x8),
-            Self::X86Avx512DqMovq2m256 => ("vpmovq2m", VectorType::I64x4),
-            Self::X86Avx512DqMovm2d256 => ("vpmovm2d", VectorType::I32x8),
-            Self::X86Avx512DqMovm2q256 => ("vpmovm2q", VectorType::I64x4),
-            Self::X86Avx512DqMovd2m512 => ("vpmovd2m", VectorType::I32x16),
-            Self::X86Avx512DqMovq2m512 => ("vpmovq2m", VectorType::I64x8),
-            Self::X86Avx512DqMovm2d512 => ("vpmovm2d", VectorType::I32x16),
-            Self::X86Avx512DqMovm2q512 => ("vpmovm2q", VectorType::I64x8),
+            Self::X86Avx512DqMovd2m128 => (EvexMnemonic::Vpmovd2m, VectorType::I32x4),
+            Self::X86Avx512DqMovq2m128 => (EvexMnemonic::Vpmovq2m, VectorType::I64x2),
+            Self::X86Avx512DqMovm2d128 => (EvexMnemonic::Vpmovm2d, VectorType::I32x4),
+            Self::X86Avx512DqMovm2q128 => (EvexMnemonic::Vpmovm2q, VectorType::I64x2),
+            Self::X86Avx512DqMovd2m256 => (EvexMnemonic::Vpmovd2m, VectorType::I32x8),
+            Self::X86Avx512DqMovq2m256 => (EvexMnemonic::Vpmovq2m, VectorType::I64x4),
+            Self::X86Avx512DqMovm2d256 => (EvexMnemonic::Vpmovm2d, VectorType::I32x8),
+            Self::X86Avx512DqMovm2q256 => (EvexMnemonic::Vpmovm2q, VectorType::I64x4),
+            Self::X86Avx512DqMovd2m512 => (EvexMnemonic::Vpmovd2m, VectorType::I32x16),
+            Self::X86Avx512DqMovq2m512 => (EvexMnemonic::Vpmovq2m, VectorType::I64x8),
+            Self::X86Avx512DqMovm2d512 => (EvexMnemonic::Vpmovm2d, VectorType::I32x16),
+            Self::X86Avx512DqMovm2q512 => (EvexMnemonic::Vpmovm2q, VectorType::I64x8),
             _ => return None,
         })
     }
 
     /// Conflict detection, packed leading-zero count and mask broadcasts, requiring AVX512CD.
-    pub fn x86_avx512_cd(self) -> Option<(&'static str, VectorType)> {
+    pub fn x86_avx512_cd(self) -> Option<(EvexMnemonic, VectorType)> {
         Some(match self {
-            Self::X86Avx512CdMaskConflictd128 => ("vpconflictd", VectorType::I32x4),
-            Self::X86Avx512CdMaskConflictq128 => ("vpconflictq", VectorType::I64x2),
-            Self::X86Avx512CdMaskLzcntd128 => ("vplzcntd", VectorType::I32x4),
-            Self::X86Avx512CdMaskLzcntq128 => ("vplzcntq", VectorType::I64x2),
-            Self::X86Avx512CdMaskConflictd256 => ("vpconflictd", VectorType::I32x8),
-            Self::X86Avx512CdMaskConflictq256 => ("vpconflictq", VectorType::I64x4),
-            Self::X86Avx512CdMaskLzcntd256 => ("vplzcntd", VectorType::I32x8),
-            Self::X86Avx512CdMaskLzcntq256 => ("vplzcntq", VectorType::I64x4),
-            Self::X86Avx512CdMaskConflictd512 => ("vpconflictd", VectorType::I32x16),
-            Self::X86Avx512CdMaskConflictq512 => ("vpconflictq", VectorType::I64x8),
-            Self::X86Avx512CdMaskLzcntd512 => ("vplzcntd", VectorType::I32x16),
-            Self::X86Avx512CdMaskLzcntq512 => ("vplzcntq", VectorType::I64x8),
-            Self::X86Avx512CdBroadcastmb128 => ("vpbroadcastmb2q", VectorType::I64x2),
-            Self::X86Avx512CdBroadcastmw128 => ("vpbroadcastmw2d", VectorType::I32x4),
-            Self::X86Avx512CdBroadcastmb256 => ("vpbroadcastmb2q", VectorType::I64x4),
-            Self::X86Avx512CdBroadcastmw256 => ("vpbroadcastmw2d", VectorType::I32x8),
-            Self::X86Avx512CdBroadcastmb512 => ("vpbroadcastmb2q", VectorType::I64x8),
-            Self::X86Avx512CdBroadcastmw512 => ("vpbroadcastmw2d", VectorType::I32x16),
+            Self::X86Avx512CdMaskConflictd128 => (EvexMnemonic::Vpconflictd, VectorType::I32x4),
+            Self::X86Avx512CdMaskConflictq128 => (EvexMnemonic::Vpconflictq, VectorType::I64x2),
+            Self::X86Avx512CdMaskLzcntd128 => (EvexMnemonic::Vplzcntd, VectorType::I32x4),
+            Self::X86Avx512CdMaskLzcntq128 => (EvexMnemonic::Vplzcntq, VectorType::I64x2),
+            Self::X86Avx512CdMaskConflictd256 => (EvexMnemonic::Vpconflictd, VectorType::I32x8),
+            Self::X86Avx512CdMaskConflictq256 => (EvexMnemonic::Vpconflictq, VectorType::I64x4),
+            Self::X86Avx512CdMaskLzcntd256 => (EvexMnemonic::Vplzcntd, VectorType::I32x8),
+            Self::X86Avx512CdMaskLzcntq256 => (EvexMnemonic::Vplzcntq, VectorType::I64x4),
+            Self::X86Avx512CdMaskConflictd512 => (EvexMnemonic::Vpconflictd, VectorType::I32x16),
+            Self::X86Avx512CdMaskConflictq512 => (EvexMnemonic::Vpconflictq, VectorType::I64x8),
+            Self::X86Avx512CdMaskLzcntd512 => (EvexMnemonic::Vplzcntd, VectorType::I32x16),
+            Self::X86Avx512CdMaskLzcntq512 => (EvexMnemonic::Vplzcntq, VectorType::I64x8),
+            Self::X86Avx512CdBroadcastmb128 => (EvexMnemonic::Vpbroadcastmb2q, VectorType::I64x2),
+            Self::X86Avx512CdBroadcastmw128 => (EvexMnemonic::Vpbroadcastmw2d, VectorType::I32x4),
+            Self::X86Avx512CdBroadcastmb256 => (EvexMnemonic::Vpbroadcastmb2q, VectorType::I64x4),
+            Self::X86Avx512CdBroadcastmw256 => (EvexMnemonic::Vpbroadcastmw2d, VectorType::I32x8),
+            Self::X86Avx512CdBroadcastmb512 => (EvexMnemonic::Vpbroadcastmb2q, VectorType::I64x8),
+            Self::X86Avx512CdBroadcastmw512 => (EvexMnemonic::Vpbroadcastmw2d, VectorType::I32x16),
             _ => return None,
         })
     }
 
     /// Pure DQ multiplication and floating-container bitwise operations.
-    pub fn x86_avx512_dq_opcode(self) -> Option<(&'static str, VectorType)> {
+    pub fn x86_avx512_dq_opcode(self) -> Option<(EvexMnemonic, VectorType)> {
         Some(match self {
-            Self::X86Avx512DqMulloq128 => ("vpmullq", VectorType::I64x2),
-            Self::X86Avx512DqAndps128 => ("vandps", VectorType::F32x4),
-            Self::X86Avx512DqAndpd128 => ("vandpd", VectorType::F64x2),
-            Self::X86Avx512DqAndnps128 => ("vandnps", VectorType::F32x4),
-            Self::X86Avx512DqAndnpd128 => ("vandnpd", VectorType::F64x2),
-            Self::X86Avx512DqOrps128 => ("vorps", VectorType::F32x4),
-            Self::X86Avx512DqOrpd128 => ("vorpd", VectorType::F64x2),
-            Self::X86Avx512DqXorps128 => ("vxorps", VectorType::F32x4),
-            Self::X86Avx512DqXorpd128 => ("vxorpd", VectorType::F64x2),
-            Self::X86Avx512DqMulloq256 => ("vpmullq", VectorType::I64x4),
-            Self::X86Avx512DqAndps256 => ("vandps", VectorType::F32x8),
-            Self::X86Avx512DqAndpd256 => ("vandpd", VectorType::F64x4),
-            Self::X86Avx512DqAndnps256 => ("vandnps", VectorType::F32x8),
-            Self::X86Avx512DqAndnpd256 => ("vandnpd", VectorType::F64x4),
-            Self::X86Avx512DqOrps256 => ("vorps", VectorType::F32x8),
-            Self::X86Avx512DqOrpd256 => ("vorpd", VectorType::F64x4),
-            Self::X86Avx512DqXorps256 => ("vxorps", VectorType::F32x8),
-            Self::X86Avx512DqXorpd256 => ("vxorpd", VectorType::F64x4),
-            Self::X86Avx512DqMulloq512 => ("vpmullq", VectorType::I64x8),
-            Self::X86Avx512DqAndps512 => ("vandps", VectorType::F32x16),
-            Self::X86Avx512DqAndpd512 => ("vandpd", VectorType::F64x8),
-            Self::X86Avx512DqAndnps512 => ("vandnps", VectorType::F32x16),
-            Self::X86Avx512DqAndnpd512 => ("vandnpd", VectorType::F64x8),
-            Self::X86Avx512DqOrps512 => ("vorps", VectorType::F32x16),
-            Self::X86Avx512DqOrpd512 => ("vorpd", VectorType::F64x8),
-            Self::X86Avx512DqXorps512 => ("vxorps", VectorType::F32x16),
-            Self::X86Avx512DqXorpd512 => ("vxorpd", VectorType::F64x8),
+            Self::X86Avx512DqMulloq128 => (EvexMnemonic::Vpmullq, VectorType::I64x2),
+            Self::X86Avx512DqAndps128 => (EvexMnemonic::Vandps, VectorType::F32x4),
+            Self::X86Avx512DqAndpd128 => (EvexMnemonic::Vandpd, VectorType::F64x2),
+            Self::X86Avx512DqAndnps128 => (EvexMnemonic::Vandnps, VectorType::F32x4),
+            Self::X86Avx512DqAndnpd128 => (EvexMnemonic::Vandnpd, VectorType::F64x2),
+            Self::X86Avx512DqOrps128 => (EvexMnemonic::Vorps, VectorType::F32x4),
+            Self::X86Avx512DqOrpd128 => (EvexMnemonic::Vorpd, VectorType::F64x2),
+            Self::X86Avx512DqXorps128 => (EvexMnemonic::Vxorps, VectorType::F32x4),
+            Self::X86Avx512DqXorpd128 => (EvexMnemonic::Vxorpd, VectorType::F64x2),
+            Self::X86Avx512DqMulloq256 => (EvexMnemonic::Vpmullq, VectorType::I64x4),
+            Self::X86Avx512DqAndps256 => (EvexMnemonic::Vandps, VectorType::F32x8),
+            Self::X86Avx512DqAndpd256 => (EvexMnemonic::Vandpd, VectorType::F64x4),
+            Self::X86Avx512DqAndnps256 => (EvexMnemonic::Vandnps, VectorType::F32x8),
+            Self::X86Avx512DqAndnpd256 => (EvexMnemonic::Vandnpd, VectorType::F64x4),
+            Self::X86Avx512DqOrps256 => (EvexMnemonic::Vorps, VectorType::F32x8),
+            Self::X86Avx512DqOrpd256 => (EvexMnemonic::Vorpd, VectorType::F64x4),
+            Self::X86Avx512DqXorps256 => (EvexMnemonic::Vxorps, VectorType::F32x8),
+            Self::X86Avx512DqXorpd256 => (EvexMnemonic::Vxorpd, VectorType::F64x4),
+            Self::X86Avx512DqMulloq512 => (EvexMnemonic::Vpmullq, VectorType::I64x8),
+            Self::X86Avx512DqAndps512 => (EvexMnemonic::Vandps, VectorType::F32x16),
+            Self::X86Avx512DqAndpd512 => (EvexMnemonic::Vandpd, VectorType::F64x8),
+            Self::X86Avx512DqAndnps512 => (EvexMnemonic::Vandnps, VectorType::F32x16),
+            Self::X86Avx512DqAndnpd512 => (EvexMnemonic::Vandnpd, VectorType::F64x8),
+            Self::X86Avx512DqOrps512 => (EvexMnemonic::Vorps, VectorType::F32x16),
+            Self::X86Avx512DqOrpd512 => (EvexMnemonic::Vorpd, VectorType::F64x8),
+            Self::X86Avx512DqXorps512 => (EvexMnemonic::Vxorps, VectorType::F32x16),
+            Self::X86Avx512DqXorpd512 => (EvexMnemonic::Vxorpd, VectorType::F64x8),
             _ => return None,
         })
     }
@@ -378,116 +379,224 @@ impl Intrinsic {
     }
 
     /// Raw qword/FP conversion opcode, encoded length and exact containers.
-    pub fn x86_avx512_dq_convert(self) -> Option<(&'static str, u16, VectorType, VectorType)> {
+    pub fn x86_avx512_dq_convert(self) -> Option<(EvexMnemonic, u16, VectorType, VectorType)> {
         Some(match self {
-            Self::X86Avx512DqVcvtqq2pd128 => {
-                ("vcvtqq2pd", 128, VectorType::I64x2, VectorType::F64x2)
-            }
-            Self::X86Avx512DqVcvtuqq2pd128 => {
-                ("vcvtuqq2pd", 128, VectorType::I64x2, VectorType::F64x2)
-            }
-            Self::X86Avx512DqVcvtqq2ps128 => {
-                ("vcvtqq2ps", 128, VectorType::I64x2, VectorType::F32x4)
-            }
-            Self::X86Avx512DqVcvtuqq2ps128 => {
-                ("vcvtuqq2ps", 128, VectorType::I64x2, VectorType::F32x4)
-            }
-            Self::X86Avx512DqVcvtpd2qq128 => {
-                ("vcvtpd2qq", 128, VectorType::F64x2, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvtpd2uqq128 => {
-                ("vcvtpd2uqq", 128, VectorType::F64x2, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvtps2qq128 => {
-                ("vcvtps2qq", 128, VectorType::F32x4, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvtps2uqq128 => {
-                ("vcvtps2uqq", 128, VectorType::F32x4, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvttpd2qq128 => {
-                ("vcvttpd2qq", 128, VectorType::F64x2, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvttpd2uqq128 => {
-                ("vcvttpd2uqq", 128, VectorType::F64x2, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvttps2qq128 => {
-                ("vcvttps2qq", 128, VectorType::F32x4, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvttps2uqq128 => {
-                ("vcvttps2uqq", 128, VectorType::F32x4, VectorType::I64x2)
-            }
-            Self::X86Avx512DqVcvtqq2pd256 => {
-                ("vcvtqq2pd", 256, VectorType::I64x4, VectorType::F64x4)
-            }
-            Self::X86Avx512DqVcvtuqq2pd256 => {
-                ("vcvtuqq2pd", 256, VectorType::I64x4, VectorType::F64x4)
-            }
-            Self::X86Avx512DqVcvtqq2ps256 => {
-                ("vcvtqq2ps", 256, VectorType::I64x4, VectorType::F32x4)
-            }
-            Self::X86Avx512DqVcvtuqq2ps256 => {
-                ("vcvtuqq2ps", 256, VectorType::I64x4, VectorType::F32x4)
-            }
-            Self::X86Avx512DqVcvtpd2qq256 => {
-                ("vcvtpd2qq", 256, VectorType::F64x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvtpd2uqq256 => {
-                ("vcvtpd2uqq", 256, VectorType::F64x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvtps2qq256 => {
-                ("vcvtps2qq", 256, VectorType::F32x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvtps2uqq256 => {
-                ("vcvtps2uqq", 256, VectorType::F32x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvttpd2qq256 => {
-                ("vcvttpd2qq", 256, VectorType::F64x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvttpd2uqq256 => {
-                ("vcvttpd2uqq", 256, VectorType::F64x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvttps2qq256 => {
-                ("vcvttps2qq", 256, VectorType::F32x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvttps2uqq256 => {
-                ("vcvttps2uqq", 256, VectorType::F32x4, VectorType::I64x4)
-            }
-            Self::X86Avx512DqVcvtqq2pd512 => {
-                ("vcvtqq2pd", 512, VectorType::I64x8, VectorType::F64x8)
-            }
-            Self::X86Avx512DqVcvtuqq2pd512 => {
-                ("vcvtuqq2pd", 512, VectorType::I64x8, VectorType::F64x8)
-            }
-            Self::X86Avx512DqVcvtqq2ps512 => {
-                ("vcvtqq2ps", 512, VectorType::I64x8, VectorType::F32x8)
-            }
-            Self::X86Avx512DqVcvtuqq2ps512 => {
-                ("vcvtuqq2ps", 512, VectorType::I64x8, VectorType::F32x8)
-            }
-            Self::X86Avx512DqVcvtpd2qq512 => {
-                ("vcvtpd2qq", 512, VectorType::F64x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvtpd2uqq512 => {
-                ("vcvtpd2uqq", 512, VectorType::F64x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvtps2qq512 => {
-                ("vcvtps2qq", 512, VectorType::F32x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvtps2uqq512 => {
-                ("vcvtps2uqq", 512, VectorType::F32x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvttpd2qq512 => {
-                ("vcvttpd2qq", 512, VectorType::F64x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvttpd2uqq512 => {
-                ("vcvttpd2uqq", 512, VectorType::F64x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvttps2qq512 => {
-                ("vcvttps2qq", 512, VectorType::F32x8, VectorType::I64x8)
-            }
-            Self::X86Avx512DqVcvttps2uqq512 => {
-                ("vcvttps2uqq", 512, VectorType::F32x8, VectorType::I64x8)
-            }
+            Self::X86Avx512DqVcvtqq2pd128 => (
+                EvexMnemonic::Vcvtqq2pd,
+                128,
+                VectorType::I64x2,
+                VectorType::F64x2,
+            ),
+            Self::X86Avx512DqVcvtuqq2pd128 => (
+                EvexMnemonic::Vcvtuqq2pd,
+                128,
+                VectorType::I64x2,
+                VectorType::F64x2,
+            ),
+            Self::X86Avx512DqVcvtqq2ps128 => (
+                EvexMnemonic::Vcvtqq2ps,
+                128,
+                VectorType::I64x2,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512DqVcvtuqq2ps128 => (
+                EvexMnemonic::Vcvtuqq2ps,
+                128,
+                VectorType::I64x2,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512DqVcvtpd2qq128 => (
+                EvexMnemonic::Vcvtpd2qq,
+                128,
+                VectorType::F64x2,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvtpd2uqq128 => (
+                EvexMnemonic::Vcvtpd2uqq,
+                128,
+                VectorType::F64x2,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvtps2qq128 => (
+                EvexMnemonic::Vcvtps2qq,
+                128,
+                VectorType::F32x4,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvtps2uqq128 => (
+                EvexMnemonic::Vcvtps2uqq,
+                128,
+                VectorType::F32x4,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvttpd2qq128 => (
+                EvexMnemonic::Vcvttpd2qq,
+                128,
+                VectorType::F64x2,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvttpd2uqq128 => (
+                EvexMnemonic::Vcvttpd2uqq,
+                128,
+                VectorType::F64x2,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvttps2qq128 => (
+                EvexMnemonic::Vcvttps2qq,
+                128,
+                VectorType::F32x4,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvttps2uqq128 => (
+                EvexMnemonic::Vcvttps2uqq,
+                128,
+                VectorType::F32x4,
+                VectorType::I64x2,
+            ),
+            Self::X86Avx512DqVcvtqq2pd256 => (
+                EvexMnemonic::Vcvtqq2pd,
+                256,
+                VectorType::I64x4,
+                VectorType::F64x4,
+            ),
+            Self::X86Avx512DqVcvtuqq2pd256 => (
+                EvexMnemonic::Vcvtuqq2pd,
+                256,
+                VectorType::I64x4,
+                VectorType::F64x4,
+            ),
+            Self::X86Avx512DqVcvtqq2ps256 => (
+                EvexMnemonic::Vcvtqq2ps,
+                256,
+                VectorType::I64x4,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512DqVcvtuqq2ps256 => (
+                EvexMnemonic::Vcvtuqq2ps,
+                256,
+                VectorType::I64x4,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512DqVcvtpd2qq256 => (
+                EvexMnemonic::Vcvtpd2qq,
+                256,
+                VectorType::F64x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvtpd2uqq256 => (
+                EvexMnemonic::Vcvtpd2uqq,
+                256,
+                VectorType::F64x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvtps2qq256 => (
+                EvexMnemonic::Vcvtps2qq,
+                256,
+                VectorType::F32x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvtps2uqq256 => (
+                EvexMnemonic::Vcvtps2uqq,
+                256,
+                VectorType::F32x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvttpd2qq256 => (
+                EvexMnemonic::Vcvttpd2qq,
+                256,
+                VectorType::F64x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvttpd2uqq256 => (
+                EvexMnemonic::Vcvttpd2uqq,
+                256,
+                VectorType::F64x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvttps2qq256 => (
+                EvexMnemonic::Vcvttps2qq,
+                256,
+                VectorType::F32x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvttps2uqq256 => (
+                EvexMnemonic::Vcvttps2uqq,
+                256,
+                VectorType::F32x4,
+                VectorType::I64x4,
+            ),
+            Self::X86Avx512DqVcvtqq2pd512 => (
+                EvexMnemonic::Vcvtqq2pd,
+                512,
+                VectorType::I64x8,
+                VectorType::F64x8,
+            ),
+            Self::X86Avx512DqVcvtuqq2pd512 => (
+                EvexMnemonic::Vcvtuqq2pd,
+                512,
+                VectorType::I64x8,
+                VectorType::F64x8,
+            ),
+            Self::X86Avx512DqVcvtqq2ps512 => (
+                EvexMnemonic::Vcvtqq2ps,
+                512,
+                VectorType::I64x8,
+                VectorType::F32x8,
+            ),
+            Self::X86Avx512DqVcvtuqq2ps512 => (
+                EvexMnemonic::Vcvtuqq2ps,
+                512,
+                VectorType::I64x8,
+                VectorType::F32x8,
+            ),
+            Self::X86Avx512DqVcvtpd2qq512 => (
+                EvexMnemonic::Vcvtpd2qq,
+                512,
+                VectorType::F64x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvtpd2uqq512 => (
+                EvexMnemonic::Vcvtpd2uqq,
+                512,
+                VectorType::F64x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvtps2qq512 => (
+                EvexMnemonic::Vcvtps2qq,
+                512,
+                VectorType::F32x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvtps2uqq512 => (
+                EvexMnemonic::Vcvtps2uqq,
+                512,
+                VectorType::F32x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvttpd2qq512 => (
+                EvexMnemonic::Vcvttpd2qq,
+                512,
+                VectorType::F64x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvttpd2uqq512 => (
+                EvexMnemonic::Vcvttpd2uqq,
+                512,
+                VectorType::F64x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvttps2qq512 => (
+                EvexMnemonic::Vcvttps2qq,
+                512,
+                VectorType::F32x8,
+                VectorType::I64x8,
+            ),
+            Self::X86Avx512DqVcvttps2uqq512 => (
+                EvexMnemonic::Vcvttps2uqq,
+                512,
+                VectorType::F32x8,
+                VectorType::I64x8,
+            ),
             _ => return None,
         })
     }
@@ -499,7 +608,7 @@ impl Intrinsic {
         self.x86_avx512_dq_convert()
             .is_some_and(|(op, width, _, _)| {
                 width == 512
-                    && if op.starts_with("vcvtt") {
+                    && if op.mnemonic().starts_with("vcvtt") {
                         matches!(control, 4 | 8)
                     } else {
                         matches!(control, 4 | 8..=11)
@@ -509,104 +618,200 @@ impl Intrinsic {
 
     /// Native opcode, encoded vector length and exact input/output containers.
     /// Narrow conversions have no ER or SAE. Only VCVTPS2PH has an imm8.
-    pub fn x86_avx512_vl_convert(self) -> Option<(&'static str, u16, VectorType, VectorType)> {
+    pub fn x86_avx512_vl_convert(self) -> Option<(EvexMnemonic, u16, VectorType, VectorType)> {
         Some(match self {
-            Self::X86Avx512VlVcvtdq2ps128 => {
-                ("vcvtdq2ps", 128, VectorType::I32x4, VectorType::F32x4)
-            }
-            Self::X86Avx512VlVcvtdq2ps256 => {
-                ("vcvtdq2ps", 256, VectorType::I32x8, VectorType::F32x8)
-            }
-            Self::X86Avx512VlVcvtudq2ps128 => {
-                ("vcvtudq2ps", 128, VectorType::I32x4, VectorType::F32x4)
-            }
-            Self::X86Avx512VlVcvtudq2ps256 => {
-                ("vcvtudq2ps", 256, VectorType::I32x8, VectorType::F32x8)
-            }
-            Self::X86Avx512VlVcvtdq2pd128 => {
-                ("vcvtdq2pd", 128, VectorType::I32x4, VectorType::F64x2)
-            }
-            Self::X86Avx512VlVcvtdq2pd256 => {
-                ("vcvtdq2pd", 256, VectorType::I32x4, VectorType::F64x4)
-            }
-            Self::X86Avx512VlVcvtudq2pd128 => {
-                ("vcvtudq2pd", 128, VectorType::I32x4, VectorType::F64x2)
-            }
-            Self::X86Avx512VlVcvtudq2pd256 => {
-                ("vcvtudq2pd", 256, VectorType::I32x4, VectorType::F64x4)
-            }
-            Self::X86Avx512VlVcvtps2dq128 => {
-                ("vcvtps2dq", 128, VectorType::F32x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtps2dq256 => {
-                ("vcvtps2dq", 256, VectorType::F32x8, VectorType::I32x8)
-            }
-            Self::X86Avx512VlVcvtps2udq128 => {
-                ("vcvtps2udq", 128, VectorType::F32x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtps2udq256 => {
-                ("vcvtps2udq", 256, VectorType::F32x8, VectorType::I32x8)
-            }
-            Self::X86Avx512VlVcvttps2dq128 => {
-                ("vcvttps2dq", 128, VectorType::F32x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttps2dq256 => {
-                ("vcvttps2dq", 256, VectorType::F32x8, VectorType::I32x8)
-            }
-            Self::X86Avx512VlVcvttps2udq128 => {
-                ("vcvttps2udq", 128, VectorType::F32x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttps2udq256 => {
-                ("vcvttps2udq", 256, VectorType::F32x8, VectorType::I32x8)
-            }
-            Self::X86Avx512VlVcvtpd2dq128 => {
-                ("vcvtpd2dq", 128, VectorType::F64x2, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtpd2dq256 => {
-                ("vcvtpd2dq", 256, VectorType::F64x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtpd2udq128 => {
-                ("vcvtpd2udq", 128, VectorType::F64x2, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtpd2udq256 => {
-                ("vcvtpd2udq", 256, VectorType::F64x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttpd2dq128 => {
-                ("vcvttpd2dq", 128, VectorType::F64x2, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttpd2dq256 => {
-                ("vcvttpd2dq", 256, VectorType::F64x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttpd2udq128 => {
-                ("vcvttpd2udq", 128, VectorType::F64x2, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvttpd2udq256 => {
-                ("vcvttpd2udq", 256, VectorType::F64x4, VectorType::I32x4)
-            }
-            Self::X86Avx512VlVcvtps2pd128 => {
-                ("vcvtps2pd", 128, VectorType::F32x4, VectorType::F64x2)
-            }
-            Self::X86Avx512VlVcvtps2pd256 => {
-                ("vcvtps2pd", 256, VectorType::F32x4, VectorType::F64x4)
-            }
-            Self::X86Avx512VlVcvtpd2ps128 => {
-                ("vcvtpd2ps", 128, VectorType::F64x2, VectorType::F32x4)
-            }
-            Self::X86Avx512VlVcvtpd2ps256 => {
-                ("vcvtpd2ps", 256, VectorType::F64x4, VectorType::F32x4)
-            }
-            Self::X86Avx512VlVcvtph2ps128 => {
-                ("vcvtph2ps", 128, VectorType::I16x8, VectorType::F32x4)
-            }
-            Self::X86Avx512VlVcvtph2ps256 => {
-                ("vcvtph2ps", 256, VectorType::I16x8, VectorType::F32x8)
-            }
-            Self::X86Avx512VlVcvtps2ph128 => {
-                ("vcvtps2ph", 128, VectorType::F32x4, VectorType::I16x8)
-            }
-            Self::X86Avx512VlVcvtps2ph256 => {
-                ("vcvtps2ph", 256, VectorType::F32x8, VectorType::I16x8)
-            }
+            Self::X86Avx512VlVcvtdq2ps128 => (
+                EvexMnemonic::Vcvtdq2ps,
+                128,
+                VectorType::I32x4,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512VlVcvtdq2ps256 => (
+                EvexMnemonic::Vcvtdq2ps,
+                256,
+                VectorType::I32x8,
+                VectorType::F32x8,
+            ),
+            Self::X86Avx512VlVcvtudq2ps128 => (
+                EvexMnemonic::Vcvtudq2ps,
+                128,
+                VectorType::I32x4,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512VlVcvtudq2ps256 => (
+                EvexMnemonic::Vcvtudq2ps,
+                256,
+                VectorType::I32x8,
+                VectorType::F32x8,
+            ),
+            Self::X86Avx512VlVcvtdq2pd128 => (
+                EvexMnemonic::Vcvtdq2pd,
+                128,
+                VectorType::I32x4,
+                VectorType::F64x2,
+            ),
+            Self::X86Avx512VlVcvtdq2pd256 => (
+                EvexMnemonic::Vcvtdq2pd,
+                256,
+                VectorType::I32x4,
+                VectorType::F64x4,
+            ),
+            Self::X86Avx512VlVcvtudq2pd128 => (
+                EvexMnemonic::Vcvtudq2pd,
+                128,
+                VectorType::I32x4,
+                VectorType::F64x2,
+            ),
+            Self::X86Avx512VlVcvtudq2pd256 => (
+                EvexMnemonic::Vcvtudq2pd,
+                256,
+                VectorType::I32x4,
+                VectorType::F64x4,
+            ),
+            Self::X86Avx512VlVcvtps2dq128 => (
+                EvexMnemonic::Vcvtps2dq,
+                128,
+                VectorType::F32x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtps2dq256 => (
+                EvexMnemonic::Vcvtps2dq,
+                256,
+                VectorType::F32x8,
+                VectorType::I32x8,
+            ),
+            Self::X86Avx512VlVcvtps2udq128 => (
+                EvexMnemonic::Vcvtps2udq,
+                128,
+                VectorType::F32x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtps2udq256 => (
+                EvexMnemonic::Vcvtps2udq,
+                256,
+                VectorType::F32x8,
+                VectorType::I32x8,
+            ),
+            Self::X86Avx512VlVcvttps2dq128 => (
+                EvexMnemonic::Vcvttps2dq,
+                128,
+                VectorType::F32x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttps2dq256 => (
+                EvexMnemonic::Vcvttps2dq,
+                256,
+                VectorType::F32x8,
+                VectorType::I32x8,
+            ),
+            Self::X86Avx512VlVcvttps2udq128 => (
+                EvexMnemonic::Vcvttps2udq,
+                128,
+                VectorType::F32x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttps2udq256 => (
+                EvexMnemonic::Vcvttps2udq,
+                256,
+                VectorType::F32x8,
+                VectorType::I32x8,
+            ),
+            Self::X86Avx512VlVcvtpd2dq128 => (
+                EvexMnemonic::Vcvtpd2dq,
+                128,
+                VectorType::F64x2,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtpd2dq256 => (
+                EvexMnemonic::Vcvtpd2dq,
+                256,
+                VectorType::F64x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtpd2udq128 => (
+                EvexMnemonic::Vcvtpd2udq,
+                128,
+                VectorType::F64x2,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtpd2udq256 => (
+                EvexMnemonic::Vcvtpd2udq,
+                256,
+                VectorType::F64x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttpd2dq128 => (
+                EvexMnemonic::Vcvttpd2dq,
+                128,
+                VectorType::F64x2,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttpd2dq256 => (
+                EvexMnemonic::Vcvttpd2dq,
+                256,
+                VectorType::F64x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttpd2udq128 => (
+                EvexMnemonic::Vcvttpd2udq,
+                128,
+                VectorType::F64x2,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvttpd2udq256 => (
+                EvexMnemonic::Vcvttpd2udq,
+                256,
+                VectorType::F64x4,
+                VectorType::I32x4,
+            ),
+            Self::X86Avx512VlVcvtps2pd128 => (
+                EvexMnemonic::Vcvtps2pd,
+                128,
+                VectorType::F32x4,
+                VectorType::F64x2,
+            ),
+            Self::X86Avx512VlVcvtps2pd256 => (
+                EvexMnemonic::Vcvtps2pd,
+                256,
+                VectorType::F32x4,
+                VectorType::F64x4,
+            ),
+            Self::X86Avx512VlVcvtpd2ps128 => (
+                EvexMnemonic::Vcvtpd2ps,
+                128,
+                VectorType::F64x2,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512VlVcvtpd2ps256 => (
+                EvexMnemonic::Vcvtpd2ps,
+                256,
+                VectorType::F64x4,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512VlVcvtph2ps128 => (
+                EvexMnemonic::Vcvtph2ps,
+                128,
+                VectorType::I16x8,
+                VectorType::F32x4,
+            ),
+            Self::X86Avx512VlVcvtph2ps256 => (
+                EvexMnemonic::Vcvtph2ps,
+                256,
+                VectorType::I16x8,
+                VectorType::F32x8,
+            ),
+            Self::X86Avx512VlVcvtps2ph128 => (
+                EvexMnemonic::Vcvtps2ph,
+                128,
+                VectorType::F32x4,
+                VectorType::I16x8,
+            ),
+            Self::X86Avx512VlVcvtps2ph256 => (
+                EvexMnemonic::Vcvtps2ph,
+                256,
+                VectorType::F32x8,
+                VectorType::I16x8,
+            ),
             _ => return None,
         })
     }
@@ -659,25 +864,25 @@ impl Intrinsic {
     }
 
     /// Native opcode, optional immediate index and optional rounding/SAE index.
-    pub fn x86_avx512_special(self) -> Option<(&'static str, Option<usize>, Option<usize>)> {
+    pub fn x86_avx512_special(self) -> Option<(EvexMnemonic, Option<usize>, Option<usize>)> {
         if let Some((opcode, _, immediate)) = self.x86_avx512_vl_special() {
             return Some((opcode, immediate, None));
         }
         Some(match self {
-            Self::X86Avx512Getexpps => ("vgetexpps", None, Some(3)),
-            Self::X86Avx512Getexppd => ("vgetexppd", None, Some(3)),
-            Self::X86Avx512Getmantps => ("vgetmantps", Some(3), Some(4)),
-            Self::X86Avx512Getmantpd => ("vgetmantpd", Some(3), Some(4)),
-            Self::X86Avx512Scalefps => ("vscalefps", None, Some(4)),
-            Self::X86Avx512Scalefpd => ("vscalefpd", None, Some(4)),
-            Self::X86Avx512Rcp14ps => ("vrcp14ps", None, None),
-            Self::X86Avx512Rcp14pd => ("vrcp14pd", None, None),
-            Self::X86Avx512Rsqrt14ps => ("vrsqrt14ps", None, None),
-            Self::X86Avx512Rsqrt14pd => ("vrsqrt14pd", None, None),
-            Self::X86Avx512Roundscaleps => ("vrndscaleps", Some(3), Some(4)),
-            Self::X86Avx512Roundscalepd => ("vrndscalepd", Some(3), Some(4)),
-            Self::X86Avx512Fixupimmps => ("vfixupimmps", Some(4), Some(5)),
-            Self::X86Avx512Fixupimmpd => ("vfixupimmpd", Some(4), Some(5)),
+            Self::X86Avx512Getexpps => (EvexMnemonic::Vgetexpps, None, Some(3)),
+            Self::X86Avx512Getexppd => (EvexMnemonic::Vgetexppd, None, Some(3)),
+            Self::X86Avx512Getmantps => (EvexMnemonic::Vgetmantps, Some(3), Some(4)),
+            Self::X86Avx512Getmantpd => (EvexMnemonic::Vgetmantpd, Some(3), Some(4)),
+            Self::X86Avx512Scalefps => (EvexMnemonic::Vscalefps, None, Some(4)),
+            Self::X86Avx512Scalefpd => (EvexMnemonic::Vscalefpd, None, Some(4)),
+            Self::X86Avx512Rcp14ps => (EvexMnemonic::Vrcp14ps, None, None),
+            Self::X86Avx512Rcp14pd => (EvexMnemonic::Vrcp14pd, None, None),
+            Self::X86Avx512Rsqrt14ps => (EvexMnemonic::Vrsqrt14ps, None, None),
+            Self::X86Avx512Rsqrt14pd => (EvexMnemonic::Vrsqrt14pd, None, None),
+            Self::X86Avx512Roundscaleps => (EvexMnemonic::Vrndscaleps, Some(3), Some(4)),
+            Self::X86Avx512Roundscalepd => (EvexMnemonic::Vrndscalepd, Some(3), Some(4)),
+            Self::X86Avx512Fixupimmps => (EvexMnemonic::Vfixupimmps, Some(4), Some(5)),
+            Self::X86Avx512Fixupimmpd => (EvexMnemonic::Vfixupimmpd, Some(4), Some(5)),
             _ => return None,
         })
     }
@@ -687,7 +892,7 @@ impl Intrinsic {
             return false;
         };
         if Some(index) == imm {
-            return (0..=if name.starts_with("vgetmant") {
+            return (0..=if name.mnemonic().starts_with("vgetmant") {
                 15
             } else {
                 255
@@ -696,7 +901,7 @@ impl Intrinsic {
         }
         Some(index) == control
             && (value == 4
-                || if name.starts_with("vscalef") {
+                || if name.mnemonic().starts_with("vscalef") {
                     (8..=11).contains(&value)
                 } else {
                     value == 8
@@ -765,84 +970,84 @@ impl Intrinsic {
     /// Raw FMA operands retain their encoded positions, including NaN priority.
     /// 132 computes a*c+b, 213 computes b*a+c, and 231 computes b*c+a.
     /// Alternating add/sub families select their architectural lane signs.
-    pub fn x86_avx512_fma_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_fma_opcode(self) -> Option<EvexMnemonic> {
         if let Some((opcode, _)) = self.x86_avx512_vl_fma() {
             return Some(opcode);
         }
         Some(match self {
-            Self::X86Avx512Vfmadd132ps => "vfmadd132ps",
-            Self::X86Avx512Vfmadd132pd => "vfmadd132pd",
-            Self::X86Avx512Vfmadd213ps => "vfmadd213ps",
-            Self::X86Avx512Vfmadd213pd => "vfmadd213pd",
-            Self::X86Avx512Vfmadd231ps => "vfmadd231ps",
-            Self::X86Avx512Vfmadd231pd => "vfmadd231pd",
-            Self::X86Avx512Vfmsub132ps => "vfmsub132ps",
-            Self::X86Avx512Vfmsub132pd => "vfmsub132pd",
-            Self::X86Avx512Vfmsub213ps => "vfmsub213ps",
-            Self::X86Avx512Vfmsub213pd => "vfmsub213pd",
-            Self::X86Avx512Vfmsub231ps => "vfmsub231ps",
-            Self::X86Avx512Vfmsub231pd => "vfmsub231pd",
-            Self::X86Avx512Vfnmadd132ps => "vfnmadd132ps",
-            Self::X86Avx512Vfnmadd132pd => "vfnmadd132pd",
-            Self::X86Avx512Vfnmadd213ps => "vfnmadd213ps",
-            Self::X86Avx512Vfnmadd213pd => "vfnmadd213pd",
-            Self::X86Avx512Vfnmadd231ps => "vfnmadd231ps",
-            Self::X86Avx512Vfnmadd231pd => "vfnmadd231pd",
-            Self::X86Avx512Vfnmsub132ps => "vfnmsub132ps",
-            Self::X86Avx512Vfnmsub132pd => "vfnmsub132pd",
-            Self::X86Avx512Vfnmsub213ps => "vfnmsub213ps",
-            Self::X86Avx512Vfnmsub213pd => "vfnmsub213pd",
-            Self::X86Avx512Vfnmsub231ps => "vfnmsub231ps",
-            Self::X86Avx512Vfnmsub231pd => "vfnmsub231pd",
-            Self::X86Avx512Vfmaddsub132ps => "vfmaddsub132ps",
-            Self::X86Avx512Vfmaddsub132pd => "vfmaddsub132pd",
-            Self::X86Avx512Vfmaddsub213ps => "vfmaddsub213ps",
-            Self::X86Avx512Vfmaddsub213pd => "vfmaddsub213pd",
-            Self::X86Avx512Vfmaddsub231ps => "vfmaddsub231ps",
-            Self::X86Avx512Vfmaddsub231pd => "vfmaddsub231pd",
-            Self::X86Avx512Vfmsubadd132ps => "vfmsubadd132ps",
-            Self::X86Avx512Vfmsubadd132pd => "vfmsubadd132pd",
-            Self::X86Avx512Vfmsubadd213ps => "vfmsubadd213ps",
-            Self::X86Avx512Vfmsubadd213pd => "vfmsubadd213pd",
-            Self::X86Avx512Vfmsubadd231ps => "vfmsubadd231ps",
-            Self::X86Avx512Vfmsubadd231pd => "vfmsubadd231pd",
+            Self::X86Avx512Vfmadd132ps => EvexMnemonic::Vfmadd132ps,
+            Self::X86Avx512Vfmadd132pd => EvexMnemonic::Vfmadd132pd,
+            Self::X86Avx512Vfmadd213ps => EvexMnemonic::Vfmadd213ps,
+            Self::X86Avx512Vfmadd213pd => EvexMnemonic::Vfmadd213pd,
+            Self::X86Avx512Vfmadd231ps => EvexMnemonic::Vfmadd231ps,
+            Self::X86Avx512Vfmadd231pd => EvexMnemonic::Vfmadd231pd,
+            Self::X86Avx512Vfmsub132ps => EvexMnemonic::Vfmsub132ps,
+            Self::X86Avx512Vfmsub132pd => EvexMnemonic::Vfmsub132pd,
+            Self::X86Avx512Vfmsub213ps => EvexMnemonic::Vfmsub213ps,
+            Self::X86Avx512Vfmsub213pd => EvexMnemonic::Vfmsub213pd,
+            Self::X86Avx512Vfmsub231ps => EvexMnemonic::Vfmsub231ps,
+            Self::X86Avx512Vfmsub231pd => EvexMnemonic::Vfmsub231pd,
+            Self::X86Avx512Vfnmadd132ps => EvexMnemonic::Vfnmadd132ps,
+            Self::X86Avx512Vfnmadd132pd => EvexMnemonic::Vfnmadd132pd,
+            Self::X86Avx512Vfnmadd213ps => EvexMnemonic::Vfnmadd213ps,
+            Self::X86Avx512Vfnmadd213pd => EvexMnemonic::Vfnmadd213pd,
+            Self::X86Avx512Vfnmadd231ps => EvexMnemonic::Vfnmadd231ps,
+            Self::X86Avx512Vfnmadd231pd => EvexMnemonic::Vfnmadd231pd,
+            Self::X86Avx512Vfnmsub132ps => EvexMnemonic::Vfnmsub132ps,
+            Self::X86Avx512Vfnmsub132pd => EvexMnemonic::Vfnmsub132pd,
+            Self::X86Avx512Vfnmsub213ps => EvexMnemonic::Vfnmsub213ps,
+            Self::X86Avx512Vfnmsub213pd => EvexMnemonic::Vfnmsub213pd,
+            Self::X86Avx512Vfnmsub231ps => EvexMnemonic::Vfnmsub231ps,
+            Self::X86Avx512Vfnmsub231pd => EvexMnemonic::Vfnmsub231pd,
+            Self::X86Avx512Vfmaddsub132ps => EvexMnemonic::Vfmaddsub132ps,
+            Self::X86Avx512Vfmaddsub132pd => EvexMnemonic::Vfmaddsub132pd,
+            Self::X86Avx512Vfmaddsub213ps => EvexMnemonic::Vfmaddsub213ps,
+            Self::X86Avx512Vfmaddsub213pd => EvexMnemonic::Vfmaddsub213pd,
+            Self::X86Avx512Vfmaddsub231ps => EvexMnemonic::Vfmaddsub231ps,
+            Self::X86Avx512Vfmaddsub231pd => EvexMnemonic::Vfmaddsub231pd,
+            Self::X86Avx512Vfmsubadd132ps => EvexMnemonic::Vfmsubadd132ps,
+            Self::X86Avx512Vfmsubadd132pd => EvexMnemonic::Vfmsubadd132pd,
+            Self::X86Avx512Vfmsubadd213ps => EvexMnemonic::Vfmsubadd213ps,
+            Self::X86Avx512Vfmsubadd213pd => EvexMnemonic::Vfmsubadd213pd,
+            Self::X86Avx512Vfmsubadd231ps => EvexMnemonic::Vfmsubadd231ps,
+            Self::X86Avx512Vfmsubadd231pd => EvexMnemonic::Vfmsubadd231pd,
             _ => return None,
         })
     }
 
     /// Scalar EVEX opcode, optional immediate index and optional SAE/rounding index.
-    pub fn x86_avx512_scalar(self) -> Option<(&'static str, Option<usize>, Option<usize>)> {
+    pub fn x86_avx512_scalar(self) -> Option<(EvexMnemonic, Option<usize>, Option<usize>)> {
         Some(match self {
-            Self::X86Avx512Addss => ("vaddss", None, Some(4)),
-            Self::X86Avx512Addsd => ("vaddsd", None, Some(4)),
-            Self::X86Avx512Subss => ("vsubss", None, Some(4)),
-            Self::X86Avx512Subsd => ("vsubsd", None, Some(4)),
-            Self::X86Avx512Mulss => ("vmulss", None, Some(4)),
-            Self::X86Avx512Mulsd => ("vmulsd", None, Some(4)),
-            Self::X86Avx512Divss => ("vdivss", None, Some(4)),
-            Self::X86Avx512Divsd => ("vdivsd", None, Some(4)),
-            Self::X86Avx512Sqrtss => ("vsqrtss", None, Some(4)),
-            Self::X86Avx512Sqrtsd => ("vsqrtsd", None, Some(4)),
-            Self::X86Avx512Minss => ("vminss", None, Some(4)),
-            Self::X86Avx512Minsd => ("vminsd", None, Some(4)),
-            Self::X86Avx512Maxss => ("vmaxss", None, Some(4)),
-            Self::X86Avx512Maxsd => ("vmaxsd", None, Some(4)),
-            Self::X86Avx512Cmpss => ("vcmpss", Some(3), Some(4)),
-            Self::X86Avx512Cmpsd => ("vcmpsd", Some(3), Some(4)),
-            Self::X86Avx512Getexpss => ("vgetexpss", None, Some(4)),
-            Self::X86Avx512Getexpsd => ("vgetexpsd", None, Some(4)),
-            Self::X86Avx512Getmantss => ("vgetmantss", Some(4), Some(5)),
-            Self::X86Avx512Getmantsd => ("vgetmantsd", Some(4), Some(5)),
-            Self::X86Avx512Scalefss => ("vscalefss", None, Some(4)),
-            Self::X86Avx512Scalefsd => ("vscalefsd", None, Some(4)),
-            Self::X86Avx512Rcp14ss => ("vrcp14ss", None, None),
-            Self::X86Avx512Rcp14sd => ("vrcp14sd", None, None),
-            Self::X86Avx512Rsqrt14ss => ("vrsqrt14ss", None, None),
-            Self::X86Avx512Rsqrt14sd => ("vrsqrt14sd", None, None),
-            Self::X86Avx512Roundscaless => ("vrndscaless", Some(4), Some(5)),
-            Self::X86Avx512Roundscalesd => ("vrndscalesd", Some(4), Some(5)),
-            Self::X86Avx512Fixupimmss => ("vfixupimmss", Some(4), Some(5)),
-            Self::X86Avx512Fixupimmsd => ("vfixupimmsd", Some(4), Some(5)),
+            Self::X86Avx512Addss => (EvexMnemonic::Vaddss, None, Some(4)),
+            Self::X86Avx512Addsd => (EvexMnemonic::Vaddsd, None, Some(4)),
+            Self::X86Avx512Subss => (EvexMnemonic::Vsubss, None, Some(4)),
+            Self::X86Avx512Subsd => (EvexMnemonic::Vsubsd, None, Some(4)),
+            Self::X86Avx512Mulss => (EvexMnemonic::Vmulss, None, Some(4)),
+            Self::X86Avx512Mulsd => (EvexMnemonic::Vmulsd, None, Some(4)),
+            Self::X86Avx512Divss => (EvexMnemonic::Vdivss, None, Some(4)),
+            Self::X86Avx512Divsd => (EvexMnemonic::Vdivsd, None, Some(4)),
+            Self::X86Avx512Sqrtss => (EvexMnemonic::Vsqrtss, None, Some(4)),
+            Self::X86Avx512Sqrtsd => (EvexMnemonic::Vsqrtsd, None, Some(4)),
+            Self::X86Avx512Minss => (EvexMnemonic::Vminss, None, Some(4)),
+            Self::X86Avx512Minsd => (EvexMnemonic::Vminsd, None, Some(4)),
+            Self::X86Avx512Maxss => (EvexMnemonic::Vmaxss, None, Some(4)),
+            Self::X86Avx512Maxsd => (EvexMnemonic::Vmaxsd, None, Some(4)),
+            Self::X86Avx512Cmpss => (EvexMnemonic::Vcmpss, Some(3), Some(4)),
+            Self::X86Avx512Cmpsd => (EvexMnemonic::Vcmpsd, Some(3), Some(4)),
+            Self::X86Avx512Getexpss => (EvexMnemonic::Vgetexpss, None, Some(4)),
+            Self::X86Avx512Getexpsd => (EvexMnemonic::Vgetexpsd, None, Some(4)),
+            Self::X86Avx512Getmantss => (EvexMnemonic::Vgetmantss, Some(4), Some(5)),
+            Self::X86Avx512Getmantsd => (EvexMnemonic::Vgetmantsd, Some(4), Some(5)),
+            Self::X86Avx512Scalefss => (EvexMnemonic::Vscalefss, None, Some(4)),
+            Self::X86Avx512Scalefsd => (EvexMnemonic::Vscalefsd, None, Some(4)),
+            Self::X86Avx512Rcp14ss => (EvexMnemonic::Vrcp14ss, None, None),
+            Self::X86Avx512Rcp14sd => (EvexMnemonic::Vrcp14sd, None, None),
+            Self::X86Avx512Rsqrt14ss => (EvexMnemonic::Vrsqrt14ss, None, None),
+            Self::X86Avx512Rsqrt14sd => (EvexMnemonic::Vrsqrt14sd, None, None),
+            Self::X86Avx512Roundscaless => (EvexMnemonic::Vrndscaless, Some(4), Some(5)),
+            Self::X86Avx512Roundscalesd => (EvexMnemonic::Vrndscalesd, Some(4), Some(5)),
+            Self::X86Avx512Fixupimmss => (EvexMnemonic::Vfixupimmss, Some(4), Some(5)),
+            Self::X86Avx512Fixupimmsd => (EvexMnemonic::Vfixupimmsd, Some(4), Some(5)),
             _ => return None,
         })
     }
@@ -851,7 +1056,7 @@ impl Intrinsic {
         self.x86_avx512_scalar().is_some_and(|(name, _, _)| {
             ["vadd", "vsub", "vmul", "vdiv", "vsqrt", "vscalef"]
                 .iter()
-                .any(|prefix| name.starts_with(prefix))
+                .any(|prefix| name.mnemonic().starts_with(prefix))
         })
     }
 
@@ -860,9 +1065,9 @@ impl Intrinsic {
             return false;
         };
         if Some(index) == immediate {
-            return (0..=if name.starts_with("vcmp") {
+            return (0..=if name.mnemonic().starts_with("vcmp") {
                 31
-            } else if name.starts_with("vgetmant") {
+            } else if name.mnemonic().starts_with("vgetmant") {
                 15
             } else {
                 255
@@ -901,69 +1106,69 @@ impl Intrinsic {
     }
 
     /// Scalar FMA keeps encoded operand positions and destination-a upper lanes.
-    pub fn x86_avx512_scalar_fma_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_scalar_fma_opcode(self) -> Option<EvexMnemonic> {
         Some(match self {
-            Self::X86Avx512Vfmadd132ss => "vfmadd132ss",
-            Self::X86Avx512Vfmadd132sd => "vfmadd132sd",
-            Self::X86Avx512Vfmadd213ss => "vfmadd213ss",
-            Self::X86Avx512Vfmadd213sd => "vfmadd213sd",
-            Self::X86Avx512Vfmadd231ss => "vfmadd231ss",
-            Self::X86Avx512Vfmadd231sd => "vfmadd231sd",
-            Self::X86Avx512Vfmsub132ss => "vfmsub132ss",
-            Self::X86Avx512Vfmsub132sd => "vfmsub132sd",
-            Self::X86Avx512Vfmsub213ss => "vfmsub213ss",
-            Self::X86Avx512Vfmsub213sd => "vfmsub213sd",
-            Self::X86Avx512Vfmsub231ss => "vfmsub231ss",
-            Self::X86Avx512Vfmsub231sd => "vfmsub231sd",
-            Self::X86Avx512Vfnmadd132ss => "vfnmadd132ss",
-            Self::X86Avx512Vfnmadd132sd => "vfnmadd132sd",
-            Self::X86Avx512Vfnmadd213ss => "vfnmadd213ss",
-            Self::X86Avx512Vfnmadd213sd => "vfnmadd213sd",
-            Self::X86Avx512Vfnmadd231ss => "vfnmadd231ss",
-            Self::X86Avx512Vfnmadd231sd => "vfnmadd231sd",
-            Self::X86Avx512Vfnmsub132ss => "vfnmsub132ss",
-            Self::X86Avx512Vfnmsub132sd => "vfnmsub132sd",
-            Self::X86Avx512Vfnmsub213ss => "vfnmsub213ss",
-            Self::X86Avx512Vfnmsub213sd => "vfnmsub213sd",
-            Self::X86Avx512Vfnmsub231ss => "vfnmsub231ss",
-            Self::X86Avx512Vfnmsub231sd => "vfnmsub231sd",
+            Self::X86Avx512Vfmadd132ss => EvexMnemonic::Vfmadd132ss,
+            Self::X86Avx512Vfmadd132sd => EvexMnemonic::Vfmadd132sd,
+            Self::X86Avx512Vfmadd213ss => EvexMnemonic::Vfmadd213ss,
+            Self::X86Avx512Vfmadd213sd => EvexMnemonic::Vfmadd213sd,
+            Self::X86Avx512Vfmadd231ss => EvexMnemonic::Vfmadd231ss,
+            Self::X86Avx512Vfmadd231sd => EvexMnemonic::Vfmadd231sd,
+            Self::X86Avx512Vfmsub132ss => EvexMnemonic::Vfmsub132ss,
+            Self::X86Avx512Vfmsub132sd => EvexMnemonic::Vfmsub132sd,
+            Self::X86Avx512Vfmsub213ss => EvexMnemonic::Vfmsub213ss,
+            Self::X86Avx512Vfmsub213sd => EvexMnemonic::Vfmsub213sd,
+            Self::X86Avx512Vfmsub231ss => EvexMnemonic::Vfmsub231ss,
+            Self::X86Avx512Vfmsub231sd => EvexMnemonic::Vfmsub231sd,
+            Self::X86Avx512Vfnmadd132ss => EvexMnemonic::Vfnmadd132ss,
+            Self::X86Avx512Vfnmadd132sd => EvexMnemonic::Vfnmadd132sd,
+            Self::X86Avx512Vfnmadd213ss => EvexMnemonic::Vfnmadd213ss,
+            Self::X86Avx512Vfnmadd213sd => EvexMnemonic::Vfnmadd213sd,
+            Self::X86Avx512Vfnmadd231ss => EvexMnemonic::Vfnmadd231ss,
+            Self::X86Avx512Vfnmadd231sd => EvexMnemonic::Vfnmadd231sd,
+            Self::X86Avx512Vfnmsub132ss => EvexMnemonic::Vfnmsub132ss,
+            Self::X86Avx512Vfnmsub132sd => EvexMnemonic::Vfnmsub132sd,
+            Self::X86Avx512Vfnmsub213ss => EvexMnemonic::Vfnmsub213ss,
+            Self::X86Avx512Vfnmsub213sd => EvexMnemonic::Vfnmsub213sd,
+            Self::X86Avx512Vfnmsub231ss => EvexMnemonic::Vfnmsub231ss,
+            Self::X86Avx512Vfnmsub231sd => EvexMnemonic::Vfnmsub231sd,
             _ => return None,
         })
     }
 
     /// Scalar conversion/flag opcode and rounding/SAE control index.
-    pub fn x86_avx512_scalar_convert(self) -> Option<(&'static str, usize)> {
+    pub fn x86_avx512_scalar_convert(self) -> Option<(EvexMnemonic, usize)> {
         Some(match self {
-            Self::X86Avx512Vcvtsi2ss32 => ("vcvtsi2ss", 2),
-            Self::X86Avx512Vcvtsi2sd32 => ("vcvtsi2sd", 2),
-            Self::X86Avx512Vcvtsi2ss64 => ("vcvtsi2ss", 2),
-            Self::X86Avx512Vcvtsi2sd64 => ("vcvtsi2sd", 2),
-            Self::X86Avx512Vcvtusi2ss32 => ("vcvtusi2ss", 2),
-            Self::X86Avx512Vcvtusi2sd32 => ("vcvtusi2sd", 2),
-            Self::X86Avx512Vcvtusi2ss64 => ("vcvtusi2ss", 2),
-            Self::X86Avx512Vcvtusi2sd64 => ("vcvtusi2sd", 2),
-            Self::X86Avx512Vcvtss2si32 => ("vcvtss2si", 1),
-            Self::X86Avx512Vcvtss2si64 => ("vcvtss2si", 1),
-            Self::X86Avx512Vcvttss2si32 => ("vcvttss2si", 1),
-            Self::X86Avx512Vcvttss2si64 => ("vcvttss2si", 1),
-            Self::X86Avx512Vcvtss2usi32 => ("vcvtss2usi", 1),
-            Self::X86Avx512Vcvtss2usi64 => ("vcvtss2usi", 1),
-            Self::X86Avx512Vcvttss2usi32 => ("vcvttss2usi", 1),
-            Self::X86Avx512Vcvttss2usi64 => ("vcvttss2usi", 1),
-            Self::X86Avx512Vcvtsd2si32 => ("vcvtsd2si", 1),
-            Self::X86Avx512Vcvtsd2si64 => ("vcvtsd2si", 1),
-            Self::X86Avx512Vcvttsd2si32 => ("vcvttsd2si", 1),
-            Self::X86Avx512Vcvttsd2si64 => ("vcvttsd2si", 1),
-            Self::X86Avx512Vcvtsd2usi32 => ("vcvtsd2usi", 1),
-            Self::X86Avx512Vcvtsd2usi64 => ("vcvtsd2usi", 1),
-            Self::X86Avx512Vcvttsd2usi32 => ("vcvttsd2usi", 1),
-            Self::X86Avx512Vcvttsd2usi64 => ("vcvttsd2usi", 1),
-            Self::X86Avx512Vcvtss2sd => ("vcvtss2sd", 4),
-            Self::X86Avx512Vcvtsd2ss => ("vcvtsd2ss", 4),
-            Self::X86Avx512Vcomiss => ("vcomiss", 2),
-            Self::X86Avx512Vcomisd => ("vcomisd", 2),
-            Self::X86Avx512Vucomiss => ("vucomiss", 2),
-            Self::X86Avx512Vucomisd => ("vucomisd", 2),
+            Self::X86Avx512Vcvtsi2ss32 => (EvexMnemonic::Vcvtsi2ss, 2),
+            Self::X86Avx512Vcvtsi2sd32 => (EvexMnemonic::Vcvtsi2sd, 2),
+            Self::X86Avx512Vcvtsi2ss64 => (EvexMnemonic::Vcvtsi2ss, 2),
+            Self::X86Avx512Vcvtsi2sd64 => (EvexMnemonic::Vcvtsi2sd, 2),
+            Self::X86Avx512Vcvtusi2ss32 => (EvexMnemonic::Vcvtusi2ss, 2),
+            Self::X86Avx512Vcvtusi2sd32 => (EvexMnemonic::Vcvtusi2sd, 2),
+            Self::X86Avx512Vcvtusi2ss64 => (EvexMnemonic::Vcvtusi2ss, 2),
+            Self::X86Avx512Vcvtusi2sd64 => (EvexMnemonic::Vcvtusi2sd, 2),
+            Self::X86Avx512Vcvtss2si32 => (EvexMnemonic::Vcvtss2si, 1),
+            Self::X86Avx512Vcvtss2si64 => (EvexMnemonic::Vcvtss2si, 1),
+            Self::X86Avx512Vcvttss2si32 => (EvexMnemonic::Vcvttss2si, 1),
+            Self::X86Avx512Vcvttss2si64 => (EvexMnemonic::Vcvttss2si, 1),
+            Self::X86Avx512Vcvtss2usi32 => (EvexMnemonic::Vcvtss2usi, 1),
+            Self::X86Avx512Vcvtss2usi64 => (EvexMnemonic::Vcvtss2usi, 1),
+            Self::X86Avx512Vcvttss2usi32 => (EvexMnemonic::Vcvttss2usi, 1),
+            Self::X86Avx512Vcvttss2usi64 => (EvexMnemonic::Vcvttss2usi, 1),
+            Self::X86Avx512Vcvtsd2si32 => (EvexMnemonic::Vcvtsd2si, 1),
+            Self::X86Avx512Vcvtsd2si64 => (EvexMnemonic::Vcvtsd2si, 1),
+            Self::X86Avx512Vcvttsd2si32 => (EvexMnemonic::Vcvttsd2si, 1),
+            Self::X86Avx512Vcvttsd2si64 => (EvexMnemonic::Vcvttsd2si, 1),
+            Self::X86Avx512Vcvtsd2usi32 => (EvexMnemonic::Vcvtsd2usi, 1),
+            Self::X86Avx512Vcvtsd2usi64 => (EvexMnemonic::Vcvtsd2usi, 1),
+            Self::X86Avx512Vcvttsd2usi32 => (EvexMnemonic::Vcvttsd2usi, 1),
+            Self::X86Avx512Vcvttsd2usi64 => (EvexMnemonic::Vcvttsd2usi, 1),
+            Self::X86Avx512Vcvtss2sd => (EvexMnemonic::Vcvtss2sd, 4),
+            Self::X86Avx512Vcvtsd2ss => (EvexMnemonic::Vcvtsd2ss, 4),
+            Self::X86Avx512Vcomiss => (EvexMnemonic::Vcomiss, 2),
+            Self::X86Avx512Vcomisd => (EvexMnemonic::Vcomisd, 2),
+            Self::X86Avx512Vucomiss => (EvexMnemonic::Vucomiss, 2),
+            Self::X86Avx512Vucomisd => (EvexMnemonic::Vucomisd, 2),
             _ => return None,
         })
     }
@@ -1047,33 +1252,63 @@ impl Intrinsic {
         )
     }
 
-    pub fn x86_avx512_integer_convert_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_integer_convert_opcode(self) -> Option<EvexMnemonic> {
         Some(match self {
-            Self::X86Avx512MaskPmovsxbd | Self::X86Avx512MaskLoadPmovsxbd => "vpmovsxbd",
-            Self::X86Avx512MaskPmovsxbq | Self::X86Avx512MaskLoadPmovsxbq => "vpmovsxbq",
-            Self::X86Avx512MaskPmovsxwd | Self::X86Avx512MaskLoadPmovsxwd => "vpmovsxwd",
-            Self::X86Avx512MaskPmovsxwq | Self::X86Avx512MaskLoadPmovsxwq => "vpmovsxwq",
-            Self::X86Avx512MaskPmovsxdq | Self::X86Avx512MaskLoadPmovsxdq => "vpmovsxdq",
-            Self::X86Avx512MaskPmovzxbd | Self::X86Avx512MaskLoadPmovzxbd => "vpmovzxbd",
-            Self::X86Avx512MaskPmovzxbq | Self::X86Avx512MaskLoadPmovzxbq => "vpmovzxbq",
-            Self::X86Avx512MaskPmovzxwd | Self::X86Avx512MaskLoadPmovzxwd => "vpmovzxwd",
-            Self::X86Avx512MaskPmovzxwq | Self::X86Avx512MaskLoadPmovzxwq => "vpmovzxwq",
-            Self::X86Avx512MaskPmovzxdq | Self::X86Avx512MaskLoadPmovzxdq => "vpmovzxdq",
-            Self::X86Avx512MaskPmovdb | Self::X86Avx512MaskStorePmovdb => "vpmovdb",
-            Self::X86Avx512MaskPmovdw | Self::X86Avx512MaskStorePmovdw => "vpmovdw",
-            Self::X86Avx512MaskPmovqb | Self::X86Avx512MaskStorePmovqb => "vpmovqb",
-            Self::X86Avx512MaskPmovqd | Self::X86Avx512MaskStorePmovqd => "vpmovqd",
-            Self::X86Avx512MaskPmovqw | Self::X86Avx512MaskStorePmovqw => "vpmovqw",
-            Self::X86Avx512MaskPmovsdb | Self::X86Avx512MaskStorePmovsdb => "vpmovsdb",
-            Self::X86Avx512MaskPmovsdw | Self::X86Avx512MaskStorePmovsdw => "vpmovsdw",
-            Self::X86Avx512MaskPmovsqb | Self::X86Avx512MaskStorePmovsqb => "vpmovsqb",
-            Self::X86Avx512MaskPmovsqd | Self::X86Avx512MaskStorePmovsqd => "vpmovsqd",
-            Self::X86Avx512MaskPmovsqw | Self::X86Avx512MaskStorePmovsqw => "vpmovsqw",
-            Self::X86Avx512MaskPmovusdb | Self::X86Avx512MaskStorePmovusdb => "vpmovusdb",
-            Self::X86Avx512MaskPmovusdw | Self::X86Avx512MaskStorePmovusdw => "vpmovusdw",
-            Self::X86Avx512MaskPmovusqb | Self::X86Avx512MaskStorePmovusqb => "vpmovusqb",
-            Self::X86Avx512MaskPmovusqd | Self::X86Avx512MaskStorePmovusqd => "vpmovusqd",
-            Self::X86Avx512MaskPmovusqw | Self::X86Avx512MaskStorePmovusqw => "vpmovusqw",
+            Self::X86Avx512MaskPmovsxbd | Self::X86Avx512MaskLoadPmovsxbd => {
+                EvexMnemonic::Vpmovsxbd
+            }
+            Self::X86Avx512MaskPmovsxbq | Self::X86Avx512MaskLoadPmovsxbq => {
+                EvexMnemonic::Vpmovsxbq
+            }
+            Self::X86Avx512MaskPmovsxwd | Self::X86Avx512MaskLoadPmovsxwd => {
+                EvexMnemonic::Vpmovsxwd
+            }
+            Self::X86Avx512MaskPmovsxwq | Self::X86Avx512MaskLoadPmovsxwq => {
+                EvexMnemonic::Vpmovsxwq
+            }
+            Self::X86Avx512MaskPmovsxdq | Self::X86Avx512MaskLoadPmovsxdq => {
+                EvexMnemonic::Vpmovsxdq
+            }
+            Self::X86Avx512MaskPmovzxbd | Self::X86Avx512MaskLoadPmovzxbd => {
+                EvexMnemonic::Vpmovzxbd
+            }
+            Self::X86Avx512MaskPmovzxbq | Self::X86Avx512MaskLoadPmovzxbq => {
+                EvexMnemonic::Vpmovzxbq
+            }
+            Self::X86Avx512MaskPmovzxwd | Self::X86Avx512MaskLoadPmovzxwd => {
+                EvexMnemonic::Vpmovzxwd
+            }
+            Self::X86Avx512MaskPmovzxwq | Self::X86Avx512MaskLoadPmovzxwq => {
+                EvexMnemonic::Vpmovzxwq
+            }
+            Self::X86Avx512MaskPmovzxdq | Self::X86Avx512MaskLoadPmovzxdq => {
+                EvexMnemonic::Vpmovzxdq
+            }
+            Self::X86Avx512MaskPmovdb | Self::X86Avx512MaskStorePmovdb => EvexMnemonic::Vpmovdb,
+            Self::X86Avx512MaskPmovdw | Self::X86Avx512MaskStorePmovdw => EvexMnemonic::Vpmovdw,
+            Self::X86Avx512MaskPmovqb | Self::X86Avx512MaskStorePmovqb => EvexMnemonic::Vpmovqb,
+            Self::X86Avx512MaskPmovqd | Self::X86Avx512MaskStorePmovqd => EvexMnemonic::Vpmovqd,
+            Self::X86Avx512MaskPmovqw | Self::X86Avx512MaskStorePmovqw => EvexMnemonic::Vpmovqw,
+            Self::X86Avx512MaskPmovsdb | Self::X86Avx512MaskStorePmovsdb => EvexMnemonic::Vpmovsdb,
+            Self::X86Avx512MaskPmovsdw | Self::X86Avx512MaskStorePmovsdw => EvexMnemonic::Vpmovsdw,
+            Self::X86Avx512MaskPmovsqb | Self::X86Avx512MaskStorePmovsqb => EvexMnemonic::Vpmovsqb,
+            Self::X86Avx512MaskPmovsqd | Self::X86Avx512MaskStorePmovsqd => EvexMnemonic::Vpmovsqd,
+            Self::X86Avx512MaskPmovsqw | Self::X86Avx512MaskStorePmovsqw => EvexMnemonic::Vpmovsqw,
+            Self::X86Avx512MaskPmovusdb | Self::X86Avx512MaskStorePmovusdb => {
+                EvexMnemonic::Vpmovusdb
+            }
+            Self::X86Avx512MaskPmovusdw | Self::X86Avx512MaskStorePmovusdw => {
+                EvexMnemonic::Vpmovusdw
+            }
+            Self::X86Avx512MaskPmovusqb | Self::X86Avx512MaskStorePmovusqb => {
+                EvexMnemonic::Vpmovusqb
+            }
+            Self::X86Avx512MaskPmovusqd | Self::X86Avx512MaskStorePmovusqd => {
+                EvexMnemonic::Vpmovusqd
+            }
+            Self::X86Avx512MaskPmovusqw | Self::X86Avx512MaskStorePmovusqw => {
+                EvexMnemonic::Vpmovusqw
+            }
             _ => return None,
         })
     }
@@ -1110,107 +1345,107 @@ impl Intrinsic {
         })
     }
 
-    pub fn x86_avx512_permute(self) -> Option<(&'static str, X86Avx512PermuteKind)> {
+    pub fn x86_avx512_permute(self) -> Option<(EvexMnemonic, X86Avx512PermuteKind)> {
         if let Some(descriptor) = self.x86_avx512_vl_permute() {
             return Some((descriptor.opcode, descriptor.kind));
         }
         use X86Avx512PermuteKind::*;
         Some(match self {
-            Self::X86Avx512Vpermd => ("vpermd", Full),
-            Self::X86Avx512Vpermq => ("vpermq", Full),
-            Self::X86Avx512Vpermps => ("vpermps", Full),
-            Self::X86Avx512Vpermpd => ("vpermpd", Full),
-            Self::X86Avx512Vpermi2d => ("vpermi2d", TwoIndex),
-            Self::X86Avx512Vpermi2q => ("vpermi2q", TwoIndex),
-            Self::X86Avx512Vpermi2ps => ("vpermi2ps", TwoIndex),
-            Self::X86Avx512Vpermi2pd => ("vpermi2pd", TwoIndex),
-            Self::X86Avx512Vpermt2d => ("vpermt2d", TwoTable),
-            Self::X86Avx512Vpermt2q => ("vpermt2q", TwoTable),
-            Self::X86Avx512Vpermt2ps => ("vpermt2ps", TwoTable),
-            Self::X86Avx512Vpermt2pd => ("vpermt2pd", TwoTable),
-            Self::X86Avx512Vpermilps => ("vpermilps", Local),
-            Self::X86Avx512Vpermilpd => ("vpermilpd", Local),
-            Self::X86Avx512VpermilpsImm => ("vpermilps", Immediate),
-            Self::X86Avx512VpermilpdImm => ("vpermilpd", Immediate),
-            Self::X86Avx512VpermqImm => ("vpermq", Immediate),
-            Self::X86Avx512VpermpdImm => ("vpermpd", Immediate),
-            Self::X86Avx512Vshufps => ("vshufps", PairImmediate),
-            Self::X86Avx512Vshufpd => ("vshufpd", PairImmediate),
-            Self::X86Avx512Vpshufd => ("vpshufd", Immediate),
-            Self::X86Avx512Vshufi32x4 => ("vshufi32x4", PairImmediate),
-            Self::X86Avx512Vshufi64x2 => ("vshufi64x2", PairImmediate),
-            Self::X86Avx512Vshuff32x4 => ("vshuff32x4", PairImmediate),
-            Self::X86Avx512Vshuff64x2 => ("vshuff64x2", PairImmediate),
-            Self::X86Avx512Valignd => ("valignd", PairImmediate),
-            Self::X86Avx512Valignq => ("valignq", PairImmediate),
-            Self::X86Avx512Vpunpckldq => ("vpunpckldq", Pair),
-            Self::X86Avx512Vpunpcklqdq => ("vpunpcklqdq", Pair),
-            Self::X86Avx512Vunpcklps => ("vunpcklps", Pair),
-            Self::X86Avx512Vunpcklpd => ("vunpcklpd", Pair),
-            Self::X86Avx512Vpunpckhdq => ("vpunpckhdq", Pair),
-            Self::X86Avx512Vpunpckhqdq => ("vpunpckhqdq", Pair),
-            Self::X86Avx512Vunpckhps => ("vunpckhps", Pair),
-            Self::X86Avx512Vunpckhpd => ("vunpckhpd", Pair),
-            Self::X86Avx512Vmovshdup => ("vmovshdup", Unary),
-            Self::X86Avx512Vmovsldup => ("vmovsldup", Unary),
-            Self::X86Avx512Vmovddup => ("vmovddup", Unary),
+            Self::X86Avx512Vpermd => (EvexMnemonic::Vpermd, Full),
+            Self::X86Avx512Vpermq => (EvexMnemonic::Vpermq, Full),
+            Self::X86Avx512Vpermps => (EvexMnemonic::Vpermps, Full),
+            Self::X86Avx512Vpermpd => (EvexMnemonic::Vpermpd, Full),
+            Self::X86Avx512Vpermi2d => (EvexMnemonic::Vpermi2d, TwoIndex),
+            Self::X86Avx512Vpermi2q => (EvexMnemonic::Vpermi2q, TwoIndex),
+            Self::X86Avx512Vpermi2ps => (EvexMnemonic::Vpermi2ps, TwoIndex),
+            Self::X86Avx512Vpermi2pd => (EvexMnemonic::Vpermi2pd, TwoIndex),
+            Self::X86Avx512Vpermt2d => (EvexMnemonic::Vpermt2d, TwoTable),
+            Self::X86Avx512Vpermt2q => (EvexMnemonic::Vpermt2q, TwoTable),
+            Self::X86Avx512Vpermt2ps => (EvexMnemonic::Vpermt2ps, TwoTable),
+            Self::X86Avx512Vpermt2pd => (EvexMnemonic::Vpermt2pd, TwoTable),
+            Self::X86Avx512Vpermilps => (EvexMnemonic::Vpermilps, Local),
+            Self::X86Avx512Vpermilpd => (EvexMnemonic::Vpermilpd, Local),
+            Self::X86Avx512VpermilpsImm => (EvexMnemonic::Vpermilps, Immediate),
+            Self::X86Avx512VpermilpdImm => (EvexMnemonic::Vpermilpd, Immediate),
+            Self::X86Avx512VpermqImm => (EvexMnemonic::Vpermq, Immediate),
+            Self::X86Avx512VpermpdImm => (EvexMnemonic::Vpermpd, Immediate),
+            Self::X86Avx512Vshufps => (EvexMnemonic::Vshufps, PairImmediate),
+            Self::X86Avx512Vshufpd => (EvexMnemonic::Vshufpd, PairImmediate),
+            Self::X86Avx512Vpshufd => (EvexMnemonic::Vpshufd, Immediate),
+            Self::X86Avx512Vshufi32x4 => (EvexMnemonic::Vshufi32x4, PairImmediate),
+            Self::X86Avx512Vshufi64x2 => (EvexMnemonic::Vshufi64x2, PairImmediate),
+            Self::X86Avx512Vshuff32x4 => (EvexMnemonic::Vshuff32x4, PairImmediate),
+            Self::X86Avx512Vshuff64x2 => (EvexMnemonic::Vshuff64x2, PairImmediate),
+            Self::X86Avx512Valignd => (EvexMnemonic::Valignd, PairImmediate),
+            Self::X86Avx512Valignq => (EvexMnemonic::Valignq, PairImmediate),
+            Self::X86Avx512Vpunpckldq => (EvexMnemonic::Vpunpckldq, Pair),
+            Self::X86Avx512Vpunpcklqdq => (EvexMnemonic::Vpunpcklqdq, Pair),
+            Self::X86Avx512Vunpcklps => (EvexMnemonic::Vunpcklps, Pair),
+            Self::X86Avx512Vunpcklpd => (EvexMnemonic::Vunpcklpd, Pair),
+            Self::X86Avx512Vpunpckhdq => (EvexMnemonic::Vpunpckhdq, Pair),
+            Self::X86Avx512Vpunpckhqdq => (EvexMnemonic::Vpunpckhqdq, Pair),
+            Self::X86Avx512Vunpckhps => (EvexMnemonic::Vunpckhps, Pair),
+            Self::X86Avx512Vunpckhpd => (EvexMnemonic::Vunpckhpd, Pair),
+            Self::X86Avx512Vmovshdup => (EvexMnemonic::Vmovshdup, Unary),
+            Self::X86Avx512Vmovsldup => (EvexMnemonic::Vmovsldup, Unary),
+            Self::X86Avx512Vmovddup => (EvexMnemonic::Vmovddup, Unary),
             _ => return None,
         })
     }
 
-    pub fn x86_avx512_packed_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_packed_opcode(self) -> Option<EvexMnemonic> {
         Some(match self {
-            Self::X86Avx512MaskMulld => "vpmulld",
-            Self::X86Avx512MaskMinsd => "vpminsd",
-            Self::X86Avx512MaskMinud => "vpminud",
-            Self::X86Avx512MaskMaxsd => "vpmaxsd",
-            Self::X86Avx512MaskMaxud => "vpmaxud",
-            Self::X86Avx512MaskAndd => "vpandd",
-            Self::X86Avx512MaskAndnd => "vpandnd",
-            Self::X86Avx512MaskOrd => "vpord",
-            Self::X86Avx512MaskXord => "vpxord",
-            Self::X86Avx512MaskMinsq => "vpminsq",
-            Self::X86Avx512MaskMinuq => "vpminuq",
-            Self::X86Avx512MaskMaxsq => "vpmaxsq",
-            Self::X86Avx512MaskMaxuq => "vpmaxuq",
-            Self::X86Avx512MaskAndq => "vpandq",
-            Self::X86Avx512MaskAndnq => "vpandnq",
-            Self::X86Avx512MaskOrq => "vporq",
-            Self::X86Avx512MaskXorq => "vpxorq",
-            Self::X86Avx512MaskAddRoundps => "vaddps",
-            Self::X86Avx512MaskAddRoundpd => "vaddpd",
-            Self::X86Avx512MaskSubRoundps => "vsubps",
-            Self::X86Avx512MaskSubRoundpd => "vsubpd",
-            Self::X86Avx512MaskMulRoundps => "vmulps",
-            Self::X86Avx512MaskMulRoundpd => "vmulpd",
-            Self::X86Avx512MaskDivRoundps => "vdivps",
-            Self::X86Avx512MaskDivRoundpd => "vdivpd",
-            Self::X86Avx512MaskSqrtRoundps => "vsqrtps",
-            Self::X86Avx512MaskSqrtRoundpd => "vsqrtpd",
-            Self::X86Avx512MaskMinps => "vminps",
-            Self::X86Avx512MaskMinpd => "vminpd",
-            Self::X86Avx512MaskMaxps => "vmaxps",
-            Self::X86Avx512MaskMaxpd => "vmaxpd",
-            Self::X86Avx512MaskMoved => "vmovdqu32",
-            Self::X86Avx512Blendd => "vpblendmd",
-            Self::X86Avx512MaskMoveq => "vmovdqu64",
-            Self::X86Avx512Blendq => "vpblendmq",
-            Self::X86Avx512MaskMoveps => "vmovdqu32",
-            Self::X86Avx512Blendps => "vblendmps",
-            Self::X86Avx512MaskMovepd => "vmovdqu64",
-            Self::X86Avx512Blendpd => "vblendmpd",
-            Self::X86Avx512MaskAlignedLoadd => "vmovdqa32",
-            Self::X86Avx512MaskAlignedStored => "vmovdqa32",
-            Self::X86Avx512MaskAlignedLoadq => "vmovdqa64",
-            Self::X86Avx512MaskAlignedStoreq => "vmovdqa64",
-            Self::X86Avx512MaskAlignedLoadps => "vmovaps",
-            Self::X86Avx512MaskAlignedStoreps => "vmovaps",
-            Self::X86Avx512MaskAlignedLoadpd => "vmovapd",
-            Self::X86Avx512MaskAlignedStorepd => "vmovapd",
-            Self::X86Avx512StreamLoaddq => "vmovntdqa",
-            Self::X86Avx512StreamStoredq => "vmovntdq",
-            Self::X86Avx512StreamStoreps => "vmovntps",
-            Self::X86Avx512StreamStorepd => "vmovntpd",
+            Self::X86Avx512MaskMulld => EvexMnemonic::Vpmulld,
+            Self::X86Avx512MaskMinsd => EvexMnemonic::Vpminsd,
+            Self::X86Avx512MaskMinud => EvexMnemonic::Vpminud,
+            Self::X86Avx512MaskMaxsd => EvexMnemonic::Vpmaxsd,
+            Self::X86Avx512MaskMaxud => EvexMnemonic::Vpmaxud,
+            Self::X86Avx512MaskAndd => EvexMnemonic::Vpandd,
+            Self::X86Avx512MaskAndnd => EvexMnemonic::Vpandnd,
+            Self::X86Avx512MaskOrd => EvexMnemonic::Vpord,
+            Self::X86Avx512MaskXord => EvexMnemonic::Vpxord,
+            Self::X86Avx512MaskMinsq => EvexMnemonic::Vpminsq,
+            Self::X86Avx512MaskMinuq => EvexMnemonic::Vpminuq,
+            Self::X86Avx512MaskMaxsq => EvexMnemonic::Vpmaxsq,
+            Self::X86Avx512MaskMaxuq => EvexMnemonic::Vpmaxuq,
+            Self::X86Avx512MaskAndq => EvexMnemonic::Vpandq,
+            Self::X86Avx512MaskAndnq => EvexMnemonic::Vpandnq,
+            Self::X86Avx512MaskOrq => EvexMnemonic::Vporq,
+            Self::X86Avx512MaskXorq => EvexMnemonic::Vpxorq,
+            Self::X86Avx512MaskAddRoundps => EvexMnemonic::Vaddps,
+            Self::X86Avx512MaskAddRoundpd => EvexMnemonic::Vaddpd,
+            Self::X86Avx512MaskSubRoundps => EvexMnemonic::Vsubps,
+            Self::X86Avx512MaskSubRoundpd => EvexMnemonic::Vsubpd,
+            Self::X86Avx512MaskMulRoundps => EvexMnemonic::Vmulps,
+            Self::X86Avx512MaskMulRoundpd => EvexMnemonic::Vmulpd,
+            Self::X86Avx512MaskDivRoundps => EvexMnemonic::Vdivps,
+            Self::X86Avx512MaskDivRoundpd => EvexMnemonic::Vdivpd,
+            Self::X86Avx512MaskSqrtRoundps => EvexMnemonic::Vsqrtps,
+            Self::X86Avx512MaskSqrtRoundpd => EvexMnemonic::Vsqrtpd,
+            Self::X86Avx512MaskMinps => EvexMnemonic::Vminps,
+            Self::X86Avx512MaskMinpd => EvexMnemonic::Vminpd,
+            Self::X86Avx512MaskMaxps => EvexMnemonic::Vmaxps,
+            Self::X86Avx512MaskMaxpd => EvexMnemonic::Vmaxpd,
+            Self::X86Avx512MaskMoved => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512Blendd => EvexMnemonic::Vpblendmd,
+            Self::X86Avx512MaskMoveq => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512Blendq => EvexMnemonic::Vpblendmq,
+            Self::X86Avx512MaskMoveps => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512Blendps => EvexMnemonic::Vblendmps,
+            Self::X86Avx512MaskMovepd => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512Blendpd => EvexMnemonic::Vblendmpd,
+            Self::X86Avx512MaskAlignedLoadd => EvexMnemonic::Vmovdqa32,
+            Self::X86Avx512MaskAlignedStored => EvexMnemonic::Vmovdqa32,
+            Self::X86Avx512MaskAlignedLoadq => EvexMnemonic::Vmovdqa64,
+            Self::X86Avx512MaskAlignedStoreq => EvexMnemonic::Vmovdqa64,
+            Self::X86Avx512MaskAlignedLoadps => EvexMnemonic::Vmovaps,
+            Self::X86Avx512MaskAlignedStoreps => EvexMnemonic::Vmovaps,
+            Self::X86Avx512MaskAlignedLoadpd => EvexMnemonic::Vmovapd,
+            Self::X86Avx512MaskAlignedStorepd => EvexMnemonic::Vmovapd,
+            Self::X86Avx512StreamLoaddq => EvexMnemonic::Vmovntdqa,
+            Self::X86Avx512StreamStoredq => EvexMnemonic::Vmovntdq,
+            Self::X86Avx512StreamStoreps => EvexMnemonic::Vmovntps,
+            Self::X86Avx512StreamStorepd => EvexMnemonic::Vmovntpd,
             _ => return None,
         })
     }
@@ -1230,7 +1465,7 @@ impl Intrinsic {
         };
         self.x86_avx512_packed_control().is_some()
             && (value == 4
-                || if name.starts_with("vmin") || name.starts_with("vmax") {
+                || if name.mnemonic().starts_with("vmin") || name.mnemonic().starts_with("vmax") {
                     value == 8
                 } else {
                     (8..=11).contains(&value)
@@ -1270,46 +1505,62 @@ impl Intrinsic {
         )
     }
 
-    pub fn x86_avx512_lane_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_lane_opcode(self) -> Option<EvexMnemonic> {
         Some(match self {
-            Self::X86Avx512MaskSllid | Self::X86Avx512MaskSlld => "vpslld",
-            Self::X86Avx512MaskSlliq | Self::X86Avx512MaskSllq => "vpsllq",
-            Self::X86Avx512MaskSrlid | Self::X86Avx512MaskSrld => "vpsrld",
-            Self::X86Avx512MaskSrliq | Self::X86Avx512MaskSrlq => "vpsrlq",
-            Self::X86Avx512MaskSraid | Self::X86Avx512MaskSrad => "vpsrad",
-            Self::X86Avx512MaskSraiq | Self::X86Avx512MaskSraq => "vpsraq",
-            Self::X86Avx512MaskPbroadcastd | Self::X86Avx512MaskLoadPbroadcastd => "vpbroadcastd",
-            Self::X86Avx512MaskPbroadcastq | Self::X86Avx512MaskLoadPbroadcastq => "vpbroadcastq",
-            Self::X86Avx512MaskBroadcastss | Self::X86Avx512MaskLoadBroadcastss => "vbroadcastss",
-            Self::X86Avx512MaskBroadcastsd | Self::X86Avx512MaskLoadBroadcastsd => "vbroadcastsd",
+            Self::X86Avx512MaskSllid | Self::X86Avx512MaskSlld => EvexMnemonic::Vpslld,
+            Self::X86Avx512MaskSlliq | Self::X86Avx512MaskSllq => EvexMnemonic::Vpsllq,
+            Self::X86Avx512MaskSrlid | Self::X86Avx512MaskSrld => EvexMnemonic::Vpsrld,
+            Self::X86Avx512MaskSrliq | Self::X86Avx512MaskSrlq => EvexMnemonic::Vpsrlq,
+            Self::X86Avx512MaskSraid | Self::X86Avx512MaskSrad => EvexMnemonic::Vpsrad,
+            Self::X86Avx512MaskSraiq | Self::X86Avx512MaskSraq => EvexMnemonic::Vpsraq,
+            Self::X86Avx512MaskPbroadcastd | Self::X86Avx512MaskLoadPbroadcastd => {
+                EvexMnemonic::Vpbroadcastd
+            }
+            Self::X86Avx512MaskPbroadcastq | Self::X86Avx512MaskLoadPbroadcastq => {
+                EvexMnemonic::Vpbroadcastq
+            }
+            Self::X86Avx512MaskBroadcastss | Self::X86Avx512MaskLoadBroadcastss => {
+                EvexMnemonic::Vbroadcastss
+            }
+            Self::X86Avx512MaskBroadcastsd | Self::X86Avx512MaskLoadBroadcastsd => {
+                EvexMnemonic::Vbroadcastsd
+            }
             Self::X86Avx512MaskBroadcasti32x4 | Self::X86Avx512MaskLoadBroadcasti32x4 => {
-                "vbroadcasti32x4"
+                EvexMnemonic::Vbroadcasti32x4
             }
             Self::X86Avx512MaskBroadcasti64x4 | Self::X86Avx512MaskLoadBroadcasti64x4 => {
-                "vbroadcasti64x4"
+                EvexMnemonic::Vbroadcasti64x4
             }
             Self::X86Avx512MaskBroadcastf32x4 | Self::X86Avx512MaskLoadBroadcastf32x4 => {
-                "vbroadcastf32x4"
+                EvexMnemonic::Vbroadcastf32x4
             }
             Self::X86Avx512MaskBroadcastf64x4 | Self::X86Avx512MaskLoadBroadcastf64x4 => {
-                "vbroadcastf64x4"
+                EvexMnemonic::Vbroadcastf64x4
             }
             Self::X86Avx512MaskExtracti32x4 | Self::X86Avx512MaskStoreExtracti32x4 => {
-                "vextracti32x4"
+                EvexMnemonic::Vextracti32x4
             }
             Self::X86Avx512MaskExtracti64x4 | Self::X86Avx512MaskStoreExtracti64x4 => {
-                "vextracti64x4"
+                EvexMnemonic::Vextracti64x4
             }
             Self::X86Avx512MaskExtractf32x4 | Self::X86Avx512MaskStoreExtractf32x4 => {
-                "vextractf32x4"
+                EvexMnemonic::Vextractf32x4
             }
             Self::X86Avx512MaskExtractf64x4 | Self::X86Avx512MaskStoreExtractf64x4 => {
-                "vextractf64x4"
+                EvexMnemonic::Vextractf64x4
             }
-            Self::X86Avx512MaskInserti32x4 | Self::X86Avx512MaskLoadInserti32x4 => "vinserti32x4",
-            Self::X86Avx512MaskInserti64x4 | Self::X86Avx512MaskLoadInserti64x4 => "vinserti64x4",
-            Self::X86Avx512MaskInsertf32x4 | Self::X86Avx512MaskLoadInsertf32x4 => "vinsertf32x4",
-            Self::X86Avx512MaskInsertf64x4 | Self::X86Avx512MaskLoadInsertf64x4 => "vinsertf64x4",
+            Self::X86Avx512MaskInserti32x4 | Self::X86Avx512MaskLoadInserti32x4 => {
+                EvexMnemonic::Vinserti32x4
+            }
+            Self::X86Avx512MaskInserti64x4 | Self::X86Avx512MaskLoadInserti64x4 => {
+                EvexMnemonic::Vinserti64x4
+            }
+            Self::X86Avx512MaskInsertf32x4 | Self::X86Avx512MaskLoadInsertf32x4 => {
+                EvexMnemonic::Vinsertf32x4
+            }
+            Self::X86Avx512MaskInsertf64x4 | Self::X86Avx512MaskLoadInsertf64x4 => {
+                EvexMnemonic::Vinsertf64x4
+            }
             _ => return None,
         })
     }
@@ -1426,7 +1677,7 @@ impl Intrinsic {
     }
 
     /// Shared masked opcode. Operand types determine the physical vector width.
-    pub fn x86_avx512_mask_opcode(self) -> Option<&'static str> {
+    pub fn x86_avx512_mask_opcode(self) -> Option<EvexMnemonic> {
         if let Some((opcode, _)) = self.x86_avx512_cd() {
             return Some(opcode);
         }
@@ -1440,156 +1691,156 @@ impl Intrinsic {
             return Some(opcode);
         }
         Some(match self {
-            Self::X86Avx512Cmpd => "vpcmpd",
-            Self::X86Avx512Cmpq => "vpcmpq",
-            Self::X86Avx512Cmpud => "vpcmpud",
-            Self::X86Avx512Cmpuq => "vpcmpuq",
-            Self::X86Avx512MaskAddd => "vpaddd",
-            Self::X86Avx512MaskSubd => "vpsubd",
-            Self::X86Avx512MaskLoadd => "vmovdqu32",
-            Self::X86Avx512MaskStored => "vmovdqu32",
-            Self::X86Avx512MaskAddq => "vpaddq",
-            Self::X86Avx512MaskSubq => "vpsubq",
-            Self::X86Avx512MaskLoadq => "vmovdqu64",
-            Self::X86Avx512MaskStoreq => "vmovdqu64",
-            Self::X86Avx512MaskAddps => "vaddps",
-            Self::X86Avx512MaskSubps => "vsubps",
-            Self::X86Avx512MaskLoadps => "vmovups",
-            Self::X86Avx512MaskStoreps => "vmovups",
-            Self::X86Avx512MaskAddpd => "vaddpd",
-            Self::X86Avx512MaskSubpd => "vsubpd",
-            Self::X86Avx512MaskLoadpd => "vmovupd",
-            Self::X86Avx512MaskStorepd => "vmovupd",
-            Self::X86Avx512MaskMulps => "vmulps",
-            Self::X86Avx512MaskDivps => "vdivps",
-            Self::X86Avx512MaskSqrtps => "vsqrtps",
-            Self::X86Avx512Cmpps => "vcmpps",
-            Self::X86Avx512CmpRoundps => "vcmpps",
-            Self::X86Avx512MaskMulpd => "vmulpd",
-            Self::X86Avx512MaskDivpd => "vdivpd",
-            Self::X86Avx512MaskSqrtpd => "vsqrtpd",
-            Self::X86Avx512Cmppd => "vcmppd",
-            Self::X86Avx512CmpRoundpd => "vcmppd",
-            Self::X86Avx512VlMaskAddd128 => "vpaddd",
-            Self::X86Avx512VlMaskAddq128 => "vpaddq",
-            Self::X86Avx512VlMaskSubd128 => "vpsubd",
-            Self::X86Avx512VlMaskSubq128 => "vpsubq",
-            Self::X86Avx512VlMaskLoadd128 => "vmovdqu32",
-            Self::X86Avx512VlMaskLoadq128 => "vmovdqu64",
-            Self::X86Avx512VlMaskStored128 => "vmovdqu32",
-            Self::X86Avx512VlMaskStoreq128 => "vmovdqu64",
-            Self::X86Avx512VlCmpd128 => "vpcmpd",
-            Self::X86Avx512VlCmpq128 => "vpcmpq",
-            Self::X86Avx512VlCmpud128 => "vpcmpud",
-            Self::X86Avx512VlCmpuq128 => "vpcmpuq",
-            Self::X86Avx512VlMaskAddps128 => "vaddps",
-            Self::X86Avx512VlMaskAddpd128 => "vaddpd",
-            Self::X86Avx512VlMaskSubps128 => "vsubps",
-            Self::X86Avx512VlMaskSubpd128 => "vsubpd",
-            Self::X86Avx512VlMaskLoadps128 => "vmovups",
-            Self::X86Avx512VlMaskLoadpd128 => "vmovupd",
-            Self::X86Avx512VlMaskStoreps128 => "vmovups",
-            Self::X86Avx512VlMaskStorepd128 => "vmovupd",
-            Self::X86Avx512VlCmpps128 => "vcmpps",
-            Self::X86Avx512VlCmppd128 => "vcmppd",
-            Self::X86Avx512VlMaskAddd256 => "vpaddd",
-            Self::X86Avx512VlMaskAddq256 => "vpaddq",
-            Self::X86Avx512VlMaskSubd256 => "vpsubd",
-            Self::X86Avx512VlMaskSubq256 => "vpsubq",
-            Self::X86Avx512VlMaskLoadd256 => "vmovdqu32",
-            Self::X86Avx512VlMaskLoadq256 => "vmovdqu64",
-            Self::X86Avx512VlMaskStored256 => "vmovdqu32",
-            Self::X86Avx512VlMaskStoreq256 => "vmovdqu64",
-            Self::X86Avx512VlCmpd256 => "vpcmpd",
-            Self::X86Avx512VlCmpq256 => "vpcmpq",
-            Self::X86Avx512VlCmpud256 => "vpcmpud",
-            Self::X86Avx512VlCmpuq256 => "vpcmpuq",
-            Self::X86Avx512VlMaskAddps256 => "vaddps",
-            Self::X86Avx512VlMaskAddpd256 => "vaddpd",
-            Self::X86Avx512VlMaskSubps256 => "vsubps",
-            Self::X86Avx512VlMaskSubpd256 => "vsubpd",
-            Self::X86Avx512VlMaskLoadps256 => "vmovups",
-            Self::X86Avx512VlMaskLoadpd256 => "vmovupd",
-            Self::X86Avx512VlMaskStoreps256 => "vmovups",
-            Self::X86Avx512VlMaskStorepd256 => "vmovupd",
-            Self::X86Avx512VlCmpps256 => "vcmpps",
-            Self::X86Avx512VlCmppd256 => "vcmppd",
+            Self::X86Avx512Cmpd => EvexMnemonic::Vpcmpd,
+            Self::X86Avx512Cmpq => EvexMnemonic::Vpcmpq,
+            Self::X86Avx512Cmpud => EvexMnemonic::Vpcmpud,
+            Self::X86Avx512Cmpuq => EvexMnemonic::Vpcmpuq,
+            Self::X86Avx512MaskAddd => EvexMnemonic::Vpaddd,
+            Self::X86Avx512MaskSubd => EvexMnemonic::Vpsubd,
+            Self::X86Avx512MaskLoadd => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512MaskStored => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512MaskAddq => EvexMnemonic::Vpaddq,
+            Self::X86Avx512MaskSubq => EvexMnemonic::Vpsubq,
+            Self::X86Avx512MaskLoadq => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512MaskStoreq => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512MaskAddps => EvexMnemonic::Vaddps,
+            Self::X86Avx512MaskSubps => EvexMnemonic::Vsubps,
+            Self::X86Avx512MaskLoadps => EvexMnemonic::Vmovups,
+            Self::X86Avx512MaskStoreps => EvexMnemonic::Vmovups,
+            Self::X86Avx512MaskAddpd => EvexMnemonic::Vaddpd,
+            Self::X86Avx512MaskSubpd => EvexMnemonic::Vsubpd,
+            Self::X86Avx512MaskLoadpd => EvexMnemonic::Vmovupd,
+            Self::X86Avx512MaskStorepd => EvexMnemonic::Vmovupd,
+            Self::X86Avx512MaskMulps => EvexMnemonic::Vmulps,
+            Self::X86Avx512MaskDivps => EvexMnemonic::Vdivps,
+            Self::X86Avx512MaskSqrtps => EvexMnemonic::Vsqrtps,
+            Self::X86Avx512Cmpps => EvexMnemonic::Vcmpps,
+            Self::X86Avx512CmpRoundps => EvexMnemonic::Vcmpps,
+            Self::X86Avx512MaskMulpd => EvexMnemonic::Vmulpd,
+            Self::X86Avx512MaskDivpd => EvexMnemonic::Vdivpd,
+            Self::X86Avx512MaskSqrtpd => EvexMnemonic::Vsqrtpd,
+            Self::X86Avx512Cmppd => EvexMnemonic::Vcmppd,
+            Self::X86Avx512CmpRoundpd => EvexMnemonic::Vcmppd,
+            Self::X86Avx512VlMaskAddd128 => EvexMnemonic::Vpaddd,
+            Self::X86Avx512VlMaskAddq128 => EvexMnemonic::Vpaddq,
+            Self::X86Avx512VlMaskSubd128 => EvexMnemonic::Vpsubd,
+            Self::X86Avx512VlMaskSubq128 => EvexMnemonic::Vpsubq,
+            Self::X86Avx512VlMaskLoadd128 => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512VlMaskLoadq128 => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512VlMaskStored128 => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512VlMaskStoreq128 => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512VlCmpd128 => EvexMnemonic::Vpcmpd,
+            Self::X86Avx512VlCmpq128 => EvexMnemonic::Vpcmpq,
+            Self::X86Avx512VlCmpud128 => EvexMnemonic::Vpcmpud,
+            Self::X86Avx512VlCmpuq128 => EvexMnemonic::Vpcmpuq,
+            Self::X86Avx512VlMaskAddps128 => EvexMnemonic::Vaddps,
+            Self::X86Avx512VlMaskAddpd128 => EvexMnemonic::Vaddpd,
+            Self::X86Avx512VlMaskSubps128 => EvexMnemonic::Vsubps,
+            Self::X86Avx512VlMaskSubpd128 => EvexMnemonic::Vsubpd,
+            Self::X86Avx512VlMaskLoadps128 => EvexMnemonic::Vmovups,
+            Self::X86Avx512VlMaskLoadpd128 => EvexMnemonic::Vmovupd,
+            Self::X86Avx512VlMaskStoreps128 => EvexMnemonic::Vmovups,
+            Self::X86Avx512VlMaskStorepd128 => EvexMnemonic::Vmovupd,
+            Self::X86Avx512VlCmpps128 => EvexMnemonic::Vcmpps,
+            Self::X86Avx512VlCmppd128 => EvexMnemonic::Vcmppd,
+            Self::X86Avx512VlMaskAddd256 => EvexMnemonic::Vpaddd,
+            Self::X86Avx512VlMaskAddq256 => EvexMnemonic::Vpaddq,
+            Self::X86Avx512VlMaskSubd256 => EvexMnemonic::Vpsubd,
+            Self::X86Avx512VlMaskSubq256 => EvexMnemonic::Vpsubq,
+            Self::X86Avx512VlMaskLoadd256 => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512VlMaskLoadq256 => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512VlMaskStored256 => EvexMnemonic::Vmovdqu32,
+            Self::X86Avx512VlMaskStoreq256 => EvexMnemonic::Vmovdqu64,
+            Self::X86Avx512VlCmpd256 => EvexMnemonic::Vpcmpd,
+            Self::X86Avx512VlCmpq256 => EvexMnemonic::Vpcmpq,
+            Self::X86Avx512VlCmpud256 => EvexMnemonic::Vpcmpud,
+            Self::X86Avx512VlCmpuq256 => EvexMnemonic::Vpcmpuq,
+            Self::X86Avx512VlMaskAddps256 => EvexMnemonic::Vaddps,
+            Self::X86Avx512VlMaskAddpd256 => EvexMnemonic::Vaddpd,
+            Self::X86Avx512VlMaskSubps256 => EvexMnemonic::Vsubps,
+            Self::X86Avx512VlMaskSubpd256 => EvexMnemonic::Vsubpd,
+            Self::X86Avx512VlMaskLoadps256 => EvexMnemonic::Vmovups,
+            Self::X86Avx512VlMaskLoadpd256 => EvexMnemonic::Vmovupd,
+            Self::X86Avx512VlMaskStoreps256 => EvexMnemonic::Vmovups,
+            Self::X86Avx512VlMaskStorepd256 => EvexMnemonic::Vmovupd,
+            Self::X86Avx512VlCmpps256 => EvexMnemonic::Vcmpps,
+            Self::X86Avx512VlCmppd256 => EvexMnemonic::Vcmppd,
             _ => return None,
         })
     }
 
     /// Raw VL floating operation with its explicit container shape.
-    pub fn x86_avx512_vl_float_arithmetic(self) -> Option<(&'static str, VectorType)> {
+    pub fn x86_avx512_vl_float_arithmetic(self) -> Option<(EvexMnemonic, VectorType)> {
         Some(match self {
-            Self::X86Avx512VlMaskMulps128 => ("vmulps", VectorType::F32x4),
-            Self::X86Avx512VlMaskMulpd128 => ("vmulpd", VectorType::F64x2),
-            Self::X86Avx512VlMaskDivps128 => ("vdivps", VectorType::F32x4),
-            Self::X86Avx512VlMaskDivpd128 => ("vdivpd", VectorType::F64x2),
-            Self::X86Avx512VlMaskSqrtps128 => ("vsqrtps", VectorType::F32x4),
-            Self::X86Avx512VlMaskSqrtpd128 => ("vsqrtpd", VectorType::F64x2),
-            Self::X86Avx512VlMaskMinps128 => ("vminps", VectorType::F32x4),
-            Self::X86Avx512VlMaskMinpd128 => ("vminpd", VectorType::F64x2),
-            Self::X86Avx512VlMaskMaxps128 => ("vmaxps", VectorType::F32x4),
-            Self::X86Avx512VlMaskMaxpd128 => ("vmaxpd", VectorType::F64x2),
-            Self::X86Avx512VlMaskMulps256 => ("vmulps", VectorType::F32x8),
-            Self::X86Avx512VlMaskMulpd256 => ("vmulpd", VectorType::F64x4),
-            Self::X86Avx512VlMaskDivps256 => ("vdivps", VectorType::F32x8),
-            Self::X86Avx512VlMaskDivpd256 => ("vdivpd", VectorType::F64x4),
-            Self::X86Avx512VlMaskSqrtps256 => ("vsqrtps", VectorType::F32x8),
-            Self::X86Avx512VlMaskSqrtpd256 => ("vsqrtpd", VectorType::F64x4),
-            Self::X86Avx512VlMaskMinps256 => ("vminps", VectorType::F32x8),
-            Self::X86Avx512VlMaskMinpd256 => ("vminpd", VectorType::F64x4),
-            Self::X86Avx512VlMaskMaxps256 => ("vmaxps", VectorType::F32x8),
-            Self::X86Avx512VlMaskMaxpd256 => ("vmaxpd", VectorType::F64x4),
+            Self::X86Avx512VlMaskMulps128 => (EvexMnemonic::Vmulps, VectorType::F32x4),
+            Self::X86Avx512VlMaskMulpd128 => (EvexMnemonic::Vmulpd, VectorType::F64x2),
+            Self::X86Avx512VlMaskDivps128 => (EvexMnemonic::Vdivps, VectorType::F32x4),
+            Self::X86Avx512VlMaskDivpd128 => (EvexMnemonic::Vdivpd, VectorType::F64x2),
+            Self::X86Avx512VlMaskSqrtps128 => (EvexMnemonic::Vsqrtps, VectorType::F32x4),
+            Self::X86Avx512VlMaskSqrtpd128 => (EvexMnemonic::Vsqrtpd, VectorType::F64x2),
+            Self::X86Avx512VlMaskMinps128 => (EvexMnemonic::Vminps, VectorType::F32x4),
+            Self::X86Avx512VlMaskMinpd128 => (EvexMnemonic::Vminpd, VectorType::F64x2),
+            Self::X86Avx512VlMaskMaxps128 => (EvexMnemonic::Vmaxps, VectorType::F32x4),
+            Self::X86Avx512VlMaskMaxpd128 => (EvexMnemonic::Vmaxpd, VectorType::F64x2),
+            Self::X86Avx512VlMaskMulps256 => (EvexMnemonic::Vmulps, VectorType::F32x8),
+            Self::X86Avx512VlMaskMulpd256 => (EvexMnemonic::Vmulpd, VectorType::F64x4),
+            Self::X86Avx512VlMaskDivps256 => (EvexMnemonic::Vdivps, VectorType::F32x8),
+            Self::X86Avx512VlMaskDivpd256 => (EvexMnemonic::Vdivpd, VectorType::F64x4),
+            Self::X86Avx512VlMaskSqrtps256 => (EvexMnemonic::Vsqrtps, VectorType::F32x8),
+            Self::X86Avx512VlMaskSqrtpd256 => (EvexMnemonic::Vsqrtpd, VectorType::F64x4),
+            Self::X86Avx512VlMaskMinps256 => (EvexMnemonic::Vminps, VectorType::F32x8),
+            Self::X86Avx512VlMaskMinpd256 => (EvexMnemonic::Vminpd, VectorType::F64x4),
+            Self::X86Avx512VlMaskMaxps256 => (EvexMnemonic::Vmaxps, VectorType::F32x8),
+            Self::X86Avx512VlMaskMaxpd256 => (EvexMnemonic::Vmaxpd, VectorType::F64x4),
             _ => return None,
         })
     }
 
     /// Explicit operation and container for pure VL integer arithmetic and moves.
-    pub fn x86_avx512_vl_integer_move(self) -> Option<(&'static str, VectorType)> {
+    pub fn x86_avx512_vl_integer_move(self) -> Option<(EvexMnemonic, VectorType)> {
         Some(match self {
-            Self::X86Avx512VlMaskMulld128 => ("vpmulld", VectorType::I32x4),
-            Self::X86Avx512VlMaskMinsd128 => ("vpminsd", VectorType::I32x4),
-            Self::X86Avx512VlMaskMinud128 => ("vpminud", VectorType::I32x4),
-            Self::X86Avx512VlMaskMaxsd128 => ("vpmaxsd", VectorType::I32x4),
-            Self::X86Avx512VlMaskMaxud128 => ("vpmaxud", VectorType::I32x4),
-            Self::X86Avx512VlMaskAndd128 => ("vpandd", VectorType::I32x4),
-            Self::X86Avx512VlMaskAndnd128 => ("vpandnd", VectorType::I32x4),
-            Self::X86Avx512VlMaskOrd128 => ("vpord", VectorType::I32x4),
-            Self::X86Avx512VlMaskXord128 => ("vpxord", VectorType::I32x4),
-            Self::X86Avx512VlMaskMinsq128 => ("vpminsq", VectorType::I64x2),
-            Self::X86Avx512VlMaskMinuq128 => ("vpminuq", VectorType::I64x2),
-            Self::X86Avx512VlMaskMaxsq128 => ("vpmaxsq", VectorType::I64x2),
-            Self::X86Avx512VlMaskMaxuq128 => ("vpmaxuq", VectorType::I64x2),
-            Self::X86Avx512VlMaskAndq128 => ("vpandq", VectorType::I64x2),
-            Self::X86Avx512VlMaskAndnq128 => ("vpandnq", VectorType::I64x2),
-            Self::X86Avx512VlMaskOrq128 => ("vporq", VectorType::I64x2),
-            Self::X86Avx512VlMaskXorq128 => ("vpxorq", VectorType::I64x2),
-            Self::X86Avx512VlMaskMoved128 => ("vmovdqu32", VectorType::I32x4),
-            Self::X86Avx512VlMaskMoveq128 => ("vmovdqu64", VectorType::I64x2),
-            Self::X86Avx512VlMaskMoveps128 => ("vmovdqu32", VectorType::F32x4),
-            Self::X86Avx512VlMaskMovepd128 => ("vmovdqu64", VectorType::F64x2),
-            Self::X86Avx512VlMaskMulld256 => ("vpmulld", VectorType::I32x8),
-            Self::X86Avx512VlMaskMinsd256 => ("vpminsd", VectorType::I32x8),
-            Self::X86Avx512VlMaskMinud256 => ("vpminud", VectorType::I32x8),
-            Self::X86Avx512VlMaskMaxsd256 => ("vpmaxsd", VectorType::I32x8),
-            Self::X86Avx512VlMaskMaxud256 => ("vpmaxud", VectorType::I32x8),
-            Self::X86Avx512VlMaskAndd256 => ("vpandd", VectorType::I32x8),
-            Self::X86Avx512VlMaskAndnd256 => ("vpandnd", VectorType::I32x8),
-            Self::X86Avx512VlMaskOrd256 => ("vpord", VectorType::I32x8),
-            Self::X86Avx512VlMaskXord256 => ("vpxord", VectorType::I32x8),
-            Self::X86Avx512VlMaskMinsq256 => ("vpminsq", VectorType::I64x4),
-            Self::X86Avx512VlMaskMinuq256 => ("vpminuq", VectorType::I64x4),
-            Self::X86Avx512VlMaskMaxsq256 => ("vpmaxsq", VectorType::I64x4),
-            Self::X86Avx512VlMaskMaxuq256 => ("vpmaxuq", VectorType::I64x4),
-            Self::X86Avx512VlMaskAndq256 => ("vpandq", VectorType::I64x4),
-            Self::X86Avx512VlMaskAndnq256 => ("vpandnq", VectorType::I64x4),
-            Self::X86Avx512VlMaskOrq256 => ("vporq", VectorType::I64x4),
-            Self::X86Avx512VlMaskXorq256 => ("vpxorq", VectorType::I64x4),
-            Self::X86Avx512VlMaskMoved256 => ("vmovdqu32", VectorType::I32x8),
-            Self::X86Avx512VlMaskMoveq256 => ("vmovdqu64", VectorType::I64x4),
-            Self::X86Avx512VlMaskMoveps256 => ("vmovdqu32", VectorType::F32x8),
-            Self::X86Avx512VlMaskMovepd256 => ("vmovdqu64", VectorType::F64x4),
+            Self::X86Avx512VlMaskMulld128 => (EvexMnemonic::Vpmulld, VectorType::I32x4),
+            Self::X86Avx512VlMaskMinsd128 => (EvexMnemonic::Vpminsd, VectorType::I32x4),
+            Self::X86Avx512VlMaskMinud128 => (EvexMnemonic::Vpminud, VectorType::I32x4),
+            Self::X86Avx512VlMaskMaxsd128 => (EvexMnemonic::Vpmaxsd, VectorType::I32x4),
+            Self::X86Avx512VlMaskMaxud128 => (EvexMnemonic::Vpmaxud, VectorType::I32x4),
+            Self::X86Avx512VlMaskAndd128 => (EvexMnemonic::Vpandd, VectorType::I32x4),
+            Self::X86Avx512VlMaskAndnd128 => (EvexMnemonic::Vpandnd, VectorType::I32x4),
+            Self::X86Avx512VlMaskOrd128 => (EvexMnemonic::Vpord, VectorType::I32x4),
+            Self::X86Avx512VlMaskXord128 => (EvexMnemonic::Vpxord, VectorType::I32x4),
+            Self::X86Avx512VlMaskMinsq128 => (EvexMnemonic::Vpminsq, VectorType::I64x2),
+            Self::X86Avx512VlMaskMinuq128 => (EvexMnemonic::Vpminuq, VectorType::I64x2),
+            Self::X86Avx512VlMaskMaxsq128 => (EvexMnemonic::Vpmaxsq, VectorType::I64x2),
+            Self::X86Avx512VlMaskMaxuq128 => (EvexMnemonic::Vpmaxuq, VectorType::I64x2),
+            Self::X86Avx512VlMaskAndq128 => (EvexMnemonic::Vpandq, VectorType::I64x2),
+            Self::X86Avx512VlMaskAndnq128 => (EvexMnemonic::Vpandnq, VectorType::I64x2),
+            Self::X86Avx512VlMaskOrq128 => (EvexMnemonic::Vporq, VectorType::I64x2),
+            Self::X86Avx512VlMaskXorq128 => (EvexMnemonic::Vpxorq, VectorType::I64x2),
+            Self::X86Avx512VlMaskMoved128 => (EvexMnemonic::Vmovdqu32, VectorType::I32x4),
+            Self::X86Avx512VlMaskMoveq128 => (EvexMnemonic::Vmovdqu64, VectorType::I64x2),
+            Self::X86Avx512VlMaskMoveps128 => (EvexMnemonic::Vmovdqu32, VectorType::F32x4),
+            Self::X86Avx512VlMaskMovepd128 => (EvexMnemonic::Vmovdqu64, VectorType::F64x2),
+            Self::X86Avx512VlMaskMulld256 => (EvexMnemonic::Vpmulld, VectorType::I32x8),
+            Self::X86Avx512VlMaskMinsd256 => (EvexMnemonic::Vpminsd, VectorType::I32x8),
+            Self::X86Avx512VlMaskMinud256 => (EvexMnemonic::Vpminud, VectorType::I32x8),
+            Self::X86Avx512VlMaskMaxsd256 => (EvexMnemonic::Vpmaxsd, VectorType::I32x8),
+            Self::X86Avx512VlMaskMaxud256 => (EvexMnemonic::Vpmaxud, VectorType::I32x8),
+            Self::X86Avx512VlMaskAndd256 => (EvexMnemonic::Vpandd, VectorType::I32x8),
+            Self::X86Avx512VlMaskAndnd256 => (EvexMnemonic::Vpandnd, VectorType::I32x8),
+            Self::X86Avx512VlMaskOrd256 => (EvexMnemonic::Vpord, VectorType::I32x8),
+            Self::X86Avx512VlMaskXord256 => (EvexMnemonic::Vpxord, VectorType::I32x8),
+            Self::X86Avx512VlMaskMinsq256 => (EvexMnemonic::Vpminsq, VectorType::I64x4),
+            Self::X86Avx512VlMaskMinuq256 => (EvexMnemonic::Vpminuq, VectorType::I64x4),
+            Self::X86Avx512VlMaskMaxsq256 => (EvexMnemonic::Vpmaxsq, VectorType::I64x4),
+            Self::X86Avx512VlMaskMaxuq256 => (EvexMnemonic::Vpmaxuq, VectorType::I64x4),
+            Self::X86Avx512VlMaskAndq256 => (EvexMnemonic::Vpandq, VectorType::I64x4),
+            Self::X86Avx512VlMaskAndnq256 => (EvexMnemonic::Vpandnq, VectorType::I64x4),
+            Self::X86Avx512VlMaskOrq256 => (EvexMnemonic::Vporq, VectorType::I64x4),
+            Self::X86Avx512VlMaskXorq256 => (EvexMnemonic::Vpxorq, VectorType::I64x4),
+            Self::X86Avx512VlMaskMoved256 => (EvexMnemonic::Vmovdqu32, VectorType::I32x8),
+            Self::X86Avx512VlMaskMoveq256 => (EvexMnemonic::Vmovdqu64, VectorType::I64x4),
+            Self::X86Avx512VlMaskMoveps256 => (EvexMnemonic::Vmovdqu32, VectorType::F32x8),
+            Self::X86Avx512VlMaskMovepd256 => (EvexMnemonic::Vmovdqu64, VectorType::F64x4),
             _ => return None,
         })
     }
@@ -14621,54 +14872,54 @@ impl Intrinsic {
         )
     }
     /// Opcode, per-lane-count form, and feature tier (SSE2=0/AVX=1/AVX2=2).
-    pub fn x86_packed_shift(self) -> Option<(&'static str, bool, u8)> {
+    pub fn x86_packed_shift(self) -> Option<(Opcode, bool, u8)> {
         match self {
-            Self::X86Sse2Psllw128 => Some(("psllw", false, 0)),
-            Self::X86Sse2Pslld128 => Some(("pslld", false, 0)),
-            Self::X86Sse2Psllq128 => Some(("psllq", false, 0)),
-            Self::X86Sse2Psrlw128 => Some(("psrlw", false, 0)),
-            Self::X86Sse2Psrld128 => Some(("psrld", false, 0)),
-            Self::X86Sse2Psrlq128 => Some(("psrlq", false, 0)),
-            Self::X86Sse2Psraw128 => Some(("psraw", false, 0)),
-            Self::X86Sse2Psrad128 => Some(("psrad", false, 0)),
-            Self::X86AvxVpsllw128 => Some(("vpsllw", false, 1)),
-            Self::X86AvxVpslld128 => Some(("vpslld", false, 1)),
-            Self::X86AvxVpsllq128 => Some(("vpsllq", false, 1)),
-            Self::X86AvxVpsrlw128 => Some(("vpsrlw", false, 1)),
-            Self::X86AvxVpsrld128 => Some(("vpsrld", false, 1)),
-            Self::X86AvxVpsrlq128 => Some(("vpsrlq", false, 1)),
-            Self::X86AvxVpsraw128 => Some(("vpsraw", false, 1)),
-            Self::X86AvxVpsrad128 => Some(("vpsrad", false, 1)),
-            Self::X86Avx2Vpsllw256 => Some(("vpsllw", false, 2)),
-            Self::X86Avx2Vpslld256 => Some(("vpslld", false, 2)),
-            Self::X86Avx2Vpsllq256 => Some(("vpsllq", false, 2)),
-            Self::X86Avx2Vpsrlw256 => Some(("vpsrlw", false, 2)),
-            Self::X86Avx2Vpsrld256 => Some(("vpsrld", false, 2)),
-            Self::X86Avx2Vpsrlq256 => Some(("vpsrlq", false, 2)),
-            Self::X86Avx2Vpsraw256 => Some(("vpsraw", false, 2)),
-            Self::X86Avx2Vpsrad256 => Some(("vpsrad", false, 2)),
-            Self::X86Avx2Vpsllvd128 => Some(("vpsllvd", true, 2)),
-            Self::X86Avx2Vpsllvq128 => Some(("vpsllvq", true, 2)),
-            Self::X86Avx2Vpsrlvd128 => Some(("vpsrlvd", true, 2)),
-            Self::X86Avx2Vpsrlvq128 => Some(("vpsrlvq", true, 2)),
-            Self::X86Avx2Vpsravd128 => Some(("vpsravd", true, 2)),
-            Self::X86Avx2Vpsllvd256 => Some(("vpsllvd", true, 2)),
-            Self::X86Avx2Vpsllvq256 => Some(("vpsllvq", true, 2)),
-            Self::X86Avx2Vpsrlvd256 => Some(("vpsrlvd", true, 2)),
-            Self::X86Avx2Vpsrlvq256 => Some(("vpsrlvq", true, 2)),
-            Self::X86Avx2Vpsravd256 => Some(("vpsravd", true, 2)),
+            Self::X86Sse2Psllw128 => Some((Opcode::Psllw, false, 0)),
+            Self::X86Sse2Pslld128 => Some((Opcode::Pslld, false, 0)),
+            Self::X86Sse2Psllq128 => Some((Opcode::Psllq, false, 0)),
+            Self::X86Sse2Psrlw128 => Some((Opcode::Psrlw, false, 0)),
+            Self::X86Sse2Psrld128 => Some((Opcode::Psrld, false, 0)),
+            Self::X86Sse2Psrlq128 => Some((Opcode::Psrlq, false, 0)),
+            Self::X86Sse2Psraw128 => Some((Opcode::Psraw, false, 0)),
+            Self::X86Sse2Psrad128 => Some((Opcode::Psrad, false, 0)),
+            Self::X86AvxVpsllw128 => Some((op::VPSLLW, false, 1)),
+            Self::X86AvxVpslld128 => Some((op::VPSLLD, false, 1)),
+            Self::X86AvxVpsllq128 => Some((op::VPSLLQ, false, 1)),
+            Self::X86AvxVpsrlw128 => Some((op::VPSRLW, false, 1)),
+            Self::X86AvxVpsrld128 => Some((op::VPSRLD, false, 1)),
+            Self::X86AvxVpsrlq128 => Some((op::VPSRLQ, false, 1)),
+            Self::X86AvxVpsraw128 => Some((op::VPSRAW, false, 1)),
+            Self::X86AvxVpsrad128 => Some((op::VPSRAD, false, 1)),
+            Self::X86Avx2Vpsllw256 => Some((op::VPSLLW, false, 2)),
+            Self::X86Avx2Vpslld256 => Some((op::VPSLLD, false, 2)),
+            Self::X86Avx2Vpsllq256 => Some((op::VPSLLQ, false, 2)),
+            Self::X86Avx2Vpsrlw256 => Some((op::VPSRLW, false, 2)),
+            Self::X86Avx2Vpsrld256 => Some((op::VPSRLD, false, 2)),
+            Self::X86Avx2Vpsrlq256 => Some((op::VPSRLQ, false, 2)),
+            Self::X86Avx2Vpsraw256 => Some((op::VPSRAW, false, 2)),
+            Self::X86Avx2Vpsrad256 => Some((op::VPSRAD, false, 2)),
+            Self::X86Avx2Vpsllvd128 => Some((op::VPSLLVD, true, 2)),
+            Self::X86Avx2Vpsllvq128 => Some((op::VPSLLVQ, true, 2)),
+            Self::X86Avx2Vpsrlvd128 => Some((op::VPSRLVD, true, 2)),
+            Self::X86Avx2Vpsrlvq128 => Some((op::VPSRLVQ, true, 2)),
+            Self::X86Avx2Vpsravd128 => Some((op::VPSRAVD, true, 2)),
+            Self::X86Avx2Vpsllvd256 => Some((op::VPSLLVD, true, 2)),
+            Self::X86Avx2Vpsllvq256 => Some((op::VPSLLVQ, true, 2)),
+            Self::X86Avx2Vpsrlvd256 => Some((op::VPSRLVD, true, 2)),
+            Self::X86Avx2Vpsrlvq256 => Some((op::VPSRLVQ, true, 2)),
+            Self::X86Avx2Vpsravd256 => Some((op::VPSRAVD, true, 2)),
             _ => None,
         }
     }
     /// Byte-lane shifts take a verified immediate0..255; halves stay independent.
-    pub fn x86_byte_shift(self) -> Option<(&'static str, u8)> {
+    pub fn x86_byte_shift(self) -> Option<(Opcode, u8)> {
         match self {
-            Self::X86Sse2Pslldq128 => Some(("pslldq", 0)),
-            Self::X86Sse2Psrldq128 => Some(("psrldq", 0)),
-            Self::X86AvxVpslldq128 => Some(("vpslldq", 1)),
-            Self::X86AvxVpsrldq128 => Some(("vpsrldq", 1)),
-            Self::X86Avx2Vpslldq256 => Some(("vpslldq", 2)),
-            Self::X86Avx2Vpsrldq256 => Some(("vpsrldq", 2)),
+            Self::X86Sse2Pslldq128 => Some((Opcode::Pslldq, 0)),
+            Self::X86Sse2Psrldq128 => Some((Opcode::Psrldq, 0)),
+            Self::X86AvxVpslldq128 => Some((op::VPSLLDQ, 1)),
+            Self::X86AvxVpsrldq128 => Some((op::VPSRLDQ, 1)),
+            Self::X86Avx2Vpslldq256 => Some((op::VPSLLDQ, 2)),
+            Self::X86Avx2Vpsrldq256 => Some((op::VPSRLDQ, 2)),
             _ => None,
         }
     }
@@ -14676,136 +14927,136 @@ impl Intrinsic {
     /// half, or unsigned minimum/lowest index with zero result padding. SAD imm8
     /// uses bits 2:0 in the low half and 5:3 in the high half; other bits ignored.
     /// Returns opcode, independent feature tier (2=SSE41,3=AVX,4=AVX+AVX2), SAD.
-    pub fn x86_packed_search(self) -> Option<(&'static str, u8, bool)> {
+    pub fn x86_packed_search(self) -> Option<(Opcode, u8, bool)> {
         match self {
-            Self::X86Sse41Mpsadbw128 => Some(("mpsadbw", 2, true)),
-            Self::X86AvxVmpsadbw128 => Some(("vmpsadbw", 3, true)),
-            Self::X86Avx2Vmpsadbw256 => Some(("vmpsadbw", 4, true)),
-            Self::X86Sse41Phminposuw128 => Some(("phminposuw", 2, false)),
-            Self::X86AvxVphminposuw128 => Some(("vphminposuw", 3, false)),
+            Self::X86Sse41Mpsadbw128 => Some((op::MPSADBW, 2, true)),
+            Self::X86AvxVmpsadbw128 => Some((op::VMPSADBW, 3, true)),
+            Self::X86Avx2Vmpsadbw256 => Some((op::VMPSADBW, 4, true)),
+            Self::X86Sse41Phminposuw128 => Some((op::PHMINPOSUW, 2, false)),
+            Self::X86AvxVphminposuw128 => Some((op::VPHMINPOSUW, 3, false)),
             _ => None,
         }
     }
     /// Exact pairwise/sliced integer operation; tier SSE2/SSSE3/SSE41/AVX/AVX2.
     /// Opcode and feature tier: SSE4.1 / AVX / AVX+AVX2.
-    pub fn x86_sign_blend(self) -> Option<(&'static str, u8)> {
+    pub fn x86_sign_blend(self) -> Option<(Opcode, u8)> {
         match self {
-            Self::X86Sse41Blendvps128 => Some(("blendvps", 0)),
-            Self::X86Sse41Blendvpd128 => Some(("blendvpd", 0)),
-            Self::X86Sse41Pblendvb128 => Some(("pblendvb", 0)),
-            Self::X86AvxVblendvps128 => Some(("vblendvps", 1)),
-            Self::X86AvxVblendvpd128 => Some(("vblendvpd", 1)),
-            Self::X86AvxVpblendvb128 => Some(("vpblendvb", 1)),
-            Self::X86AvxVblendvps256 => Some(("vblendvps", 1)),
-            Self::X86AvxVblendvpd256 => Some(("vblendvpd", 1)),
-            Self::X86Avx2Vpblendvb256 => Some(("vpblendvb", 2)),
+            Self::X86Sse41Blendvps128 => Some((op::BLENDVPS, 0)),
+            Self::X86Sse41Blendvpd128 => Some((op::BLENDVPD, 0)),
+            Self::X86Sse41Pblendvb128 => Some((op::PBLENDVB, 0)),
+            Self::X86AvxVblendvps128 => Some((op::VBLENDVPS, 1)),
+            Self::X86AvxVblendvpd128 => Some((op::VBLENDVPD, 1)),
+            Self::X86AvxVpblendvb128 => Some((op::VPBLENDVB, 1)),
+            Self::X86AvxVblendvps256 => Some((op::VBLENDVPS, 1)),
+            Self::X86AvxVblendvpd256 => Some((op::VBLENDVPD, 1)),
+            Self::X86Avx2Vpblendvb256 => Some((op::VPBLENDVB, 2)),
             _ => None,
         }
     }
-    pub fn x86_packed_pair(self) -> Option<(&'static str, u8)> {
+    pub fn x86_packed_pair(self) -> Option<(Opcode, u8)> {
         match self {
-            Self::X86Sse2Packsswb128 => Some(("packsswb", 0)),
-            Self::X86Sse2Packssdw128 => Some(("packssdw", 0)),
-            Self::X86Sse2Packuswb128 => Some(("packuswb", 0)),
-            Self::X86Sse41Packusdw128 => Some(("packusdw", 2)),
-            Self::X86AvxVpacksswb128 => Some(("vpacksswb", 3)),
-            Self::X86AvxVpackssdw128 => Some(("vpackssdw", 3)),
-            Self::X86AvxVpackuswb128 => Some(("vpackuswb", 3)),
-            Self::X86AvxVpackusdw128 => Some(("vpackusdw", 3)),
-            Self::X86Avx2Vpacksswb256 => Some(("vpacksswb", 4)),
-            Self::X86Avx2Vpackssdw256 => Some(("vpackssdw", 4)),
-            Self::X86Avx2Vpackuswb256 => Some(("vpackuswb", 4)),
-            Self::X86Avx2Vpackusdw256 => Some(("vpackusdw", 4)),
-            Self::X86Ssse3Phaddw128 => Some(("phaddw", 1)),
-            Self::X86Ssse3Phaddd128 => Some(("phaddd", 1)),
-            Self::X86Ssse3Phaddsw128 => Some(("phaddsw", 1)),
-            Self::X86Ssse3Phsubw128 => Some(("phsubw", 1)),
-            Self::X86Ssse3Phsubd128 => Some(("phsubd", 1)),
-            Self::X86Ssse3Phsubsw128 => Some(("phsubsw", 1)),
-            Self::X86Sse2Paddsb128 => Some(("paddsb", 0)),
-            Self::X86Sse2Paddsw128 => Some(("paddsw", 0)),
-            Self::X86Sse2Paddusb128 => Some(("paddusb", 0)),
-            Self::X86Sse2Paddusw128 => Some(("paddusw", 0)),
-            Self::X86Sse2Psubsb128 => Some(("psubsb", 0)),
-            Self::X86Sse2Psubsw128 => Some(("psubsw", 0)),
-            Self::X86Sse2Psubusb128 => Some(("psubusb", 0)),
-            Self::X86Sse2Psubusw128 => Some(("psubusw", 0)),
-            Self::X86Sse2Pavgb128 => Some(("pavgb", 0)),
-            Self::X86Sse2Pavgw128 => Some(("pavgw", 0)),
-            Self::X86Ssse3Psignb128 => Some(("psignb", 1)),
-            Self::X86Ssse3Psignw128 => Some(("psignw", 1)),
-            Self::X86Ssse3Psignd128 => Some(("psignd", 1)),
-            Self::X86Ssse3Pabsb128 => Some(("pabsb", 1)),
-            Self::X86Ssse3Pabsw128 => Some(("pabsw", 1)),
-            Self::X86Ssse3Pabsd128 => Some(("pabsd", 1)),
-            Self::X86AvxVphaddw128 => Some(("vphaddw", 3)),
-            Self::X86AvxVphaddd128 => Some(("vphaddd", 3)),
-            Self::X86AvxVphaddsw128 => Some(("vphaddsw", 3)),
-            Self::X86AvxVphsubw128 => Some(("vphsubw", 3)),
-            Self::X86AvxVphsubd128 => Some(("vphsubd", 3)),
-            Self::X86AvxVphsubsw128 => Some(("vphsubsw", 3)),
-            Self::X86AvxVpaddsb128 => Some(("vpaddsb", 3)),
-            Self::X86AvxVpaddsw128 => Some(("vpaddsw", 3)),
-            Self::X86AvxVpaddusb128 => Some(("vpaddusb", 3)),
-            Self::X86AvxVpaddusw128 => Some(("vpaddusw", 3)),
-            Self::X86AvxVpsubsb128 => Some(("vpsubsb", 3)),
-            Self::X86AvxVpsubsw128 => Some(("vpsubsw", 3)),
-            Self::X86AvxVpsubusb128 => Some(("vpsubusb", 3)),
-            Self::X86AvxVpsubusw128 => Some(("vpsubusw", 3)),
-            Self::X86AvxVpavgb128 => Some(("vpavgb", 3)),
-            Self::X86AvxVpavgw128 => Some(("vpavgw", 3)),
-            Self::X86AvxVpsignb128 => Some(("vpsignb", 3)),
-            Self::X86AvxVpsignw128 => Some(("vpsignw", 3)),
-            Self::X86AvxVpsignd128 => Some(("vpsignd", 3)),
-            Self::X86AvxVpabsb128 => Some(("vpabsb", 3)),
-            Self::X86AvxVpabsw128 => Some(("vpabsw", 3)),
-            Self::X86AvxVpabsd128 => Some(("vpabsd", 3)),
-            Self::X86Avx2Vphaddw256 => Some(("vphaddw", 4)),
-            Self::X86Avx2Vphaddd256 => Some(("vphaddd", 4)),
-            Self::X86Avx2Vphaddsw256 => Some(("vphaddsw", 4)),
-            Self::X86Avx2Vphsubw256 => Some(("vphsubw", 4)),
-            Self::X86Avx2Vphsubd256 => Some(("vphsubd", 4)),
-            Self::X86Avx2Vphsubsw256 => Some(("vphsubsw", 4)),
-            Self::X86Avx2Vpaddsb256 => Some(("vpaddsb", 4)),
-            Self::X86Avx2Vpaddsw256 => Some(("vpaddsw", 4)),
-            Self::X86Avx2Vpaddusb256 => Some(("vpaddusb", 4)),
-            Self::X86Avx2Vpaddusw256 => Some(("vpaddusw", 4)),
-            Self::X86Avx2Vpsubsb256 => Some(("vpsubsb", 4)),
-            Self::X86Avx2Vpsubsw256 => Some(("vpsubsw", 4)),
-            Self::X86Avx2Vpsubusb256 => Some(("vpsubusb", 4)),
-            Self::X86Avx2Vpsubusw256 => Some(("vpsubusw", 4)),
-            Self::X86Avx2Vpavgb256 => Some(("vpavgb", 4)),
-            Self::X86Avx2Vpavgw256 => Some(("vpavgw", 4)),
-            Self::X86Avx2Vpsignb256 => Some(("vpsignb", 4)),
-            Self::X86Avx2Vpsignw256 => Some(("vpsignw", 4)),
-            Self::X86Avx2Vpsignd256 => Some(("vpsignd", 4)),
-            Self::X86Avx2Vpabsb256 => Some(("vpabsb", 4)),
-            Self::X86Avx2Vpabsw256 => Some(("vpabsw", 4)),
-            Self::X86Avx2Vpabsd256 => Some(("vpabsd", 4)),
-            Self::X86Sse2Pmaddwd128 => Some(("pmaddwd", 0)),
-            Self::X86Ssse3Pmaddubsw128 => Some(("pmaddubsw", 1)),
-            Self::X86Sse2Pmulhw128 => Some(("pmulhw", 0)),
-            Self::X86Sse2Pmulhuw128 => Some(("pmulhuw", 0)),
-            Self::X86Ssse3Pmulhrsw128 => Some(("pmulhrsw", 1)),
-            Self::X86Sse41Pmuldq128 => Some(("pmuldq", 2)),
-            Self::X86Sse2Pmuludq128 => Some(("pmuludq", 0)),
-            Self::X86Sse2Psadbw128 => Some(("psadbw", 0)),
-            Self::X86AvxVpmaddwd128 => Some(("vpmaddwd", 3)),
-            Self::X86AvxVpmaddubsw128 => Some(("vpmaddubsw", 3)),
-            Self::X86AvxVpmulhw128 => Some(("vpmulhw", 3)),
-            Self::X86AvxVpmulhuw128 => Some(("vpmulhuw", 3)),
-            Self::X86AvxVpmulhrsw128 => Some(("vpmulhrsw", 3)),
-            Self::X86AvxVpmuldq128 => Some(("vpmuldq", 3)),
-            Self::X86AvxVpmuludq128 => Some(("vpmuludq", 3)),
-            Self::X86AvxVpsadbw128 => Some(("vpsadbw", 3)),
-            Self::X86Avx2Vpmaddwd256 => Some(("vpmaddwd", 4)),
-            Self::X86Avx2Vpmaddubsw256 => Some(("vpmaddubsw", 4)),
-            Self::X86Avx2Vpmulhw256 => Some(("vpmulhw", 4)),
-            Self::X86Avx2Vpmulhuw256 => Some(("vpmulhuw", 4)),
-            Self::X86Avx2Vpmulhrsw256 => Some(("vpmulhrsw", 4)),
-            Self::X86Avx2Vpmuldq256 => Some(("vpmuldq", 4)),
-            Self::X86Avx2Vpmuludq256 => Some(("vpmuludq", 4)),
-            Self::X86Avx2Vpsadbw256 => Some(("vpsadbw", 4)),
+            Self::X86Sse2Packsswb128 => Some((Opcode::Packsswb, 0)),
+            Self::X86Sse2Packssdw128 => Some((Opcode::Packssdw, 0)),
+            Self::X86Sse2Packuswb128 => Some((Opcode::Packuswb, 0)),
+            Self::X86Sse41Packusdw128 => Some((op::PACKUSDW, 2)),
+            Self::X86AvxVpacksswb128 => Some((op::VPACKSSWB, 3)),
+            Self::X86AvxVpackssdw128 => Some((op::VPACKSSDW, 3)),
+            Self::X86AvxVpackuswb128 => Some((op::VPACKUSWB, 3)),
+            Self::X86AvxVpackusdw128 => Some((op::VPACKUSDW, 3)),
+            Self::X86Avx2Vpacksswb256 => Some((op::VPACKSSWB, 4)),
+            Self::X86Avx2Vpackssdw256 => Some((op::VPACKSSDW, 4)),
+            Self::X86Avx2Vpackuswb256 => Some((op::VPACKUSWB, 4)),
+            Self::X86Avx2Vpackusdw256 => Some((op::VPACKUSDW, 4)),
+            Self::X86Ssse3Phaddw128 => Some((op::PHADDW, 1)),
+            Self::X86Ssse3Phaddd128 => Some((op::PHADDD, 1)),
+            Self::X86Ssse3Phaddsw128 => Some((op::PHADDSW, 1)),
+            Self::X86Ssse3Phsubw128 => Some((op::PHSUBW, 1)),
+            Self::X86Ssse3Phsubd128 => Some((op::PHSUBD, 1)),
+            Self::X86Ssse3Phsubsw128 => Some((op::PHSUBSW, 1)),
+            Self::X86Sse2Paddsb128 => Some((Opcode::Paddsb, 0)),
+            Self::X86Sse2Paddsw128 => Some((Opcode::Paddsw, 0)),
+            Self::X86Sse2Paddusb128 => Some((Opcode::Paddusb, 0)),
+            Self::X86Sse2Paddusw128 => Some((Opcode::Paddusw, 0)),
+            Self::X86Sse2Psubsb128 => Some((Opcode::Psubsb, 0)),
+            Self::X86Sse2Psubsw128 => Some((Opcode::Psubsw, 0)),
+            Self::X86Sse2Psubusb128 => Some((Opcode::Psubusb, 0)),
+            Self::X86Sse2Psubusw128 => Some((Opcode::Psubusw, 0)),
+            Self::X86Sse2Pavgb128 => Some((Opcode::Pavgb, 0)),
+            Self::X86Sse2Pavgw128 => Some((Opcode::Pavgw, 0)),
+            Self::X86Ssse3Psignb128 => Some((op::PSIGNB, 1)),
+            Self::X86Ssse3Psignw128 => Some((op::PSIGNW, 1)),
+            Self::X86Ssse3Psignd128 => Some((op::PSIGND, 1)),
+            Self::X86Ssse3Pabsb128 => Some((op::PABSB, 1)),
+            Self::X86Ssse3Pabsw128 => Some((op::PABSW, 1)),
+            Self::X86Ssse3Pabsd128 => Some((op::PABSD, 1)),
+            Self::X86AvxVphaddw128 => Some((op::VPHADDW, 3)),
+            Self::X86AvxVphaddd128 => Some((op::VPHADDD, 3)),
+            Self::X86AvxVphaddsw128 => Some((op::VPHADDSW, 3)),
+            Self::X86AvxVphsubw128 => Some((op::VPHSUBW, 3)),
+            Self::X86AvxVphsubd128 => Some((op::VPHSUBD, 3)),
+            Self::X86AvxVphsubsw128 => Some((op::VPHSUBSW, 3)),
+            Self::X86AvxVpaddsb128 => Some((op::VPADDSB, 3)),
+            Self::X86AvxVpaddsw128 => Some((op::VPADDSW, 3)),
+            Self::X86AvxVpaddusb128 => Some((op::VPADDUSB, 3)),
+            Self::X86AvxVpaddusw128 => Some((op::VPADDUSW, 3)),
+            Self::X86AvxVpsubsb128 => Some((op::VPSUBSB, 3)),
+            Self::X86AvxVpsubsw128 => Some((op::VPSUBSW, 3)),
+            Self::X86AvxVpsubusb128 => Some((op::VPSUBUSB, 3)),
+            Self::X86AvxVpsubusw128 => Some((op::VPSUBUSW, 3)),
+            Self::X86AvxVpavgb128 => Some((op::VPAVGB, 3)),
+            Self::X86AvxVpavgw128 => Some((op::VPAVGW, 3)),
+            Self::X86AvxVpsignb128 => Some((op::VPSIGNB, 3)),
+            Self::X86AvxVpsignw128 => Some((op::VPSIGNW, 3)),
+            Self::X86AvxVpsignd128 => Some((op::VPSIGND, 3)),
+            Self::X86AvxVpabsb128 => Some((op::VPABSB, 3)),
+            Self::X86AvxVpabsw128 => Some((op::VPABSW, 3)),
+            Self::X86AvxVpabsd128 => Some((op::VPABSD, 3)),
+            Self::X86Avx2Vphaddw256 => Some((op::VPHADDW, 4)),
+            Self::X86Avx2Vphaddd256 => Some((op::VPHADDD, 4)),
+            Self::X86Avx2Vphaddsw256 => Some((op::VPHADDSW, 4)),
+            Self::X86Avx2Vphsubw256 => Some((op::VPHSUBW, 4)),
+            Self::X86Avx2Vphsubd256 => Some((op::VPHSUBD, 4)),
+            Self::X86Avx2Vphsubsw256 => Some((op::VPHSUBSW, 4)),
+            Self::X86Avx2Vpaddsb256 => Some((op::VPADDSB, 4)),
+            Self::X86Avx2Vpaddsw256 => Some((op::VPADDSW, 4)),
+            Self::X86Avx2Vpaddusb256 => Some((op::VPADDUSB, 4)),
+            Self::X86Avx2Vpaddusw256 => Some((op::VPADDUSW, 4)),
+            Self::X86Avx2Vpsubsb256 => Some((op::VPSUBSB, 4)),
+            Self::X86Avx2Vpsubsw256 => Some((op::VPSUBSW, 4)),
+            Self::X86Avx2Vpsubusb256 => Some((op::VPSUBUSB, 4)),
+            Self::X86Avx2Vpsubusw256 => Some((op::VPSUBUSW, 4)),
+            Self::X86Avx2Vpavgb256 => Some((op::VPAVGB, 4)),
+            Self::X86Avx2Vpavgw256 => Some((op::VPAVGW, 4)),
+            Self::X86Avx2Vpsignb256 => Some((op::VPSIGNB, 4)),
+            Self::X86Avx2Vpsignw256 => Some((op::VPSIGNW, 4)),
+            Self::X86Avx2Vpsignd256 => Some((op::VPSIGND, 4)),
+            Self::X86Avx2Vpabsb256 => Some((op::VPABSB, 4)),
+            Self::X86Avx2Vpabsw256 => Some((op::VPABSW, 4)),
+            Self::X86Avx2Vpabsd256 => Some((op::VPABSD, 4)),
+            Self::X86Sse2Pmaddwd128 => Some((Opcode::Pmaddwd, 0)),
+            Self::X86Ssse3Pmaddubsw128 => Some((op::PMADDUBSW, 1)),
+            Self::X86Sse2Pmulhw128 => Some((Opcode::Pmulhw, 0)),
+            Self::X86Sse2Pmulhuw128 => Some((Opcode::Pmulhuw, 0)),
+            Self::X86Ssse3Pmulhrsw128 => Some((op::PMULHRSW, 1)),
+            Self::X86Sse41Pmuldq128 => Some((op::PMULDQ, 2)),
+            Self::X86Sse2Pmuludq128 => Some((Opcode::Pmuludq, 0)),
+            Self::X86Sse2Psadbw128 => Some((Opcode::Psadbw, 0)),
+            Self::X86AvxVpmaddwd128 => Some((op::VPMADDWD, 3)),
+            Self::X86AvxVpmaddubsw128 => Some((op::VPMADDUBSW, 3)),
+            Self::X86AvxVpmulhw128 => Some((op::VPMULHW, 3)),
+            Self::X86AvxVpmulhuw128 => Some((op::VPMULHUW, 3)),
+            Self::X86AvxVpmulhrsw128 => Some((op::VPMULHRSW, 3)),
+            Self::X86AvxVpmuldq128 => Some((op::VPMULDQ, 3)),
+            Self::X86AvxVpmuludq128 => Some((op::VPMULUDQ, 3)),
+            Self::X86AvxVpsadbw128 => Some((op::VPSADBW, 3)),
+            Self::X86Avx2Vpmaddwd256 => Some((op::VPMADDWD, 4)),
+            Self::X86Avx2Vpmaddubsw256 => Some((op::VPMADDUBSW, 4)),
+            Self::X86Avx2Vpmulhw256 => Some((op::VPMULHW, 4)),
+            Self::X86Avx2Vpmulhuw256 => Some((op::VPMULHUW, 4)),
+            Self::X86Avx2Vpmulhrsw256 => Some((op::VPMULHRSW, 4)),
+            Self::X86Avx2Vpmuldq256 => Some((op::VPMULDQ, 4)),
+            Self::X86Avx2Vpmuludq256 => Some((op::VPMULUDQ, 4)),
+            Self::X86Avx2Vpsadbw256 => Some((op::VPSADBW, 4)),
             _ => None,
         }
     }
@@ -14939,20 +15190,20 @@ impl Intrinsic {
     }
     /// (opcode, operand-size bits, exact memory footprint). These are pinned raw
     /// operations under docs/targets/x86_64/f80/README.md, not FXSAVE-format adapters.
-    pub fn x86_legacy_x87_image(self) -> Option<(&'static str, u16, usize)> {
+    pub fn x86_legacy_x87_image(self) -> Option<(Opcode, u16, usize)> {
         Some(match self {
-            Self::X86X87Fnstenv16 => ("fnstenv", 16, 14),
-            Self::X86X87Fnstenv32 => ("fnstenv", 32, 28),
-            Self::X86X87Fstenv16 => ("fstenv", 16, 14),
-            Self::X86X87Fstenv32 => ("fstenv", 32, 28),
-            Self::X86X87Fldenv16 => ("fldenv", 16, 14),
-            Self::X86X87Fldenv32 => ("fldenv", 32, 28),
-            Self::X86X87Fnsave16 => ("fnsave", 16, 94),
-            Self::X86X87Fnsave32 => ("fnsave", 32, 108),
-            Self::X86X87Fsave16 => ("fsave", 16, 94),
-            Self::X86X87Fsave32 => ("fsave", 32, 108),
-            Self::X86X87Frstor16 => ("frstor", 16, 94),
-            Self::X86X87Frstor32 => ("frstor", 32, 108),
+            Self::X86X87Fnstenv16 => (op::FNSTENV, 16, 14),
+            Self::X86X87Fnstenv32 => (op::FNSTENV, 32, 28),
+            Self::X86X87Fstenv16 => (op::FSTENV, 16, 14),
+            Self::X86X87Fstenv32 => (op::FSTENV, 32, 28),
+            Self::X86X87Fldenv16 => (op::FLDENV, 16, 14),
+            Self::X86X87Fldenv32 => (op::FLDENV, 32, 28),
+            Self::X86X87Fnsave16 => (op::FNSAVE, 16, 94),
+            Self::X86X87Fnsave32 => (op::FNSAVE, 32, 108),
+            Self::X86X87Fsave16 => (op::FSAVE, 16, 94),
+            Self::X86X87Fsave32 => (op::FSAVE, 32, 108),
+            Self::X86X87Frstor16 => (op::FRSTOR, 16, 94),
+            Self::X86X87Frstor32 => (op::FRSTOR, 32, 108),
             _ => return None,
         })
     }
@@ -15071,38 +15322,38 @@ impl Intrinsic {
     pub fn is_x86_raw_fp_convert(self) -> bool {
         self.x86_raw_fp_opcode().is_some()
     }
-    pub fn x86_raw_fp_opcode(self) -> Option<&'static str> {
+    pub fn x86_raw_fp_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86AvxVcvtdq2pd128 => Some("vcvtdq2pd"),
-            Self::X86AvxVcvtdq2pd256 => Some("vcvtdq2pd"),
-            Self::X86AvxVcvtdq2ps128 => Some("vcvtdq2ps"),
-            Self::X86AvxVcvtdq2ps256 => Some("vcvtdq2ps"),
-            Self::X86AvxVcvtpd2dq128 => Some("vcvtpd2dq"),
-            Self::X86AvxVcvtpd2dq256 => Some("vcvtpd2dq"),
-            Self::X86AvxVcvtpd2ps128 => Some("vcvtpd2ps"),
-            Self::X86AvxVcvtpd2ps256 => Some("vcvtpd2ps"),
-            Self::X86AvxVcvtps2dq128 => Some("vcvtps2dq"),
-            Self::X86AvxVcvtps2dq256 => Some("vcvtps2dq"),
-            Self::X86AvxVcvtps2pd128 => Some("vcvtps2pd"),
-            Self::X86AvxVcvtps2pd256 => Some("vcvtps2pd"),
-            Self::X86AvxVcvttpd2dq128 => Some("vcvttpd2dq"),
-            Self::X86AvxVcvttpd2dq256 => Some("vcvttpd2dq"),
-            Self::X86AvxVcvttps2dq128 => Some("vcvttps2dq"),
-            Self::X86AvxVcvttps2dq256 => Some("vcvttps2dq"),
-            Self::X86AvxVcvtss2si32 => Some("vcvtss2si"),
-            Self::X86AvxVcvttss2si32 => Some("vcvttss2si"),
-            Self::X86AvxVcvtss2si64 => Some("vcvtss2si"),
-            Self::X86AvxVcvttss2si64 => Some("vcvttss2si"),
-            Self::X86AvxVcvtsd2si32 => Some("vcvtsd2si"),
-            Self::X86AvxVcvttsd2si32 => Some("vcvttsd2si"),
-            Self::X86AvxVcvtsd2si64 => Some("vcvtsd2si"),
-            Self::X86AvxVcvttsd2si64 => Some("vcvttsd2si"),
-            Self::X86AvxVcvtsi2ss32 => Some("vcvtsi2ss"),
-            Self::X86AvxVcvtsi2ss64 => Some("vcvtsi2ss"),
-            Self::X86AvxVcvtsi2sd32 => Some("vcvtsi2sd"),
-            Self::X86AvxVcvtsi2sd64 => Some("vcvtsi2sd"),
-            Self::X86AvxVcvtsd2ss => Some("vcvtsd2ss"),
-            Self::X86AvxVcvtss2sd => Some("vcvtss2sd"),
+            Self::X86AvxVcvtdq2pd128 => Some(op::VCVTDQ2PD),
+            Self::X86AvxVcvtdq2pd256 => Some(op::VCVTDQ2PD),
+            Self::X86AvxVcvtdq2ps128 => Some(op::VCVTDQ2PS),
+            Self::X86AvxVcvtdq2ps256 => Some(op::VCVTDQ2PS),
+            Self::X86AvxVcvtpd2dq128 => Some(op::VCVTPD2DQ),
+            Self::X86AvxVcvtpd2dq256 => Some(op::VCVTPD2DQ),
+            Self::X86AvxVcvtpd2ps128 => Some(op::VCVTPD2PS),
+            Self::X86AvxVcvtpd2ps256 => Some(op::VCVTPD2PS),
+            Self::X86AvxVcvtps2dq128 => Some(op::VCVTPS2DQ),
+            Self::X86AvxVcvtps2dq256 => Some(op::VCVTPS2DQ),
+            Self::X86AvxVcvtps2pd128 => Some(op::VCVTPS2PD),
+            Self::X86AvxVcvtps2pd256 => Some(op::VCVTPS2PD),
+            Self::X86AvxVcvttpd2dq128 => Some(op::VCVTTPD2DQ),
+            Self::X86AvxVcvttpd2dq256 => Some(op::VCVTTPD2DQ),
+            Self::X86AvxVcvttps2dq128 => Some(op::VCVTTPS2DQ),
+            Self::X86AvxVcvttps2dq256 => Some(op::VCVTTPS2DQ),
+            Self::X86AvxVcvtss2si32 => Some(op::VCVTSS2SI),
+            Self::X86AvxVcvttss2si32 => Some(op::VCVTTSS2SI),
+            Self::X86AvxVcvtss2si64 => Some(op::VCVTSS2SI),
+            Self::X86AvxVcvttss2si64 => Some(op::VCVTTSS2SI),
+            Self::X86AvxVcvtsd2si32 => Some(op::VCVTSD2SI),
+            Self::X86AvxVcvttsd2si32 => Some(op::VCVTTSD2SI),
+            Self::X86AvxVcvtsd2si64 => Some(op::VCVTSD2SI),
+            Self::X86AvxVcvttsd2si64 => Some(op::VCVTTSD2SI),
+            Self::X86AvxVcvtsi2ss32 => Some(op::VCVTSI2SS),
+            Self::X86AvxVcvtsi2ss64 => Some(op::VCVTSI2SS),
+            Self::X86AvxVcvtsi2sd32 => Some(op::VCVTSI2SD),
+            Self::X86AvxVcvtsi2sd64 => Some(op::VCVTSI2SD),
+            Self::X86AvxVcvtsd2ss => Some(op::VCVTSD2SS),
+            Self::X86AvxVcvtss2sd => Some(op::VCVTSS2SD),
             _ => None,
         }
     }
@@ -15110,52 +15361,52 @@ impl Intrinsic {
     pub fn is_x86_fp_compare(self) -> bool {
         self.x86_fp_compare_opcode().is_some()
     }
-    pub fn x86_fp_compare_opcode(self) -> Option<&'static str> {
+    pub fn x86_fp_compare_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86AvxVcmpps128 => Some("vcmpps"),
-            Self::X86AvxVcmpps256 => Some("vcmpps"),
-            Self::X86AvxVcmppd128 => Some("vcmppd"),
-            Self::X86AvxVcmppd256 => Some("vcmppd"),
-            Self::X86AvxVcmpss => Some("vcmpss"),
-            Self::X86AvxVcmpsd => Some("vcmpsd"),
+            Self::X86AvxVcmpps128 => Some(op::VCMPPS),
+            Self::X86AvxVcmpps256 => Some(op::VCMPPS),
+            Self::X86AvxVcmppd128 => Some(op::VCMPPD),
+            Self::X86AvxVcmppd256 => Some(op::VCMPPD),
+            Self::X86AvxVcmpss => Some(op::VCMPSS),
+            Self::X86AvxVcmpsd => Some(op::VCMPSD),
             _ => None,
         }
     }
 
-    pub fn x86_aes_opcode(self) -> Option<&'static str> {
+    pub fn x86_aes_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86Aesenc128 => Some("aesenc"),
-            Self::X86Aesenclast128 => Some("aesenclast"),
-            Self::X86Aesdec128 => Some("aesdec"),
-            Self::X86Aesdeclast128 => Some("aesdeclast"),
-            Self::X86Aesimc128 => Some("aesimc"),
-            Self::X86Aeskeygenassist128 => Some("aeskeygenassist"),
+            Self::X86Aesenc128 => Some(op::AESENC),
+            Self::X86Aesenclast128 => Some(op::AESENCLAST),
+            Self::X86Aesdec128 => Some(op::AESDEC),
+            Self::X86Aesdeclast128 => Some(op::AESDECLAST),
+            Self::X86Aesimc128 => Some(op::AESIMC),
+            Self::X86Aeskeygenassist128 => Some(op::AESKEYGENASSIST),
             _ => None,
         }
     }
     pub fn is_x86_pure_bits(self) -> bool {
         self.x86_pure_bits_opcode().is_some()
     }
-    pub fn x86_pure_bits_opcode(self) -> Option<&'static str> {
+    pub fn x86_pure_bits_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86AvxVpermilps128 => Some("vpermilps"),
-            Self::X86AvxVpermilps256 => Some("vpermilps"),
-            Self::X86AvxVpermilpd128 => Some("vpermilpd"),
-            Self::X86AvxVpermilpd256 => Some("vpermilpd"),
-            Self::X86Avx2Vpermd256 => Some("vpermd"),
-            Self::X86Avx2Vpermps256 => Some("vpermps"),
-            Self::X86AvxVmovmskps128 => Some("vmovmskps"),
-            Self::X86AvxVmovmskps256 => Some("vmovmskps"),
-            Self::X86AvxVmovmskpd128 => Some("vmovmskpd"),
-            Self::X86AvxVmovmskpd256 => Some("vmovmskpd"),
-            Self::X86AvxVpmovmskb128 => Some("vpmovmskb"),
-            Self::X86Avx2Vpmovmskb256 => Some("vpmovmskb"),
-            Self::X86AvxVtestps128 => Some("vtestps"),
-            Self::X86AvxVtestps256 => Some("vtestps"),
-            Self::X86AvxVtestpd128 => Some("vtestpd"),
-            Self::X86AvxVtestpd256 => Some("vtestpd"),
-            Self::X86AvxVptest128 => Some("vptest"),
-            Self::X86AvxVptest256 => Some("vptest"),
+            Self::X86AvxVpermilps128 => Some(op::VPERMILPS),
+            Self::X86AvxVpermilps256 => Some(op::VPERMILPS),
+            Self::X86AvxVpermilpd128 => Some(op::VPERMILPD),
+            Self::X86AvxVpermilpd256 => Some(op::VPERMILPD),
+            Self::X86Avx2Vpermd256 => Some(op::VPERMD),
+            Self::X86Avx2Vpermps256 => Some(op::VPERMPS),
+            Self::X86AvxVmovmskps128 => Some(op::VMOVMSKPS),
+            Self::X86AvxVmovmskps256 => Some(op::VMOVMSKPS),
+            Self::X86AvxVmovmskpd128 => Some(op::VMOVMSKPD),
+            Self::X86AvxVmovmskpd256 => Some(op::VMOVMSKPD),
+            Self::X86AvxVpmovmskb128 => Some(op::VPMOVMSKB),
+            Self::X86Avx2Vpmovmskb256 => Some(op::VPMOVMSKB),
+            Self::X86AvxVtestps128 => Some(op::VTESTPS),
+            Self::X86AvxVtestps256 => Some(op::VTESTPS),
+            Self::X86AvxVtestpd128 => Some(op::VTESTPD),
+            Self::X86AvxVtestpd256 => Some(op::VTESTPD),
+            Self::X86AvxVptest128 => Some(op::VPTEST),
+            Self::X86AvxVptest256 => Some(op::VPTEST),
             _ => None,
         }
     }
@@ -15164,69 +15415,71 @@ impl Intrinsic {
         self.x86_fp_misc_opcode().is_some()
     }
     pub fn has_x86_round_control(self) -> bool {
-        self.x86_fp_misc_opcode()
-            .is_some_and(|s| s.starts_with("vround"))
+        matches!(
+            self.x86_fp_misc_opcode(),
+            Some(op::VROUNDPS | op::VROUNDPD | Opcode::Vroundss | Opcode::Vroundsd)
+        )
     }
-    pub fn x86_fp_misc_opcode(self) -> Option<&'static str> {
+    pub fn x86_fp_misc_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86AvxVaddps128 => Some("vaddps"),
-            Self::X86AvxVaddpd128 => Some("vaddpd"),
-            Self::X86AvxVaddss => Some("vaddss"),
-            Self::X86AvxVaddsd => Some("vaddsd"),
-            Self::X86AvxVaddps256 => Some("vaddps"),
-            Self::X86AvxVaddpd256 => Some("vaddpd"),
-            Self::X86AvxVsubps128 => Some("vsubps"),
-            Self::X86AvxVsubpd128 => Some("vsubpd"),
-            Self::X86AvxVsubss => Some("vsubss"),
-            Self::X86AvxVsubsd => Some("vsubsd"),
-            Self::X86AvxVsubps256 => Some("vsubps"),
-            Self::X86AvxVsubpd256 => Some("vsubpd"),
-            Self::X86AvxVmulps128 => Some("vmulps"),
-            Self::X86AvxVmulpd128 => Some("vmulpd"),
-            Self::X86AvxVmulss => Some("vmulss"),
-            Self::X86AvxVmulsd => Some("vmulsd"),
-            Self::X86AvxVmulps256 => Some("vmulps"),
-            Self::X86AvxVmulpd256 => Some("vmulpd"),
-            Self::X86AvxVdivps128 => Some("vdivps"),
-            Self::X86AvxVdivpd128 => Some("vdivpd"),
-            Self::X86AvxVdivss => Some("vdivss"),
-            Self::X86AvxVdivsd => Some("vdivsd"),
-            Self::X86AvxVdivps256 => Some("vdivps"),
-            Self::X86AvxVdivpd256 => Some("vdivpd"),
-            Self::X86AvxVsqrtps128 => Some("vsqrtps"),
-            Self::X86AvxVsqrtpd128 => Some("vsqrtpd"),
-            Self::X86AvxVsqrtss => Some("vsqrtss"),
-            Self::X86AvxVsqrtsd => Some("vsqrtsd"),
-            Self::X86AvxVsqrtps256 => Some("vsqrtps"),
-            Self::X86AvxVsqrtpd256 => Some("vsqrtpd"),
-            Self::X86AvxVroundps128 => Some("vroundps"),
-            Self::X86AvxVroundps256 => Some("vroundps"),
-            Self::X86AvxVroundpd128 => Some("vroundpd"),
-            Self::X86AvxVroundpd256 => Some("vroundpd"),
-            Self::X86AvxVroundss => Some("vroundss"),
-            Self::X86AvxVroundsd => Some("vroundsd"),
-            Self::X86AvxVminps128 => Some("vminps"),
-            Self::X86AvxVminps256 => Some("vminps"),
-            Self::X86AvxVminpd128 => Some("vminpd"),
-            Self::X86AvxVminpd256 => Some("vminpd"),
-            Self::X86AvxVminss => Some("vminss"),
-            Self::X86AvxVminsd => Some("vminsd"),
-            Self::X86AvxVmaxps128 => Some("vmaxps"),
-            Self::X86AvxVmaxps256 => Some("vmaxps"),
-            Self::X86AvxVmaxpd128 => Some("vmaxpd"),
-            Self::X86AvxVmaxpd256 => Some("vmaxpd"),
-            Self::X86AvxVmaxss => Some("vmaxss"),
-            Self::X86AvxVmaxsd => Some("vmaxsd"),
-            Self::X86AvxVrcpps128 => Some("vrcpps"),
-            Self::X86AvxVrcpps256 => Some("vrcpps"),
-            Self::X86AvxVrcpss => Some("vrcpss"),
-            Self::X86AvxVrsqrtps128 => Some("vrsqrtps"),
-            Self::X86AvxVrsqrtps256 => Some("vrsqrtps"),
-            Self::X86AvxVrsqrtss => Some("vrsqrtss"),
-            Self::X86AvxVcomiss => Some("vcomiss"),
-            Self::X86AvxVucomiss => Some("vucomiss"),
-            Self::X86AvxVcomisd => Some("vcomisd"),
-            Self::X86AvxVucomisd => Some("vucomisd"),
+            Self::X86AvxVaddps128 => Some(Opcode::Vaddps),
+            Self::X86AvxVaddpd128 => Some(Opcode::Vaddpd),
+            Self::X86AvxVaddss => Some(Opcode::Vaddss),
+            Self::X86AvxVaddsd => Some(Opcode::Vaddsd),
+            Self::X86AvxVaddps256 => Some(Opcode::Vaddps),
+            Self::X86AvxVaddpd256 => Some(Opcode::Vaddpd),
+            Self::X86AvxVsubps128 => Some(Opcode::Vsubps),
+            Self::X86AvxVsubpd128 => Some(Opcode::Vsubpd),
+            Self::X86AvxVsubss => Some(Opcode::Vsubss),
+            Self::X86AvxVsubsd => Some(Opcode::Vsubsd),
+            Self::X86AvxVsubps256 => Some(Opcode::Vsubps),
+            Self::X86AvxVsubpd256 => Some(Opcode::Vsubpd),
+            Self::X86AvxVmulps128 => Some(Opcode::Vmulps),
+            Self::X86AvxVmulpd128 => Some(Opcode::Vmulpd),
+            Self::X86AvxVmulss => Some(Opcode::Vmulss),
+            Self::X86AvxVmulsd => Some(Opcode::Vmulsd),
+            Self::X86AvxVmulps256 => Some(Opcode::Vmulps),
+            Self::X86AvxVmulpd256 => Some(Opcode::Vmulpd),
+            Self::X86AvxVdivps128 => Some(Opcode::Vdivps),
+            Self::X86AvxVdivpd128 => Some(Opcode::Vdivpd),
+            Self::X86AvxVdivss => Some(Opcode::Vdivss),
+            Self::X86AvxVdivsd => Some(Opcode::Vdivsd),
+            Self::X86AvxVdivps256 => Some(Opcode::Vdivps),
+            Self::X86AvxVdivpd256 => Some(Opcode::Vdivpd),
+            Self::X86AvxVsqrtps128 => Some(op::VSQRTPS),
+            Self::X86AvxVsqrtpd128 => Some(op::VSQRTPD),
+            Self::X86AvxVsqrtss => Some(Opcode::Vsqrtss),
+            Self::X86AvxVsqrtsd => Some(Opcode::Vsqrtsd),
+            Self::X86AvxVsqrtps256 => Some(op::VSQRTPS),
+            Self::X86AvxVsqrtpd256 => Some(op::VSQRTPD),
+            Self::X86AvxVroundps128 => Some(op::VROUNDPS),
+            Self::X86AvxVroundps256 => Some(op::VROUNDPS),
+            Self::X86AvxVroundpd128 => Some(op::VROUNDPD),
+            Self::X86AvxVroundpd256 => Some(op::VROUNDPD),
+            Self::X86AvxVroundss => Some(Opcode::Vroundss),
+            Self::X86AvxVroundsd => Some(Opcode::Vroundsd),
+            Self::X86AvxVminps128 => Some(op::VMINPS),
+            Self::X86AvxVminps256 => Some(op::VMINPS),
+            Self::X86AvxVminpd128 => Some(op::VMINPD),
+            Self::X86AvxVminpd256 => Some(op::VMINPD),
+            Self::X86AvxVminss => Some(Opcode::Vminss),
+            Self::X86AvxVminsd => Some(Opcode::Vminsd),
+            Self::X86AvxVmaxps128 => Some(op::VMAXPS),
+            Self::X86AvxVmaxps256 => Some(op::VMAXPS),
+            Self::X86AvxVmaxpd128 => Some(op::VMAXPD),
+            Self::X86AvxVmaxpd256 => Some(op::VMAXPD),
+            Self::X86AvxVmaxss => Some(Opcode::Vmaxss),
+            Self::X86AvxVmaxsd => Some(Opcode::Vmaxsd),
+            Self::X86AvxVrcpps128 => Some(op::VRCPPS),
+            Self::X86AvxVrcpps256 => Some(op::VRCPPS),
+            Self::X86AvxVrcpss => Some(op::VRCPSS),
+            Self::X86AvxVrsqrtps128 => Some(op::VRSQRTPS),
+            Self::X86AvxVrsqrtps256 => Some(op::VRSQRTPS),
+            Self::X86AvxVrsqrtss => Some(op::VRSQRTSS),
+            Self::X86AvxVcomiss => Some(op::VCOMISS),
+            Self::X86AvxVucomiss => Some(Opcode::Vucomiss),
+            Self::X86AvxVcomisd => Some(op::VCOMISD),
+            Self::X86AvxVucomisd => Some(Opcode::Vucomisd),
             _ => None,
         }
     }
@@ -15248,30 +15501,30 @@ impl Intrinsic {
     pub fn is_x86_legacy_raw_fp_convert(self) -> bool {
         self.x86_legacy_raw_fp_opcode().is_some()
     }
-    pub fn x86_legacy_raw_fp_opcode(self) -> Option<&'static str> {
+    pub fn x86_legacy_raw_fp_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86Ssecvtdq2pd128 => Some("cvtdq2pd"),
-            Self::X86Ssecvtdq2ps128 => Some("cvtdq2ps"),
-            Self::X86Ssecvtpd2dq128 => Some("cvtpd2dq"),
-            Self::X86Ssecvtpd2ps128 => Some("cvtpd2ps"),
-            Self::X86Ssecvtps2dq128 => Some("cvtps2dq"),
-            Self::X86Ssecvtps2pd128 => Some("cvtps2pd"),
-            Self::X86Ssecvttpd2dq128 => Some("cvttpd2dq"),
-            Self::X86Ssecvttps2dq128 => Some("cvttps2dq"),
-            Self::X86Ssecvtss2si32 => Some("cvtss2si"),
-            Self::X86Ssecvttss2si32 => Some("cvttss2si"),
-            Self::X86Ssecvtss2si64 => Some("cvtss2si"),
-            Self::X86Ssecvttss2si64 => Some("cvttss2si"),
-            Self::X86Ssecvtsd2si32 => Some("cvtsd2si"),
-            Self::X86Ssecvttsd2si32 => Some("cvttsd2si"),
-            Self::X86Ssecvtsd2si64 => Some("cvtsd2si"),
-            Self::X86Ssecvttsd2si64 => Some("cvttsd2si"),
-            Self::X86Ssecvtsi2ss32 => Some("cvtsi2ss"),
-            Self::X86Ssecvtsi2ss64 => Some("cvtsi2ss"),
-            Self::X86Ssecvtsi2sd32 => Some("cvtsi2sd"),
-            Self::X86Ssecvtsi2sd64 => Some("cvtsi2sd"),
-            Self::X86Ssecvtsd2ss => Some("cvtsd2ss"),
-            Self::X86Ssecvtss2sd => Some("cvtss2sd"),
+            Self::X86Ssecvtdq2pd128 => Some(Opcode::Cvtdq2pd),
+            Self::X86Ssecvtdq2ps128 => Some(Opcode::Cvtdq2ps),
+            Self::X86Ssecvtpd2dq128 => Some(Opcode::Cvtpd2dq),
+            Self::X86Ssecvtpd2ps128 => Some(Opcode::Cvtpd2ps),
+            Self::X86Ssecvtps2dq128 => Some(Opcode::Cvtps2dq),
+            Self::X86Ssecvtps2pd128 => Some(Opcode::Cvtps2pd),
+            Self::X86Ssecvttpd2dq128 => Some(Opcode::Cvttpd2dq),
+            Self::X86Ssecvttps2dq128 => Some(Opcode::Cvttps2dq),
+            Self::X86Ssecvtss2si32 => Some(Opcode::Cvtss2si),
+            Self::X86Ssecvttss2si32 => Some(Opcode::Cvttss2si),
+            Self::X86Ssecvtss2si64 => Some(Opcode::Cvtss2si),
+            Self::X86Ssecvttss2si64 => Some(Opcode::Cvttss2si),
+            Self::X86Ssecvtsd2si32 => Some(Opcode::Cvtsd2si),
+            Self::X86Ssecvttsd2si32 => Some(Opcode::Cvttsd2si),
+            Self::X86Ssecvtsd2si64 => Some(Opcode::Cvtsd2si),
+            Self::X86Ssecvttsd2si64 => Some(Opcode::Cvttsd2si),
+            Self::X86Ssecvtsi2ss32 => Some(Opcode::Cvtsi2ss),
+            Self::X86Ssecvtsi2ss64 => Some(Opcode::Cvtsi2ss),
+            Self::X86Ssecvtsi2sd32 => Some(Opcode::Cvtsi2sd),
+            Self::X86Ssecvtsi2sd64 => Some(Opcode::Cvtsi2sd),
+            Self::X86Ssecvtsd2ss => Some(Opcode::Cvtsd2ss),
+            Self::X86Ssecvtss2sd => Some(Opcode::Cvtss2sd),
             _ => None,
         }
     }
@@ -15279,56 +15532,56 @@ impl Intrinsic {
     pub fn is_x86_legacy_fp_misc(self) -> bool {
         self.x86_legacy_fp_misc_opcode().is_some()
     }
-    pub fn x86_legacy_fp_misc_opcode(self) -> Option<&'static str> {
+    pub fn x86_legacy_fp_misc_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86SseAddps128 => Some("addps"),
-            Self::X86SseAddpd128 => Some("addpd"),
-            Self::X86SseAddss => Some("addss"),
-            Self::X86SseAddsd => Some("addsd"),
-            Self::X86SseSubps128 => Some("subps"),
-            Self::X86SseSubpd128 => Some("subpd"),
-            Self::X86SseSubss => Some("subss"),
-            Self::X86SseSubsd => Some("subsd"),
-            Self::X86SseMulps128 => Some("mulps"),
-            Self::X86SseMulpd128 => Some("mulpd"),
-            Self::X86SseMulss => Some("mulss"),
-            Self::X86SseMulsd => Some("mulsd"),
-            Self::X86SseDivps128 => Some("divps"),
-            Self::X86SseDivpd128 => Some("divpd"),
-            Self::X86SseDivss => Some("divss"),
-            Self::X86SseDivsd => Some("divsd"),
-            Self::X86SseSqrtps128 => Some("sqrtps"),
-            Self::X86SseSqrtpd128 => Some("sqrtpd"),
-            Self::X86SseSqrtss => Some("sqrtss"),
-            Self::X86SseSqrtsd => Some("sqrtsd"),
-            Self::X86SseMinps128 => Some("minps"),
-            Self::X86SseMinpd128 => Some("minpd"),
-            Self::X86SseMinss => Some("minss"),
-            Self::X86SseMinsd => Some("minsd"),
-            Self::X86SseMaxps128 => Some("maxps"),
-            Self::X86SseMaxpd128 => Some("maxpd"),
-            Self::X86SseMaxss => Some("maxss"),
-            Self::X86SseMaxsd => Some("maxsd"),
-            Self::X86SseRcpps128 => Some("rcpps"),
-            Self::X86SseRcpss => Some("rcpss"),
-            Self::X86SseRsqrtps128 => Some("rsqrtps"),
-            Self::X86SseRsqrtss => Some("rsqrtss"),
-            Self::X86SseComiss => Some("comiss"),
-            Self::X86SseUcomiss => Some("ucomiss"),
-            Self::X86SseComisd => Some("comisd"),
-            Self::X86SseUcomisd => Some("ucomisd"),
+            Self::X86SseAddps128 => Some(Opcode::Addps),
+            Self::X86SseAddpd128 => Some(Opcode::Addpd),
+            Self::X86SseAddss => Some(Opcode::Addss),
+            Self::X86SseAddsd => Some(Opcode::Addsd),
+            Self::X86SseSubps128 => Some(Opcode::Subps),
+            Self::X86SseSubpd128 => Some(Opcode::Subpd),
+            Self::X86SseSubss => Some(Opcode::Subss),
+            Self::X86SseSubsd => Some(Opcode::Subsd),
+            Self::X86SseMulps128 => Some(Opcode::Mulps),
+            Self::X86SseMulpd128 => Some(Opcode::Mulpd),
+            Self::X86SseMulss => Some(Opcode::Mulss),
+            Self::X86SseMulsd => Some(Opcode::Mulsd),
+            Self::X86SseDivps128 => Some(Opcode::Divps),
+            Self::X86SseDivpd128 => Some(Opcode::Divpd),
+            Self::X86SseDivss => Some(Opcode::Divss),
+            Self::X86SseDivsd => Some(Opcode::Divsd),
+            Self::X86SseSqrtps128 => Some(Opcode::Sqrtps),
+            Self::X86SseSqrtpd128 => Some(Opcode::Sqrtpd),
+            Self::X86SseSqrtss => Some(Opcode::Sqrtss),
+            Self::X86SseSqrtsd => Some(Opcode::Sqrtsd),
+            Self::X86SseMinps128 => Some(Opcode::Minps),
+            Self::X86SseMinpd128 => Some(Opcode::Minpd),
+            Self::X86SseMinss => Some(Opcode::Minss),
+            Self::X86SseMinsd => Some(Opcode::Minsd),
+            Self::X86SseMaxps128 => Some(Opcode::Maxps),
+            Self::X86SseMaxpd128 => Some(Opcode::Maxpd),
+            Self::X86SseMaxss => Some(Opcode::Maxss),
+            Self::X86SseMaxsd => Some(Opcode::Maxsd),
+            Self::X86SseRcpps128 => Some(Opcode::Rcpps),
+            Self::X86SseRcpss => Some(Opcode::Rcpss),
+            Self::X86SseRsqrtps128 => Some(Opcode::Rsqrtps),
+            Self::X86SseRsqrtss => Some(Opcode::Rsqrtss),
+            Self::X86SseComiss => Some(Opcode::Comiss),
+            Self::X86SseUcomiss => Some(Opcode::Ucomiss),
+            Self::X86SseComisd => Some(Opcode::Comisd),
+            Self::X86SseUcomisd => Some(Opcode::Ucomisd),
             _ => None,
         }
     }
     pub fn is_x86_legacy_fp_compare(self) -> bool {
         self.x86_legacy_fp_compare_opcode().is_some()
     }
-    pub fn x86_legacy_fp_compare_opcode(self) -> Option<&'static str> {
+    pub fn x86_legacy_fp_compare_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86SseCmpps128 => Some("cmpps"),
-            Self::X86SseCmppd128 => Some("cmppd"),
-            Self::X86SseCmpss => Some("cmpss"),
-            Self::X86SseCmpsd => Some("cmpsd"),
+            Self::X86SseCmpps128 => Some(Opcode::Cmpps),
+            Self::X86SseCmppd128 => Some(Opcode::Cmppd),
+            Self::X86SseCmpss => Some(Opcode::Cmpss),
+            Self::X86SseCmpsd => Some(Opcode::Cmpsd),
             _ => None,
         }
     }
@@ -15336,11 +15589,11 @@ impl Intrinsic {
     pub fn is_x86_legacy_sign_mask(self) -> bool {
         self.x86_legacy_sign_mask_opcode().is_some()
     }
-    pub fn x86_legacy_sign_mask_opcode(self) -> Option<&'static str> {
+    pub fn x86_legacy_sign_mask_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86SseMovmskps128 => Some("movmskps"),
-            Self::X86SseMovmskpd128 => Some("movmskpd"),
-            Self::X86SsePmovmskb128 => Some("pmovmskb"),
+            Self::X86SseMovmskps128 => Some(Opcode::Movmskps),
+            Self::X86SseMovmskpd128 => Some(Opcode::Movmskpd),
+            Self::X86SsePmovmskb128 => Some(Opcode::Pmovmskb),
             _ => None,
         }
     }
@@ -15358,20 +15611,20 @@ impl Intrinsic {
             _ => None,
         }
     }
-    pub fn x86_legacy_fp_v2_opcode(self) -> Option<&'static str> {
+    pub fn x86_legacy_fp_v2_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86Sse3Haddps => Some("haddps"),
-            Self::X86Sse3Haddpd => Some("haddpd"),
-            Self::X86Sse3Hsubps => Some("hsubps"),
-            Self::X86Sse3Hsubpd => Some("hsubpd"),
-            Self::X86Sse3Addsubps => Some("addsubps"),
-            Self::X86Sse3Addsubpd => Some("addsubpd"),
-            Self::X86Sse41Roundps128 => Some("roundps"),
-            Self::X86Sse41Roundpd128 => Some("roundpd"),
-            Self::X86Sse41Roundss => Some("roundss"),
-            Self::X86Sse41Roundsd => Some("roundsd"),
-            Self::X86Sse41Dpps => Some("dpps"),
-            Self::X86Sse41Dppd => Some("dppd"),
+            Self::X86Sse3Haddps => Some(op::HADDPS),
+            Self::X86Sse3Haddpd => Some(op::HADDPD),
+            Self::X86Sse3Hsubps => Some(op::HSUBPS),
+            Self::X86Sse3Hsubpd => Some(op::HSUBPD),
+            Self::X86Sse3Addsubps => Some(op::ADDSUBPS),
+            Self::X86Sse3Addsubpd => Some(op::ADDSUBPD),
+            Self::X86Sse41Roundps128 => Some(op::ROUNDPS),
+            Self::X86Sse41Roundpd128 => Some(op::ROUNDPD),
+            Self::X86Sse41Roundss => Some(Opcode::Roundss),
+            Self::X86Sse41Roundsd => Some(Opcode::Roundsd),
+            Self::X86Sse41Dpps => Some(op::DPPS),
+            Self::X86Sse41Dppd => Some(op::DPPD),
             _ => None,
         }
     }
@@ -15394,28 +15647,28 @@ impl Intrinsic {
         self.x86_string_info().is_some()
     }
     /// Native opcode, immediate operand index, result kind (index0/mask1/flags2).
-    pub fn x86_string_info(self) -> Option<(&'static str, usize, u8)> {
+    pub fn x86_string_info(self) -> Option<(Opcode, usize, u8)> {
         match self {
-            Self::X86AvxPcmpistriIndex => Some(("vpcmpistri", 2, 0)),
-            Self::X86AvxPcmpistri64Index => Some(("vpcmpistri64", 2, 0)),
-            Self::X86AvxPcmpistrmMask => Some(("vpcmpistrm", 2, 1)),
-            Self::X86AvxPcmpistriFlags => Some(("vpcmpistri", 2, 2)),
-            Self::X86AvxPcmpestriIndex => Some(("vpcmpestri", 4, 0)),
-            Self::X86AvxPcmpestrmMask => Some(("vpcmpestrm", 4, 1)),
-            Self::X86AvxPcmpestriFlags => Some(("vpcmpestri", 4, 2)),
-            Self::X86AvxPcmpestri64Index => Some(("vpcmpestri64", 4, 0)),
-            Self::X86AvxPcmpestrm64Mask => Some(("vpcmpestrm64", 4, 1)),
-            Self::X86AvxPcmpestri64Flags => Some(("vpcmpestri64", 4, 2)),
-            Self::X86Sse42PcmpistriIndex => Some(("pcmpistri", 2, 0)),
-            Self::X86Sse42Pcmpistri64Index => Some(("pcmpistri64", 2, 0)),
-            Self::X86Sse42PcmpistrmMask => Some(("pcmpistrm", 2, 1)),
-            Self::X86Sse42PcmpistriFlags => Some(("pcmpistri", 2, 2)),
-            Self::X86Sse42PcmpestriIndex => Some(("pcmpestri", 4, 0)),
-            Self::X86Sse42PcmpestrmMask => Some(("pcmpestrm", 4, 1)),
-            Self::X86Sse42PcmpestriFlags => Some(("pcmpestri", 4, 2)),
-            Self::X86Sse42Pcmpestri64Index => Some(("pcmpestri64", 4, 0)),
-            Self::X86Sse42Pcmpestrm64Mask => Some(("pcmpestrm64", 4, 1)),
-            Self::X86Sse42Pcmpestri64Flags => Some(("pcmpestri64", 4, 2)),
+            Self::X86AvxPcmpistriIndex => Some((op::VPCMPISTRI, 2, 0)),
+            Self::X86AvxPcmpistri64Index => Some((op::VPCMPISTRI64, 2, 0)),
+            Self::X86AvxPcmpistrmMask => Some((op::VPCMPISTRM, 2, 1)),
+            Self::X86AvxPcmpistriFlags => Some((op::VPCMPISTRI, 2, 2)),
+            Self::X86AvxPcmpestriIndex => Some((op::VPCMPESTRI, 4, 0)),
+            Self::X86AvxPcmpestrmMask => Some((op::VPCMPESTRM, 4, 1)),
+            Self::X86AvxPcmpestriFlags => Some((op::VPCMPESTRI, 4, 2)),
+            Self::X86AvxPcmpestri64Index => Some((op::VPCMPESTRI64, 4, 0)),
+            Self::X86AvxPcmpestrm64Mask => Some((op::VPCMPESTRM64, 4, 1)),
+            Self::X86AvxPcmpestri64Flags => Some((op::VPCMPESTRI64, 4, 2)),
+            Self::X86Sse42PcmpistriIndex => Some((op::PCMPISTRI, 2, 0)),
+            Self::X86Sse42Pcmpistri64Index => Some((op::PCMPISTRI64, 2, 0)),
+            Self::X86Sse42PcmpistrmMask => Some((op::PCMPISTRM, 2, 1)),
+            Self::X86Sse42PcmpistriFlags => Some((op::PCMPISTRI, 2, 2)),
+            Self::X86Sse42PcmpestriIndex => Some((op::PCMPESTRI, 4, 0)),
+            Self::X86Sse42PcmpestrmMask => Some((op::PCMPESTRM, 4, 1)),
+            Self::X86Sse42PcmpestriFlags => Some((op::PCMPESTRI, 4, 2)),
+            Self::X86Sse42Pcmpestri64Index => Some((op::PCMPESTRI64, 4, 0)),
+            Self::X86Sse42Pcmpestrm64Mask => Some((op::PCMPESTRM64, 4, 1)),
+            Self::X86Sse42Pcmpestri64Flags => Some((op::PCMPESTRI64, 4, 2)),
             _ => None,
         }
     }
@@ -15423,104 +15676,104 @@ impl Intrinsic {
         self.x86_raw_fma_opcode().is_some()
     }
     /// Exact architectural opcode; no commuting, sign rewriting or order selection.
-    pub fn x86_raw_fma_opcode(self) -> Option<&'static str> {
+    pub fn x86_raw_fma_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86FmaVfmadd132pd128 => Some("vfmadd132pd"),
-            Self::X86FmaVfmadd132pd256 => Some("vfmadd132pd"),
-            Self::X86FmaVfmadd132ps128 => Some("vfmadd132ps"),
-            Self::X86FmaVfmadd132ps256 => Some("vfmadd132ps"),
-            Self::X86FmaVfmadd132sd128 => Some("vfmadd132sd"),
-            Self::X86FmaVfmadd132ss128 => Some("vfmadd132ss"),
-            Self::X86FmaVfmadd213pd128 => Some("vfmadd213pd"),
-            Self::X86FmaVfmadd213pd256 => Some("vfmadd213pd"),
-            Self::X86FmaVfmadd213ps128 => Some("vfmadd213ps"),
-            Self::X86FmaVfmadd213ps256 => Some("vfmadd213ps"),
-            Self::X86FmaVfmadd213sd128 => Some("vfmadd213sd"),
-            Self::X86FmaVfmadd213ss128 => Some("vfmadd213ss"),
-            Self::X86FmaVfmadd231pd128 => Some("vfmadd231pd"),
-            Self::X86FmaVfmadd231pd256 => Some("vfmadd231pd"),
-            Self::X86FmaVfmadd231ps128 => Some("vfmadd231ps"),
-            Self::X86FmaVfmadd231ps256 => Some("vfmadd231ps"),
-            Self::X86FmaVfmadd231sd128 => Some("vfmadd231sd"),
-            Self::X86FmaVfmadd231ss128 => Some("vfmadd231ss"),
-            Self::X86FmaVfmaddsub132pd128 => Some("vfmaddsub132pd"),
-            Self::X86FmaVfmaddsub132pd256 => Some("vfmaddsub132pd"),
-            Self::X86FmaVfmaddsub213pd128 => Some("vfmaddsub213pd"),
-            Self::X86FmaVfmaddsub213pd256 => Some("vfmaddsub213pd"),
-            Self::X86FmaVfmaddsub231pd128 => Some("vfmaddsub231pd"),
-            Self::X86FmaVfmaddsub231pd256 => Some("vfmaddsub231pd"),
-            Self::X86FmaVfmaddsub132ps128 => Some("vfmaddsub132ps"),
-            Self::X86FmaVfmaddsub132ps256 => Some("vfmaddsub132ps"),
-            Self::X86FmaVfmaddsub213ps128 => Some("vfmaddsub213ps"),
-            Self::X86FmaVfmaddsub213ps256 => Some("vfmaddsub213ps"),
-            Self::X86FmaVfmaddsub231ps128 => Some("vfmaddsub231ps"),
-            Self::X86FmaVfmaddsub231ps256 => Some("vfmaddsub231ps"),
-            Self::X86FmaVfmsubadd132pd128 => Some("vfmsubadd132pd"),
-            Self::X86FmaVfmsubadd132pd256 => Some("vfmsubadd132pd"),
-            Self::X86FmaVfmsubadd213pd128 => Some("vfmsubadd213pd"),
-            Self::X86FmaVfmsubadd213pd256 => Some("vfmsubadd213pd"),
-            Self::X86FmaVfmsubadd231pd128 => Some("vfmsubadd231pd"),
-            Self::X86FmaVfmsubadd231pd256 => Some("vfmsubadd231pd"),
-            Self::X86FmaVfmsubadd132ps128 => Some("vfmsubadd132ps"),
-            Self::X86FmaVfmsubadd132ps256 => Some("vfmsubadd132ps"),
-            Self::X86FmaVfmsubadd213ps128 => Some("vfmsubadd213ps"),
-            Self::X86FmaVfmsubadd213ps256 => Some("vfmsubadd213ps"),
-            Self::X86FmaVfmsubadd231ps128 => Some("vfmsubadd231ps"),
-            Self::X86FmaVfmsubadd231ps256 => Some("vfmsubadd231ps"),
-            Self::X86FmaVfmsub132pd128 => Some("vfmsub132pd"),
-            Self::X86FmaVfmsub132pd256 => Some("vfmsub132pd"),
-            Self::X86FmaVfmsub132ps128 => Some("vfmsub132ps"),
-            Self::X86FmaVfmsub132ps256 => Some("vfmsub132ps"),
-            Self::X86FmaVfmsub132sd128 => Some("vfmsub132sd"),
-            Self::X86FmaVfmsub132ss128 => Some("vfmsub132ss"),
-            Self::X86FmaVfmsub213pd128 => Some("vfmsub213pd"),
-            Self::X86FmaVfmsub213pd256 => Some("vfmsub213pd"),
-            Self::X86FmaVfmsub213ps128 => Some("vfmsub213ps"),
-            Self::X86FmaVfmsub213ps256 => Some("vfmsub213ps"),
-            Self::X86FmaVfmsub213sd128 => Some("vfmsub213sd"),
-            Self::X86FmaVfmsub213ss128 => Some("vfmsub213ss"),
-            Self::X86FmaVfmsub231pd128 => Some("vfmsub231pd"),
-            Self::X86FmaVfmsub231pd256 => Some("vfmsub231pd"),
-            Self::X86FmaVfmsub231ps128 => Some("vfmsub231ps"),
-            Self::X86FmaVfmsub231ps256 => Some("vfmsub231ps"),
-            Self::X86FmaVfmsub231sd128 => Some("vfmsub231sd"),
-            Self::X86FmaVfmsub231ss128 => Some("vfmsub231ss"),
-            Self::X86FmaVfnmadd132pd128 => Some("vfnmadd132pd"),
-            Self::X86FmaVfnmadd132pd256 => Some("vfnmadd132pd"),
-            Self::X86FmaVfnmadd132ps128 => Some("vfnmadd132ps"),
-            Self::X86FmaVfnmadd132ps256 => Some("vfnmadd132ps"),
-            Self::X86FmaVfnmadd132sd128 => Some("vfnmadd132sd"),
-            Self::X86FmaVfnmadd132ss128 => Some("vfnmadd132ss"),
-            Self::X86FmaVfnmadd213pd128 => Some("vfnmadd213pd"),
-            Self::X86FmaVfnmadd213pd256 => Some("vfnmadd213pd"),
-            Self::X86FmaVfnmadd213ps128 => Some("vfnmadd213ps"),
-            Self::X86FmaVfnmadd213ps256 => Some("vfnmadd213ps"),
-            Self::X86FmaVfnmadd213sd128 => Some("vfnmadd213sd"),
-            Self::X86FmaVfnmadd213ss128 => Some("vfnmadd213ss"),
-            Self::X86FmaVfnmadd231pd128 => Some("vfnmadd231pd"),
-            Self::X86FmaVfnmadd231pd256 => Some("vfnmadd231pd"),
-            Self::X86FmaVfnmadd231ps128 => Some("vfnmadd231ps"),
-            Self::X86FmaVfnmadd231ps256 => Some("vfnmadd231ps"),
-            Self::X86FmaVfnmadd231sd128 => Some("vfnmadd231sd"),
-            Self::X86FmaVfnmadd231ss128 => Some("vfnmadd231ss"),
-            Self::X86FmaVfnmsub132pd128 => Some("vfnmsub132pd"),
-            Self::X86FmaVfnmsub132pd256 => Some("vfnmsub132pd"),
-            Self::X86FmaVfnmsub132ps128 => Some("vfnmsub132ps"),
-            Self::X86FmaVfnmsub132ps256 => Some("vfnmsub132ps"),
-            Self::X86FmaVfnmsub132sd128 => Some("vfnmsub132sd"),
-            Self::X86FmaVfnmsub132ss128 => Some("vfnmsub132ss"),
-            Self::X86FmaVfnmsub213pd128 => Some("vfnmsub213pd"),
-            Self::X86FmaVfnmsub213pd256 => Some("vfnmsub213pd"),
-            Self::X86FmaVfnmsub213ps128 => Some("vfnmsub213ps"),
-            Self::X86FmaVfnmsub213ps256 => Some("vfnmsub213ps"),
-            Self::X86FmaVfnmsub213sd128 => Some("vfnmsub213sd"),
-            Self::X86FmaVfnmsub213ss128 => Some("vfnmsub213ss"),
-            Self::X86FmaVfnmsub231pd128 => Some("vfnmsub231pd"),
-            Self::X86FmaVfnmsub231pd256 => Some("vfnmsub231pd"),
-            Self::X86FmaVfnmsub231ps128 => Some("vfnmsub231ps"),
-            Self::X86FmaVfnmsub231ps256 => Some("vfnmsub231ps"),
-            Self::X86FmaVfnmsub231sd128 => Some("vfnmsub231sd"),
-            Self::X86FmaVfnmsub231ss128 => Some("vfnmsub231ss"),
+            Self::X86FmaVfmadd132pd128 => Some(op::VFMADD132PD),
+            Self::X86FmaVfmadd132pd256 => Some(op::VFMADD132PD),
+            Self::X86FmaVfmadd132ps128 => Some(op::VFMADD132PS),
+            Self::X86FmaVfmadd132ps256 => Some(op::VFMADD132PS),
+            Self::X86FmaVfmadd132sd128 => Some(op::VFMADD132SD),
+            Self::X86FmaVfmadd132ss128 => Some(op::VFMADD132SS),
+            Self::X86FmaVfmadd213pd128 => Some(op::VFMADD213PD),
+            Self::X86FmaVfmadd213pd256 => Some(op::VFMADD213PD),
+            Self::X86FmaVfmadd213ps128 => Some(op::VFMADD213PS),
+            Self::X86FmaVfmadd213ps256 => Some(op::VFMADD213PS),
+            Self::X86FmaVfmadd213sd128 => Some(op::VFMADD213SD),
+            Self::X86FmaVfmadd213ss128 => Some(op::VFMADD213SS),
+            Self::X86FmaVfmadd231pd128 => Some(op::VFMADD231PD),
+            Self::X86FmaVfmadd231pd256 => Some(op::VFMADD231PD),
+            Self::X86FmaVfmadd231ps128 => Some(op::VFMADD231PS),
+            Self::X86FmaVfmadd231ps256 => Some(op::VFMADD231PS),
+            Self::X86FmaVfmadd231sd128 => Some(op::VFMADD231SD),
+            Self::X86FmaVfmadd231ss128 => Some(op::VFMADD231SS),
+            Self::X86FmaVfmaddsub132pd128 => Some(op::VFMADDSUB132PD),
+            Self::X86FmaVfmaddsub132pd256 => Some(op::VFMADDSUB132PD),
+            Self::X86FmaVfmaddsub213pd128 => Some(op::VFMADDSUB213PD),
+            Self::X86FmaVfmaddsub213pd256 => Some(op::VFMADDSUB213PD),
+            Self::X86FmaVfmaddsub231pd128 => Some(op::VFMADDSUB231PD),
+            Self::X86FmaVfmaddsub231pd256 => Some(op::VFMADDSUB231PD),
+            Self::X86FmaVfmaddsub132ps128 => Some(op::VFMADDSUB132PS),
+            Self::X86FmaVfmaddsub132ps256 => Some(op::VFMADDSUB132PS),
+            Self::X86FmaVfmaddsub213ps128 => Some(op::VFMADDSUB213PS),
+            Self::X86FmaVfmaddsub213ps256 => Some(op::VFMADDSUB213PS),
+            Self::X86FmaVfmaddsub231ps128 => Some(op::VFMADDSUB231PS),
+            Self::X86FmaVfmaddsub231ps256 => Some(op::VFMADDSUB231PS),
+            Self::X86FmaVfmsubadd132pd128 => Some(op::VFMSUBADD132PD),
+            Self::X86FmaVfmsubadd132pd256 => Some(op::VFMSUBADD132PD),
+            Self::X86FmaVfmsubadd213pd128 => Some(op::VFMSUBADD213PD),
+            Self::X86FmaVfmsubadd213pd256 => Some(op::VFMSUBADD213PD),
+            Self::X86FmaVfmsubadd231pd128 => Some(op::VFMSUBADD231PD),
+            Self::X86FmaVfmsubadd231pd256 => Some(op::VFMSUBADD231PD),
+            Self::X86FmaVfmsubadd132ps128 => Some(op::VFMSUBADD132PS),
+            Self::X86FmaVfmsubadd132ps256 => Some(op::VFMSUBADD132PS),
+            Self::X86FmaVfmsubadd213ps128 => Some(op::VFMSUBADD213PS),
+            Self::X86FmaVfmsubadd213ps256 => Some(op::VFMSUBADD213PS),
+            Self::X86FmaVfmsubadd231ps128 => Some(op::VFMSUBADD231PS),
+            Self::X86FmaVfmsubadd231ps256 => Some(op::VFMSUBADD231PS),
+            Self::X86FmaVfmsub132pd128 => Some(op::VFMSUB132PD),
+            Self::X86FmaVfmsub132pd256 => Some(op::VFMSUB132PD),
+            Self::X86FmaVfmsub132ps128 => Some(op::VFMSUB132PS),
+            Self::X86FmaVfmsub132ps256 => Some(op::VFMSUB132PS),
+            Self::X86FmaVfmsub132sd128 => Some(op::VFMSUB132SD),
+            Self::X86FmaVfmsub132ss128 => Some(op::VFMSUB132SS),
+            Self::X86FmaVfmsub213pd128 => Some(op::VFMSUB213PD),
+            Self::X86FmaVfmsub213pd256 => Some(op::VFMSUB213PD),
+            Self::X86FmaVfmsub213ps128 => Some(op::VFMSUB213PS),
+            Self::X86FmaVfmsub213ps256 => Some(op::VFMSUB213PS),
+            Self::X86FmaVfmsub213sd128 => Some(op::VFMSUB213SD),
+            Self::X86FmaVfmsub213ss128 => Some(op::VFMSUB213SS),
+            Self::X86FmaVfmsub231pd128 => Some(op::VFMSUB231PD),
+            Self::X86FmaVfmsub231pd256 => Some(op::VFMSUB231PD),
+            Self::X86FmaVfmsub231ps128 => Some(op::VFMSUB231PS),
+            Self::X86FmaVfmsub231ps256 => Some(op::VFMSUB231PS),
+            Self::X86FmaVfmsub231sd128 => Some(op::VFMSUB231SD),
+            Self::X86FmaVfmsub231ss128 => Some(op::VFMSUB231SS),
+            Self::X86FmaVfnmadd132pd128 => Some(op::VFNMADD132PD),
+            Self::X86FmaVfnmadd132pd256 => Some(op::VFNMADD132PD),
+            Self::X86FmaVfnmadd132ps128 => Some(op::VFNMADD132PS),
+            Self::X86FmaVfnmadd132ps256 => Some(op::VFNMADD132PS),
+            Self::X86FmaVfnmadd132sd128 => Some(op::VFNMADD132SD),
+            Self::X86FmaVfnmadd132ss128 => Some(op::VFNMADD132SS),
+            Self::X86FmaVfnmadd213pd128 => Some(op::VFNMADD213PD),
+            Self::X86FmaVfnmadd213pd256 => Some(op::VFNMADD213PD),
+            Self::X86FmaVfnmadd213ps128 => Some(op::VFNMADD213PS),
+            Self::X86FmaVfnmadd213ps256 => Some(op::VFNMADD213PS),
+            Self::X86FmaVfnmadd213sd128 => Some(op::VFNMADD213SD),
+            Self::X86FmaVfnmadd213ss128 => Some(op::VFNMADD213SS),
+            Self::X86FmaVfnmadd231pd128 => Some(op::VFNMADD231PD),
+            Self::X86FmaVfnmadd231pd256 => Some(op::VFNMADD231PD),
+            Self::X86FmaVfnmadd231ps128 => Some(op::VFNMADD231PS),
+            Self::X86FmaVfnmadd231ps256 => Some(op::VFNMADD231PS),
+            Self::X86FmaVfnmadd231sd128 => Some(op::VFNMADD231SD),
+            Self::X86FmaVfnmadd231ss128 => Some(op::VFNMADD231SS),
+            Self::X86FmaVfnmsub132pd128 => Some(op::VFNMSUB132PD),
+            Self::X86FmaVfnmsub132pd256 => Some(op::VFNMSUB132PD),
+            Self::X86FmaVfnmsub132ps128 => Some(op::VFNMSUB132PS),
+            Self::X86FmaVfnmsub132ps256 => Some(op::VFNMSUB132PS),
+            Self::X86FmaVfnmsub132sd128 => Some(op::VFNMSUB132SD),
+            Self::X86FmaVfnmsub132ss128 => Some(op::VFNMSUB132SS),
+            Self::X86FmaVfnmsub213pd128 => Some(op::VFNMSUB213PD),
+            Self::X86FmaVfnmsub213pd256 => Some(op::VFNMSUB213PD),
+            Self::X86FmaVfnmsub213ps128 => Some(op::VFNMSUB213PS),
+            Self::X86FmaVfnmsub213ps256 => Some(op::VFNMSUB213PS),
+            Self::X86FmaVfnmsub213sd128 => Some(op::VFNMSUB213SD),
+            Self::X86FmaVfnmsub213ss128 => Some(op::VFNMSUB213SS),
+            Self::X86FmaVfnmsub231pd128 => Some(op::VFNMSUB231PD),
+            Self::X86FmaVfnmsub231pd256 => Some(op::VFNMSUB231PD),
+            Self::X86FmaVfnmsub231ps128 => Some(op::VFNMSUB231PS),
+            Self::X86FmaVfnmsub231ps256 => Some(op::VFNMSUB231PS),
+            Self::X86FmaVfnmsub231sd128 => Some(op::VFNMSUB231SD),
+            Self::X86FmaVfnmsub231ss128 => Some(op::VFNMSUB231SS),
             _ => None,
         }
     }
@@ -15533,23 +15786,23 @@ impl Intrinsic {
             Self::X86AvxVdpps128 | Self::X86AvxVdpps256 | Self::X86AvxVdppd128
         )
     }
-    pub fn x86_fp_horizontal_dot_opcode(self) -> Option<&'static str> {
+    pub fn x86_fp_horizontal_dot_opcode(self) -> Option<Opcode> {
         match self {
-            Self::X86AvxVhaddps128 => Some("vhaddps"),
-            Self::X86AvxVhaddps256 => Some("vhaddps"),
-            Self::X86AvxVhaddpd128 => Some("vhaddpd"),
-            Self::X86AvxVhaddpd256 => Some("vhaddpd"),
-            Self::X86AvxVhsubps128 => Some("vhsubps"),
-            Self::X86AvxVhsubps256 => Some("vhsubps"),
-            Self::X86AvxVhsubpd128 => Some("vhsubpd"),
-            Self::X86AvxVhsubpd256 => Some("vhsubpd"),
-            Self::X86AvxVaddsubps128 => Some("vaddsubps"),
-            Self::X86AvxVaddsubps256 => Some("vaddsubps"),
-            Self::X86AvxVaddsubpd128 => Some("vaddsubpd"),
-            Self::X86AvxVaddsubpd256 => Some("vaddsubpd"),
-            Self::X86AvxVdpps128 => Some("vdpps"),
-            Self::X86AvxVdpps256 => Some("vdpps"),
-            Self::X86AvxVdppd128 => Some("vdppd"),
+            Self::X86AvxVhaddps128 => Some(op::VHADDPS),
+            Self::X86AvxVhaddps256 => Some(op::VHADDPS),
+            Self::X86AvxVhaddpd128 => Some(op::VHADDPD),
+            Self::X86AvxVhaddpd256 => Some(op::VHADDPD),
+            Self::X86AvxVhsubps128 => Some(op::VHSUBPS),
+            Self::X86AvxVhsubps256 => Some(op::VHSUBPS),
+            Self::X86AvxVhsubpd128 => Some(op::VHSUBPD),
+            Self::X86AvxVhsubpd256 => Some(op::VHSUBPD),
+            Self::X86AvxVaddsubps128 => Some(op::VADDSUBPS),
+            Self::X86AvxVaddsubps256 => Some(op::VADDSUBPS),
+            Self::X86AvxVaddsubpd128 => Some(op::VADDSUBPD),
+            Self::X86AvxVaddsubpd256 => Some(op::VADDSUBPD),
+            Self::X86AvxVdpps128 => Some(op::VDPPS),
+            Self::X86AvxVdpps256 => Some(op::VDPPS),
+            Self::X86AvxVdppd128 => Some(op::VDPPD),
             _ => None,
         }
     }

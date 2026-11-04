@@ -43,7 +43,7 @@ impl FunctionCompiler<'_> {
         result: Option<Value>,
     ) {
         let (name, index) = id.x86_avx512_scalar_convert().expect("scalar conversion");
-        let mut op = EvexOpcode::parse(name).expect("scalar EVEX opcode");
+        let mut op = EvexOpcode::new(name);
         let control = iconst(self.func, args[index]).expect("validated control");
         if control != 4 {
             op.options.rounding = Some(if id.x86_avx512_scalar_convert_embedded_rounding() {
@@ -58,7 +58,7 @@ impl FunctionCompiler<'_> {
                 Rounding::Sae
             });
         }
-        if name.contains("comis") {
+        if name.mnemonic().contains("comis") {
             self.scalar_convert_stage(args[0], FS1);
             self.scalar_convert_stage(args[1], FS2);
             self.emit(Opcode::Evex(op), [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))]);

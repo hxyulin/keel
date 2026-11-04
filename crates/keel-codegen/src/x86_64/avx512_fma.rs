@@ -36,11 +36,10 @@ impl FunctionCompiler<'_> {
             self.avx512_stage_vector(value, scratch);
         }
         self.avx512_stage_mask(args[1]);
-        let mut opcode = EvexOpcode::parse(
+        let mut opcode = EvexOpcode::new(
             id.x86_avx512_fma_opcode()
                 .expect("packed AVX512 FMA intrinsic"),
-        )
-        .expect("AVX512 FMA opcode");
+        );
         opcode.options.mask = Some(1);
         let width = (self.ty(args[0]).bytes().expect("FMA vector width") * 8) as u16;
         let control = if args.len() == 5 {
@@ -77,9 +76,9 @@ impl FunctionCompiler<'_> {
                     | keel_ir::VectorType::F64x8
             )
         ) {
-            "vmovupd"
+            EvexMnemonic::Vmovupd
         } else {
-            "vmovups"
+            EvexMnemonic::Vmovups
         };
         self.emit(
             avx512_mask::opcode(merge_move, true),

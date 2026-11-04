@@ -3,6 +3,29 @@
 use super::avx512_mask::opcode;
 use super::*;
 
+fn mnemonic(id: Intrinsic) -> EvexMnemonic {
+    use Intrinsic::*;
+    match id {
+        X86Avx512Vpgatherdd => EvexMnemonic::Vpgatherdd,
+        X86Avx512Vpgatherdq => EvexMnemonic::Vpgatherdq,
+        X86Avx512Vpgatherqd => EvexMnemonic::Vpgatherqd,
+        X86Avx512Vpgatherqq => EvexMnemonic::Vpgatherqq,
+        X86Avx512Vgatherdps => EvexMnemonic::Vgatherdps,
+        X86Avx512Vgatherdpd => EvexMnemonic::Vgatherdpd,
+        X86Avx512Vgatherqps => EvexMnemonic::Vgatherqps,
+        X86Avx512Vgatherqpd => EvexMnemonic::Vgatherqpd,
+        X86Avx512Vpscatterdd => EvexMnemonic::Vpscatterdd,
+        X86Avx512Vpscatterdq => EvexMnemonic::Vpscatterdq,
+        X86Avx512Vpscatterqd => EvexMnemonic::Vpscatterqd,
+        X86Avx512Vpscatterqq => EvexMnemonic::Vpscatterqq,
+        X86Avx512Vscatterdps => EvexMnemonic::Vscatterdps,
+        X86Avx512Vscatterdpd => EvexMnemonic::Vscatterdpd,
+        X86Avx512Vscatterqps => EvexMnemonic::Vscatterqps,
+        X86Avx512Vscatterqpd => EvexMnemonic::Vscatterqpd,
+        _ => unreachable!("AVX512F gather or scatter intrinsic"),
+    }
+}
+
 pub(super) fn validate(
     func: &Function,
     id: Intrinsic,
@@ -62,10 +85,7 @@ impl FunctionCompiler<'_> {
             // unused upper two dword result lanes, even when K1 is zero.
             descriptor.opcode
         } else {
-            id.info()
-                .name
-                .strip_prefix("x86_avx512_")
-                .expect("indexed intrinsic name")
+            mnemonic(id)
         };
         if id.is_x86_avx512_scatter() {
             self.emit(

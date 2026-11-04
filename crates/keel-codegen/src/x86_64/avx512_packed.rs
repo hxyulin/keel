@@ -36,8 +36,8 @@ impl FunctionCompiler<'_> {
         let info = id.info();
         let load = info.params[0] == Type::Ptr;
         let store = info.returns.is_empty();
-        let stream = name.starts_with("vmovnt");
-        let mut op = EvexOpcode::parse(name).expect("AVX512F opcode");
+        let stream = name.mnemonic().starts_with("vmovnt");
+        let mut op = EvexOpcode::new(name);
         if load || store {
             if !stream {
                 self.avx512_stage_vector(args[1], FS0);
@@ -73,8 +73,10 @@ impl FunctionCompiler<'_> {
             if let Some(index) = id.x86_avx512_packed_control() {
                 let value = iconst(self.func, args[index]).expect("validated control");
                 if value != 4 {
-                    op.options.rounding =
-                        Some(if name.starts_with("vmin") || name.starts_with("vmax") {
+                    op.options.rounding = Some(
+                        if name.mnemonic().starts_with("vmin")
+                            || name.mnemonic().starts_with("vmax")
+                        {
                             Rounding::Sae
                         } else {
                             match value {
@@ -84,7 +86,8 @@ impl FunctionCompiler<'_> {
                                 11 => Rounding::Zero,
                                 _ => unreachable!("validated control"),
                             }
-                        });
+                        },
+                    );
                 }
             }
             if moved {
@@ -101,7 +104,7 @@ impl FunctionCompiler<'_> {
                         asm_arg(simd_width(FS1, 512)),
                     ],
                 );
-            } else if name.starts_with("vsqrt") {
+            } else if name.mnemonic().starts_with("vsqrt") {
                 self.emit(
                     Opcode::Evex(op),
                     [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(FS1, 512))],

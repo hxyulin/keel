@@ -50,12 +50,12 @@ impl FunctionCompiler<'_> {
         self.avx512_stage_vector(args[2], FS1);
         self.avx512_stage_vector(args[0], FS0);
         self.avx512_stage_mask(args[1]);
-        let mut opcode = EvexOpcode::parse(name).expect("imported DQ conversion");
+        let mut opcode = EvexOpcode::new(name);
         opcode.options.mask = Some(1);
         if width == 512 {
             let control = iconst(self.func, args[3]).expect("validated DQ control");
             if control != 4 {
-                opcode.options.rounding = Some(if name.starts_with("vcvtt") {
+                opcode.options.rounding = Some(if name.mnemonic().starts_with("vcvtt") {
                     Rounding::Sae
                 } else {
                     match control & 3 {

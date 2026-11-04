@@ -14,14 +14,14 @@ pub struct X86Avx512BwMisc {
     pub kind: X86Avx512BwMiscKind,
     pub result: VectorType,
     pub scalar: Type,
-    pub opcode: &'static str,
+    pub opcode: EvexMnemonic,
     pub params: &'static [Type],
     pub returns: &'static [Type],
 }
 impl Intrinsic {
     pub fn x86_avx512_bw_misc(self) -> Option<X86Avx512BwMisc> {
         macro_rules! descriptor {
-            ($name:literal,$kind:ident,$result:ident,$byte:ident,$mask:ident,$scalar:ident,$opcode:literal) => {{
+            ($name:literal,$kind:ident,$result:ident,$byte:ident,$mask:ident,$scalar:ident,$opcode:ident) => {{
                 const R: Type = Type::Vector(VectorType::$result);
                 const B: Type = Type::Vector(VectorType::$byte);
                 const M: Type = Type::$mask;
@@ -32,7 +32,7 @@ impl Intrinsic {
                     kind: $kind,
                     result: VectorType::$result,
                     scalar: S,
-                    opcode: $opcode,
+                    opcode: EvexMnemonic::$opcode,
                     params: match $kind {
                         Abs => &[R, M, R],
                         Broadcast => &[R, M, S],
@@ -45,24 +45,12 @@ impl Intrinsic {
             }};
         }
         Some(match self {
-            Self::X86Avx512BwPabsb128 => descriptor!(
-                "x86_avx512bw_pabsb128",
-                Abs,
-                I8x16,
-                I8x16,
-                I16,
-                I8,
-                "vpabsb"
-            ),
-            Self::X86Avx512BwPabsw128 => descriptor!(
-                "x86_avx512bw_pabsw128",
-                Abs,
-                I16x8,
-                I8x16,
-                I8,
-                I16,
-                "vpabsw"
-            ),
+            Self::X86Avx512BwPabsb128 => {
+                descriptor!("x86_avx512bw_pabsb128", Abs, I8x16, I8x16, I16, I8, Vpabsb)
+            }
+            Self::X86Avx512BwPabsw128 => {
+                descriptor!("x86_avx512bw_pabsw128", Abs, I16x8, I8x16, I8, I16, Vpabsw)
+            }
             Self::X86Avx512BwBroadcastb128 => descriptor!(
                 "x86_avx512bw_broadcastb128",
                 Broadcast,
@@ -70,7 +58,7 @@ impl Intrinsic {
                 I8x16,
                 I16,
                 I8,
-                "vpbroadcastb"
+                Vpbroadcastb
             ),
             Self::X86Avx512BwBroadcastw128 => descriptor!(
                 "x86_avx512bw_broadcastw128",
@@ -79,7 +67,7 @@ impl Intrinsic {
                 I8x16,
                 I8,
                 I16,
-                "vpbroadcastw"
+                Vpbroadcastw
             ),
             Self::X86Avx512BwBlendb128 => descriptor!(
                 "x86_avx512bw_blendb128",
@@ -88,7 +76,7 @@ impl Intrinsic {
                 I8x16,
                 I16,
                 I8,
-                "vpblendmb"
+                Vpblendmb
             ),
             Self::X86Avx512BwBlendw128 => descriptor!(
                 "x86_avx512bw_blendw128",
@@ -97,17 +85,11 @@ impl Intrinsic {
                 I8x16,
                 I8,
                 I16,
-                "vpblendmw"
+                Vpblendmw
             ),
-            Self::X86Avx512BwPsadbw128 => descriptor!(
-                "x86_avx512bw_psadbw128",
-                Sad,
-                I64x2,
-                I8x16,
-                I8,
-                I8,
-                "vpsadbw"
-            ),
+            Self::X86Avx512BwPsadbw128 => {
+                descriptor!("x86_avx512bw_psadbw128", Sad, I64x2, I8x16, I8, I8, Vpsadbw)
+            }
             Self::X86Avx512BwDbsad128 => descriptor!(
                 "x86_avx512bw_dbsad128",
                 Dbsad,
@@ -115,17 +97,11 @@ impl Intrinsic {
                 I8x16,
                 I8,
                 I8,
-                "vdbpsadbw"
+                Vdbpsadbw
             ),
-            Self::X86Avx512BwPabsb256 => descriptor!(
-                "x86_avx512bw_pabsb256",
-                Abs,
-                I8x32,
-                I8x32,
-                I32,
-                I8,
-                "vpabsb"
-            ),
+            Self::X86Avx512BwPabsb256 => {
+                descriptor!("x86_avx512bw_pabsb256", Abs, I8x32, I8x32, I32, I8, Vpabsb)
+            }
             Self::X86Avx512BwPabsw256 => descriptor!(
                 "x86_avx512bw_pabsw256",
                 Abs,
@@ -133,7 +109,7 @@ impl Intrinsic {
                 I8x32,
                 I16,
                 I16,
-                "vpabsw"
+                Vpabsw
             ),
             Self::X86Avx512BwBroadcastb256 => descriptor!(
                 "x86_avx512bw_broadcastb256",
@@ -142,7 +118,7 @@ impl Intrinsic {
                 I8x32,
                 I32,
                 I8,
-                "vpbroadcastb"
+                Vpbroadcastb
             ),
             Self::X86Avx512BwBroadcastw256 => descriptor!(
                 "x86_avx512bw_broadcastw256",
@@ -151,7 +127,7 @@ impl Intrinsic {
                 I8x32,
                 I16,
                 I16,
-                "vpbroadcastw"
+                Vpbroadcastw
             ),
             Self::X86Avx512BwBlendb256 => descriptor!(
                 "x86_avx512bw_blendb256",
@@ -160,7 +136,7 @@ impl Intrinsic {
                 I8x32,
                 I32,
                 I8,
-                "vpblendmb"
+                Vpblendmb
             ),
             Self::X86Avx512BwBlendw256 => descriptor!(
                 "x86_avx512bw_blendw256",
@@ -169,17 +145,11 @@ impl Intrinsic {
                 I8x32,
                 I16,
                 I16,
-                "vpblendmw"
+                Vpblendmw
             ),
-            Self::X86Avx512BwPsadbw256 => descriptor!(
-                "x86_avx512bw_psadbw256",
-                Sad,
-                I64x4,
-                I8x32,
-                I8,
-                I8,
-                "vpsadbw"
-            ),
+            Self::X86Avx512BwPsadbw256 => {
+                descriptor!("x86_avx512bw_psadbw256", Sad, I64x4, I8x32, I8, I8, Vpsadbw)
+            }
             Self::X86Avx512BwDbsad256 => descriptor!(
                 "x86_avx512bw_dbsad256",
                 Dbsad,
@@ -187,17 +157,11 @@ impl Intrinsic {
                 I8x32,
                 I16,
                 I8,
-                "vdbpsadbw"
+                Vdbpsadbw
             ),
-            Self::X86Avx512BwPabsb512 => descriptor!(
-                "x86_avx512bw_pabsb512",
-                Abs,
-                I8x64,
-                I8x64,
-                I64,
-                I8,
-                "vpabsb"
-            ),
+            Self::X86Avx512BwPabsb512 => {
+                descriptor!("x86_avx512bw_pabsb512", Abs, I8x64, I8x64, I64, I8, Vpabsb)
+            }
             Self::X86Avx512BwPabsw512 => descriptor!(
                 "x86_avx512bw_pabsw512",
                 Abs,
@@ -205,7 +169,7 @@ impl Intrinsic {
                 I8x64,
                 I32,
                 I16,
-                "vpabsw"
+                Vpabsw
             ),
             Self::X86Avx512BwBroadcastb512 => descriptor!(
                 "x86_avx512bw_broadcastb512",
@@ -214,7 +178,7 @@ impl Intrinsic {
                 I8x64,
                 I64,
                 I8,
-                "vpbroadcastb"
+                Vpbroadcastb
             ),
             Self::X86Avx512BwBroadcastw512 => descriptor!(
                 "x86_avx512bw_broadcastw512",
@@ -223,7 +187,7 @@ impl Intrinsic {
                 I8x64,
                 I32,
                 I16,
-                "vpbroadcastw"
+                Vpbroadcastw
             ),
             Self::X86Avx512BwBlendb512 => descriptor!(
                 "x86_avx512bw_blendb512",
@@ -232,7 +196,7 @@ impl Intrinsic {
                 I8x64,
                 I64,
                 I8,
-                "vpblendmb"
+                Vpblendmb
             ),
             Self::X86Avx512BwBlendw512 => descriptor!(
                 "x86_avx512bw_blendw512",
@@ -241,17 +205,11 @@ impl Intrinsic {
                 I8x64,
                 I32,
                 I16,
-                "vpblendmw"
+                Vpblendmw
             ),
-            Self::X86Avx512BwPsadbw512 => descriptor!(
-                "x86_avx512bw_psadbw512",
-                Sad,
-                I64x8,
-                I8x64,
-                I8,
-                I8,
-                "vpsadbw"
-            ),
+            Self::X86Avx512BwPsadbw512 => {
+                descriptor!("x86_avx512bw_psadbw512", Sad, I64x8, I8x64, I8, I8, Vpsadbw)
+            }
             Self::X86Avx512BwDbsad512 => descriptor!(
                 "x86_avx512bw_dbsad512",
                 Dbsad,
@@ -259,7 +217,7 @@ impl Intrinsic {
                 I8x64,
                 I32,
                 I8,
-                "vdbpsadbw"
+                Vdbpsadbw
             ),
             _ => return None,
         })

@@ -26,8 +26,10 @@ fn query_and_scalar_io_metadata_matches_the_frozen_contract() {
                 info.pure,
                 inst.memory_effects(),
                 id.is_x86_target(),
-                id.x86_descriptor_query(),
-                id.x86_selector_query(),
+                id.x86_descriptor_query()
+                    .map(|(op, bits, bytes)| (op.to_string(), bits, bytes)),
+                id.x86_selector_query()
+                    .map(|(op, bits, memory)| (op.to_string(), bits, memory)),
                 id.x86_port_io()
             );
             assert_eq!(&actual, expected);

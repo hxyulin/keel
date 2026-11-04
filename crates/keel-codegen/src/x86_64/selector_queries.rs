@@ -32,7 +32,7 @@ impl FunctionCompiler<'_> {
                 ..r64(S1)
             })
         };
-        let opcode = Opcode::parse(op).expect("baseline descriptor query");
+        let opcode = op;
         if query {
             self.emit(opcode, [asm_arg(Register { width, ..r64(S0) }), source]);
         } else {

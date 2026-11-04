@@ -38,7 +38,8 @@ fn expr(id: Intrinsic) -> String {
     let i = id.info();
     let a = i.params[0];
     let b = i.returns[0];
-    let op = id.x86_legacy_raw_fp_opcode().unwrap();
+    let op = id.x86_legacy_raw_fp_opcode().unwrap().to_string();
+    let op = op.as_str();
     let load = if let Some(s) = a.vector() {
         let wide = s.bytes() == 32;
         let prefix = if wide { "_mm256" } else { "_mm" };

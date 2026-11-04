@@ -21,7 +21,7 @@ struct Recipe {
 }
 impl Recipe {
     fn new(id: Intrinsic) -> Self {
-        let opcode = id.x86_avx512_integer_convert_opcode().unwrap();
+        let opcode = id.x86_avx512_integer_convert_opcode().unwrap().mnemonic();
         let suffix = opcode.trim_start_matches("vpmov");
         let widen = suffix.starts_with("sx") || suffix.starts_with("zx");
         let pair = &suffix[suffix.len() - 2..];
@@ -225,7 +225,11 @@ static void scalar(unsigned char*out,const unsigned char*merge,const unsigned ch
             checks += &format!(
                 "{{{setup}for(unsigned phase=0;phase<2;phase++){{initialize(input,{inputbytes},{from},{to},{kind},phase);for(unsigned p=0;p<5;p++){{{c_mask} k=masks[p],saved;unsigned char*base=p==0?(void*)1:p==1?guard+2*page-{element}:p==2?guard+page-({lanes}-1)*{element}:guard+2*page-{capacity};memset(guard+page,0xa5,page);memset(page_expected,0xa5,page);memset(out,0xa5,sizeof out);{operation}}}}}"
             );
-            let opcode = recipe.id.x86_avx512_integer_convert_opcode().unwrap();
+            let opcode = recipe
+                .id
+                .x86_avx512_integer_convert_opcode()
+                .unwrap()
+                .mnemonic();
             if (recipe.load && matches!(opcode, "vpmovsxbd" | "vpmovsxwd" | "vpmovsxdq"))
                 || (recipe.store && matches!(opcode, "vpmovdb" | "vpmovdw" | "vpmovqd"))
             {

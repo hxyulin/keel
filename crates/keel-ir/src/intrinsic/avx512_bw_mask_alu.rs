@@ -10,7 +10,7 @@ pub enum X86Avx512BwMaskAluKind {
 #[derive(Clone, Copy, Debug)]
 pub struct X86Avx512BwMaskAlu {
     pub name: &'static str,
-    pub opcode: &'static str,
+    pub opcode: Opcode,
     pub kind: X86Avx512BwMaskAluKind,
     pub ty: Type,
     pub params: &'static [Type],
@@ -19,12 +19,12 @@ pub struct X86Avx512BwMaskAlu {
 impl Intrinsic {
     pub fn x86_avx512_bw_mask_alu(self) -> Option<X86Avx512BwMaskAlu> {
         macro_rules! descriptor {
-            ($opcode:literal,$kind:ident,$ty:ident) => {{
+            ($name:literal, $opcode:ident, $kind:ident, $ty:ident) => {{
                 const T: Type = Type::$ty;
                 use X86Avx512BwMaskAluKind::*;
                 X86Avx512BwMaskAlu {
-                    name: concat!("x86_avx512bw_", $opcode),
-                    opcode: $opcode,
+                    name: $name,
+                    opcode: op::$opcode,
                     kind: $kind,
                     ty: T,
                     params: match $kind {
@@ -40,30 +40,34 @@ impl Intrinsic {
             }};
         }
         Some(match self {
-            Self::X86Avx512BwKandd => descriptor!("kandd", Binary, I32),
-            Self::X86Avx512BwKandnd => descriptor!("kandnd", Binary, I32),
-            Self::X86Avx512BwKord => descriptor!("kord", Binary, I32),
-            Self::X86Avx512BwKxord => descriptor!("kxord", Binary, I32),
-            Self::X86Avx512BwKxnord => descriptor!("kxnord", Binary, I32),
-            Self::X86Avx512BwKnotd => descriptor!("knotd", Unary, I32),
-            Self::X86Avx512BwKshiftld => descriptor!("kshiftld", Shift, I32),
-            Self::X86Avx512BwKshiftrd => descriptor!("kshiftrd", Shift, I32),
-            Self::X86Avx512BwKaddd => descriptor!("kaddd", Binary, I32),
-            Self::X86Avx512BwKtestd => descriptor!("ktestd", Test, I32),
-            Self::X86Avx512BwKortestd => descriptor!("kortestd", Test, I32),
-            Self::X86Avx512BwKunpckwd => descriptor!("kunpckwd", Binary, I32),
-            Self::X86Avx512BwKandq => descriptor!("kandq", Binary, I64),
-            Self::X86Avx512BwKandnq => descriptor!("kandnq", Binary, I64),
-            Self::X86Avx512BwKorq => descriptor!("korq", Binary, I64),
-            Self::X86Avx512BwKxorq => descriptor!("kxorq", Binary, I64),
-            Self::X86Avx512BwKxnorq => descriptor!("kxnorq", Binary, I64),
-            Self::X86Avx512BwKnotq => descriptor!("knotq", Unary, I64),
-            Self::X86Avx512BwKshiftlq => descriptor!("kshiftlq", Shift, I64),
-            Self::X86Avx512BwKshiftrq => descriptor!("kshiftrq", Shift, I64),
-            Self::X86Avx512BwKaddq => descriptor!("kaddq", Binary, I64),
-            Self::X86Avx512BwKtestq => descriptor!("ktestq", Test, I64),
-            Self::X86Avx512BwKortestq => descriptor!("kortestq", Test, I64),
-            Self::X86Avx512BwKunpckdq => descriptor!("kunpckdq", Binary, I64),
+            Self::X86Avx512BwKandd => descriptor!("x86_avx512bw_kandd", KANDD, Binary, I32),
+            Self::X86Avx512BwKandnd => descriptor!("x86_avx512bw_kandnd", KANDND, Binary, I32),
+            Self::X86Avx512BwKord => descriptor!("x86_avx512bw_kord", KORD, Binary, I32),
+            Self::X86Avx512BwKxord => descriptor!("x86_avx512bw_kxord", KXORD, Binary, I32),
+            Self::X86Avx512BwKxnord => descriptor!("x86_avx512bw_kxnord", KXNORD, Binary, I32),
+            Self::X86Avx512BwKnotd => descriptor!("x86_avx512bw_knotd", KNOTD, Unary, I32),
+            Self::X86Avx512BwKshiftld => descriptor!("x86_avx512bw_kshiftld", KSHIFTLD, Shift, I32),
+            Self::X86Avx512BwKshiftrd => descriptor!("x86_avx512bw_kshiftrd", KSHIFTRD, Shift, I32),
+            Self::X86Avx512BwKaddd => descriptor!("x86_avx512bw_kaddd", KADDD, Binary, I32),
+            Self::X86Avx512BwKtestd => descriptor!("x86_avx512bw_ktestd", KTESTD, Test, I32),
+            Self::X86Avx512BwKortestd => descriptor!("x86_avx512bw_kortestd", KORTESTD, Test, I32),
+            Self::X86Avx512BwKunpckwd => {
+                descriptor!("x86_avx512bw_kunpckwd", KUNPCKWD, Binary, I32)
+            }
+            Self::X86Avx512BwKandq => descriptor!("x86_avx512bw_kandq", KANDQ, Binary, I64),
+            Self::X86Avx512BwKandnq => descriptor!("x86_avx512bw_kandnq", KANDNQ, Binary, I64),
+            Self::X86Avx512BwKorq => descriptor!("x86_avx512bw_korq", KORQ, Binary, I64),
+            Self::X86Avx512BwKxorq => descriptor!("x86_avx512bw_kxorq", KXORQ, Binary, I64),
+            Self::X86Avx512BwKxnorq => descriptor!("x86_avx512bw_kxnorq", KXNORQ, Binary, I64),
+            Self::X86Avx512BwKnotq => descriptor!("x86_avx512bw_knotq", KNOTQ, Unary, I64),
+            Self::X86Avx512BwKshiftlq => descriptor!("x86_avx512bw_kshiftlq", KSHIFTLQ, Shift, I64),
+            Self::X86Avx512BwKshiftrq => descriptor!("x86_avx512bw_kshiftrq", KSHIFTRQ, Shift, I64),
+            Self::X86Avx512BwKaddq => descriptor!("x86_avx512bw_kaddq", KADDQ, Binary, I64),
+            Self::X86Avx512BwKtestq => descriptor!("x86_avx512bw_ktestq", KTESTQ, Test, I64),
+            Self::X86Avx512BwKortestq => descriptor!("x86_avx512bw_kortestq", KORTESTQ, Test, I64),
+            Self::X86Avx512BwKunpckdq => {
+                descriptor!("x86_avx512bw_kunpckdq", KUNPCKDQ, Binary, I64)
+            }
             _ => return None,
         })
     }

@@ -26,33 +26,33 @@ pub(super) fn validate(
     Ok(())
 }
 
-fn name(id: Intrinsic) -> &'static str {
+fn name(id: Intrinsic) -> EvexMnemonic {
     use Intrinsic::*;
     match id {
-        X86Avx512MaskTernlogd => "vpternlogd",
-        X86Avx512MaskTernlogq => "vpternlogq",
-        X86Avx512MaskRold => "vprold",
-        X86Avx512MaskRolq => "vprolq",
-        X86Avx512MaskRord => "vprord",
-        X86Avx512MaskRorq => "vprorq",
-        X86Avx512MaskRolvd => "vprolvd",
-        X86Avx512MaskRolvq => "vprolvq",
-        X86Avx512MaskRorvd => "vprorvd",
-        X86Avx512MaskRorvq => "vprorvq",
-        X86Avx512MaskSllvd => "vpsllvd",
-        X86Avx512MaskSllvq => "vpsllvq",
-        X86Avx512MaskSrlvd => "vpsrlvd",
-        X86Avx512MaskSrlvq => "vpsrlvq",
-        X86Avx512MaskSravd => "vpsravd",
-        X86Avx512MaskSravq => "vpsravq",
-        X86Avx512Testd => "vptestmd",
-        X86Avx512Testq => "vptestmq",
-        X86Avx512Testnd => "vptestnmd",
-        X86Avx512Testnq => "vptestnmq",
-        X86Avx512MaskAbsd => "vpabsd",
-        X86Avx512MaskAbsq => "vpabsq",
-        X86Avx512MaskMuldq => "vpmuldq",
-        X86Avx512MaskMuludq => "vpmuludq",
+        X86Avx512MaskTernlogd => EvexMnemonic::Vpternlogd,
+        X86Avx512MaskTernlogq => EvexMnemonic::Vpternlogq,
+        X86Avx512MaskRold => EvexMnemonic::Vprold,
+        X86Avx512MaskRolq => EvexMnemonic::Vprolq,
+        X86Avx512MaskRord => EvexMnemonic::Vprord,
+        X86Avx512MaskRorq => EvexMnemonic::Vprorq,
+        X86Avx512MaskRolvd => EvexMnemonic::Vprolvd,
+        X86Avx512MaskRolvq => EvexMnemonic::Vprolvq,
+        X86Avx512MaskRorvd => EvexMnemonic::Vprorvd,
+        X86Avx512MaskRorvq => EvexMnemonic::Vprorvq,
+        X86Avx512MaskSllvd => EvexMnemonic::Vpsllvd,
+        X86Avx512MaskSllvq => EvexMnemonic::Vpsllvq,
+        X86Avx512MaskSrlvd => EvexMnemonic::Vpsrlvd,
+        X86Avx512MaskSrlvq => EvexMnemonic::Vpsrlvq,
+        X86Avx512MaskSravd => EvexMnemonic::Vpsravd,
+        X86Avx512MaskSravq => EvexMnemonic::Vpsravq,
+        X86Avx512Testd => EvexMnemonic::Vptestmd,
+        X86Avx512Testq => EvexMnemonic::Vptestmq,
+        X86Avx512Testnd => EvexMnemonic::Vptestnmd,
+        X86Avx512Testnq => EvexMnemonic::Vptestnmq,
+        X86Avx512MaskAbsd => EvexMnemonic::Vpabsd,
+        X86Avx512MaskAbsq => EvexMnemonic::Vpabsq,
+        X86Avx512MaskMuldq => EvexMnemonic::Vpmuldq,
+        X86Avx512MaskMuludq => EvexMnemonic::Vpmuludq,
         _ => unreachable!("AVX512 integer intrinsic"),
     }
 }
@@ -105,9 +105,9 @@ impl FunctionCompiler<'_> {
             self.emit(
                 avx512_mask::opcode(
                     if id.info().returns[0] == Type::Vector(keel_ir::VectorType::I64x8) {
-                        "vmovdqu64"
+                        EvexMnemonic::Vmovdqu64
                     } else {
-                        "vmovdqu32"
+                        EvexMnemonic::Vmovdqu32
                     },
                     true,
                 ),

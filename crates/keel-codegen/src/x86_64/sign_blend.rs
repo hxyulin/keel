@@ -19,7 +19,6 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let opcode = Opcode::parse(opcode).unwrap();
         if tier == 0 {
             // The dedicated parallel-copy temporary is not an SSA spill home.
             // Save all YMM0 bits in wide functions, even for a 128-bit blend.

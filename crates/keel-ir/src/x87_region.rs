@@ -1,5 +1,6 @@
 //! Bounded x87 region controls. Stable operation numbers, independent of Intrinsic discriminants.
 //! See docs/targets/x86_64/f80/README.md. Existing raw APIs keep their masked-CW preconditions.
+use keel_asm_ir::x86::{Opcode, op};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum X87RegionOperand {
     None,
@@ -15,7 +16,7 @@ pub enum X87RegionOperand {
 #[derive(Clone, Copy, Debug)]
 pub struct X87RegionOp {
     pub name: &'static str,
-    pub opcode: &'static str,
+    pub opcode: Opcode,
     pub loads: u8,
     pub results: u8,
     pub operand: X87RegionOperand,
@@ -24,7 +25,7 @@ pub struct X87RegionOp {
 pub const X87_REGION_OPS: &[X87RegionOp] = &[
     X87RegionOp {
         name: "fsin",
-        opcode: "fsin",
+        opcode: op::FSIN,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -32,7 +33,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 0
     X87RegionOp {
         name: "fcos",
-        opcode: "fcos",
+        opcode: op::FCOS,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -40,7 +41,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 1
     X87RegionOp {
         name: "f2xm1",
-        opcode: "f2xm1",
+        opcode: op::F2XM1,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -48,7 +49,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 2
     X87RegionOp {
         name: "fpatan",
-        opcode: "fpatan",
+        opcode: op::FPATAN,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -56,7 +57,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 3
     X87RegionOp {
         name: "fyl2x",
-        opcode: "fyl2x",
+        opcode: op::FYL2X,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -64,7 +65,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 4
     X87RegionOp {
         name: "fyl2xp1",
-        opcode: "fyl2xp1",
+        opcode: op::FYL2XP1,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -72,7 +73,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 5
     X87RegionOp {
         name: "fscale",
-        opcode: "fscale",
+        opcode: op::FSCALE,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -80,7 +81,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 6
     X87RegionOp {
         name: "fprem",
-        opcode: "fprem",
+        opcode: op::FPREM,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -88,7 +89,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 7
     X87RegionOp {
         name: "fprem1",
-        opcode: "fprem1",
+        opcode: op::FPREM1,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::None,
@@ -96,7 +97,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 8
     X87RegionOp {
         name: "fsincos",
-        opcode: "fsincos",
+        opcode: op::FSINCOS,
         loads: 1,
         results: 2,
         operand: X87RegionOperand::None,
@@ -104,7 +105,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 9
     X87RegionOp {
         name: "fptan",
-        opcode: "fptan",
+        opcode: op::FPTAN,
         loads: 1,
         results: 2,
         operand: X87RegionOperand::None,
@@ -112,7 +113,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 10
     X87RegionOp {
         name: "fxtract",
-        opcode: "fxtract",
+        opcode: op::FXTRACT,
         loads: 1,
         results: 2,
         operand: X87RegionOperand::None,
@@ -120,7 +121,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 11
     X87RegionOp {
         name: "fabs",
-        opcode: "fabs",
+        opcode: op::FABS,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -128,7 +129,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 12
     X87RegionOp {
         name: "fchs",
-        opcode: "fchs",
+        opcode: op::FCHS,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -136,7 +137,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 13
     X87RegionOp {
         name: "fsqrt",
-        opcode: "fsqrt",
+        opcode: op::FSQRT,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -144,7 +145,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 14
     X87RegionOp {
         name: "frndint",
-        opcode: "frndint",
+        opcode: op::FRNDINT,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::None,
@@ -152,7 +153,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 15
     X87RegionOp {
         name: "ftst",
-        opcode: "ftst",
+        opcode: op::FTST,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::None,
@@ -160,7 +161,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 16
     X87RegionOp {
         name: "fxam",
-        opcode: "fxam",
+        opcode: op::FXAM,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::None,
@@ -168,7 +169,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 17
     X87RegionOp {
         name: "fadd",
-        opcode: "fadd",
+        opcode: Opcode::Fadd,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -176,7 +177,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 18
     X87RegionOp {
         name: "fmul",
-        opcode: "fmul",
+        opcode: Opcode::Fmul,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -184,7 +185,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 19
     X87RegionOp {
         name: "fsub",
-        opcode: "fsub",
+        opcode: op::FSUB,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -192,7 +193,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 20
     X87RegionOp {
         name: "fsubr",
-        opcode: "fsubr",
+        opcode: op::FSUBR,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -200,7 +201,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 21
     X87RegionOp {
         name: "fdiv",
-        opcode: "fdiv",
+        opcode: op::FDIV,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -208,7 +209,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 22
     X87RegionOp {
         name: "fdivr",
-        opcode: "fdivr",
+        opcode: op::FDIVR,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St01,
@@ -216,7 +217,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 23
     X87RegionOp {
         name: "fadd_st1",
-        opcode: "fadd",
+        opcode: Opcode::Fadd,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -224,7 +225,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 24
     X87RegionOp {
         name: "fmul_st1",
-        opcode: "fmul",
+        opcode: Opcode::Fmul,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -232,7 +233,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 25
     X87RegionOp {
         name: "fsub_st1",
-        opcode: "fsub",
+        opcode: op::FSUB,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -240,7 +241,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 26
     X87RegionOp {
         name: "fsubr_st1",
-        opcode: "fsubr",
+        opcode: op::FSUBR,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -248,7 +249,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 27
     X87RegionOp {
         name: "fdiv_st1",
-        opcode: "fdiv",
+        opcode: op::FDIV,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -256,7 +257,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 28
     X87RegionOp {
         name: "fdivr_st1",
-        opcode: "fdivr",
+        opcode: op::FDIVR,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10,
@@ -264,7 +265,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 29
     X87RegionOp {
         name: "faddp",
-        opcode: "faddp",
+        opcode: op::FADDP,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -272,7 +273,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 30
     X87RegionOp {
         name: "fmulp",
-        opcode: "fmulp",
+        opcode: Opcode::Fmulp,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -280,7 +281,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 31
     X87RegionOp {
         name: "fsubp",
-        opcode: "fsubp",
+        opcode: Opcode::Fsubp,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -288,7 +289,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 32
     X87RegionOp {
         name: "fsubrp",
-        opcode: "fsubrp",
+        opcode: Opcode::Fsubrp,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -296,7 +297,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 33
     X87RegionOp {
         name: "fdivp",
-        opcode: "fdivp",
+        opcode: op::FDIVP,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -304,7 +305,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 34
     X87RegionOp {
         name: "fdivrp",
-        opcode: "fdivrp",
+        opcode: op::FDIVRP,
         loads: 2,
         results: 1,
         operand: X87RegionOperand::St10Pop,
@@ -312,7 +313,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 35
     X87RegionOp {
         name: "fcom",
-        opcode: "fcom",
+        opcode: op::FCOM,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::St1,
@@ -320,7 +321,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 36
     X87RegionOp {
         name: "fcomp",
-        opcode: "fcomp",
+        opcode: op::FCOMP,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::St1,
@@ -328,7 +329,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 37
     X87RegionOp {
         name: "fcompp",
-        opcode: "fcompp",
+        opcode: op::FCOMPP,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::None,
@@ -336,7 +337,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 38
     X87RegionOp {
         name: "fucom",
-        opcode: "fucom",
+        opcode: op::FUCOM,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::St1,
@@ -344,7 +345,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 39
     X87RegionOp {
         name: "fucomp",
-        opcode: "fucomp",
+        opcode: op::FUCOMP,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::St1,
@@ -352,7 +353,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 40
     X87RegionOp {
         name: "fucompp",
-        opcode: "fucompp",
+        opcode: op::FUCOMPP,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::None,
@@ -360,7 +361,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 41
     X87RegionOp {
         name: "fcomi",
-        opcode: "fcomi",
+        opcode: op::FCOMI,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::Flags,
@@ -368,7 +369,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 42
     X87RegionOp {
         name: "fcomip",
-        opcode: "fcomip",
+        opcode: op::FCOMIP,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::Flags,
@@ -376,7 +377,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 43
     X87RegionOp {
         name: "fucomi",
-        opcode: "fucomi",
+        opcode: Opcode::Fucomi,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::Flags,
@@ -384,7 +385,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 44
     X87RegionOp {
         name: "fucomip",
-        opcode: "fucomip",
+        opcode: Opcode::Fucomip,
         loads: 2,
         results: 0,
         operand: X87RegionOperand::Flags,
@@ -392,7 +393,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 45
     X87RegionOp {
         name: "fist16",
-        opcode: "fist",
+        opcode: op::FIST,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -400,7 +401,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 46
     X87RegionOp {
         name: "fist32",
-        opcode: "fist",
+        opcode: op::FIST,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -408,7 +409,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 47
     X87RegionOp {
         name: "fistp16",
-        opcode: "fistp",
+        opcode: Opcode::Fistp,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -416,7 +417,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 48
     X87RegionOp {
         name: "fistp32",
-        opcode: "fistp",
+        opcode: Opcode::Fistp,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -424,7 +425,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 49
     X87RegionOp {
         name: "fistp64",
-        opcode: "fistp",
+        opcode: Opcode::Fistp,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -432,7 +433,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 50
     X87RegionOp {
         name: "fisttp16",
-        opcode: "fisttp",
+        opcode: op::FISTTP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -440,7 +441,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 51
     X87RegionOp {
         name: "fisttp32",
-        opcode: "fisttp",
+        opcode: op::FISTTP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -448,7 +449,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 52
     X87RegionOp {
         name: "fisttp64",
-        opcode: "fisttp",
+        opcode: op::FISTTP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -456,7 +457,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 53
     X87RegionOp {
         name: "fild16",
-        opcode: "fild",
+        opcode: Opcode::Fild,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::Input,
@@ -464,7 +465,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 54
     X87RegionOp {
         name: "fild32",
-        opcode: "fild",
+        opcode: Opcode::Fild,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::Input,
@@ -472,7 +473,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 55
     X87RegionOp {
         name: "fild64",
-        opcode: "fild",
+        opcode: Opcode::Fild,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::Input,
@@ -480,7 +481,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 56
     X87RegionOp {
         name: "fiadd16",
-        opcode: "fiadd",
+        opcode: op::FIADD,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -488,7 +489,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 57
     X87RegionOp {
         name: "fiadd32",
-        opcode: "fiadd",
+        opcode: op::FIADD,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -496,7 +497,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 58
     X87RegionOp {
         name: "fimul16",
-        opcode: "fimul",
+        opcode: op::FIMUL,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -504,7 +505,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 59
     X87RegionOp {
         name: "fimul32",
-        opcode: "fimul",
+        opcode: op::FIMUL,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -512,7 +513,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 60
     X87RegionOp {
         name: "fisub16",
-        opcode: "fisub",
+        opcode: op::FISUB,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -520,7 +521,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 61
     X87RegionOp {
         name: "fisub32",
-        opcode: "fisub",
+        opcode: op::FISUB,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -528,7 +529,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 62
     X87RegionOp {
         name: "fisubr16",
-        opcode: "fisubr",
+        opcode: op::FISUBR,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -536,7 +537,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 63
     X87RegionOp {
         name: "fisubr32",
-        opcode: "fisubr",
+        opcode: op::FISUBR,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -544,7 +545,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 64
     X87RegionOp {
         name: "fidiv16",
-        opcode: "fidiv",
+        opcode: op::FIDIV,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -552,7 +553,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 65
     X87RegionOp {
         name: "fidiv32",
-        opcode: "fidiv",
+        opcode: op::FIDIV,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -560,7 +561,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 66
     X87RegionOp {
         name: "fidivr16",
-        opcode: "fidivr",
+        opcode: op::FIDIVR,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -568,7 +569,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 67
     X87RegionOp {
         name: "fidivr32",
-        opcode: "fidivr",
+        opcode: op::FIDIVR,
         loads: 1,
         results: 1,
         operand: X87RegionOperand::Second,
@@ -576,7 +577,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 68
     X87RegionOp {
         name: "fbld",
-        opcode: "fbld",
+        opcode: op::FBLD,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::Input,
@@ -584,7 +585,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 69
     X87RegionOp {
         name: "fbstp",
-        opcode: "fbstp",
+        opcode: op::FBSTP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Output,
@@ -592,7 +593,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 70
     X87RegionOp {
         name: "fldpi",
-        opcode: "fldpi",
+        opcode: op::FLDPI,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::None,
@@ -600,7 +601,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 71
     X87RegionOp {
         name: "fldl2e",
-        opcode: "fldl2e",
+        opcode: op::FLDL2E,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::None,
@@ -608,7 +609,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 72
     X87RegionOp {
         name: "fldl2t",
-        opcode: "fldl2t",
+        opcode: op::FLDL2T,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::None,
@@ -616,7 +617,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 73
     X87RegionOp {
         name: "fldlg2",
-        opcode: "fldlg2",
+        opcode: op::FLDLG2,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::None,
@@ -624,7 +625,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 74
     X87RegionOp {
         name: "fldln2",
-        opcode: "fldln2",
+        opcode: op::FLDLN2,
         loads: 0,
         results: 1,
         operand: X87RegionOperand::None,
@@ -632,7 +633,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 75
     X87RegionOp {
         name: "ficom16",
-        opcode: "ficom",
+        opcode: op::FICOM,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Second,
@@ -640,7 +641,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 76
     X87RegionOp {
         name: "ficom32",
-        opcode: "ficom",
+        opcode: op::FICOM,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Second,
@@ -648,7 +649,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 77
     X87RegionOp {
         name: "ficomp16",
-        opcode: "ficomp",
+        opcode: op::FICOMP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Second,
@@ -656,7 +657,7 @@ pub const X87_REGION_OPS: &[X87RegionOp] = &[
     }, // 78
     X87RegionOp {
         name: "ficomp32",
-        opcode: "ficomp",
+        opcode: op::FICOMP,
         loads: 1,
         results: 0,
         operand: X87RegionOperand::Second,

@@ -19,7 +19,6 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let opcode = Opcode::parse(opcode).unwrap();
         if args.len() == 1 {
             self.emit(
                 opcode,

@@ -359,7 +359,8 @@ pub(super) fn validate(
         }
         F::String => {
             if let Some((opcode, index, _)) = id.x86_string_info() {
-                let avx = opcode.starts_with('v');
+                // The VEX forms; the SSE4.2 forms are V2 opcodes.
+                let avx = matches!(opcode, Opcode::V3(_));
                 if !(if avx { f.avx } else { f.sse42 }) {
                     return Err(format!(
                         "{id} requires {}",
@@ -389,7 +390,7 @@ pub(super) fn validate(
             let control = iconst(func, args[1])
                 .and_then(keel_ir::x87_region_control)
                 .ok_or("x87 region control must be a valid iconst.i32")?;
-            if control.0.opcode == "fisttp" && !f.sse3 {
+            if control.0.opcode == op::FISTTP && !f.sse3 {
                 return Err("x87 region FISTTP requires SSE3".into());
             }
         }

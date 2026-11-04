@@ -14,7 +14,7 @@ impl FunctionCompiler<'_> {
             }
         }
         self.emit(
-            Opcode::parse(id.x86_raw_fma_opcode().unwrap()).unwrap(),
+            id.x86_raw_fma_opcode().unwrap(),
             [
                 asm_arg(simd(FS0, ty)),
                 asm_arg(simd(FS1, ty)),

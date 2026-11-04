@@ -39,6 +39,8 @@ fn exact_operand_sizes_and_native_memory_writes() {
         .filter(|i| i.x86_descriptor_query().is_some())
     {
         let (op, width, bytes) = id.x86_descriptor_query().unwrap();
+        let op = op.to_string();
+        let op = op.as_str();
         let call = if bytes == 0 {
             format!(" v1 = intrinsic {}(v0)\n return v1", id.info().name)
         } else {

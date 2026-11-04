@@ -1,5 +1,6 @@
 //! Dword/qword shifts saturate counts; rotations reduce counts modulo lane width.
 use super::{Intrinsic, Type, VectorType};
+use keel_asm_ir::x86::EvexMnemonic;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum X86Avx512VlShiftKind {
     Immediate,
@@ -11,7 +12,7 @@ pub struct X86Avx512VlShift {
     pub name: &'static str,
     pub kind: X86Avx512VlShiftKind,
     pub vector: VectorType,
-    pub opcode: &'static str,
+    pub opcode: EvexMnemonic,
     pub params: &'static [Type],
     pub returns: &'static [Type],
 }
@@ -19,14 +20,14 @@ impl Intrinsic {
     /// Count form and exact lane shape for pure AVX512F plus AVX512VL shifts/rotates.
     pub fn x86_avx512_vl_shift(self) -> Option<X86Avx512VlShift> {
         macro_rules! descriptor {
-            ($kind:ident, $name:literal, $vector:ident, $opcode:literal) => {{
+            ($kind:ident, $name:literal, $vector:ident, $opcode:ident) => {{
                 const V: Type = Type::Vector(VectorType::$vector);
                 use X86Avx512VlShiftKind::*;
                 X86Avx512VlShift {
                     name: $name,
                     kind: $kind,
                     vector: VectorType::$vector,
-                    opcode: $opcode,
+                    opcode: EvexMnemonic::$opcode,
                     params: match $kind {
                         Immediate => &[V, Type::I8, V, Type::I32],
                         Shared => &[V, Type::I8, V, Type::Vector(VectorType::I64x2)],
@@ -38,160 +39,160 @@ impl Intrinsic {
         }
         Some(match self {
             Self::X86Avx512VlSllid128 => {
-                descriptor!(Immediate, "x86_avx512vl_sllid128", I32x4, "vpslld")
+                descriptor!(Immediate, "x86_avx512vl_sllid128", I32x4, Vpslld)
             }
             Self::X86Avx512VlSlliq128 => {
-                descriptor!(Immediate, "x86_avx512vl_slliq128", I64x2, "vpsllq")
+                descriptor!(Immediate, "x86_avx512vl_slliq128", I64x2, Vpsllq)
             }
             Self::X86Avx512VlSrlid128 => {
-                descriptor!(Immediate, "x86_avx512vl_srlid128", I32x4, "vpsrld")
+                descriptor!(Immediate, "x86_avx512vl_srlid128", I32x4, Vpsrld)
             }
             Self::X86Avx512VlSrliq128 => {
-                descriptor!(Immediate, "x86_avx512vl_srliq128", I64x2, "vpsrlq")
+                descriptor!(Immediate, "x86_avx512vl_srliq128", I64x2, Vpsrlq)
             }
             Self::X86Avx512VlSraid128 => {
-                descriptor!(Immediate, "x86_avx512vl_sraid128", I32x4, "vpsrad")
+                descriptor!(Immediate, "x86_avx512vl_sraid128", I32x4, Vpsrad)
             }
             Self::X86Avx512VlSraiq128 => {
-                descriptor!(Immediate, "x86_avx512vl_sraiq128", I64x2, "vpsraq")
+                descriptor!(Immediate, "x86_avx512vl_sraiq128", I64x2, Vpsraq)
             }
             Self::X86Avx512VlSlld128 => {
-                descriptor!(Shared, "x86_avx512vl_slld128", I32x4, "vpslld")
+                descriptor!(Shared, "x86_avx512vl_slld128", I32x4, Vpslld)
             }
             Self::X86Avx512VlSllq128 => {
-                descriptor!(Shared, "x86_avx512vl_sllq128", I64x2, "vpsllq")
+                descriptor!(Shared, "x86_avx512vl_sllq128", I64x2, Vpsllq)
             }
             Self::X86Avx512VlSrld128 => {
-                descriptor!(Shared, "x86_avx512vl_srld128", I32x4, "vpsrld")
+                descriptor!(Shared, "x86_avx512vl_srld128", I32x4, Vpsrld)
             }
             Self::X86Avx512VlSrlq128 => {
-                descriptor!(Shared, "x86_avx512vl_srlq128", I64x2, "vpsrlq")
+                descriptor!(Shared, "x86_avx512vl_srlq128", I64x2, Vpsrlq)
             }
             Self::X86Avx512VlSrad128 => {
-                descriptor!(Shared, "x86_avx512vl_srad128", I32x4, "vpsrad")
+                descriptor!(Shared, "x86_avx512vl_srad128", I32x4, Vpsrad)
             }
             Self::X86Avx512VlSraq128 => {
-                descriptor!(Shared, "x86_avx512vl_sraq128", I64x2, "vpsraq")
+                descriptor!(Shared, "x86_avx512vl_sraq128", I64x2, Vpsraq)
             }
             Self::X86Avx512VlSllvd128 => {
-                descriptor!(Variable, "x86_avx512vl_sllvd128", I32x4, "vpsllvd")
+                descriptor!(Variable, "x86_avx512vl_sllvd128", I32x4, Vpsllvd)
             }
             Self::X86Avx512VlSllvq128 => {
-                descriptor!(Variable, "x86_avx512vl_sllvq128", I64x2, "vpsllvq")
+                descriptor!(Variable, "x86_avx512vl_sllvq128", I64x2, Vpsllvq)
             }
             Self::X86Avx512VlSrlvd128 => {
-                descriptor!(Variable, "x86_avx512vl_srlvd128", I32x4, "vpsrlvd")
+                descriptor!(Variable, "x86_avx512vl_srlvd128", I32x4, Vpsrlvd)
             }
             Self::X86Avx512VlSrlvq128 => {
-                descriptor!(Variable, "x86_avx512vl_srlvq128", I64x2, "vpsrlvq")
+                descriptor!(Variable, "x86_avx512vl_srlvq128", I64x2, Vpsrlvq)
             }
             Self::X86Avx512VlSravd128 => {
-                descriptor!(Variable, "x86_avx512vl_sravd128", I32x4, "vpsravd")
+                descriptor!(Variable, "x86_avx512vl_sravd128", I32x4, Vpsravd)
             }
             Self::X86Avx512VlSravq128 => {
-                descriptor!(Variable, "x86_avx512vl_sravq128", I64x2, "vpsravq")
+                descriptor!(Variable, "x86_avx512vl_sravq128", I64x2, Vpsravq)
             }
             Self::X86Avx512VlRold128 => {
-                descriptor!(Immediate, "x86_avx512vl_rold128", I32x4, "vprold")
+                descriptor!(Immediate, "x86_avx512vl_rold128", I32x4, Vprold)
             }
             Self::X86Avx512VlRolq128 => {
-                descriptor!(Immediate, "x86_avx512vl_rolq128", I64x2, "vprolq")
+                descriptor!(Immediate, "x86_avx512vl_rolq128", I64x2, Vprolq)
             }
             Self::X86Avx512VlRord128 => {
-                descriptor!(Immediate, "x86_avx512vl_rord128", I32x4, "vprord")
+                descriptor!(Immediate, "x86_avx512vl_rord128", I32x4, Vprord)
             }
             Self::X86Avx512VlRorq128 => {
-                descriptor!(Immediate, "x86_avx512vl_rorq128", I64x2, "vprorq")
+                descriptor!(Immediate, "x86_avx512vl_rorq128", I64x2, Vprorq)
             }
             Self::X86Avx512VlRolvd128 => {
-                descriptor!(Variable, "x86_avx512vl_rolvd128", I32x4, "vprolvd")
+                descriptor!(Variable, "x86_avx512vl_rolvd128", I32x4, Vprolvd)
             }
             Self::X86Avx512VlRolvq128 => {
-                descriptor!(Variable, "x86_avx512vl_rolvq128", I64x2, "vprolvq")
+                descriptor!(Variable, "x86_avx512vl_rolvq128", I64x2, Vprolvq)
             }
             Self::X86Avx512VlRorvd128 => {
-                descriptor!(Variable, "x86_avx512vl_rorvd128", I32x4, "vprorvd")
+                descriptor!(Variable, "x86_avx512vl_rorvd128", I32x4, Vprorvd)
             }
             Self::X86Avx512VlRorvq128 => {
-                descriptor!(Variable, "x86_avx512vl_rorvq128", I64x2, "vprorvq")
+                descriptor!(Variable, "x86_avx512vl_rorvq128", I64x2, Vprorvq)
             }
             Self::X86Avx512VlSllid256 => {
-                descriptor!(Immediate, "x86_avx512vl_sllid256", I32x8, "vpslld")
+                descriptor!(Immediate, "x86_avx512vl_sllid256", I32x8, Vpslld)
             }
             Self::X86Avx512VlSlliq256 => {
-                descriptor!(Immediate, "x86_avx512vl_slliq256", I64x4, "vpsllq")
+                descriptor!(Immediate, "x86_avx512vl_slliq256", I64x4, Vpsllq)
             }
             Self::X86Avx512VlSrlid256 => {
-                descriptor!(Immediate, "x86_avx512vl_srlid256", I32x8, "vpsrld")
+                descriptor!(Immediate, "x86_avx512vl_srlid256", I32x8, Vpsrld)
             }
             Self::X86Avx512VlSrliq256 => {
-                descriptor!(Immediate, "x86_avx512vl_srliq256", I64x4, "vpsrlq")
+                descriptor!(Immediate, "x86_avx512vl_srliq256", I64x4, Vpsrlq)
             }
             Self::X86Avx512VlSraid256 => {
-                descriptor!(Immediate, "x86_avx512vl_sraid256", I32x8, "vpsrad")
+                descriptor!(Immediate, "x86_avx512vl_sraid256", I32x8, Vpsrad)
             }
             Self::X86Avx512VlSraiq256 => {
-                descriptor!(Immediate, "x86_avx512vl_sraiq256", I64x4, "vpsraq")
+                descriptor!(Immediate, "x86_avx512vl_sraiq256", I64x4, Vpsraq)
             }
             Self::X86Avx512VlSlld256 => {
-                descriptor!(Shared, "x86_avx512vl_slld256", I32x8, "vpslld")
+                descriptor!(Shared, "x86_avx512vl_slld256", I32x8, Vpslld)
             }
             Self::X86Avx512VlSllq256 => {
-                descriptor!(Shared, "x86_avx512vl_sllq256", I64x4, "vpsllq")
+                descriptor!(Shared, "x86_avx512vl_sllq256", I64x4, Vpsllq)
             }
             Self::X86Avx512VlSrld256 => {
-                descriptor!(Shared, "x86_avx512vl_srld256", I32x8, "vpsrld")
+                descriptor!(Shared, "x86_avx512vl_srld256", I32x8, Vpsrld)
             }
             Self::X86Avx512VlSrlq256 => {
-                descriptor!(Shared, "x86_avx512vl_srlq256", I64x4, "vpsrlq")
+                descriptor!(Shared, "x86_avx512vl_srlq256", I64x4, Vpsrlq)
             }
             Self::X86Avx512VlSrad256 => {
-                descriptor!(Shared, "x86_avx512vl_srad256", I32x8, "vpsrad")
+                descriptor!(Shared, "x86_avx512vl_srad256", I32x8, Vpsrad)
             }
             Self::X86Avx512VlSraq256 => {
-                descriptor!(Shared, "x86_avx512vl_sraq256", I64x4, "vpsraq")
+                descriptor!(Shared, "x86_avx512vl_sraq256", I64x4, Vpsraq)
             }
             Self::X86Avx512VlSllvd256 => {
-                descriptor!(Variable, "x86_avx512vl_sllvd256", I32x8, "vpsllvd")
+                descriptor!(Variable, "x86_avx512vl_sllvd256", I32x8, Vpsllvd)
             }
             Self::X86Avx512VlSllvq256 => {
-                descriptor!(Variable, "x86_avx512vl_sllvq256", I64x4, "vpsllvq")
+                descriptor!(Variable, "x86_avx512vl_sllvq256", I64x4, Vpsllvq)
             }
             Self::X86Avx512VlSrlvd256 => {
-                descriptor!(Variable, "x86_avx512vl_srlvd256", I32x8, "vpsrlvd")
+                descriptor!(Variable, "x86_avx512vl_srlvd256", I32x8, Vpsrlvd)
             }
             Self::X86Avx512VlSrlvq256 => {
-                descriptor!(Variable, "x86_avx512vl_srlvq256", I64x4, "vpsrlvq")
+                descriptor!(Variable, "x86_avx512vl_srlvq256", I64x4, Vpsrlvq)
             }
             Self::X86Avx512VlSravd256 => {
-                descriptor!(Variable, "x86_avx512vl_sravd256", I32x8, "vpsravd")
+                descriptor!(Variable, "x86_avx512vl_sravd256", I32x8, Vpsravd)
             }
             Self::X86Avx512VlSravq256 => {
-                descriptor!(Variable, "x86_avx512vl_sravq256", I64x4, "vpsravq")
+                descriptor!(Variable, "x86_avx512vl_sravq256", I64x4, Vpsravq)
             }
             Self::X86Avx512VlRold256 => {
-                descriptor!(Immediate, "x86_avx512vl_rold256", I32x8, "vprold")
+                descriptor!(Immediate, "x86_avx512vl_rold256", I32x8, Vprold)
             }
             Self::X86Avx512VlRolq256 => {
-                descriptor!(Immediate, "x86_avx512vl_rolq256", I64x4, "vprolq")
+                descriptor!(Immediate, "x86_avx512vl_rolq256", I64x4, Vprolq)
             }
             Self::X86Avx512VlRord256 => {
-                descriptor!(Immediate, "x86_avx512vl_rord256", I32x8, "vprord")
+                descriptor!(Immediate, "x86_avx512vl_rord256", I32x8, Vprord)
             }
             Self::X86Avx512VlRorq256 => {
-                descriptor!(Immediate, "x86_avx512vl_rorq256", I64x4, "vprorq")
+                descriptor!(Immediate, "x86_avx512vl_rorq256", I64x4, Vprorq)
             }
             Self::X86Avx512VlRolvd256 => {
-                descriptor!(Variable, "x86_avx512vl_rolvd256", I32x8, "vprolvd")
+                descriptor!(Variable, "x86_avx512vl_rolvd256", I32x8, Vprolvd)
             }
             Self::X86Avx512VlRolvq256 => {
-                descriptor!(Variable, "x86_avx512vl_rolvq256", I64x4, "vprolvq")
+                descriptor!(Variable, "x86_avx512vl_rolvq256", I64x4, Vprolvq)
             }
             Self::X86Avx512VlRorvd256 => {
-                descriptor!(Variable, "x86_avx512vl_rorvd256", I32x8, "vprorvd")
+                descriptor!(Variable, "x86_avx512vl_rorvd256", I32x8, Vprorvd)
             }
             Self::X86Avx512VlRorvq256 => {
-                descriptor!(Variable, "x86_avx512vl_rorvq256", I64x4, "vprorvq")
+                descriptor!(Variable, "x86_avx512vl_rorvq256", I64x4, Vprorvq)
             }
             _ => return None,
         })

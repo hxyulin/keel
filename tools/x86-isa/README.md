@@ -339,6 +339,9 @@ To add an intrinsic:
    For `handwritten`, implement the signature and descriptor matches in Rust,
    and set `effects`, `trap`, `inline` and, for x86, `family` on the row.
    Family membership does not require neighbouring IDs or a generator edit.
+   Descriptor opcodes are typed: an `x86::op` constant or `Opcode` variant for
+   legacy and VEX forms, an `EvexMnemonic` for EVEX forms. A misspelled
+   mnemonic fails to compile instead of panicking in the backend.
 3. Select an existing lowering recipe or implement the new behavior. Review
    permission, state, clobber and continuation contracts explicitly. A new
    `family` adds an `X86Family` variant, and

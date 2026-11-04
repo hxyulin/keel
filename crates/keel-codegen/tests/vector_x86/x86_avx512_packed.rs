@@ -25,7 +25,7 @@ fn fixtures() -> (String, String) {
         .copied()
         .filter(|id| id.x86_avx512_packed_opcode().is_some())
     {
-        let opcode = id.x86_avx512_packed_opcode().unwrap();
+        let opcode = id.x86_avx512_packed_opcode().unwrap().mnemonic();
         let info = id.info();
         let store = info.returns.is_empty();
         let memory = info.params[0] == Type::Ptr;

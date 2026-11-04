@@ -15,7 +15,6 @@ impl FunctionCompiler<'_> {
         }
         if let Some((opcode, tier)) = id.x86_byte_shift() {
             let count = iconst(self.func, args[1]).unwrap();
-            let opcode = Opcode::parse(opcode).unwrap();
             if tier == 0 {
                 self.emit(opcode, [asm_arg(simd(FS0, ty)), asm_arg(count)]);
             } else {
@@ -45,7 +44,6 @@ impl FunctionCompiler<'_> {
             self.emit(Opcode::Movq, [asm_arg(xmm(FS1)), asm_arg(r64(count))]);
             xmm(FS1)
         };
-        let opcode = Opcode::parse(opcode).unwrap();
         if tier == 0 {
             self.emit(opcode, [asm_arg(simd(FS0, ty)), asm_arg(count)]);
         } else {

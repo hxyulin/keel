@@ -62,7 +62,7 @@ impl FunctionCompiler<'_> {
             width: 80,
             high_byte: false,
         };
-        let opcode = Opcode::parse(op.opcode).unwrap();
+        let opcode = op.opcode;
         match op.operand {
             Kind::None => self.emit(opcode, []),
             Kind::St01 | Kind::Flags => self.emit(opcode, [asm_arg(st(0)), asm_arg(st(1))]),
