@@ -18,6 +18,7 @@
 use crate::ast::*;
 use crate::debug::DebugTypes;
 use crate::eval::{Base, Const, eval};
+use crate::int_const::{self, IntConst, IntTy, Policy};
 use crate::parse::Parser;
 use crate::types::*;
 use crate::{Error, Loc};
@@ -1442,78 +1443,44 @@ fn small_int(ty: &Ty, layout: CDataLayout) -> bool {
 }
 
 /// The value of integer expression `e` if it is made of literals alone,
-/// normalized to its type as the parser normalizes literals.
+/// in the AST's integer encoding.
 fn fold_int(e: &Expr<'_>, depth: u32, layout: CDataLayout) -> Option<i64> {
+    fold_literals(e, depth, layout).map(IntConst::bits64)
+}
+
+/// Fold what the generated code would compute: overflow wraps, while
+/// division traps and out-of-range shifts are left to the target.
+fn fold_literals(e: &Expr<'_>, depth: u32, layout: CDataLayout) -> Option<IntConst> {
     if !small_int(&e.ty, layout) {
         return None;
     }
+    let ty = IntTy::of(&e.ty, layout)?;
     let depth = depth.checked_sub(1)?;
+    let fold = |a: &Expr<'_>| fold_literals(a, depth, layout);
+    let policy = Policy::LOWERING;
     let v = match &e.kind {
-        ExprKind::Int(v) => *v,
-        ExprKind::Cast(a) if small_int(&a.ty, layout) => fold_int(a, depth, layout)?,
+        ExprKind::Int(v) => IntConst::from_literal(ty, *v),
+        ExprKind::Cast(a) if small_int(&a.ty, layout) => fold(a)?,
         ExprKind::Unary(op, a) if small_int(&a.ty, layout) => {
-            let x = fold_int(a, depth, layout)?;
-            match op {
-                UnOp::Neg => x.wrapping_neg(),
-                UnOp::BitNot => !x,
-                UnOp::Not => i64::from(x == 0),
-            }
+            int_const::unary(*op, fold(a)?, policy).ok()?
         }
         ExprKind::Binary(op, a, b) if small_int(&a.ty, layout) && small_int(&b.ty, layout) => {
-            let x = fold_int(a, depth, layout)?;
-            let y = fold_int(b, depth, layout)?;
-            let signed = a.ty.is_signed();
-            let bits = a.ty.int_kind()?.size_with_layout(layout) as i64 * 8;
-            let (ux, uy) = (x as u64, y as u64);
-            let min = i64::MIN >> (64 - bits);
-            match op {
-                BinOp::Add => x.wrapping_add(y),
-                BinOp::Sub => x.wrapping_sub(y),
-                BinOp::Mul => x.wrapping_mul(y),
-                // Division by zero and the signed overflow trap at run time.
-                BinOp::Div | BinOp::Rem if y == 0 || (signed && x == min && y == -1) => {
-                    return None;
-                }
-                BinOp::Div if signed => x / y,
-                BinOp::Div => (ux / uy) as i64,
-                BinOp::Rem if signed => x % y,
-                BinOp::Rem => (ux % uy) as i64,
-                // Out-of-range amounts are left to the target's semantics.
-                BinOp::Shl | BinOp::Shr if !(0..bits).contains(&y) => return None,
-                BinOp::Shl => x << y,
-                BinOp::Shr if signed => x >> y,
-                BinOp::Shr => (ux >> y) as i64,
-                BinOp::And => x & y,
-                BinOp::Or => x | y,
-                BinOp::Xor => x ^ y,
-                BinOp::Eq => i64::from(x == y),
-                BinOp::Ne => i64::from(x != y),
-                BinOp::Lt if signed => i64::from(x < y),
-                BinOp::Le if signed => i64::from(x <= y),
-                BinOp::Gt if signed => i64::from(x > y),
-                BinOp::Ge if signed => i64::from(x >= y),
-                BinOp::Lt => i64::from(ux < uy),
-                BinOp::Le => i64::from(ux <= uy),
-                BinOp::Gt => i64::from(ux > uy),
-                BinOp::Ge => i64::from(ux >= uy),
-            }
+            let operand = IntTy::of(&a.ty, layout)?;
+            let (x, y) = (fold(a)?.convert(operand), fold(b)?.convert(operand));
+            int_const::binary(*op, x, y, policy).ok()?
         }
         // `sizeof(size_t) < sizeof(long) ? A : B`: the other arm is not
         // evaluated, whatever it is.
         ExprKind::Cond(c, a, b) if small_int(&c.ty, layout) => {
-            let arm = if fold_int(c, depth, layout)? != 0 {
-                a
-            } else {
-                b
-            };
+            let arm = if fold(c)?.is_zero() { b } else { a };
             if arm.ty != e.ty {
                 return None;
             }
-            fold_int(arm, depth, layout)?
+            fold(arm)?
         }
         _ => return None,
     };
-    Some(crate::eval::wrap_literal(v, &e.ty, layout))
+    Some(v.convert(ty))
 }
 
 /// Whether `x op k` is `x` for integer `x` of type `ty`.

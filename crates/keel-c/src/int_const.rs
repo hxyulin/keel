@@ -25,7 +25,6 @@ impl IntTy {
     };
     pub(crate) const INT: IntTy = IntTy::new(32, true);
     pub(crate) const INTMAX: IntTy = IntTy::new(64, true);
-    pub(crate) const UINTMAX: IntTy = IntTy::new(64, false);
 
     pub(crate) const fn new(width: u32, signed: bool) -> IntTy {
         assert!(width >= 1 && width <= 128);
@@ -50,21 +49,8 @@ impl IntTy {
         }
     }
 
-    /// A bit-field of `width` bits of this type. `_Bool` stays boolean.
-    pub(crate) fn bit_field(self, width: u32) -> IntTy {
-        if self.boolean {
-            self
-        } else {
-            IntTy::new(width, self.signed)
-        }
-    }
-
     pub(crate) fn width(self) -> u32 {
         u32::from(self.width)
-    }
-
-    pub(crate) fn signed(self) -> bool {
-        self.signed
     }
 
     fn mask(self) -> u128 {
@@ -105,7 +91,11 @@ impl IntConst {
     /// Decode the AST's `i64` encoding of a value of `ty`: the bits for
     /// types of 64 bits or less, sign-extended to 128 bits otherwise.
     pub(crate) fn from_literal(ty: IntTy, v: i64) -> IntConst {
-        IntConst::wrap(ty, v as i128 as u128)
+        if ty.boolean {
+            IntConst::wrap(ty, u128::from(v != 0))
+        } else {
+            IntConst::wrap(ty, v as i128 as u128)
+        }
     }
 
     /// The AST's `i64` encoding, or `None` for a 128-bit value outside the
@@ -125,10 +115,6 @@ impl IntConst {
 
     pub(crate) fn bits(self) -> u128 {
         self.bits
-    }
-
-    pub(crate) fn ty(self) -> IntTy {
-        self.ty
     }
 
     pub(crate) fn is_zero(self) -> bool {
@@ -192,8 +178,11 @@ pub(crate) enum Ub {
 /// zero and out-of-range shift counts are never accepted.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Policy {
-    /// Signed overflow wraps.
+    /// Signed `+ - *` and unary `-` wrap.
     pub wrap_overflow: bool,
+    /// `MIN / -1` gives `MIN` and `MIN % -1` gives 0. Lowering leaves them
+    /// to the target, where they trap.
+    pub wrap_quotient: bool,
     /// `<<` of a negative value or past the sign bit wraps.
     pub wrap_signed_shift: bool,
     /// A float out of range saturates, and NaN gives 0.
@@ -205,18 +194,21 @@ impl Policy {
     /// results GCC and Clang agree on.
     pub(crate) const CONSTANT: Policy = Policy {
         wrap_overflow: true,
+        wrap_quotient: true,
         wrap_signed_shift: true,
         saturate_float: true,
     };
     /// Builtin immediates: any undefined behavior is an error.
     pub(crate) const STRICT: Policy = Policy {
         wrap_overflow: false,
+        wrap_quotient: false,
         wrap_signed_shift: false,
         saturate_float: false,
     };
     /// Folds that must give what the generated code computes.
     pub(crate) const LOWERING: Policy = Policy {
         wrap_overflow: true,
+        wrap_quotient: false,
         wrap_signed_shift: true,
         saturate_float: false,
     };
@@ -288,7 +280,7 @@ pub(crate) fn binary(op: BinOp, a: IntConst, b: IntConst, p: Policy) -> Result<I
             if ty.signed {
                 if a == ty.min() && y == -1 {
                     let value = if div { a } else { wrap(0) };
-                    return accept(false, p.wrap_overflow, Ub::Overflow, value);
+                    return accept(false, p.wrap_quotient, Ub::Overflow, value);
                 }
                 Ok(wrap(if div { x / y } else { x % y } as u128))
             } else {
@@ -486,7 +478,17 @@ mod tests {
                             let expect = match want {
                                 Err(ub) => Err(ub),
                                 Ok((v, None)) => Ok(v),
-                                Ok((v, Some(Ub::Overflow))) if p.wrap_overflow => Ok(v),
+                                Ok((v, Some(Ub::Overflow)))
+                                    if matches!(op, BinOp::Div | BinOp::Rem) && p.wrap_quotient =>
+                                {
+                                    Ok(v)
+                                }
+                                Ok((v, Some(Ub::Overflow)))
+                                    if !matches!(op, BinOp::Div | BinOp::Rem)
+                                        && p.wrap_overflow =>
+                                {
+                                    Ok(v)
+                                }
                                 Ok((v, Some(Ub::SignedShift))) if p.wrap_signed_shift => Ok(v),
                                 Ok((_, Some(ub))) => Err(ub),
                             };
@@ -496,7 +498,7 @@ mod tests {
                 }
                 let a = value(ty, x);
                 let neg = unary(UnOp::Neg, a, Policy::STRICT).map(math);
-                if !ty.signed() {
+                if !ty.signed {
                     assert_eq!(neg, Ok(reduce(ty, -x)));
                 } else if range(ty).contains(&-x) {
                     assert_eq!(neg, Ok(-x));
@@ -528,7 +530,7 @@ mod tests {
                         reduce(to, x)
                     };
                     assert_eq!(math(got), want, "{x} {from:?} -> {to:?}");
-                    assert_eq!(got.ty(), to);
+                    assert_eq!(got.ty, to);
                 }
             }
         }
@@ -552,7 +554,7 @@ mod tests {
     fn wide_boundaries_are_exact() {
         let i128t = IntTy::new(128, true);
         let u128t = IntTy::new(128, false);
-        let u64t = IntTy::UINTMAX;
+        let u64t = IntTy::new(64, false);
         let u = |v: u128| IntConst::wrap(u128t, v);
         let s = |v: i128| IntConst::wrap(i128t, v as u128);
         let c = Policy::CONSTANT;
@@ -614,8 +616,6 @@ mod tests {
             assert_eq!(u(v).to_u128(), Some(v));
             assert_eq!(u(v).convert(i128t).convert(u128t), u(v));
         }
-        assert_eq!(IntTy::new(5, true).bit_field(3), IntTy::new(3, true));
-        assert_eq!(IntTy::BOOL.bit_field(1), IntTy::BOOL);
     }
 
     #[test]
@@ -638,11 +638,13 @@ mod tests {
             IntTy::INTMAX.max()
         );
         assert_eq!(
-            from_float(two(64), IntTy::UINTMAX, c).unwrap(),
-            IntTy::UINTMAX.max()
+            from_float(two(64), IntTy::new(64, false), c).unwrap(),
+            IntTy::new(64, false).max()
         );
         assert_eq!(
-            from_float(two(63), IntTy::UINTMAX, s).unwrap().bits(),
+            from_float(two(63), IntTy::new(64, false), s)
+                .unwrap()
+                .bits(),
             1 << 63
         );
         assert_eq!(from_float(two(127), u128t, s).unwrap().bits(), 1 << 127);

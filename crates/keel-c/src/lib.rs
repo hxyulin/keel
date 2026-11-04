@@ -40,8 +40,6 @@ mod expr;
 mod features;
 mod headers;
 mod init;
-// Callers move to the kernel in the following changes.
-#[allow(dead_code)]
 mod int_const;
 mod irgen;
 mod lex;
