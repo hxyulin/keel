@@ -2,8 +2,9 @@
 
 This page states how LLVM's semantics map onto Keel IR contracts. The
 [`keel-llvm` README](../../crates/keel-llvm/README.md) owns the supported
-instruction and transport mapping, and [PORTING.md](../../crates/keel-llvm/PORTING.md)
-the porting policy.
+instruction and transport mapping. `keel-llvm-import` is the only LLVM
+importer; the native validators under `suite/ir/` run it through
+`cargo suite test-frontends` (see [the suite README](../../suite/README.md#frontend-correctness-checks)).
 
 ## Concrete operations and producer contracts
 
@@ -117,13 +118,24 @@ Whole-function clones keep the side table. Instruction clones start without
 facts, and rewrites, removal, moves and block removal clear affected entries.
 No optimizer consumes these facts.
 
+<a id="llvm-definedness"></a>
 ## Definedness
 
-Supported scalar `undef` and `poison` operands become zero (positive zero for
-floating point, null for pointers), and scalar `freeze` keeps the concretized
-operand. This is a deterministic refinement, not poison transport; see
-[the refinement policy](../../crates/keel-llvm/PORTING.md#scalar-deferred-value-refinement).
-Differential tests check allowed outcomes rather than LLVM's arbitrary choices.
+Supported scalar `undef` and `poison` operands of i1/i8/i16/i32/i64, f32/f64
+and address-space-zero pointer type become zero (positive zero for floating
+point, null for pointers). The importer materializes the constant at each use,
+so LLVM's shared constant handles cannot create cross-block dominance errors.
+Scalar `freeze` aliases the concretized operand: concrete inputs keep their
+bits, and a deferred input gets one permitted value that every use of that
+`freeze` result sees. No poison tag, runtime shadow state, trap or unreachable
+assumption is added. Arithmetic refinement and signed-division totalization
+still apply, and aggregate and global restrictions are unchanged. This is a
+deterministic refinement, not poison transport.
+
+`crates/keel-llvm/tests/import/definedness.rs` checks masked operands, PHIs,
+loop uses, frozen-value stability, pointer identity and raw floating-point
+bits. Its drivers, like any differential test of this refinement, check the
+permitted outcomes rather than LLVM's arbitrary choices.
 
 LLVM defers poison, and `select` and PHIs can mask it
 ([LLVM's UB manual](https://llvm.org/docs/UndefinedBehavior.html)):

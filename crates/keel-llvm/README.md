@@ -196,9 +196,27 @@ cargo build -p keel-llvm --bins
   --libllvm "$(rustc --print sysroot)/lib/libLLVM.dylib" input.ll -o output.keel
 ```
 
-The supported operations and rejection policies match the diagnostic Python
-importer described in [the import contract](../../suite/README.md).
-The Rust importer also retains scalar load/store alignment and function or
+`keel-llvm-import` is the only LLVM importer. Unsupported constructs fail the
+whole module with an `llvm-import:` diagnostic, and nothing is written. Errors
+keep their rejection category and context; the exact wording is not a stable
+interface. Diagnostics decode names as lossy UTF-8, but supported symbols use
+only ASCII letters, digits, `_`, `.` and `$`. Sizes and addends use checked
+integer arithmetic, with products computed in u128/i128 before narrowing to
+LLVM's u32 object and addend bounds.
+
+Some translations are fixed choices. Overflow flags, GEP constraints and
+optimizer metadata are omitted rather than turned into Keel facts. Signed
+division guards MIN/-1 on masked poison paths. i1 values become canonical i8
+values. FP constants keep their raw bits. memcpy becomes memmove, which also
+covers LLVM's identical-pointer case. ODR copies, hidden RTTI, aggregate
+parameters and sret keep their bounded acceptance checks.
+
+`ffi.rs` holds all dynamic symbol loading, C calls, pointer handling and
+resource disposal. Each translation owns its LLVM context, module and target
+data, and disposes of them in dependency order on success or error. Handles
+never leave the private import implementation.
+
+The importer also retains scalar load/store alignment and function or
 declaration `inlinehint`, `alwaysinline`, `noinline`, `noreturn`, `nounwind`,
 `cold`, `hot` and `optnone` attributes. It keeps LLVM's ABI-default access
 alignment when source IR omits an explicit alignment. Alignment never implies
@@ -211,12 +229,14 @@ LLVM permits simultaneous `cold` and `hot` hints; both are omitted when they
 conflict, because Keel requires mutually exclusive frequency hints.
 `--localize-odr-functions` retains its explicit no-outside-TU-reference
 assertion. The CLI buffers output and atomically replaces destinations only
-after verification succeeds. An optional `--keel PATH` adds the old external
-verification step for compatibility and failure-injection checks.
+after verification succeeds. The Keel module is always verified in-process.
+An optional `--keel PATH` adds an external `keel opt` verification step before
+publication; the suite uses it to check failure handling.
 
-The three-input harness uses the Rust API directly. The Python implementation
-remains a reference for port parity tests. See [porting notes](PORTING.md) for
-the mapping, deliberate differences and validation commands.
+The three-input harness uses the Rust API directly. Native interoperability and
+rejection checks for compiler-emitted and handwritten LLVM IR run against the
+CLI under `suite/ir/` through `cargo suite test-frontends`; see
+[the suite README](../../suite/README.md#frontend-correctness-checks).
 
 ## Memory and pointer contract transport
 
@@ -285,7 +305,7 @@ consistent uses of the frozen result. This discards nondeterminism without
 introducing traps or unreachable assumptions. It does not implement full LLVM
 poison semantics or extend aggregate/global support. Differential tests must
 check permitted outcomes rather than require LLVM to make the same arbitrary
-choice. See [the refinement policy](PORTING.md#scalar-deferred-value-refinement).
+choice. See [definedness](../../docs/frontends/llvm.md#llvm-definedness).
 
 The diagnostic exporter still has an observed memory-fault loss: LLVM may delete
 an unused ordinary load that Keel retains for its possible fault. Defined-memory

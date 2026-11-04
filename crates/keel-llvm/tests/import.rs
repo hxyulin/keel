@@ -1,4 +1,4 @@
-//! Characterization tests for the Python LLVM importer contract.
+//! LLVM importer translation contract.
 #[path = "import/contracts.rs"]
 mod contracts;
 #[path = "import/definedness.rs"]
@@ -6,7 +6,7 @@ mod definedness;
 #[path = "import/value_facts.rs"]
 mod value_facts;
 
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 const HEADER: &str = "target triple = \"arm64-apple-macosx11.0.0\"\ntarget datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128-Fn32\"\n";
 fn translated(importer: &keel_llvm::import::Importer, body: &str) -> keel_ir::Module {
     let text = importer
@@ -62,59 +62,6 @@ fn local_and_odr_freeze_definitions_keep_attributes_and_contracts() {
         assert_eq!(function.weak_odr, linkage == "linkonce_odr", "{text}");
         assert_eq!(function.restrict_params, [0], "{text}");
         assert!(function.attrs.contract.parameters[0].1.nonnull, "{text}");
-    }
-}
-
-#[test]
-fn fixture_output_matches_python_reference() {
-    let Some(i) = importer() else {
-        eprintln!("skipped: set KEEL_TEST_LIBLLVM to LLVM 23");
-        return;
-    };
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let paths = [
-        "crates/keel-cranelift/tools/ir-fixtures/scalar.ll",
-        "suite/ir/llvm_import_linkage_fixtures/available.ll",
-    ];
-    for path in paths {
-        let source = std::fs::read(root.join(path)).unwrap();
-        for localize in [false, true] {
-            let script = "import sys;sys.path.insert(0,sys.argv[1]);from llvm_import import LLVM,import_module;print(import_module(LLVM(sys.argv[2]),sys.stdin.buffer.read(),localize_odr=sys.argv[3]=='true'),end='')";
-            let mut child = Command::new("python3")
-                .args(["-c", script])
-                .arg(root.join("suite/ir"))
-                .arg(std::env::var_os("KEEL_TEST_LIBLLVM").unwrap())
-                .arg(localize.to_string())
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap();
-            {
-                use std::io::Write;
-                child.stdin.take().unwrap().write_all(&source).unwrap();
-            }
-            let python = child.wait_with_output().unwrap();
-            let rust = i.translate(
-                &source,
-                keel_llvm::import::Options {
-                    localize_odr_functions: localize,
-                },
-            );
-            assert_eq!(
-                rust.is_ok(),
-                python.status.success(),
-                "{path} localize={localize}: Rust {rust:?}; Python {}",
-                String::from_utf8_lossy(&python.stderr)
-            );
-            if let Ok(text) = rust {
-                let a = keel_ir::parse(&text).unwrap().to_string();
-                let b = keel_ir::parse(&String::from_utf8(python.stdout).unwrap())
-                    .unwrap()
-                    .to_string();
-                assert_eq!(a, b, "{path}");
-            }
-        }
     }
 }
 

@@ -344,7 +344,7 @@ class ConsumerAndPolicyTests(unittest.TestCase):
 
     def test_policy_paths_select_their_checks(self):
         cases = {
-            "suite/ir/llvm_import.py": {"suite ir"},
+            "suite/ir/harness.py": {"suite ir"},
             "suite/c/lua/suite.toml": {"suite c"},
             "suite/common/harness.py": {"suite"},
             "suite/configs.toml": {"suite"},
@@ -430,8 +430,10 @@ class RepositorySelectionTests(unittest.TestCase):
         for path, expected in cases.items():
             with self.subTest(path=path):
                 self.assertEqual(self.select(path), expected)
-        # keel-suite names the suite/ir group; keel-llvm's parity test runs the Python importer.
-        self.assertEqual(self.select("suite/ir/llvm_import.py"), ({"keel-suite", "keel-llvm"}, {"suite ir"}))
+        # keel-suite names the suite/ir group; keel-codegen's fast_cc test includes the fastcc golden.
+        self.assertEqual(self.select("suite/ir/harness.py"), ({"keel-suite"}, {"suite ir"}))
+        self.assertEqual(self.select("suite/ir/llvm_import_fast_fixtures/fast.keel"),
+                         ({"keel-suite", "keel-codegen"}, {"suite ir"}))
 
 
 class OptimizerQuickTests(unittest.TestCase):

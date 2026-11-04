@@ -148,7 +148,7 @@ impl Api {
     pub(super) fn load(path: &Path) -> Result<Self, String> {
         // SAFETY: the explicitly supplied path must name the trusted LLVM library.
         let library = unsafe { libloading::Library::new(path) }.map_err(|e| e.to_string())?;
-        // SAFETY: these signatures match LLVM 23's C API, as in the Python importer.
+        // SAFETY: these signatures match LLVM 23's C API headers.
         let api = Self {
             get_version: {
                 // SAFETY: the symbol uses its LLVM 23 C API signature and the library stays loaded.
