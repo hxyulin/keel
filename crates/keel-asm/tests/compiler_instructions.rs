@@ -261,8 +261,7 @@ fn lrcpc2_native_width_sign_extension_and_offset_boundaries() {
         .output()
         .unwrap();
     if !available.status.success() || available.stdout != b"1\n" {
-        eprintln!("LRCPC2 native execution requires hardware support");
-        return;
+        keel_test_support::skip!("host CPU lacks FEAT_LRCPC2");
     }
     let mut source = String::from(".text\n");
     let mut driver = String::from("#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n");

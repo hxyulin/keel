@@ -476,8 +476,7 @@ tls: .zero 8
             "{section} relocations"
         );
     }
-    #[cfg(target_os = "linux")]
-    {
+    if let Some(gnu_as) = keel_test_support::gnu_as() {
         // GNU as rejects absolute symbols with @GOTPCREL; Clang accepts this
         // form and is the reference for it above. Compare GNU's shared syntax.
         let gnu_source = source.replace("mov rcx,[rip+absolute@GOTPCREL]\n", "");
@@ -485,7 +484,8 @@ tls: .zero 8
         let ours_bytes = assemble_object(&gnu_source).unwrap();
         let ours = object::File::parse(&*ours_bytes).unwrap();
         let gnu = temp.join("gnu.o");
-        let result = Command::new("as")
+        let result = gnu_as
+            .command()
             .args(["--64", "-mrelax-relocations=no", "-o"])
             .arg(&gnu)
             .arg(&input)
@@ -510,6 +510,8 @@ tls: .zero 8
                 "GNU as {section} relocations"
             );
         }
+    } else {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
     }
     std::fs::remove_dir_all(temp).unwrap();
 }
