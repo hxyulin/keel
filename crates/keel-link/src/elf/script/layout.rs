@@ -8,9 +8,9 @@ use crate::{
         shdr, string, symbol_and_section_tables, symbol_record,
     },
 };
-use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::SymbolSection;
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug)]
 struct Value {

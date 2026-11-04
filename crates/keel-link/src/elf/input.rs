@@ -5,8 +5,8 @@ use crate::{
     Input, Result,
     elf_selection::{Request, Selection},
 };
-use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::Object;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct Named<'a> {
     pub name: String,

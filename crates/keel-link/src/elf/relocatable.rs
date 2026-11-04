@@ -4,9 +4,9 @@
 //! remain in the output. No instruction or address relocation is applied here.
 use super::{Executable, Machine, input, put16, put32, put64};
 use crate::{Input, Result};
-use bbtree::unsync::BBTreeMap as BTreeMap;
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags, SymbolSection};
+use std::collections::BTreeMap;
 
 const LIMIT: u64 = 512 * 1024 * 1024;
 

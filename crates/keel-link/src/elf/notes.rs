@@ -2,7 +2,7 @@
 //! unsorted and repeated; output is one sorted, unique property note.
 use super::{Section, put32};
 use crate::Result;
-use bbtree::unsync::BBTreeMap as BTreeMap;
+use std::collections::BTreeMap;
 
 const FEATURE_1_AND: u32 = 0xc0000002;
 const ISA_1_NEEDED: u32 = 0xc0008002;

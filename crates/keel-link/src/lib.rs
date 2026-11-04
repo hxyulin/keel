@@ -12,8 +12,8 @@ mod sign;
 mod tbd;
 mod unwind;
 mod write;
-use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use read::{Object, Symbol};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 pub use tbd::Dylib;
 
@@ -207,8 +207,6 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
             return fail("dylib interface contains an invalid export name");
         }
     }
-    // The temporary set borrows options until it is dropped.
-    drop(install_names);
     let mut objects = Vec::new();
     let mut archives = Vec::new();
     let mut archive_bodies = Vec::new();

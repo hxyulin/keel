@@ -15,12 +15,12 @@ mod selected;
 mod sframe;
 mod unwind;
 use crate::{Input, Result, elf_selection::Selection};
-use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{
     Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget, SectionFlags,
     SymbolFlags, SymbolSection,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 const BASE: u64 = 0x400000;
 const PAGE: u64 = 4096;

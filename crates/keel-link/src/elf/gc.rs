@@ -1,7 +1,7 @@
 //! Reachability uses original contribution indices until one final compaction.
 use super::{Result, Section, Symbol, Unit, sframe, unwind};
-use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
 use object::SymbolSection;
+use std::collections::{BTreeMap, BTreeSet};
 
 type Key = (usize, usize);
 
@@ -463,8 +463,6 @@ pub(super) fn collect(
     }
     // Release symbol borrows before metadata mutates/removes input symbols.
     drop(selected);
-    // Boundary names borrow sections, which metadata rewriting mutates below.
-    drop(boundaries);
     for (&section, list) in &owners {
         if list
             .iter()
@@ -597,8 +595,8 @@ pub(super) fn collect(
         retained_symbols[lookups[u].get(raw).expect("selected global identity")]
     });
     *frames = std::mem::take(frames)
-        .into_iter()
-        .filter_map(|(i, _)| remap[i].map(|at| Ok((at, unwind::Frames::parse(&output[at].data)?))))
+        .into_keys()
+        .filter_map(|i| remap[i].map(|at| Ok((at, unwind::Frames::parse(&output[at].data)?))))
         .collect::<Result<_>>()?;
     if let Some((section, _)) = sframe {
         *section = remap[*section].ok_or(".sframe: metadata was discarded")?;
