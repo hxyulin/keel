@@ -52,7 +52,8 @@ fn pipeline(tier: keel_opt::OptimizationTier, binding: bool) -> String {
             .iter()
             .any(|n| matches!(*n, "inline-noninterposable" | "inline-cheap-reserve"))
     {
-        names.insert(0, "inline-noninterposable");
+        // As in the tiers that inline, fold operations on literals first.
+        names.splice(0..0, ["const-fold", "inline-noninterposable"]);
     }
     names.join(",")
 }

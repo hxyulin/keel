@@ -618,8 +618,11 @@ const RELEASE_EPILOGUE: [&str; 12] = [
     "tail-calls",
 ];
 
+// `const-fold` ahead of the first inliner: frontends may leave operations on
+// literals, such as `ineg 1`, and inliner admission counts instructions.
 const BALANCED_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
+    &["const-fold"],
     &["inline-noninterposable"],
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
@@ -728,16 +731,18 @@ const FULL_EPILOGUE: [&str; 26] = [
 // Also do this before freezing the first inliner templates: scalar cleanup
 // removes aggregate homes and avoids charging byval snapshots at every site.
 // Retain the late invocation for signatures exposed by intervening rewrites.
+// Fold operations on literals before the first inliner, as in Balanced.
 const FULL_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
+    &["const-fold"],
     &FULL_ROUND,
     &FULL_ROUND,
     &FULL_ROUND,
     &FULL_EPILOGUE,
 ];
 
-/// The passes `keel compile -O` runs: private aggregate cleanup, three bounded
-/// rounds, then memory/loop, known-bit, call and reachability cleanup.
+/// The passes `keel compile -O` runs: private aggregate cleanup, constant
+/// folding, three bounded rounds, then memory/loop, known-bit, call and reachability cleanup.
 pub const DEFAULT_PIPELINE: &[&str] = &concat::<{ total_len(FULL_PARTS) }>(FULL_PARTS);
 
 const fn total_len(parts: &[&[&str]]) -> usize {

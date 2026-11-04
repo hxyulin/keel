@@ -142,8 +142,12 @@ fn cleanup_policy_is_full_only() {
     }
     let full = keel_opt::OptimizationTier::Full.pipeline();
     assert_eq!(
-        &full[..2],
-        ["private-aggregate-cleanup", "inline-cheap-reserve"]
+        &full[..3],
+        [
+            "private-aggregate-cleanup",
+            "const-fold",
+            "inline-cheap-reserve"
+        ]
     );
     assert_eq!(
         full.iter()

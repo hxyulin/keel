@@ -104,7 +104,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
 | `canonicalize` | Establish the [canonical form](#canonical-form) |
 | `simplify-cfg` | Fold constant `brif` and `switch`, compose arguments through jump-only blocks, merge a block into its only predecessor, drop unreachable blocks |
-| `const-fold` (opt-in) | Evaluate instructions on constants with the machine's semantics; trapping divisions stay |
+| `const-fold` | Evaluate instructions on constants with the machine's semantics; trapping divisions stay. Balanced and Full run it once, before the first inliner, whose admission counts instructions |
 | `instcombine` | Worklist combining; see [scalar simplification](#scalar-simplification) |
 | `call-contracts` | Apply direct `noreturn` and `nounwind` contracts; see [function attributes](function-attributes.md#optimizer-consumers) |
 | `memory-forward` (opt-in) | Block-local exact-address load reuse and store-to-load forwarding |
