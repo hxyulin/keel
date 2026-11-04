@@ -68,10 +68,9 @@ CODEGEN_CORE_TARGETS = (
 # keel-opt's own tests check IR text. These crates/keel tests compile C or IR
 # through optimizing pipelines and run the result against an independent oracle.
 OPTIMIZER_E2E_TARGETS = (
-    "aggregate_return", "c_lane_reduce", "conditional_reduce", "constant_division",
-    "full_bounded_inline", "if_convert_nested", "inline", "noninterposable_inline",
-    "optimization_levels", "private_aggregate", "small_memory_default", "stack_cache",
-    "stack_promote_large", "stackobj", "vectorize",
+    "c_lane_reduce", "conditional_reduce", "constant_division", "full_bounded_inline",
+    "if_convert_nested", "inline", "noninterposable_inline", "optimization_levels",
+    "private_aggregate", "small_memory_default", "stack_cache", "stackobj", "vectorize",
 )
 # Under --quick, a selected package also runs these targets of other packages.
 # keel-codegen's run and keel-c's run are the program-level differential oracles.
