@@ -99,7 +99,6 @@ compare = "clang-O2"
             self.assertLess(sizes['text_bytes'], sizes['bytes'])
             self.assertFalse((root / 'target/suite/unselected').exists())
             self.assertEqual(report['apps']['sample']['compile'], {})
-            self.assertEqual(report['apps']['sample']['runtime'], {})
             if reference_fail:
                 self.assertFalse(report['apps']['sample']['checks']['clang-O2']['passed'])
                 self.assertIn('Clang O2 correctness reference failed', report['fatal_error'])

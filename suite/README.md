@@ -129,7 +129,7 @@ schedule, not an unbounded fixed-point loop. Fast retains its own bounded pipeli
    take a first timing.
 
 `suite/c/benchmark_platforms.py` discovers native-C manifests too; a new workload is
-only measured there when selected explicitly with `--apps`.
+only built there when selected explicitly with `--apps`.
 
 ### `suite.toml` format
 
@@ -295,8 +295,8 @@ arguments run through `test-frontends`, not ordinary test discovery. Use
 ## Measurements
 
 Use [`cargo suite ab`](#timing-two-compilers) to compare the runtime of two
-Keel compilers. Use `python3 suite/c/benchmark_platforms.py --help` for paired
-application compile/runtime comparisons. `integration/compiler-bench/` and `linker/` own
+Keel compilers. Use `python3 suite/c/benchmark_platforms.py --help` to check and
+time the compilation of a matrix of Clang, GCC and Keel configurations. `integration/compiler-bench/` and `linker/` own
 public README measurements. Workload names such as `lua` remain unchanged;
 prepared sources and build caches remain under `target/suite/<name>/`.
 

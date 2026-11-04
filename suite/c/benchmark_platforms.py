@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Native application benchmark: frozen inputs, correctness first, paired timings.
+"""Native application matrix: frozen inputs, correctness first, compile timings.
 
-Compilation is serial C -> assembly and C -> object, including native preprocessing by default.
-Keel's object boundary uses its own emitter; other compilers use -c. Shared mode
-excludes preprocessing. Linking, compiler construction and dependency setup are
-excluded from both compile boundaries.
-Runtime is CLI wall time including startup. No LTO, native CPU tuning or PGO.
+Builds the selected applications with Clang, GCC and named Keel configurations,
+checks every build against Clang -O2, and times serial compilation: C -> assembly
+and C -> object, including native preprocessing by default. Keel's object
+boundary uses its own emitter; other compilers use -c. Shared mode excludes
+preprocessing. Linking, compiler construction and dependency setup are excluded
+from both compile boundaries. No LTO, native CPU tuning or PGO.
+
+The report keeps every timing row and each configuration's median. Runtime
+comparisons of two Keel compilers belong to `cargo suite ab`, which owns the
+timing controls and statistics.
 """
 import argparse
 import copy
 import gzip
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import platform
@@ -69,13 +73,6 @@ def common_float_aliases(text):
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def interval(values):
-    rng = random.Random(24517000)
-    boot = sorted(statistics.median(rng.choices(values, k=len(values))) for _ in range(4000))
-    return {'median': statistics.median(values), 'bootstrap95': [boot[99], boot[3899]],
-            'pairs': len(values)}
 
 
 def noise(cpu):
@@ -176,7 +173,7 @@ def main():
     p.add_argument('--experimental-allocators', action='store_true',
                    help='extend the matrix; requires a compiler built with experimental-regalloc')
     p.add_argument('--checks-only', action='store_true',
-                   help='build and run correctness checks, without compile/runtime timing rounds')
+                   help='build and run correctness checks, without compile timing rounds')
     p.add_argument('--input-mode', choices=['native', 'shared'], default='native',
                    help='native includes compiler preprocessing; shared isolates compilation of Clang .i inputs')
     p.add_argument('--gcc-native-preprocess', action='store_true',
@@ -187,7 +184,6 @@ def main():
     p.add_argument('--normalize-prepared', action='store_true',
                    help='preserve raw .i files and rename explicit glibc float aliases for common GCC/Clang inputs')
     p.add_argument('--compile-rounds', type=int, default=5)
-    p.add_argument('--runtime-rounds', type=int, default=7)
     args = p.parse_args()
     if args.experimental_allocators and not args.optimization_matrix:
         p.error('--experimental-allocators requires --optimization-matrix')
@@ -200,7 +196,7 @@ def main():
         p.error('unknown application manifests: ' + ', '.join(sorted(unknown)))
     if len(set(chosen_apps)) != len(chosen_apps):
         p.error('--apps must not repeat an application')
-    if not args.checks_only and (args.compile_rounds < 1 or args.runtime_rounds < 1):
+    if not args.checks_only and args.compile_rounds < 1:
         p.error('timing rounds must be positive; use --checks-only for validation')
     work.mkdir(parents=True, exist_ok=False)
     clang = str(Path(shutil.which(args.clang) or args.clang).resolve())
@@ -210,8 +206,7 @@ def main():
               'platform': platform.platform(), 'arch': platform.machine(), 'cpu_affinity': args.cpu,
               'runner_sha256': sha(__file__), 'method': __doc__, 'started_utc': time.strftime('%FT%TZ', time.gmtime()),
               'apps': {}, 'errors': [], 'noise_before': noise(args.cpu), 'compiler_versions': {},
-              'compile_rounds': args.compile_rounds, 'runtime_rounds': args.runtime_rounds,
-              'compile_warmups': 1, 'runtime_warmups': 2, 'route': 'native-c',
+              'compile_rounds': args.compile_rounds, 'compile_warmups': 1, 'route': 'native-c',
               'checks_only': args.checks_only, 'input_mode': args.input_mode,
               'compile_boundary': 'source-to-output including preprocessing' if args.input_mode == 'native' else 'preprocessed-input-to-output; preprocessing excluded'}
     log = gzip.open(work / 'commands.jsonl.gz', 'wt')
@@ -337,7 +332,7 @@ def main():
                 prep['sources'] = {str(p): sha(p) for p in sources}
                 marker.write_text(json.dumps(prep, indent=2) + '\n')
             all_sources[app] = sources
-            report['apps'][app] = {'manifest_sha256': sha(root / 'suite/c' / app / 'suite.toml'), 'preparation': prep, 'sources': {str(p): sha(p) for p in sources}, 'builds': {}, 'checks': {}, 'compile': {}, 'runtime': {}}
+            report['apps'][app] = {'manifest_sha256': sha(root / 'suite/c' / app / 'suite.toml'), 'preparation': prep, 'sources': {str(p): sha(p) for p in sources}, 'builds': {}, 'checks': {}, 'compile': {}}
         assert all(all_sources[a] for a in chosen_apps), 'application has no prepared sources'
         if args.prepare_only:
             report['complete'] = True
@@ -494,7 +489,7 @@ def main():
                        for app in chosen_apps)
             report['phase'] = 'complete'
             report['complete'] = True
-            report['scope'] = 'Correctness only; no compile or native runtime measurement rounds.'
+            report['scope'] = 'Correctness only; no compile measurement rounds.'
             save()
             if report['errors']:
                 raise SystemExit(1)
@@ -517,43 +512,16 @@ def main():
                     detail['compile'][boundary].append(row)
                     save()
                     print('compile', app, boundary, block, flush=True)
-        report['phase'] = 'runtime'
         for app in chosen_apps:
             detail = report['apps'][app]
-            m, _ = spec(app)
-            names = [n for n in configs if detail['builds'][n]['status'] == 'built']
-            # An interleaved identical executable control measures placement/noise,
-            # without pretending it is an independent compiler configuration.
-            control = Path(detail['builds']['clang-O2']['binary']).with_name('baseline-copy')
-            shutil.copy2(detail['builds']['clang-O2']['binary'], control)
-            assert sha(control) == detail['builds']['clang-O2']['sha256']
-            for bench in m.get('bench', []):
-                rows = []
-                detail['runtime'][bench['name']] = rows
-                for block in range(-2, args.runtime_rounds):
-                    order = [*names, 'identical-control']
-                    rng.shuffle(order)
-                    row = {'block': block, 'warmup': block < 0, 'order': order, 'seconds': {}, 'noise_before': noise(args.cpu)}
-                    for name in order:
-                        binary = control if name == 'identical-control' else Path(detail['builds'][name]['binary'])
-                        argv, stdin = invocation(app, bench['name'], binary)
-                        proc, seconds = run(argv, 'runtime-timing', stdin=stdin)
-                        assert proc.stdout.decode() == detail['expected'][bench['name']], (app, bench['name'], name)
-                        row['seconds'][name] = seconds
-                    row['noise_after'] = noise(args.cpu)
-                    rows.append(row)
-                    save()
-                    print('runtime', app, bench['name'], block, flush=True)
-        for app in chosen_apps:
-            detail = report['apps'][app]
-            detail['summary'] = {'compile': {}, 'runtime': {}}
-            for stage, batches in [('compile', detail['compile']), ('runtime', detail['runtime'])]:
-                for boundary, rows in batches.items():
-                    rows = [r for r in rows if not r['warmup']]
-                    detail['summary'][stage][boundary] = {
-                        name: {'seconds_median': statistics.median(r['seconds'][name] for r in rows),
-                               'time_over_clang_O2': interval([r['seconds'][name] / r['seconds']['clang-O2'] for r in rows])}
-                        for name in rows[0]['seconds']}
+            detail['summary'] = {}
+            for boundary, rows in detail['compile'].items():
+                rows = [r for r in rows if not r['warmup']]
+                detail['summary'][boundary] = {
+                    name: {'seconds_median': statistics.median(r['seconds'][name] for r in rows),
+                           'time_over_clang_O2_median': statistics.median(
+                               r['seconds'][name] / r['seconds']['clang-O2'] for r in rows)}
+                    for name in rows[0]['seconds']}
             for name, build in detail['builds'].items():
                 if build['status'] in ['built', 'incorrect']:
                     assert sha(build['binary']) == build['sha256']

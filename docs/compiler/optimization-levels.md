@@ -80,21 +80,21 @@ presets override the invocation pipeline and optional native selection.
 
 ## Measurement
 
-The native application runner compares the presets and a selector and
-allocator matrix with the IR pipeline held at `-O2`:
+The native application runner checks and compares the compile time of the
+presets and a selector and allocator matrix with the IR pipeline held at `-O2`:
 
 ```sh
 cargo build --release -p keel
-python3 suite/c/benchmark_platforms.py --root . --work /tmp/keel-levels \
-  --keel target/release/keel --apps lua --optimization-matrix \
-  --compile-rounds 5 --runtime-rounds 7
+python3 suite/c/benchmark_platforms.py --root . --work target/keel-levels \
+  --keel target/release/keel --apps lua --optimization-matrix --compile-rounds 5
 ```
 
 `--experimental-allocators` adds the experimental allocators and needs a
 compiler built with `--features experimental-regalloc`. `--configs` selects
 named cases and must keep `clang-O2` as the correctness and timing reference.
 `--cpu` pins subprocesses on Linux. The runner checks outputs against Clang
-before timing.
+before timing. Compare the runtime of two compilers with `cargo suite ab`
+(see the [suite guide](../../suite/README.md#timing-two-compilers)).
 
 For in-process stage timings:
 
