@@ -155,9 +155,11 @@ fn direct_signed_output_matches_buffered_and_failure_preserves_destination() {
     assert_eq!(signed, std::fs::read(&new).unwrap());
 
     assert!(
-        !std::fs::read_dir(&root)
+        !std::fs::read_dir(&root).unwrap().any(|p| p
             .unwrap()
-            .any(|p| p.unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp"))
     );
     std::fs::remove_dir_all(root).unwrap();
 }
