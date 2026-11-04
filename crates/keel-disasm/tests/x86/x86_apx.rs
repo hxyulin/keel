@@ -66,8 +66,11 @@ fn rex2_independent_oracles_and_addressing() {
     fs::write(&input, source).unwrap();
     for gnu in [false, true] {
         let mut command = if gnu {
-            let mut command =
-                Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut command = gnu.command();
             command.arg("--64");
             command
         } else {

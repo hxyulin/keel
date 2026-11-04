@@ -472,6 +472,7 @@ version = "0.1.0"
 dependencies = [
  "keel-asm",
  "keel-asm-ir",
+ "keel-test-support",
  "object",
 ]
 

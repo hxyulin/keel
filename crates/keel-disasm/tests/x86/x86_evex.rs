@@ -64,7 +64,11 @@ fn evex_oracles_and_att_decorators() {
     fs::write(&input, source).unwrap();
     for gnu in [false, true] {
         let mut cmd = if gnu {
-            let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut c = gnu.command();
             c.arg("--64");
             c
         } else {
@@ -159,7 +163,9 @@ fn oracle(source: &str, tag: &str, gnu: bool) -> Vec<u8> {
     let input = dir.join("input.s");
     fs::write(&input, source).unwrap();
     let mut command = if gnu {
-        let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+        let mut c = keel_test_support::gnu_as()
+            .expect("callers check for GNU as")
+            .command();
         c.arg("--64");
         c
     } else {
@@ -232,6 +238,10 @@ fn generated_sources_match_clang_and_gnu() {
             source += &format!("w{n}: {case}\n");
         }
         for gnu in [false, true] {
+            if gnu && keel_test_support::gnu_as().is_none() {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            }
             let raw = oracle(&source, &format!("generated-{syntax:?}"), gnu);
             let object = object::File::parse(raw.as_slice()).unwrap();
             let bytes = object.section_by_name(".text").unwrap().data().unwrap();
@@ -434,7 +444,11 @@ fn evex_pc_relative_relocation_addends_include_trailing_immediates() {
     fs::write(&input, source).unwrap();
     for gnu in [false, true] {
         let mut cmd = if gnu {
-            let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut c = gnu.command();
             c.arg("--64");
             c
         } else {
@@ -568,6 +582,10 @@ fn evex_dq_bw_cd_independent_bytes_and_decode_roundtrips() {
         expected.extend(bytes);
     }
     for gnu in [false, true] {
+        if gnu && keel_test_support::gnu_as().is_none() {
+            keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+            continue;
+        }
         assert_eq!(
             text(&oracle(&source, "dq-bw-cd", gnu)),
             expected,
@@ -597,6 +615,10 @@ fn evex_dq_bw_cd_independent_bytes_and_decode_roundtrips() {
         assert_eq!(encode(att, Syntax::Att), bytes, "{att}");
         let source = format!(".att_syntax\n.text\n{att}\n");
         for gnu in [false, true] {
+            if gnu && keel_test_support::gnu_as().is_none() {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            }
             assert_eq!(
                 text(&oracle(&source, "dq-bw-cd-att", gnu)),
                 bytes,
