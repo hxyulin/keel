@@ -23,6 +23,11 @@ const TINY: Pools = Pools {
 /// x86-64-v3 features beyond the baseline, for `-march=x86-64-v3` programs.
 const V3_FEATURES: [&str; 7] = ["avx", "avx2", "bmi1", "bmi2", "fma", "lzcnt", "movbe"];
 const BAD_TAIL: &str = "unsigned long long __wrap_tail_gp_0_0(void) { return 0; }\n";
+/// The value checks' report for the constant-return tail: each of the three
+/// direct reverse checks sees 0 instead of its expected value.
+const BAD_TAIL_OUTPUT: &str = "FAIL gp direct reverse: 0 != f7b2d4c736695458\n\
+    FAIL gp direct reverse: 0 != 21c5bdd671365ab8\n\
+    FAIL gp direct reverse: 0 != 412e2ae342947e18\n";
 
 #[test]
 fn compatible_tail_packet() {
@@ -171,6 +176,7 @@ fn compatible_tail_packet() {
                                     "program",
                                 ])
                                 .exit(1)
+                                .stdout(BAD_TAIL_OUTPUT)
                                 .check();
                         }
                     }
