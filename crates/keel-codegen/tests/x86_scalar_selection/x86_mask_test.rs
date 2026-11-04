@@ -1,16 +1,10 @@
 //! Literal i32 AND/zero tests: register-only, ZF-only, allocation-visible leaves.
+use crate::codegen::{Case, EMPTY};
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
-    CodegenPipeline, InstructionSelector, SelectionTier,
+    InstructionSelector, SelectionTier,
     regalloc::{AllocationTier, Constraint, OperandKind, Pools, ValuePart},
     select::{Selection, Target},
-    x86_features::FeatureSelector,
-};
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 const ONE: Pools = Pools {
     caller_saved: &[7],
@@ -61,37 +55,16 @@ fn compile_module(
     features: Features,
 ) -> (String, Vec<u8>) {
     keel_ir::verify_module(m).unwrap();
-    let selector = FeatureSelector { inner: s, features };
-    let p = CodegenPipeline {
-        selector: &selector,
-        allocator: &a,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &p).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &p).unwrap();
-    let mut chunks = keel_asm_ir::Program::default();
-    keel_codegen::x86_64::compile_program_chunks_with_pipeline(m, pools, &p, &mut |p| {
-        chunks.items.extend(p.items)
-    })
-    .unwrap();
-    for p in [&program, &chunks] {
-        assert_eq!(p.stats().text_bytes, 0);
-        for item in &p.items {
-            if let keel_asm_ir::Item::X86Instruction(i) = item {
-                assert!(features.contains(i.required_features()), "{i}");
-            }
-        }
-    }
-    let obj = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
-    assert_eq!(
-        obj,
-        keel_asm::x86::assemble_program_object_with_features(&chunks, features).unwrap()
-    );
-    assert_eq!(
-        obj,
-        keel_asm::x86::assemble_object_with_features(&text, features).unwrap(),
-        "{text}"
-    );
-    (text, obj)
+    let out = Case::x86(m)
+        .selector(s)
+        .allocator(&a)
+        .pools(pools)
+        .features(features)
+        .chunks()
+        .no_text_fallback()
+        .within_features()
+        .compile();
+    (out.text, out.object)
 }
 fn tests(text: &str) -> Vec<&str> {
     text.lines()
@@ -110,30 +83,24 @@ fn masks_consumers_live_sources_and_all_pipelines() {
             for consumer in ["bool", "branch", "select"] {
                 for live in [false, true] {
                     let src = source("f", mask, cc, consumer, live);
-                    for s in [
-                        SelectionTier::Baseline,
-                        SelectionTier::Trees,
-                        SelectionTier::Full,
-                    ] {
-                        for a in [AllocationTier::Fast, AllocationTier::Full] {
-                            for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                                for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
-                                    let (text, _) =
-                                        compile(&src, &s, a, pools, Features::for_level(level));
-                                    assert_eq!(tests(&text).len(), 1, "{s:?} {a:?}: {text}");
-                                    assert!(!text.contains("\tand\t"), "{text}");
-                                    let test = tests(&text)[0];
-                                    assert!(
-                                        test.contains('e') || test.contains("d,"),
-                                        "i32 register: {test}"
-                                    );
-                                    if consumer == "select" {
-                                        assert!(text.contains("\tcmov"), "{text}");
-                                    }
-                                    if consumer != "bool" {
-                                        assert!(!text.contains("\tset"), "{text}");
-                                    }
-                                }
+                    for (s, a, pools) in crate::codegen::matrix(
+                        &crate::codegen::SELECTIONS,
+                        &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
+                    ) {
+                        for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
+                            let (text, _) = compile(&src, &s, a, pools, Features::for_level(level));
+                            assert_eq!(tests(&text).len(), 1, "{s:?} {a:?}: {text}");
+                            assert!(!text.contains("\tand\t"), "{text}");
+                            let test = tests(&text)[0];
+                            assert!(
+                                test.contains('e') || test.contains("d,"),
+                                "i32 register: {test}"
+                            );
+                            if consumer == "select" {
+                                assert!(text.contains("\tcmov"), "{text}");
+                            }
+                            if consumer != "bool" {
+                                assert!(!text.contains("\tset"), "{text}");
                             }
                         }
                     }
@@ -296,25 +263,20 @@ fn signed_byte_source(name: &str, cc: &str, consumer: &str) -> String {
 fn signed_byte_cover_and_mask_test_compose_at_all_roots() {
     for consumer in ["bool", "branch", "select"] {
         let src = signed_byte_source("f", "eq", consumer);
-        for s in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for a in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                    let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
-                    assert_eq!(tests(&text).len(), 1, "{text}");
-                    assert!(!text.contains("\tand\t"), "{text}");
-                    assert_eq!(
-                        text.lines()
-                            .filter(|l| l.starts_with("\tmovsx\t") && l.contains("byte ptr"))
-                            .count(),
-                        1,
-                        "{text}"
-                    );
-                }
-            }
+        for (s, a, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
+            assert_eq!(tests(&text).len(), 1, "{text}");
+            assert!(!text.contains("\tand\t"), "{text}");
+            assert_eq!(
+                text.lines()
+                    .filter(|l| l.starts_with("\tmovsx\t") && l.contains("byte ptr"))
+                    .count(),
+                1,
+                "{text}"
+            );
         }
     }
 }
@@ -345,20 +307,14 @@ fn resolved_source_aliases_transfer_to_each_allocation_root() {
             .replace("and v0, v3", "and v3, v20");
         let mut m = keel_ir::parse(&src).unwrap();
         alias_source(&mut m);
-        for s in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for a in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                    let (text, _) =
-                        compile_module(&m, &s, a, pools, Features::for_level(CpuLevel::V1));
-                    assert_eq!(tests(&text).len(), 1, "{text}");
-                    assert!(!text.contains("\tand\t"), "{text}");
-                    assert_eq!(text.contains("\tset"), consumer == "bool", "{text}");
-                }
-            }
+        for (s, a, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (text, _) = compile_module(&m, &s, a, pools, Features::for_level(CpuLevel::V1));
+            assert_eq!(tests(&text).len(), 1, "{text}");
+            assert!(!text.contains("\tand\t"), "{text}");
+            assert_eq!(text.contains("\tset"), consumer == "bool", "{text}");
         }
     }
 }
@@ -591,17 +547,12 @@ fn aliased_select_arm_nonadjacent_consumer_and_constant_source() {
             .replace("and v0, v3", "and v11, v3")
             .replace("icmp.eq v4, v9", "icmp.eq v4, v11"),
     ] {
-        for s in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for a in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                    let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
-                    assert_eq!(tests(&text).len(), 1, "{text}");
-                }
-            }
+        for (s, a, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
+            assert_eq!(tests(&text).len(), 1, "{text}");
         }
     }
     for ty in ["i8", "i16"] {

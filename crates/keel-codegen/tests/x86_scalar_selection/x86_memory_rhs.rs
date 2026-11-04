@@ -1,18 +1,13 @@
 //! Bounded adjacent integer memory RHS covers. Native C is an independent
 //! semantic oracle; ARM runs validate the fallback/oracle, not x86 execution.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, OptionsSelector, SelectionOptions,
+    OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
     select::{Selection, Target},
 };
 use object::{Object, ObjectSection};
 
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 const ONE: Pools = Pools {
     caller_saved: &[7],
     ..SPILLED
@@ -51,19 +46,12 @@ fn compile(
     alloc: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let pipeline = CodegenPipeline {
-        selector: &OptionsSelector(options),
-        allocator: alloc,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(
-        object,
-        keel_asm::x86::assemble_object(&text).unwrap(),
-        "{text}"
-    );
-    (text, object)
+    let out = Case::x86(m)
+        .selector(&OptionsSelector(options))
+        .allocator(alloc)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 fn folded(m: &keel_ir::Module) -> bool {
     let f = &m.functions[0];
@@ -592,7 +580,7 @@ fn native_independent_c_oracle_arithmetic_normalization_compares_and_fault_order
                 2 => &one,
                 _ => &keel_codegen::aarch64::REGISTERS,
             };
-            let pipeline = CodegenPipeline {
+            let pipeline = keel_codegen::CodegenPipeline {
                 selector: &OptionsSelector(options),
                 allocator,
             };

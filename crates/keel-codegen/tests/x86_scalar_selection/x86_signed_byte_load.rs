@@ -1,18 +1,12 @@
 //! Exact ordinary m8 -> signed i32 selection, allocation and native oracle.
+use crate::codegen::{Case, EMPTY};
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
-    x86_features::FeatureSelector,
 };
 use keel_test_support::native_program;
 use std::fs;
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 const TINY: Pools = Pools {
     caller_saved: &[7],
     callee_saved: &[],
@@ -34,40 +28,16 @@ fn compile(
     pools: &Pools,
     features: Features,
 ) -> (String, Vec<u8>) {
-    let m = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let selector = FeatureSelector {
-        inner: &sel,
-        features,
-    };
-    let p = CodegenPipeline {
-        selector: &selector,
-        allocator: &alloc,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &p).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &p).unwrap();
-    let mut chunks = keel_asm_ir::Program::default();
-    keel_codegen::x86_64::compile_program_chunks_with_pipeline(&m, pools, &p, &mut |part| {
-        chunks.items.extend(part.items)
-    })
-    .unwrap();
-    for part in [&program, &chunks] {
-        for item in &part.items {
-            if let keel_asm_ir::Item::X86Instruction(i) = item {
-                assert!(features.contains(i.required_features()), "{i}");
-            }
-        }
-    }
-    let obj = keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
-    assert_eq!(
-        keel_asm::x86::assemble_program_object_with_features(&chunks, features).unwrap(),
-        obj
-    );
-    assert_eq!(
-        keel_asm::x86::assemble_object_with_features(&text, features).unwrap(),
-        obj
-    );
-    (text, obj)
+    let m = crate::codegen::parse(src);
+    let out = Case::x86(&m)
+        .selector(&sel)
+        .allocator(&alloc)
+        .pools(pools)
+        .features(features)
+        .chunks()
+        .within_features()
+        .compile();
+    (out.text, out.object)
 }
 fn fused(text: &str) -> usize {
     text.lines()
@@ -77,57 +47,52 @@ fn fused(text: &str) -> usize {
 #[test]
 fn exact_shape_and_negative_gates() {
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
-                    let features = Features::for_level(level);
-                    let text = compile(SOURCE, sel, alloc, pools, features).0;
-                    assert_eq!(fused(&text), 1, "{text}");
-                    for src in [
-                        SOURCE.replace("load.i8 align", "load.i8 volatile align"),
-                        SOURCE.replace("load.i8 align 1", "atomic_load.i8 acquire"),
-                        SOURCE.replace("load.i8", "load.i16"),
-                        SOURCE
-                            .replace("load.i8", "load.i32")
-                            .replace("sext.i32", "sext.i64"),
-                        SOURCE.replace("sext.i32", "sext.i64"),
-                        SOURCE.replace("sext.i32", "uext.i32"),
-                        SOURCE.replace(" v3 =", " fence seq_cst\n v3 ="),
-                        SOURCE.replace(" v3 =", " store v2,v1\n v3 ="),
-                        SOURCE.replace(" v3 =", " v4 = load.i8 v1\n v3 ="),
-                        SOURCE.replace(" v3 =", " call @clobber()\n v3 =").replacen(
-                            "func",
-                            "decl @clobber()\nfunc",
-                            1,
-                        ),
-                        SOURCE.replace(" v3 =", " v4 = iconst.i64 2\n v5 = iadd v4,v4\n v3 ="),
-                        SOURCE.replace(" return", " store v2,v1\n return"),
-                        SOURCE.replace(
-                            " v3 =",
-                            " x86_rflags_region terminal \"save; reapply; normal\"()\n v3 =",
-                        ),
-                        SOURCE.replace(" v3 =", " v4 = iconst.i64 7\n v5 = sdiv v4,v4\n v3 ="),
-                        SOURCE
-                            .replace(" v3 =", " jump block1(v2)\nblock1(v4:i8):\n v3 =")
-                            .replace("sext.i32 v2", "sext.i32 v4"),
-                    ] {
-                        assert_eq!(
-                            fused(&compile(&src, sel, alloc, pools, features).0),
-                            0,
-                            "{src}"
-                        );
-                    }
-                    let constants = SOURCE.replace(" v3 =", " v4 = iconst.i32 7\n v3 =");
-                    assert_eq!(
-                        fused(&compile(&constants, sel, alloc, pools, features).0),
-                        1
-                    );
-                }
+        for (sel, alloc, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY],
+        ) {
+            let features = Features::for_level(level);
+            let text = compile(SOURCE, sel, alloc, pools, features).0;
+            assert_eq!(fused(&text), 1, "{text}");
+            for src in [
+                SOURCE.replace("load.i8 align", "load.i8 volatile align"),
+                SOURCE.replace("load.i8 align 1", "atomic_load.i8 acquire"),
+                SOURCE.replace("load.i8", "load.i16"),
+                SOURCE
+                    .replace("load.i8", "load.i32")
+                    .replace("sext.i32", "sext.i64"),
+                SOURCE.replace("sext.i32", "sext.i64"),
+                SOURCE.replace("sext.i32", "uext.i32"),
+                SOURCE.replace(" v3 =", " fence seq_cst\n v3 ="),
+                SOURCE.replace(" v3 =", " store v2,v1\n v3 ="),
+                SOURCE.replace(" v3 =", " v4 = load.i8 v1\n v3 ="),
+                SOURCE.replace(" v3 =", " call @clobber()\n v3 =").replacen(
+                    "func",
+                    "decl @clobber()\nfunc",
+                    1,
+                ),
+                SOURCE.replace(" v3 =", " v4 = iconst.i64 2\n v5 = iadd v4,v4\n v3 ="),
+                SOURCE.replace(" return", " store v2,v1\n return"),
+                SOURCE.replace(
+                    " v3 =",
+                    " x86_rflags_region terminal \"save; reapply; normal\"()\n v3 =",
+                ),
+                SOURCE.replace(" v3 =", " v4 = iconst.i64 7\n v5 = sdiv v4,v4\n v3 ="),
+                SOURCE
+                    .replace(" v3 =", " jump block1(v2)\nblock1(v4:i8):\n v3 =")
+                    .replace("sext.i32 v2", "sext.i32 v4"),
+            ] {
+                assert_eq!(
+                    fused(&compile(&src, sel, alloc, pools, features).0),
+                    0,
+                    "{src}"
+                );
             }
+            let constants = SOURCE.replace(" v3 =", " v4 = iconst.i32 7\n v3 =");
+            assert_eq!(
+                fused(&compile(&constants, sel, alloc, pools, features).0),
+                1
+            );
         }
     }
 }
@@ -403,21 +368,14 @@ fn symbolic_stack_address_and_resolved_input_alias() {
             .replace("align 1 v0", "align 1 v4"),
     ];
     for src in sources {
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
-                    assert_eq!(
-                        fused(
-                            &compile(&src, sel, alloc, pools, Features::for_level(CpuLevel::V1)).0
-                        ),
-                        1
-                    );
-                }
-            }
+        for (sel, alloc, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&keel_codegen::x86_64::REGISTERS, &EMPTY],
+        ) {
+            assert_eq!(
+                fused(&compile(&src, sel, alloc, pools, Features::for_level(CpuLevel::V1)).0),
+                1
+            );
         }
     }
     let mut m = keel_ir::parse(

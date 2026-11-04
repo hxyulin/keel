@@ -1,12 +1,12 @@
 //! C leaves may omit their frame only when the stack and its observers are absent.
+use crate::codegen::{Case, EMPTY};
 use keel_asm_ir::{
     Cfi, Directive, Item,
     x86::{CpuLevel, Features},
 };
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
-    x86_features::FeatureSelector,
 };
 use keel_ir::EntityRef;
 use object::{Object, ObjectSection};
@@ -17,12 +17,6 @@ block0(v0: i64):
  v2 = iadd v0, v1
  return v2
 }";
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 
 fn compile(
     src: &str,
@@ -31,27 +25,20 @@ fn compile(
     pools: &Pools,
     wide: bool,
 ) -> (String, Vec<u8>, Vec<Cfi>) {
-    let module = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let selector = FeatureSelector {
-        inner: &tier,
-        features: Features::for_level(if wide { CpuLevel::V3 } else { CpuLevel::V1 }),
-    };
-    let pipeline = CodegenPipeline {
-        selector: &selector,
-        allocator: alloc,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-    assert_eq!(program.stats().text_bytes, 0);
-    let bytes =
-        keel_asm::x86::assemble_program_object_with_features(&program, selector.features).unwrap();
-    assert_eq!(
-        bytes,
-        keel_asm::x86::assemble_object_with_features(&text, selector.features).unwrap()
-    );
-    let cfi = program
+    let module = crate::codegen::parse(src);
+    let out = Case::x86(&module)
+        .selector(&tier)
+        .allocator(alloc)
+        .pools(pools)
+        .features(Features::for_level(if wide {
+            CpuLevel::V3
+        } else {
+            CpuLevel::V1
+        }))
+        .no_text_fallback()
+        .compile();
+    let cfi = out
+        .program
         .items
         .iter()
         .filter_map(|item| match item {
@@ -59,7 +46,7 @@ fn compile(
             _ => None,
         })
         .collect();
-    (text, bytes, cfi)
+    (out.text, out.object, cfi)
 }
 
 fn assert_leaf(text: &str, bytes: &[u8], cfi: &[Cfi]) {
@@ -244,9 +231,7 @@ block1(v4:{ty},v5:{ty}):
             #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
             if !wide || std::is_x86_feature_detected!("avx2") {
                 use std::{fs, process::Command};
-                let dir = std::env::temp_dir()
-                    .join(format!("keel-leaf-{}-{wide}-{spilled}", std::process::id()));
-                fs::create_dir_all(&dir).unwrap();
+                let dir = keel_test_support::TempDir::new(&format!("leaf-{wide}-{spilled}"));
                 fs::write(dir.join("cycle.o"), bytes).unwrap();
                 fs::write(
                     dir.join("main.c"),
@@ -278,7 +263,6 @@ block1(v4:{ty},v5:{ty}):
                     Command::new(dir.join("run")).status().unwrap().success(),
                     "{text}"
                 );
-                fs::remove_dir_all(dir).unwrap();
             }
         }
     }

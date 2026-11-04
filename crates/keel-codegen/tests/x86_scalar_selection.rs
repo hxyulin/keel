@@ -1,4 +1,7 @@
 //! x86-64 scalar instruction selection: memory operands, addressing, compares, branches and division.
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 #[path = "x86_scalar_selection/x86_brif_fallthrough.rs"]
 mod x86_brif_fallthrough;
 #[path = "x86_scalar_selection/x86_c_leaf.rs"]

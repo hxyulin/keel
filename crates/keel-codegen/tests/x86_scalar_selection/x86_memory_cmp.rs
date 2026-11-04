@@ -1,15 +1,9 @@
 //! Adjacent ordinary loads selected into CMP, with allocation-visible addresses.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
     select::{Selection, Target as SelectTarget},
-};
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 
 fn source(condition: &str) -> String {
@@ -49,19 +43,13 @@ fn compile(
     alloc: AllocationTier,
     pools: &Pools,
 ) -> String {
-    let pipeline = CodegenPipeline {
-        selector: &tier,
-        allocator: &alloc,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    assert_eq!(program.stats().text_bytes, 0);
-    assert_eq!(
-        keel_asm::x86::assemble_program_object(&program).unwrap(),
-        keel_asm::x86::assemble_object(&text).unwrap(),
-        "{text}"
-    );
-    text
+    Case::x86(m)
+        .selector(&tier)
+        .allocator(&alloc)
+        .pools(pools)
+        .no_text_fallback()
+        .compile()
+        .text
 }
 
 #[test]
@@ -69,22 +57,17 @@ fn exact_width_flags_conditions_edges_and_spilled_addresses() {
     for cc in [
         "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge",
     ] {
-        for tier in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
-            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&SPILLED, &keel_codegen::x86_64::REGISTERS] {
-                    let m = module(&source(cc));
-                    let text = compile(&m, tier, alloc, pools);
-                    assert_eq!(
-                        memory_compares(&text),
-                        usize::from(tier != SelectionTier::Baseline),
-                        "{text}"
-                    );
-                }
-            }
+        for (tier, alloc, pools) in crate::codegen::matrix(
+            &crate::codegen::SELECTIONS,
+            &[&SPILLED, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let m = module(&source(cc));
+            let text = compile(&m, tier, alloc, pools);
+            assert_eq!(
+                memory_compares(&text),
+                usize::from(tier != SelectionTier::Baseline),
+                "{text}"
+            );
         }
     }
     // `notrap` is not required: the original exact eight-byte read still occurs.

@@ -1,14 +1,8 @@
 //! Branch inversion must skip only edges whose copies are all no-ops.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},
-};
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 
 fn source(ty: &str, edges: bool, same: bool) -> String {
@@ -62,36 +56,22 @@ fn compile(
     alloc: AllocationTier,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let module = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &tier,
-        allocator: &alloc,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-    assert_eq!(program.stats().text_bytes, 0, "no opaque text fallback");
-    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(
-        object,
-        keel_asm::x86::assemble_object(&text).unwrap(),
-        "{text}"
-    );
-    (text, object)
+    let module = crate::codegen::parse(src);
+    let out = Case::x86(&module)
+        .selector(&tier)
+        .allocator(&alloc)
+        .pools(pools)
+        .no_text_fallback()
+        .compile();
+    (out.text, out.object)
 }
 
 fn matrix(mut f: impl FnMut(SelectionTier, AllocationTier, &Pools)) {
-    for tier in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
-        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&SPILLED, &keel_codegen::x86_64::REGISTERS] {
-                f(tier, alloc, pools);
-            }
-        }
+    for (tier, alloc, pools) in crate::codegen::matrix(
+        &crate::codegen::SELECTIONS,
+        &[&SPILLED, &keel_codegen::x86_64::REGISTERS],
+    ) {
+        f(tier, alloc, pools);
     }
 }
 
@@ -362,9 +342,7 @@ fn allocator_only_edge_transfers_are_not_lost_or_moved_to_the_other_edge() {
             #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
             {
                 use std::{fs, process::Command};
-                let dir =
-                    std::env::temp_dir().join(format!("keel-edge-transfer-{}", std::process::id()));
-                fs::create_dir_all(&dir).unwrap();
+                let dir = keel_test_support::TempDir::new("edge-transfer");
                 fs::write(
                     dir.join("test.o"),
                     keel_asm::x86::assemble_program_object(&program).unwrap(),
@@ -383,7 +361,6 @@ fn allocator_only_edge_transfers_are_not_lost_or_moved_to_the_other_edge() {
                         .success()
                 );
                 assert!(Command::new(dir.join("run")).status().unwrap().success());
-                fs::remove_dir_all(dir).unwrap();
             }
         }
     }
@@ -501,8 +478,7 @@ block2:
     c += &format!(
         "int main(void) {{ __uint128_t values[]={{0,1,255,256,65536,((__uint128_t)1)<<64,~(__uint128_t)0}}; for(int i=0;i<7;i++) for(int j=0;j<7;j++) {{ {checks} }} }}"
     );
-    let dir = std::env::temp_dir().join(format!("keel-x86-brif-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("x86-brif");
     fs::write(dir.join("oracle.c"), c).unwrap();
     // The oracle is immutable; compile it once and link each image.
     assert!(
@@ -551,5 +527,4 @@ block2:
         );
         assert!(Command::new(dir.join("test")).status().unwrap().success());
     });
-    fs::remove_dir_all(dir).unwrap();
 }

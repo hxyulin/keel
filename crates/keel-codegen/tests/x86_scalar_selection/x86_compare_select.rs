@@ -1,13 +1,8 @@
 //! Compare/consumer fusion must preserve NaNs, operand lifetimes and spills.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
-};
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 const ONE: Pools = Pools {
     caller_saved: &[7],
@@ -19,21 +14,13 @@ fn compile(
     allocation: AllocationTier,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let m = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let p = CodegenPipeline {
-        selector: &selection,
-        allocator: &allocation,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &p).unwrap();
-    let prog = keel_codegen::x86_64::compile_program_with_pipeline(&m, pools, &p).unwrap();
-    let object = keel_asm::x86::assemble_program_object(&prog).unwrap();
-    assert_eq!(
-        object,
-        keel_asm::x86::assemble_object(&text).unwrap(),
-        "{text}"
-    );
-    (text, object)
+    let m = crate::codegen::parse(src);
+    let out = Case::x86(&m)
+        .selector(&selection)
+        .allocator(&allocation)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 fn select(name: &str, ty: &str, cmp: &str, shared: bool) -> String {
     format!(
@@ -58,17 +45,16 @@ fn adjacent_single_use_compare_selects_keep_flags_without_boolean() {
         } else {
             "icmp.slt"
         };
-        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                    let (text, _) = compile(&select("f", ty, cmp, false), sel, alloc, pools);
-                    assert!(text.contains("\tcmov"), "{text}");
-                    if ty.starts_with('i') {
-                        assert!(!text.contains("\tset"), "{text}");
-                    }
-                    assert!(!text.contains("\ttest\t"), "{text}");
-                }
+        for (sel, alloc, pools) in crate::codegen::matrix(
+            &[SelectionTier::Baseline, SelectionTier::Full],
+            &[&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (text, _) = compile(&select("f", ty, cmp, false), sel, alloc, pools);
+            assert!(text.contains("\tcmov"), "{text}");
+            if ty.starts_with('i') {
+                assert!(!text.contains("\tset"), "{text}");
             }
+            assert!(!text.contains("\ttest\t"), "{text}");
         }
     }
 }
@@ -85,15 +71,14 @@ block0(v0: {ty}):
  return v4
 }}"
         );
-        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-            for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                    let (text, _) = compile(&src, sel, alloc, pools);
-                    assert!(text.contains("\tcmovl\t"), "{text}");
-                    assert!(!text.contains("\tsetl\t"), "{text}");
-                    assert!(!text.contains("\ttest\t"), "{text}");
-                }
-            }
+        for (sel, alloc, pools) in crate::codegen::matrix(
+            &[SelectionTier::Baseline, SelectionTier::Full],
+            &[&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (text, _) = compile(&src, sel, alloc, pools);
+            assert!(text.contains("\tcmovl\t"), "{text}");
+            assert!(!text.contains("\tsetl\t"), "{text}");
+            assert!(!text.contains("\ttest\t"), "{text}");
         }
     }
 }
@@ -299,22 +284,21 @@ block0(v0: i{bits}):
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS] {
-                let (_, obj) = compile(&ir, sel, alloc, pools);
-                fs::write(dir.join("test.o"), obj).unwrap();
-                let out = Command::new("clang")
-                    .arg(dir.join("oracle.o"))
-                    .arg(dir.join("test.o"))
-                    .arg("-o")
-                    .arg(dir.join("test"))
-                    .output()
-                    .unwrap();
-                assert!(out.status.success(), "{out:?}");
-                let out = Command::new(dir.join("test")).output().unwrap();
-                assert!(out.status.success(), "{sel:?} {alloc:?}: {out:?}");
-            }
-        }
+    for (sel, alloc, pools) in crate::codegen::matrix(
+        &[SelectionTier::Baseline, SelectionTier::Full],
+        &[&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS],
+    ) {
+        let (_, obj) = compile(&ir, sel, alloc, pools);
+        fs::write(dir.join("test.o"), obj).unwrap();
+        let out = Command::new("clang")
+            .arg(dir.join("oracle.o"))
+            .arg(dir.join("test.o"))
+            .arg("-o")
+            .arg(dir.join("test"))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let out = Command::new(dir.join("test")).output().unwrap();
+        assert!(out.status.success(), "{sel:?} {alloc:?}: {out:?}");
     }
 }

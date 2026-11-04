@@ -2,16 +2,10 @@
 //! replace `idiv`/`div`, while divisors that trap or are 1 keep the
 //! hardware path and its checks.
 
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
-};
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 
 const WIDTHS: [u32; 4] = [8, 16, 32, 64];
@@ -24,15 +18,12 @@ fn compile(
     pools: &Pools,
 ) -> (String, Vec<u8>) {
     keel_ir::verify_module(m).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &selection,
-        allocator: &allocation,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
-    (text, object)
+    let out = Case::x86(m)
+        .selector(&selection)
+        .allocator(&allocation)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 fn mask(width: u32) -> u64 {
@@ -145,18 +136,17 @@ fn constant_divisors_avoid_hardware_division() {
         for op in OPS {
             for imm in divisors(width) {
                 let m = keel_ir::parse(&single("f", width, op, imm)).unwrap();
-                for selection in [SelectionTier::Baseline, SelectionTier::Full] {
-                    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                        for pools in [&SPILLED, &keel_codegen::x86_64::REGISTERS] {
-                            let (text, _) = compile(&m, selection, allocation, pools);
-                            let hardware = text.contains("\tidiv\t") || text.contains("\tdiv\t");
-                            assert_eq!(
-                                hardware,
-                                !reduced(width, op, imm),
-                                "i{width} {op} {imm}\n{text}"
-                            );
-                        }
-                    }
+                for (selection, allocation, pools) in crate::codegen::matrix(
+                    &[SelectionTier::Baseline, SelectionTier::Full],
+                    &[&SPILLED, &keel_codegen::x86_64::REGISTERS],
+                ) {
+                    let (text, _) = compile(&m, selection, allocation, pools);
+                    let hardware = text.contains("\tidiv\t") || text.contains("\tdiv\t");
+                    assert_eq!(
+                        hardware,
+                        !reduced(width, op, imm),
+                        "i{width} {op} {imm}\n{text}"
+                    );
                 }
             }
         }
@@ -265,8 +255,7 @@ fn native_constant_division_matches_c_oracle() {
     c += "} return 3; }\n";
     c += &checks;
     c += "return 0; }\n";
-    let dir = std::env::temp_dir().join(format!("keel-x86-const-div-{}", std::process::id()));
-    fs::create_dir(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("x86-const-div");
     fs::write(dir.join("oracle.c"), &c).unwrap();
     // The oracle is large and invariant: compile it once, link per config.
     let driver = Command::new("clang")
@@ -285,38 +274,36 @@ fn native_constant_division_matches_c_oracle() {
     ] {
         let mut m = keel_ir::parse(&ir).unwrap();
         keel_opt::optimize_with_tier(&mut m, tier).unwrap();
-        for selection in [SelectionTier::Baseline, SelectionTier::Full] {
-            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                for pools in [&SPILLED, &keel_codegen::x86_64::REGISTERS] {
-                    let (_, object) = compile(&m, selection, allocation, pools);
-                    fs::write(dir.join("test.o"), object).unwrap();
-                    let link = Command::new("clang")
-                        .arg(dir.join("oracle.o"))
-                        .arg(dir.join("test.o"))
-                        .arg("-o")
-                        .arg(dir.join("test"))
-                        .output()
-                        .unwrap();
-                    assert!(link.status.success(), "{link:?}");
-                    let out = Command::new(dir.join("test")).output().unwrap();
-                    let context = format!("{tier:?} {selection:?} {allocation:?}");
-                    assert!(out.status.success(), "{context}: {out:?}");
-                    for (case, call) in traps.iter().enumerate() {
-                        let out = Command::new(dir.join("test"))
-                            .arg(case.to_string())
-                            .output()
-                            .unwrap();
-                        assert_eq!(
-                            out.status.signal(),
-                            Some(4),
-                            "case {case} ({call}) {context}: {out:?}"
-                        );
-                    }
-                }
+        for (selection, allocation, pools) in crate::codegen::matrix(
+            &[SelectionTier::Baseline, SelectionTier::Full],
+            &[&SPILLED, &keel_codegen::x86_64::REGISTERS],
+        ) {
+            let (_, object) = compile(&m, selection, allocation, pools);
+            fs::write(dir.join("test.o"), object).unwrap();
+            let link = Command::new("clang")
+                .arg(dir.join("oracle.o"))
+                .arg(dir.join("test.o"))
+                .arg("-o")
+                .arg(dir.join("test"))
+                .output()
+                .unwrap();
+            assert!(link.status.success(), "{link:?}");
+            let out = Command::new(dir.join("test")).output().unwrap();
+            let context = format!("{tier:?} {selection:?} {allocation:?}");
+            assert!(out.status.success(), "{context}: {out:?}");
+            for (case, call) in traps.iter().enumerate() {
+                let out = Command::new(dir.join("test"))
+                    .arg(case.to_string())
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    out.status.signal(),
+                    Some(4),
+                    "case {case} ({call}) {context}: {out:?}"
+                );
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 fn remainder_pair(name: &str, ty: &str, op: &str, gap: bool) -> String {
@@ -413,29 +400,28 @@ fn native_remainder_reuse_matches_c_and_preserves_division_traps() {
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     let m = keel_ir::parse(&ir).unwrap();
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&SPILLED, &keel_codegen::x86_64::REGISTERS] {
-                let (_, obj) = compile(&m, sel, alloc, pools);
-                fs::write(dir.join("test.o"), obj).unwrap();
-                let out = Command::new("clang")
-                    .arg(dir.join("oracle.o"))
-                    .arg(dir.join("test.o"))
-                    .arg("-o")
-                    .arg(dir.join("test"))
-                    .output()
-                    .unwrap();
-                assert!(out.status.success(), "{out:?}");
-                let out = Command::new(dir.join("test")).output().unwrap();
-                assert!(out.status.success(), "{sel:?} {alloc:?}: {out:?}");
-                for case in 0..cases {
-                    let out = Command::new(dir.join("test"))
-                        .arg(case.to_string())
-                        .output()
-                        .unwrap();
-                    assert_eq!(out.status.signal(), Some(4), "case{case}: {out:?}");
-                }
-            }
+    for (sel, alloc, pools) in crate::codegen::matrix(
+        &[SelectionTier::Baseline, SelectionTier::Full],
+        &[&SPILLED, &keel_codegen::x86_64::REGISTERS],
+    ) {
+        let (_, obj) = compile(&m, sel, alloc, pools);
+        fs::write(dir.join("test.o"), obj).unwrap();
+        let out = Command::new("clang")
+            .arg(dir.join("oracle.o"))
+            .arg(dir.join("test.o"))
+            .arg("-o")
+            .arg(dir.join("test"))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let out = Command::new(dir.join("test")).output().unwrap();
+        assert!(out.status.success(), "{sel:?} {alloc:?}: {out:?}");
+        for case in 0..cases {
+            let out = Command::new(dir.join("test"))
+                .arg(case.to_string())
+                .output()
+                .unwrap();
+            assert_eq!(out.status.signal(), Some(4), "case{case}: {out:?}");
         }
     }
 }

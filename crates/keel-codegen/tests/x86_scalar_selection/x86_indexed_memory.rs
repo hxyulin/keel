@@ -1,18 +1,13 @@
 //! Exact-width indexed memory covers, including allocation-visible leaves and
 //! scratch reloads composed with stores and adjacent CMP-memory selection.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, OptionsSelector, SelectionOptions,
+    OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
     select::{Selection, Target},
 };
 use keel_ir::EntityRef;
 
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 const ONE_REG: Pools = Pools {
     caller_saved: &[7],
     ..SPILLED
@@ -53,26 +48,18 @@ fn compile(
 ) -> (String, Vec<u8>) {
     compile_allocator(m, options, &alloc, pools)
 }
-
 fn compile_allocator(
     m: &keel_ir::Module,
     options: SelectionOptions,
     allocator: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let pipeline = CodegenPipeline {
-        selector: &OptionsSelector(options),
-        allocator,
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(
-        object,
-        keel_asm::x86::assemble_object(&text).unwrap(),
-        "{text}"
-    );
-    (text, object)
+    let out = Case::x86(m)
+        .selector(&OptionsSelector(options))
+        .allocator(allocator)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 fn indexed_accesses(text: &str) -> usize {
@@ -609,7 +596,7 @@ fn native_independent_c_oracles_exact_width_wrap_spills_and_fault_order() {
             );
             #[cfg(target_arch = "aarch64")]
             let (text, object) = {
-                let pipeline = CodegenPipeline {
+                let pipeline = keel_codegen::CodegenPipeline {
                     selector: &OptionsSelector(options),
                     allocator,
                 };
