@@ -1,6 +1,6 @@
 [package]
 name = "keel-test-support"
-description = "Shared helpers for Keel's tests: external tool discovery, recorded skips and temporary directories"
+description = "Shared helpers for Keel's tests: external tool discovery, recorded skips, temporary directories and native x86-64 program packets"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

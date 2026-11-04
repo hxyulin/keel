@@ -214,6 +214,30 @@ A test that cannot run because a host tool or host is missing calls
 the runner prints the skipped tests grouped by reason, and `--report` records
 them under `skips`.
 
+## Native x86-64 programs on another host
+
+Tests that link and run an x86-64 program describe it with
+`keel_test_support::native_program!`. On x86-64 Linux the test builds and runs
+the program itself. Elsewhere it records the skip
+`requires x86-64 Linux; set KEEL_TEST_EXPORT_DIR to export`. When
+`KEEL_TEST_EXPORT_DIR` names an absolute directory, every such program is also
+written to `<dir>/<package>/<test>/<program>/`. The packet holds the program's
+files and a `manifest.json` with the build steps, the run command, the expected
+exit status and output, and the required CPU features. Copy the directory to an x86-64 Linux host and
+run every packet there:
+
+```sh
+KEEL_TEST_EXPORT_DIR="$PWD/target/x86-exports" python3 tools/test.py codegen --quick
+# On the Linux host, with clang on PATH:
+python3 suite/integration/x86-exports/run.py target/x86-exports
+```
+
+The runner prints the failures and a `passed, failed, skipped` count. It skips
+a packet when the host lacks one of its CPU features or a build tool. Add
+`--filter <text>` to run a subset and `--keep <dir>` to keep the build
+directories. The manifest format is documented in
+`crates/keel-test-support/src/native.rs`.
+
 ## Parallel execution
 
 Install `cargo-nextest` to run test binaries in parallel:

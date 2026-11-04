@@ -33,6 +33,15 @@
 //! `<package>::<test>\t<reason>` to it; `tools/test.py` sets it and summarizes
 //! the skips by reason. With `KEEL_REQUIRE_ORACLES=1`, both panic instead, so a
 //! qualification host fails on a missing tool.
+//!
+//! # Native x86-64 programs
+//!
+//! [`native_program!`] describes a program that only runs on x86-64 Linux.
+//! [`native::Program::check`] runs it there, and exports it as a packet when
+//! `KEEL_TEST_EXPORT_DIR` is set, so `suite/integration/x86-exports/run.py`
+//! can run it on a Linux host later. See [`native`].
+
+pub mod native;
 
 use std::ffi::OsString;
 use std::fs::OpenOptions;
@@ -248,7 +257,7 @@ pub fn record_skip(package: &str, module: &str, reason: &str) {
 
 /// The libtest thread name, which is the test path inside its target, prefixed
 /// with the target crate. Falls back to the module path off the test thread.
-fn test_name(module: &str) -> String {
+pub(crate) fn test_name(module: &str) -> String {
     let target = module.split("::").next().unwrap_or(module);
     match thread::current().name() {
         Some(name) if name != "main" => format!("{target}::{name}"),
