@@ -40,6 +40,20 @@ afterwards. `Function::fingerprint` lists the state it covers. Clean-cache
 entries belong to pass instances, so a repeated unchanged instance stays
 skipped until its function changes.
 
+`OptimizeOptions` also carries debugging controls. `disabled` skips passes by
+name wherever they appear, including function-attribute schedules.
+`bisect_limit` runs only the first N invocations; an invocation is one
+function pass run on one function or one module pass run, and runs the clean
+cache skips are not counted. The smallest limit that shows a miscompile names
+the invocation that caused it, in about log2(invocations) runs.
+`bisect_verbose` traces each invocation that runs as `bisect: <n> <pass>
+@<function>` (or `(module)`). `print_changed` traces each function after an
+invocation that changed it, under `; after <pass>, invocation <n>`, and
+`print_function` limits that to one function. Traces go to standard error
+unless `Pipeline::trace` names a writer. The driver exposes these controls as
+`--opt-disable <pass,..>`, `--opt-bisect-limit <n>`, `--opt-bisect-verbose`,
+`--print-changed` and `--opt-function <name>` on `cc`, `compile` and `opt`.
+
 Ordinary and reported optimization share one execution loop. Without a report
 the loop creates no timers, IR counts or observation records. Completed pass
 invocations stay in a partial report when their verification fails, and

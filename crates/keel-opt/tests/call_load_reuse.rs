@@ -439,6 +439,7 @@ fn transitive_proof_requires_unique_exact_legal_binding() {
             .unwrap()
             .options(keel_opt::OptimizeOptions {
                 verification: keel_opt::VerificationPolicy::Disabled,
+                ..Default::default()
             })
             .run(&mut m)
             .unwrap();

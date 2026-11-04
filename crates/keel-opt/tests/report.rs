@@ -142,9 +142,10 @@ fn errors_match_and_stop_pipeline_without_extra_passes() {
     let mut report = OptimizationReport::default();
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
+        ..Default::default()
     };
     let expected = keel_opt::Pipeline::new(&[&Break, &Noop])
-        .options(options)
+        .options(options.clone())
         .run(&mut plain)
         .unwrap_err();
     let error = keel_opt::Pipeline::new(&[&Break, &Noop])
@@ -206,6 +207,7 @@ fn signature_and_caller_restrictions_are_site_decisions() {
             .unwrap()
             .options(keel_opt::OptimizeOptions {
                 verification: keel_opt::VerificationPolicy::Disabled,
+                ..Default::default()
             })
             .report(&mut report)
             .run(&mut module)
@@ -439,12 +441,13 @@ fn module_changes_and_verification_failures_preserve_plain_report_parity() {
         let mut report = OptimizationReport::default();
         let options = keel_opt::OptimizeOptions {
             verification: keel_opt::VerificationPolicy::Enabled,
+            ..Default::default()
         };
         let a = keel_opt::Pipeline::new(&[&pass, &Noop])
-            .options(options)
+            .options(options.clone())
             .run(&mut plain);
         let b = keel_opt::Pipeline::new(&[&pass, &Noop])
-            .options(options)
+            .options(options.clone())
             .report(&mut report)
             .run(&mut observed);
         assert_eq!(
@@ -496,9 +499,10 @@ fn failed_canonical_restoration_does_not_execute_or_report_the_requested_pass() 
     let mut report = OptimizationReport::default();
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
+        ..Default::default()
     };
     let a = keel_opt::Pipeline::new(&[&MustNotRun])
-        .options(options)
+        .options(options.clone())
         .run(&mut plain)
         .unwrap_err();
     let b = keel_opt::Pipeline::new(&[&MustNotRun])

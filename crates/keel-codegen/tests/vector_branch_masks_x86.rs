@@ -75,6 +75,7 @@ fn compile(
             .context(keel_opt::VectorTarget::X86Sse2.into())
             .options(keel_opt::OptimizeOptions {
                 verification: keel_opt::VerificationPolicy::Enabled,
+                ..Default::default()
             })
             .run(&mut m)
             .unwrap();

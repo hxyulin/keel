@@ -97,7 +97,10 @@ keel opt -p instcombine,dce input.keel
 [Optimizer passes](compiler/optimizer.md#passes) lists the opt-in passes that no tier runs.
 `--verify-each` / `--no-verify-each` control IR verification after every pass
 (on by default in debug builds); `--opt-report file.json` writes an
-optimization report.
+optimization report. `--opt-disable`, `--opt-bisect-limit`,
+`--opt-bisect-verbose`, `--print-changed` and `--opt-function` find the pass
+invocation behind a regression; see the
+[pass manager](compiler/optimizer.md#pass-manager).
 
 ## Targets
 

@@ -431,9 +431,90 @@ impl VerificationPolicy {
 }
 
 /// Scoped optimizer configuration. Input must already be validated, in all modes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OptimizeOptions {
     pub verification: VerificationPolicy,
+    /// Pass names to skip wherever they appear in the pipeline, including
+    /// function-attribute schedules. Each must name a pipeline or registered pass.
+    pub disabled: Vec<String>,
+    /// Run only the first N pass invocations and skip the rest. An invocation
+    /// is one function pass run on one function, or one module pass run.
+    /// Runs that the clean cache skips are not counted.
+    pub bisect_limit: Option<usize>,
+    /// Trace each invocation that runs: its index, pass and function.
+    pub bisect_verbose: bool,
+    /// Trace each function after an invocation that changed it.
+    pub print_changed: bool,
+    /// Limit `print_changed` to the function with this name.
+    pub print_function: Option<String>,
+}
+
+impl OptimizeOptions {
+    fn traces(&self) -> bool {
+        self.bisect_verbose || self.print_changed
+    }
+}
+
+/// Invocation numbering, the bisect limit and the trace sink.
+struct Trace<'a, 'o> {
+    options: &'o OptimizeOptions,
+    out: Option<&'a mut dyn std::io::Write>,
+    invocations: usize,
+}
+
+impl Trace<'_, '_> {
+    /// Whether the bisect limit leaves no invocation to run.
+    fn exhausted(&self) -> bool {
+        self.options
+            .bisect_limit
+            .is_some_and(|limit| self.invocations >= limit)
+    }
+
+    /// Numbers an invocation that is about to run, unless the limit is reached.
+    fn admit(&mut self, pass: &str, func: Option<&str>) -> bool {
+        if self.exhausted() {
+            return false;
+        }
+        self.invocations += 1;
+        if self.options.bisect_verbose {
+            let n = self.invocations;
+            self.line(format_args!("bisect: {n} {pass} {}", Target(func)));
+        }
+        true
+    }
+
+    fn changed(&mut self, pass: &str, func: &Function) {
+        let options = self.options;
+        if !options.print_changed
+            || options
+                .print_function
+                .as_ref()
+                .is_some_and(|name| *name != func.name)
+        {
+            return;
+        }
+        let n = self.invocations;
+        self.line(format_args!("; after {pass}, invocation {n}\n{func}"));
+    }
+
+    /// Tracing is a debugging aid; a failed write does not stop optimization.
+    fn line(&mut self, text: fmt::Arguments<'_>) {
+        if let Some(out) = self.out.as_deref_mut() {
+            let _ = writeln!(out, "{text}");
+        }
+    }
+}
+
+/// `@name` for a function invocation, `(module)` for a module invocation.
+struct Target<'a>(Option<&'a str>);
+
+impl fmt::Display for Target<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(name) => write!(f, "@{name}"),
+            None => f.write_str("(module)"),
+        }
+    }
 }
 
 fn verify_after(func: &Function, pass: &'static str, enabled: bool) -> Result<(), OptError> {
@@ -732,6 +813,7 @@ pub struct Pipeline<'a> {
     context: OptimizationContext,
     options: OptimizeOptions,
     report: Option<&'a mut OptimizationReport>,
+    trace: Option<&'a mut dyn std::io::Write>,
 }
 
 impl fmt::Debug for Pipeline<'_> {
@@ -742,6 +824,7 @@ impl fmt::Debug for Pipeline<'_> {
             .field("context", &self.context)
             .field("options", &self.options)
             .field("report", &self.report.is_some())
+            .field("trace", &self.trace.is_some())
             .finish()
     }
 }
@@ -754,6 +837,7 @@ impl<'a> Pipeline<'a> {
             context: OptimizationContext::default(),
             options: OptimizeOptions::default(),
             report: None,
+            trace: None,
         }
     }
 
@@ -784,28 +868,45 @@ impl<'a> Pipeline<'a> {
         self
     }
 
+    /// Where the `bisect_verbose` and `print_changed` traces go; standard
+    /// error by default.
+    pub fn trace(mut self, out: &'a mut dyn std::io::Write) -> Self {
+        self.trace = Some(out);
+        self
+    }
+
     /// Runs the passes in order, restoring declared canonical entry
     /// requirements and honoring function optimization attributes.
     pub fn run(mut self, module: &mut Module) -> Result<(), OptError> {
         if module.special_entry_contract().is_some() {
             return Ok(());
         }
+        if let Some(name) = self.options.disabled.iter().find(|&name| {
+            find_pass(name).is_none() && !self.passes.iter().any(|pass| pass.name() == name)
+        }) {
+            return Err(OptError::UnknownPass(name.clone()));
+        }
+        let mut stderr = std::io::stderr();
+        let out: Option<&mut dyn std::io::Write> = match self.trace.take() {
+            Some(out) => Some(&mut *out),
+            None if self.options.traces() => Some(&mut stderr),
+            None => None,
+        };
+        let mut trace = Trace {
+            options: &self.options,
+            out,
+            invocations: 0,
+        };
         if let Some(result) = function_policy::run(
             module,
             &self.passes,
             self.context,
             self.report.as_deref_mut(),
-            self.options,
+            &mut trace,
         ) {
             return result;
         }
-        execute_pipeline(
-            module,
-            &self.passes,
-            self.context,
-            self.report,
-            self.options,
-        )
+        execute_pipeline(module, &self.passes, self.context, self.report, &mut trace)
     }
 }
 
@@ -950,12 +1051,12 @@ impl Drop for ClearAnalyses {
 }
 
 /// One mutation/verification state machine; observation only measures its boundaries.
-pub(crate) fn execute_pipeline(
+fn execute_pipeline(
     module: &mut Module,
     passes: &[&dyn Pass],
     context: OptimizationContext,
     mut report: Option<&mut OptimizationReport>,
-    options: OptimizeOptions,
+    trace: &mut Trace<'_, '_>,
 ) -> Result<(), OptError> {
     // Preserve opaque entry/return bodies until target-specific lowering can
     // establish their register, frame and control-flow contracts.
@@ -965,6 +1066,7 @@ pub(crate) fn execute_pipeline(
     use std::time::Instant;
     let target = context.target;
     let reporting = report.is_some();
+    let options = trace.options;
     let verification_enabled = options.verification.enabled();
     // Check the no-change contract wherever verification is on, and in every
     // debug build even when a caller disabled verification.
@@ -981,6 +1083,12 @@ pub(crate) fn execute_pipeline(
         InlineBudget::default()
     };
     for (pipeline_index, &pass) in passes.iter().enumerate() {
+        if trace.exhausted() {
+            break;
+        }
+        if options.disabled.iter().any(|name| name == pass.name()) {
+            continue;
+        }
         profiling::scope!("pass", pass.name());
         let before = reporting.then(|| IrCounts::module(module));
         let mut inline_sites = reporting.then(Vec::new);
@@ -1012,6 +1120,7 @@ pub(crate) fn execute_pipeline(
             report.inline_budget = Some(inline_budget.clone());
         }
         if let Some(changed) = module_changed {
+            trace.admit(pass.name(), None);
             let old_len = versions.version.len();
             versions.module_changed(&mut canonical);
             #[cfg(debug_assertions)]
@@ -1034,6 +1143,11 @@ pub(crate) fn execute_pipeline(
                     if let Some(&(_, before)) = before {
                         assert_unchanged(pass.name(), func, before);
                     }
+                }
+            }
+            for (index, func) in module.functions.iter().enumerate() {
+                if index >= old_len || versions.changed.get(index) != Some(&false) {
+                    trace.changed(pass.name(), func);
                 }
             }
             // A body the pass reported unchanged is the one verified after
@@ -1103,6 +1217,9 @@ pub(crate) fn execute_pipeline(
                 }
                 continue;
             }
+            if !trace.admit(pass.name(), Some(&func.name)) {
+                break;
+            }
             // No module hook ran, so the function is as fingerprinted.
             let mut before_run = fingerprints.get(index).map(|&(_, print)| print);
             let mut restoration_ns = 0;
@@ -1113,6 +1230,7 @@ pub(crate) fn execute_pipeline(
                 let restored = canonicalize::run(func);
                 if restored {
                     versions.renew(index);
+                    trace.changed("canonicalize", func);
                     before_run = audit_unchanged.then(|| func.fingerprint());
                 } else if let Some(before) = before_run {
                     assert_unchanged("canonicalize", func, before);
@@ -1150,6 +1268,9 @@ pub(crate) fn execute_pipeline(
             analysis::debug_check_stamp(func);
             if !changed && let Some(before) = before_run {
                 assert_unchanged(pass.name(), func, before);
+            }
+            if changed {
+                trace.changed(pass.name(), func);
             }
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);

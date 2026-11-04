@@ -142,6 +142,7 @@ fn run_verified(source: &str, passes: &[&dyn Pass]) {
     let mut module = keel_ir::parse(source).unwrap();
     let options = keel_opt::OptimizeOptions {
         verification: keel_opt::VerificationPolicy::Enabled,
+        ..Default::default()
     };
     keel_opt::Pipeline::new(passes)
         .options(options)

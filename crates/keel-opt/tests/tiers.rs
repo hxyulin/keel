@@ -1,3 +1,5 @@
+#[path = "tiers/controls.rs"]
+mod controls;
 #[path = "tiers/fast.rs"]
 mod fast;
 #[path = "tiers/registry.rs"]
@@ -89,6 +91,7 @@ fn custom_pass_failures_identify_the_pass() {
     let error = keel_opt::Pipeline::new(&[&BrokenPass])
         .options(keel_opt::OptimizeOptions {
             verification: keel_opt::VerificationPolicy::Enabled,
+            ..Default::default()
         })
         .run(&mut module)
         .unwrap_err();

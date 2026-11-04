@@ -1,7 +1,7 @@
 //! Ordered function-local schedules with guarded module passes.
 use crate::{
-    ModuleContext, OptError, OptimizationContext, OptimizationReport, OptimizationTier,
-    OptimizeOptions, Pass, PassFamily,
+    ModuleContext, OptError, OptimizationContext, OptimizationReport, OptimizationTier, Pass,
+    PassFamily, Trace,
 };
 use keel_ir::{Function, FunctionOptLevel, FunctionPolicy, Module};
 
@@ -126,7 +126,7 @@ pub(super) fn run(
     defaults: &[&dyn Pass],
     context: OptimizationContext,
     mut report: Option<&mut OptimizationReport>,
-    options: OptimizeOptions,
+    trace: &mut Trace<'_, '_>,
 ) -> Option<Result<(), OptError>> {
     if !module
         .functions
@@ -201,6 +201,6 @@ pub(super) fn run(
             .iter()
             .map(|&index| &scoped[index] as &dyn Pass)
             .collect();
-        crate::execute_pipeline(module, &passes, context, report.as_deref_mut(), options)
+        crate::execute_pipeline(module, &passes, context, report.as_deref_mut(), trace)
     })())
 }

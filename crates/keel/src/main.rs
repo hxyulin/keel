@@ -46,6 +46,7 @@ const USAGE: &str = "usage:
   keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
+  keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
@@ -66,6 +67,8 @@ const USAGE: &str = "usage:
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier; like cc, it targets the host unless --target is given.
+  --opt-bisect-limit n runs only the first n pass invocations (one per function, or one per module pass);
+  --opt-bisect-verbose and --print-changed trace invocations and changed functions to stderr.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
   -fno-asynchronous-unwind-tables omits optional compiler-generated CFI.
   -funwind-tables requests tables independently; disable both to suppress both requests.
@@ -103,7 +106,7 @@ struct Options {
     opt_report: Option<String>,
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
-    verification: keel_opt::VerificationPolicy,
+    optimizer: keel_opt::OptimizeOptions,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
     #[cfg(feature = "experimental-regalloc")]
@@ -187,9 +190,7 @@ impl Options {
     }
 
     fn optimizer_options(&self) -> keel_opt::OptimizeOptions {
-        keel_opt::OptimizeOptions {
-            verification: self.verification,
-        }
+        self.optimizer.clone()
     }
 
     /// Explicit pipelines override tier presets, independently of flag order.
@@ -446,14 +447,35 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 } else {
                     keel_opt::VerificationPolicy::Disabled
                 };
-                if opts.verification != keel_opt::VerificationPolicy::Default
-                    && opts.verification != policy
+                if opts.optimizer.verification != keel_opt::VerificationPolicy::Default
+                    && opts.optimizer.verification != policy
                 {
                     return Err(
                         "`--verify-each` and `--no-verify-each` are mutually exclusive".into(),
                     );
                 }
-                opts.verification = policy;
+                opts.optimizer.verification = policy;
+            }
+            "--opt-disable" => {
+                let names = args.next().ok_or("`--opt-disable` needs a pass list")?;
+                opts.optimizer
+                    .disabled
+                    .extend(names.split(',').map(str::to_string));
+            }
+            "--opt-bisect-limit" => {
+                let limit = args
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .ok_or("`--opt-bisect-limit` needs a decimal invocation count")?;
+                opts.optimizer.bisect_limit = Some(limit);
+            }
+            "--opt-bisect-verbose" => opts.optimizer.bisect_verbose = true,
+            "--print-changed" => opts.optimizer.print_changed = true,
+            "--opt-function" => {
+                let name = args
+                    .next()
+                    .ok_or("`--opt-function` needs a function name")?;
+                opts.optimizer.print_function = Some(name.clone());
             }
             "--opt-report" => {
                 let path = args.next().ok_or("`--opt-report` needs a file")?;
@@ -665,6 +687,9 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         .into());
     }
+    if opts.optimizer.print_function.is_some() && !opts.optimizer.print_changed {
+        return Err("`--opt-function` needs `--print-changed`".into());
+    }
     if opts.emit_ir && opts.emit_object {
         return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
     }
@@ -810,6 +835,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-report",
                     "--verify-each",
                     "--no-verify-each",
+                    "--opt-disable",
+                    "--opt-bisect-limit",
+                    "--opt-bisect-verbose",
+                    "--print-changed",
+                    "--opt-function",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -871,6 +901,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-report",
                     "--verify-each",
                     "--no-verify-each",
+                    "--opt-disable",
+                    "--opt-bisect-limit",
+                    "--opt-bisect-verbose",
+                    "--print-changed",
+                    "--opt-function",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -968,6 +1003,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-report",
                     "--verify-each",
                     "--no-verify-each",
+                    "--opt-disable",
+                    "--opt-bisect-limit",
+                    "--opt-bisect-verbose",
+                    "--print-changed",
+                    "--opt-function",
                 ],
             )?;
             // With no level or tier, `opt` runs the tier `cc -O` runs. The
@@ -1144,7 +1184,7 @@ mod tests {
     #[test]
     fn verification_flags_override_build_default_independently_of_tiers() {
         use keel_opt::VerificationPolicy::{Default, Disabled, Enabled};
-        assert_eq!(options(&[]).unwrap().verification, Default);
+        assert_eq!(options(&[]).unwrap().optimizer.verification, Default);
         for (flag, expected) in [("--verify-each", Enabled), ("--no-verify-each", Disabled)] {
             for flags in [
                 vec![flag, "-O"],
@@ -1152,7 +1192,7 @@ mod tests {
                 vec![flag, flag],
             ] {
                 let opts = options(&flags).unwrap();
-                assert_eq!(opts.verification, expected);
+                assert_eq!(opts.optimizer.verification, expected);
                 assert_eq!(
                     opts.optimizer_options().verification.enabled(),
                     expected == Enabled

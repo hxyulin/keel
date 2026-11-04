@@ -25,6 +25,7 @@ fn unchecked(m: &mut Module, name: &str) -> Vec<InlineSite> {
         .unwrap()
         .options(keel_opt::OptimizeOptions {
             verification: keel_opt::VerificationPolicy::Disabled,
+            ..Default::default()
         })
         .report(&mut report)
         .run(m)

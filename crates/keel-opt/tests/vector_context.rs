@@ -43,13 +43,13 @@ fn context_reaches_custom_passes_and_observation() {
         let options = OptimizeOptions::default();
         keel_opt::Pipeline::new(&[&pass])
             .context(context)
-            .options(options)
+            .options(options.clone())
             .run(&mut ordinary)
             .unwrap();
         let mut report = OptimizationReport::default();
         keel_opt::Pipeline::new(&[&pass])
             .context(context)
-            .options(options)
+            .options(options.clone())
             .report(&mut report)
             .run(&mut observed)
             .unwrap();
@@ -246,13 +246,13 @@ fn context_and_deterministic_cache_are_scoped_to_one_invocation() {
             };
             keel_opt::Pipeline::new(&[&pass, &pass])
                 .context(context)
-                .options(options)
+                .options(options.clone())
                 .run(&mut module)
                 .unwrap();
             let mut report = OptimizationReport::default();
             keel_opt::Pipeline::new(&[&pass, &pass])
                 .context(context)
-                .options(options)
+                .options(options.clone())
                 .report(&mut report)
                 .run(&mut module)
                 .unwrap();
@@ -284,8 +284,16 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
     use keel_opt::{IrCounts, PassObservation, VerificationPolicy};
     let options = OptimizeOptions {
         verification: VerificationPolicy::Enabled,
+        ..Default::default()
     };
-    let OptimizeOptions { verification } = options;
+    let OptimizeOptions {
+        verification,
+        disabled: _,
+        bisect_limit: _,
+        bisect_verbose: _,
+        print_changed: _,
+        print_function: _,
+    } = options;
     assert_eq!(verification, VerificationPolicy::Enabled);
     let observation = PassObservation {
         pipeline_index: 0,

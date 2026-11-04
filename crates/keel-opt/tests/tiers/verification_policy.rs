@@ -54,6 +54,7 @@ fn actual_invalid_pass_is_caught_only_when_policy_enables_checks() {
         ] {
             let options = OptimizeOptions {
                 verification: policy,
+                ..Default::default()
             };
             let broken = RemoveTerminator {
                 module: module_pass,
@@ -63,10 +64,10 @@ fn actual_invalid_pass_is_caught_only_when_policy_enables_checks() {
             keel_ir::verify_module(&plain).unwrap();
             let mut report = OptimizationReport::default();
             let a = keel_opt::Pipeline::new(&[&broken])
-                .options(options)
+                .options(options.clone())
                 .run(&mut plain);
             let b = keel_opt::Pipeline::new(&[&broken])
-                .options(options)
+                .options(options.clone())
                 .report(&mut report)
                 .run(&mut observed);
             assert_eq!(a.is_err(), policy.enabled());
@@ -131,6 +132,7 @@ fn disabled_verification_still_restores_canonical_form_and_resolves_api_aliases(
         keel_opt::Pipeline::new(&[&pass, &pass])
             .options(OptimizeOptions {
                 verification: policy,
+                ..Default::default()
             })
             .report(&mut report)
             .run(&mut m)
@@ -196,6 +198,7 @@ fn verification_checks_only_functions_reported_changed() {
             }])
             .options(OptimizeOptions {
                 verification: VerificationPolicy::Enabled,
+                ..Default::default()
             })
             .run(&mut m);
             match result {
