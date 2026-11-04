@@ -149,12 +149,11 @@ fn native_cli_rejects_unbalanced_groups_before_opening_inputs() {
     }
 }
 
-/// Set KEEL_GNU_LD to a GNU ELF ld executable to run the reference comparisons.
+/// Compares archive selection with GNU ld; set KEEL_GNU_LD to choose the linker.
 #[test]
 fn gnu_ld_archive_selection_comparison() {
-    let Some(ld) = std::env::var_os("KEEL_GNU_LD") else {
-        eprintln!("GNU ld comparison skipped: set KEEL_GNU_LD");
-        return;
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
     };
     let f = Fixture::new("gnu");
     let cases = [
@@ -210,7 +209,8 @@ fn gnu_ld_archive_selection_comparison() {
         let mut native = args.clone();
         native.extend(["-o", "keel"]);
         let actual = f.keel(&native);
-        let reference = Command::new(&ld)
+        let reference = ld
+            .command()
             .current_dir(&f.0)
             .args(["-m", "elf_x86_64"])
             .args(&args)
@@ -245,7 +245,8 @@ fn gnu_ld_archive_selection_comparison() {
         }
     }
     // GNU warns and closes an unmatched start; Keel deliberately rejects it.
-    let reference = Command::new(ld)
+    let reference = ld
+        .command()
         .current_dir(&f.0)
         .args([
             "start.o",

@@ -29,6 +29,7 @@ object = { version = "0.36", default-features = false, features = ["read", "std"
 
 [dev-dependencies]
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
+keel-test-support = { path = "../keel-test-support" }
 
 [lints]
 workspace = true
