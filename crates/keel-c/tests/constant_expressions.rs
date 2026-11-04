@@ -222,3 +222,44 @@ fn constants_and_runtime_operations_match_clang_and_native_execution() {
             .success()
     );
 }
+/// The little-endian bytes stored for a static object.
+fn stored(m: &keel_ir::Module, name: &str) -> Vec<u8> {
+    let data = m.data.iter().find(|d| d.name == name).unwrap();
+    let mut out = Vec::new();
+    for item in &data.init.as_ref().unwrap().items {
+        match item {
+            DataItem::Bytes(b) => out.extend_from_slice(b),
+            DataItem::Zero(n) => out.resize(out.len() + *n as usize, 0),
+            DataItem::Int { ty, value } => {
+                out.extend_from_slice(&value.to_le_bytes()[..ty.bytes().unwrap() as usize])
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+    out
+}
+#[test]
+fn shift_counts_outside_the_width_are_not_constant() {
+    for source in [
+        "int x = 1 << 32;",
+        "int x = 1 >> 32;",
+        "enum { E = 1LL << 64 };",
+        "long x = 1L << -1;",
+        "unsigned x = 1u >> -1;",
+        "int f(int n){switch(n){case 1 << -1:return 1;}return 0;}",
+        "_Static_assert((1 << 40) == 0, \"\");",
+        "char a[1 + (2 >> 33)];",
+    ] {
+        let result = keel_c::compile(source, "shift.c", keel_c::Options::default());
+        assert!(result.is_err(), "accepted {source}");
+    }
+    let m = compile(
+        "int min = 1 << 31; long top = 1L << 63; unsigned u = 1u << 31; int s = -8 >> 3;",
+        Target::default(),
+        false,
+    );
+    assert_eq!(stored(&m, "min"), i32::MIN.to_le_bytes());
+    assert_eq!(stored(&m, "top"), i64::MIN.to_le_bytes());
+    assert_eq!(stored(&m, "u"), (1u32 << 31).to_le_bytes());
+    assert_eq!(stored(&m, "s"), (-1i32).to_le_bytes());
+}

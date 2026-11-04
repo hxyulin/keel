@@ -532,6 +532,12 @@ fn binary(
         (Const::Int(x), Const::Int(y)) => {
             let signed = operand.is_signed();
             let (ux, uy) = (x as u64, y as u64);
+            // The count has the left operand's type; outside [0, width) the
+            // shift is undefined, and compilers disagree on its value.
+            let width = operand.int_kind()?.size_with_layout(layout) as i64 * 8;
+            if matches!(op, BinOp::Shl | BinOp::Shr) && !(0..width).contains(&y) {
+                return None;
+            }
             let v = match op {
                 BinOp::Add => x.wrapping_add(y),
                 BinOp::Sub => x.wrapping_sub(y),
