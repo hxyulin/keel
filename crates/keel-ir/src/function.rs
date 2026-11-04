@@ -1344,6 +1344,60 @@ impl Function {
         self.cfg_stamp
     }
 
+    /// Hashes the state a pass can observably change: the signature, linkage,
+    /// layout, block parameters, each laid-out instruction with its results
+    /// and location, value aliases, stack slots, per-instruction contracts and
+    /// facts, restrict contracts and debug variables. Removed instructions,
+    /// unaliased values and the callee, data and signature tables are
+    /// excluded, so scratch entities a pass creates and abandons do not count.
+    /// The pass manager compares it to catch a pass that edits a function but
+    /// reports no change. Equal states hash equally; the value is not stable
+    /// across builds.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = crate::fxhash::FxHasher::default();
+        self.sig.hash(&mut h);
+        self.restrict_params.hash(&mut h);
+        (self.local, self.weak_odr, self.hidden).hash(&mut h);
+        self.personality.hash(&mut h);
+        self.layout.hash(&mut h);
+        for &block in &self.layout {
+            for &param in self.block_params(block) {
+                (param, self.values[param].ty).hash(&mut h);
+            }
+            for &inst in self.block_insts(block) {
+                inst.hash(&mut h);
+                self.insts[inst].data.hash(&mut h);
+                self.inst_results(inst).hash(&mut h);
+                self.inst_loc(inst)
+                    .map(|l| (l.file, l.line, l.col, l.scope))
+                    .hash(&mut h);
+            }
+        }
+        for (value, data) in self.values.iter() {
+            if let ValueDef::Alias(target) = data.def {
+                (value, target).hash(&mut h);
+            }
+        }
+        for (slot, data) in self.stack_slots.iter() {
+            (slot, data.size, data.align).hash(&mut h);
+        }
+        self.call_contracts.hash(&mut h);
+        self.inst_facts.hash(&mut h);
+        for var in &self.debug_vars {
+            (
+                &var.name,
+                var.ty,
+                var.slot,
+                var.indirect,
+                var.param,
+                var.scope,
+            )
+                .hash(&mut h);
+        }
+        h.finish()
+    }
+
     /// Whether `block` is in the layout.
     #[inline]
     pub fn is_block_inserted(&self, block: Block) -> bool {

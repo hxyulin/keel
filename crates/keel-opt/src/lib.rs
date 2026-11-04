@@ -821,6 +821,24 @@ impl<'a> Versions<'a> {
     }
 }
 
+/// Panics, naming the pass, when a pass that reported no change modified
+/// `func`. The manager skips verification of such a body and the clean cache
+/// skips later runs on it, so the lie would otherwise surface far away.
+fn assert_unchanged(pass: &str, func: &Function, before: u64) {
+    assert!(
+        func.fingerprint() == before,
+        "pass `{pass}` reported no change but modified @{}",
+        func.name
+    );
+}
+
+fn name_key(name: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = keel_ir::fxhash::FxHasher::default();
+    name.hash(&mut h);
+    h.finish()
+}
+
 /// Drops cached analyses when a pipeline ends, however it ends.
 struct ClearAnalyses;
 
@@ -882,6 +900,10 @@ fn execute_pipeline(
     let target = context.target;
     let reporting = report.is_some();
     let verification_enabled = options.verification.enabled();
+    // Check the no-change contract wherever verification is on, and in every
+    // debug build even when a caller disabled verification.
+    let audit_unchanged = verification_enabled || cfg!(debug_assertions);
+    let mut fingerprints: Vec<(u64, u64)> = Vec::new();
     profiling::scope!("optimization");
     let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
@@ -898,6 +920,15 @@ fn execute_pipeline(
         profiling::scope!("pass", pass.name());
         let before = reporting.then(|| IrCounts::module(module));
         let mut inline_sites = reporting.then(Vec::new);
+        if audit_unchanged {
+            fingerprints.clear();
+            fingerprints.extend(
+                module
+                    .functions
+                    .iter()
+                    .map(|f| (name_key(&f.name), f.fingerprint())),
+            );
+        }
         let start = reporting.then(Instant::now);
         let module_changed = pass.run_module_with_inline_budget(
             module,
@@ -918,6 +949,23 @@ fn execute_pipeline(
                 .functions
                 .iter()
                 .for_each(analysis::debug_check_stamp);
+            if audit_unchanged {
+                // Functions keep their names across module passes; indices
+                // shift when a pass removes one.
+                for (index, func) in module.functions.iter().enumerate() {
+                    if index >= old_len || versions.changed.get(index) != Some(&false) {
+                        continue;
+                    }
+                    let key = name_key(&func.name);
+                    let before = fingerprints
+                        .get(index)
+                        .filter(|&&(k, _)| k == key)
+                        .or_else(|| fingerprints.iter().find(|&&(k, _)| k == key));
+                    if let Some(&(_, before)) = before {
+                        assert_unchanged(pass.name(), func, before);
+                    }
+                }
+            }
             // A body the pass reported unchanged is the one verified after
             // its last change, as the version cache also assumes.
             let (result, verification_ns) =
@@ -985,6 +1033,8 @@ fn execute_pipeline(
                 }
                 continue;
             }
+            // No module hook ran, so the function is as fingerprinted.
+            let mut before_run = fingerprints.get(index).map(|&(_, print)| print);
             let mut restoration_ns = 0;
             let mut restoration_verification_ns = 0;
             let mut restoration_changed = None;
@@ -993,6 +1043,9 @@ fn execute_pipeline(
                 let restored = canonicalize::run(func);
                 if restored {
                     versions.renew(index);
+                    before_run = audit_unchanged.then(|| func.fingerprint());
+                } else if let Some(before) = before_run {
+                    assert_unchanged("canonicalize", func, before);
                 }
                 restoration_changed = Some(restored);
                 restoration_ns = start.map_or(0, |start| start.elapsed().as_nanos());
@@ -1028,6 +1081,9 @@ fn execute_pipeline(
             let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
             #[cfg(debug_assertions)]
             analysis::debug_check_stamp(func);
+            if !changed && let Some(before) = before_run {
+                assert_unchanged(pass.name(), func, before);
+            }
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, slot, index, changed);
             // An unchanged body is the one verified after its last change.

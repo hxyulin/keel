@@ -14,9 +14,12 @@ rustdoc.
 The manager runs each pass over the module before moving to the next and
 verifies, after every pass, each function the pass reports changed, plus any
 function a module pass added. A pass that edits a body must report the change:
-the deterministic-pass cache trusts the same flag. Clean-cache entries belong
-to pass instances, so a repeated unchanged instance stays skipped until its
-function changes.
+the deterministic-pass cache trusts the same flag. With debug assertions or
+verification on, the manager fingerprints each function before a pass and
+panics, naming the pass, when a function it reported unchanged differs
+afterwards. `Function::fingerprint` lists the state it covers. Clean-cache
+entries belong to pass instances, so a repeated unchanged instance stays
+skipped until its function changes.
 
 Ordinary and reported optimization share one execution loop. Without a report
 the loop creates no timers, IR counts or observation records. Completed pass

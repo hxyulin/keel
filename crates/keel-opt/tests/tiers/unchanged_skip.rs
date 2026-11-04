@@ -97,3 +97,92 @@ fn deterministic_passes_skip_only_functions_unchanged_since_a_clean_run() {
     let plain = Observer(AtomicUsize::new(0), false);
     assert_eq!(runs(&[&plain, &plain, &plain], &plain), 6);
 }
+
+/// Edits a function with `edit` and reports no change.
+struct Liar(fn(&mut Function));
+impl Pass for Liar {
+    fn name(&self) -> &'static str {
+        "liar"
+    }
+    fn description(&self) -> &'static str {
+        "edit a function and report no change"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        (self.0)(f);
+        false
+    }
+}
+
+/// Edits the first function and reports no module change.
+struct ModuleLiar;
+impl Pass for ModuleLiar {
+    fn name(&self) -> &'static str {
+        "module-liar"
+    }
+    fn description(&self) -> &'static str {
+        "edit a function and report no module change"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        add_constant(&mut module.functions[0]);
+        Some(false)
+    }
+}
+
+fn add_constant(f: &mut Function) {
+    let entry = f.entry_block().unwrap();
+    let first = f.block_insts(entry)[0];
+    f.ins(keel_ir::InsertPoint::Before(first))
+        .build(keel_ir::InstData::Iconst {
+            ty: keel_ir::Type::I64,
+            imm: 7,
+        });
+}
+
+fn run_verified(source: &str, passes: &[&dyn Pass]) {
+    let mut module = keel_ir::parse(source).unwrap();
+    let options = keel_opt::OptimizeOptions {
+        verification: keel_opt::VerificationPolicy::Enabled,
+    };
+    keel_opt::run_pipeline_for_target_with_options(
+        &mut module,
+        passes,
+        VectorTarget::Portable,
+        options,
+    )
+    .unwrap();
+}
+
+#[test]
+fn honest_unchanged_passes_pass_the_audit() {
+    let det = Observer(AtomicUsize::new(0), true);
+    run_verified(IR, &[&det, &ModuleNoop(false), &TouchG, &det]);
+}
+
+#[test]
+#[should_panic(expected = "pass `liar` reported no change but modified @f")]
+fn a_function_pass_that_hides_an_edit_is_named() {
+    run_verified(IR, &[&Liar(add_constant)]);
+}
+
+#[test]
+#[should_panic(expected = "pass `liar` reported no change but modified @f")]
+fn a_hidden_alias_is_an_edit() {
+    let source = "func @f() -> i64 {\nblock0:\n v0 = iconst.i64 1\n v1 = iconst.i64 2\n \
+                  v2 = iadd v0, v1\n return v2\n}";
+    run_verified(
+        source,
+        &[&Liar(|f| {
+            use keel_ir::EntityRef;
+            f.replace_all_uses(keel_ir::Value::new(1), keel_ir::Value::new(0));
+        })],
+    );
+}
+
+#[test]
+#[should_panic(expected = "pass `module-liar` reported no change but modified @f")]
+fn a_module_pass_that_hides_an_edit_is_named() {
+    run_verified(IR, &[&ModuleLiar]);
+}
