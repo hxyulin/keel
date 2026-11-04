@@ -142,19 +142,13 @@ can still be checked, but no pass trace is produced.
 
 ## Validation
 
-Run the validation harness after building both executables:
-
-```sh
-python3 crates/keel-llvm/tests/validate.py
-```
-
-It checks LLVM parsing/code generation and compares native output: handwritten
-Keel versus LLVM at O0/O2 (loops, duplicate branch/switch edges, wrapping and
+On arm64 macOS, `cargo test -p keel-llvm --test export -- native` compares
+native output: handwritten Keel versus LLVM at O0/O2 (loops, duplicate branch/switch edges, wrapping and
 overflow arithmetic, signed/unsigned/oversized/mixed-width shifts, stack,
 volatile store, memory copy, direct call, global relocations, FP NaN comparisons
 and saturating conversion boundaries), then Clang C versus unoptimized and
-scalar-optimized Keel through both native Keel and LLVM. It checks generated
-profile layout against Clang and runs `opt` pass traces if available.
+scalar-optimized Keel through both native Keel and LLVM. It checks the
+profile's data layout against Clang.
 The extended fixtures cover nested stack save/restore inside a loop (including
 16-byte alignment and fixed-slot survival), volatile and unaligned memory,
 overlapping memmove, memset, external data, relocation addends and local
@@ -170,8 +164,8 @@ as exact bit patterns.
 The ordinary-libcall reducer links an external custom `strlen` provider,
 compiled separately with `-fno-builtin`. Keel and exported LLVM at O0/O2 must
 preserve an unused call's side effect and a constant-string call's nonstandard
-return. Optimized IR must retain both calls and avoid inferred library attrs;
-a generated pre-fix negative control must fail. Trap is exercised in subprocesses
+return. Optimized IR must retain both calls, and a negative control without
+`nobuiltin` must fail. Trap is exercised in subprocesses
 at O0/O2 and must terminate abnormally. Rust tests cover unsupported feature
 families, whole-module buffering, quoted symbols, CLI errors, output preservation
 and temporary-file cleanup on write failure.

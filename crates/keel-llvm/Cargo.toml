@@ -12,6 +12,9 @@ libloading = "0.9"
 regex = "1"
 
 [dev-dependencies]
+keel-c = { path = "../keel-c" }
+keel-codegen = { path = "../keel-codegen" }
+keel-opt = { path = "../keel-opt" }
 keel-test-support = { path = "../keel-test-support" }
 
 [lints]

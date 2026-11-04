@@ -1,5 +1,7 @@
 #[path = "export/aggregate_va_arg_rejection.rs"]
 mod aggregate_va_arg_rejection;
+#[path = "export/native.rs"]
+mod native;
 #[path = "export/raw_div.rs"]
 mod raw_div;
 #[path = "export/special_entries.rs"]
