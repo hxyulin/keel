@@ -82,7 +82,7 @@ fn fixture_output_matches_python_reference() {
             let script = "import sys;sys.path.insert(0,sys.argv[1]);from llvm_import import LLVM,import_module;print(import_module(LLVM(sys.argv[2]),sys.stdin.buffer.read(),localize_odr=sys.argv[3]=='true'),end='')";
             let mut child = Command::new("python3")
                 .args(["-c", script])
-                .arg(root.join("suite"))
+                .arg(root.join("suite/ir"))
                 .arg(std::env::var_os("KEEL_TEST_LIBLLVM").unwrap())
                 .arg(localize.to_string())
                 .stdin(std::process::Stdio::piped())
