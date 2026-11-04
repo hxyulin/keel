@@ -43,18 +43,6 @@ fn profiles() -> Vec<(&'static str, Features)> {
         ("v3-sse41", Features { sse41: false, ..v3 }),
     ]
 }
-/// The CPU features an object compiled for `features` may use.
-fn required(features: Features) -> Vec<&'static str> {
-    [
-        (features.sse41, "sse4.1"),
-        (features.avx, "avx"),
-        (features.avx2, "avx2"),
-    ]
-    .into_iter()
-    .filter_map(|(on, name)| on.then_some(name))
-    .collect()
-}
-
 fn compile(
     src: &str,
     sel: SelectionTier,
@@ -355,7 +343,7 @@ static void on_fault(int sig) {fault_seen=sig;siglongjmp(fault_env,1);}
                     let (text, obj) = compile(&ir, sel, alloc, pools, features);
                     assert_eq!(fused(&text), if features.sse41 { 4 } else { 0 }, "{text}");
                     native_program!(format!("{profile}-{sel:?}-{alloc:?}-{pool}"))
-                        .requires(&required(features))
+                        .requires(&crate::common::cpu_features(features))
                         .file("oracle.s", text)
                         .file("oracle.o", obj)
                         .file("oracle.c", &c)

@@ -6,6 +6,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::{native, native_program};
 use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
@@ -217,11 +218,7 @@ fn packed_narrow_features_types_and_encodings() {
             .lines()
             .any(|l| l.split_whitespace().next() == Some("packsswb"))
     );
-    let export =
-        std::env::var_os("KEEL_X86_PACKED_NARROW_EXPORT_DIR").map(std::path::PathBuf::from);
-    let d = export
-        .clone()
-        .unwrap_or_else(|| common::temp("packed-narrow"));
+    let d = common::temp("packed-narrow");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("test.c"), harness(&all)).unwrap();
     fs::write(d.join("test.ir"), source(&all)).unwrap();
@@ -278,19 +275,17 @@ fn packed_narrow_features_types_and_encodings() {
         n.section_by_name(".text").unwrap().data().unwrap(),
         o.section_by_name(".text").unwrap().data().unwrap()
     );
-    if export.is_none() {
-        fs::remove_dir_all(d).unwrap();
-    }
+    fs::remove_dir_all(d).unwrap();
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_packed_narrow_reference_and_guards() {
-    let d = common::temp("packed-narrow-native");
-    fs::create_dir_all(&d).unwrap();
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
+    }
     let mut runs = 0;
     for (label, f, indices) in feature_sets() {
         let m = optimized(&source(&indices));
-        fs::write(d.join("test.c"), harness(&indices)).unwrap();
+        let test_c = harness(&indices);
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -299,28 +294,24 @@ fn native_packed_narrow_reference_and_guards() {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for p in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
                     let (o, _) = compile_module(&m, s, a, p, f).unwrap();
-                    fs::write(d.join("test.o"), o).unwrap();
-                    common::command(
-                        Command::new("clang")
-                            .args([
-                                "-O2",
-                                "-march=x86-64",
-                                "-mno-avx",
-                                "-fno-vectorize",
-                                "-fno-slp-vectorize",
-                            ])
-                            .arg(d.join("test.c"))
-                            .arg(d.join("test.o"))
-                            .arg("-o")
-                            .arg(d.join("test")),
-                    );
-                    common::command(&mut Command::new(d.join("test")));
+                    native_program!(format!("packed-narrow-{label}-{s:?}-{a:?}-{runs}"))
+                        .requires(&common::cpu_features(f))
+                        .file("test.c", &test_c)
+                        .file("test.o", o)
+                        .link([
+                            "-O2",
+                            "-march=x86-64",
+                            "-mno-avx",
+                            "-fno-vectorize",
+                            "-fno-slp-vectorize",
+                            "test.c",
+                            "test.o",
+                        ])
+                        .check();
                     runs += 1;
-                    println!("PASS {label} {s:?} {a:?} config{runs}");
                 }
             }
         }
     }
     assert_eq!(runs, 84);
-    fs::remove_dir_all(d).unwrap();
 }

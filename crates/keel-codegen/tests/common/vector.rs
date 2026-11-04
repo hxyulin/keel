@@ -138,6 +138,36 @@ pub fn fixture_for(shapes: &[VectorType]) -> String {
     s
 }
 
+/// The CPU features, as `is_x86_feature_detected!` names them, that code
+/// compiled for `features` may use. A `native_program!` requires them.
+pub fn cpu_features(features: keel_asm_ir::x86::Features) -> Vec<&'static str> {
+    let f = features;
+    [
+        (f.sse3, "sse3"),
+        (f.ssse3, "ssse3"),
+        (f.sse41, "sse4.1"),
+        (f.sse42, "sse4.2"),
+        (f.popcnt, "popcnt"),
+        (f.avx, "avx"),
+        (f.avx2, "avx2"),
+        (f.fma, "fma"),
+        (f.f16c, "f16c"),
+        (f.bmi1, "bmi1"),
+        (f.bmi2, "bmi2"),
+        (f.lzcnt, "lzcnt"),
+        (f.movbe, "movbe"),
+        (f.pclmulqdq, "pclmulqdq"),
+        (f.aes, "aes"),
+        (f.sha, "sha"),
+        (f.cx16, "cmpxchg16b"),
+        (f.xsave, "xsave"),
+        (f.avx512f, "avx512f"),
+        (f.avx512vl, "avx512vl"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect()
+}
 pub fn temp(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("keel-vector-{}-{tag}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

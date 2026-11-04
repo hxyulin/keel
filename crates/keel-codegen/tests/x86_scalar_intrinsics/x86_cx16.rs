@@ -1,5 +1,4 @@
 //! Fixed-register CX16, including SysV i128 ABI and fault-time RBX unwind evidence.
-use crate::common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -7,8 +6,7 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{InstData, Intrinsic, MemoryEffects};
-use std::process::Command;
-use std::{fs, path::PathBuf};
+use keel_test_support::{native, native_program};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -223,85 +221,6 @@ int main(void){
 #endif
 "#
 }
-// The runner embeds the inventory digest, so changing the manifest alone cannot
-// bless a partial or modified packet. Validate everything before compiling any case.
-const RUNNER: &str = r#"#!/bin/sh
-set -eu
-exec python3 - "$0" "$@" <<'PYTHON'
-import hashlib, itertools, json, os, pathlib, platform, shlex, struct, subprocess, sys
-root = pathlib.Path(sys.argv[1]).resolve().parent
-os.chdir(root)
-def require(ok, message):
-    if not ok:
-        raise SystemExit("CX16 packet: " + message)
-roster = [f"cx16-{s}-{a}-{p}.o" for s, a, p in itertools.product(
-    ("Baseline", "Trees", "Full"), ("Fast", "Full"), ("normal", "tiny", "empty", "rbx"))]
-expected = set(roster + [name[:-2] + ".s" for name in roster] + ["cx16.c", "cx16.ir"])
-require(sys.argv[2:] in ([], ["--verify-only"]), "usage: run.sh [--verify-only]")
-require(pathlib.Path("inventory.json").is_file(), "missing sealed inventory")
-raw = pathlib.Path("inventory.json").read_bytes()
-require(hashlib.sha256(raw).hexdigest() == "@INVENTORY_SHA256@", "inventory seal mismatch")
-inventory = json.loads(raw)
-require(isinstance(inventory, dict) and set(inventory) == expected, "inventory roster mismatch")
-actual = {p.name for pattern in ("cx16-*.o", "cx16-*.s") for p in root.glob(pattern)}
-require(actual == expected - {"cx16.c", "cx16.ir"}, "object/source roster mismatch (missing or unexpected case)")
-for name in sorted(expected):
-    path = pathlib.Path(name)
-    require(path.is_file() and not path.is_symlink(), "missing/nonregular file " + name)
-    data = path.read_bytes()
-    require(hashlib.sha256(data).hexdigest() == inventory[name], "hash mismatch: " + name)
-    if name.endswith(".o"):
-        # ELF64, little endian, current version, ET_REL, EM_X86_64; reject
-        # truncated headers and bogus section tables before invoking the linker.
-        require(len(data) >= 64 and data[:7] == b"\x7fELF\x02\x01\x01", "invalid ELF64: " + name)
-        header = struct.unpack_from("<HHIQQQIHHHHHH", data, 16)
-        require(header[0:3] == (1, 62, 1) and header[7] == 64 and header[10] == 64
-                and header[11] > 0 and header[5] >= 64
-                and header[5] + 64 * header[11] <= len(data), "invalid x86_64 relocatable ELF: " + name)
-print("CX16 sealed packet verified: 24 ELF objects", flush=True)
-if sys.argv[2:] == ["--verify-only"]:
-    sys.exit(0)
-require(platform.system() == "Linux" and platform.machine() == "x86_64", "requires native x86_64 Linux")
-cc = shlex.split(os.environ.get("CC", "cc"))
-require(bool(cc), "empty CC")
-for name in roster:
-    subprocess.run(cc + ["-O2", "-g", "-mcx16", "-pthread", "-fasynchronous-unwind-tables",
-                         "cx16.c", name, "-o", "cx16-run"], check=True)
-    subprocess.run(["./cx16-run"], check=True)
-PYTHON
-"#;
-
-fn write_packet_seal(directory: &std::path::Path) {
-    fs::write(directory.join("run.sh"), RUNNER).unwrap();
-    common::command(
-        Command::new("python3")
-            .arg("-c")
-            .arg(
-                r#"
-import hashlib, itertools, json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-roster = [f"cx16-{s}-{a}-{p}.o" for s,a,p in itertools.product(
-    ("Baseline", "Trees", "Full"), ("Fast", "Full"), ("normal", "tiny", "empty", "rbx"))]
-names = roster + [n[:-2] + ".s" for n in roster] + ["cx16.c", "cx16.ir"]
-inventory = {n: hashlib.sha256((root / n).read_bytes()).hexdigest() for n in sorted(names)}
-raw = (json.dumps(inventory, indent=2, sort_keys=True) + "\n").encode()
-(root / "inventory.json").write_bytes(raw)
-runner = root / "run.sh"
-runner.write_text(runner.read_text().replace("@INVENTORY_SHA256@", hashlib.sha256(raw).hexdigest()))
-"#,
-            )
-            .arg(directory),
-    );
-}
-
-fn seal_packet(directory: &std::path::Path) {
-    write_packet_seal(directory);
-    common::command(
-        Command::new("sh")
-            .arg(directory.join("run.sh"))
-            .arg("--verify-only"),
-    );
-}
 #[test]
 fn typed_features_effects_and_foreign_rejection() {
     let id = Intrinsic::X86Cx16Cmpxchg16b;
@@ -386,19 +305,6 @@ fn cx16_fast_leaf_and_pool_boundary() {
 }
 #[test]
 fn cx16_allocation_frame_parity_export() {
-    let export = std::env::var_os("KEEL_X86_CX16_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("cx16.ir"), source()).unwrap();
-        fs::write(d.join("cx16.c"), harness()).unwrap();
-        // Invalidate any prior seal before starting a new export.
-        for name in ["run.sh", "inventory.json"] {
-            let path = d.join(name);
-            if path.exists() {
-                fs::remove_file(path).unwrap();
-            }
-        }
-    }
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -411,127 +317,48 @@ fn cx16_allocation_frame_parity_export() {
                 ("empty", &EMPTY),
                 ("rbx", &RBX),
             ] {
-                let (b, text) = compile(s, a, p, Features::for_level(CpuLevel::V2)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("cx16-{s:?}-{a:?}-{name}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                compile(s, a, p, Features::for_level(CpuLevel::V2))
+                    .unwrap_or_else(|error| panic!("{name}: {error:?}"));
             }
         }
     }
-    if let Some(d) = &export {
-        seal_packet(d);
-    }
 }
 
-#[test]
-fn runner_rejects_incomplete_and_unsealed_packets() {
-    let d = common::temp("cx16-runner-negative");
-    fs::create_dir_all(&d).unwrap();
-    let (object, text) = compile(
-        SelectionTier::Baseline,
-        AllocationTier::Full,
-        &EMPTY,
-        Features::for_level(CpuLevel::V2),
-    )
-    .unwrap();
-    fs::write(d.join("cx16.c"), harness()).unwrap();
-    fs::write(d.join("cx16.ir"), source()).unwrap();
-    for s in ["Baseline", "Trees", "Full"] {
-        for a in ["Fast", "Full"] {
-            for p in ["normal", "tiny", "empty", "rbx"] {
-                fs::write(d.join(format!("cx16-{s}-{a}-{p}.o")), &object).unwrap();
-                fs::write(d.join(format!("cx16-{s}-{a}-{p}.s")), &text).unwrap();
-            }
-        }
-    }
-    seal_packet(&d); // Positive control: the complete, sealed fixture passes.
-    let reject = |reason: &str| {
-        let output = Command::new("sh")
-            .arg(d.join("run.sh"))
-            .arg("--verify-only")
-            .output()
-            .unwrap();
-        assert!(!output.status.success(), "runner accepted {reason}");
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains(reason),
-            "{:?}",
-            output
-        );
-    };
-    let missing = d.join("cx16-Full-Full-rbx.o");
-    fs::remove_file(&missing).unwrap();
-    reject("roster mismatch");
-    // Exercise the actual default entry point too: it must reject the missing
-    // case before the host gate or any native compiler/harness invocation.
-    let output = Command::new("sh").arg(d.join("run.sh")).output().unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("roster mismatch"));
-    fs::write(&missing, &object).unwrap();
-    fs::write(d.join("cx16-extra.o"), &object).unwrap();
-    reject("roster mismatch");
-    fs::remove_file(d.join("cx16-extra.o")).unwrap();
-    fs::write(&missing, b"not ELF").unwrap();
-    reject("hash mismatch");
-    let manifest = fs::read(d.join("inventory.json")).unwrap();
-    fs::write(d.join("inventory.json"), b"{}").unwrap();
-    reject("inventory seal mismatch");
-    fs::write(d.join("inventory.json"), manifest).unwrap();
-    // A matching hash is insufficient: reject non-ELF even if freshly sealed.
-    write_packet_seal(&d);
-    reject("invalid ELF64");
-    // Also reject a valid ELF header whose machine is not x86_64.
-    let mut foreign = object.clone();
-    foreign[18..20].copy_from_slice(&183u16.to_le_bytes());
-    fs::write(&missing, foreign).unwrap();
-    write_packet_seal(&d);
-    reject("invalid x86_64 relocatable ELF");
-    fs::write(&missing, &object).unwrap();
-    write_packet_seal(&d);
-    common::command(
-        Command::new("sh")
-            .arg(d.join("run.sh"))
-            .arg("--verify-only"),
-    );
-    fs::remove_dir_all(d).unwrap();
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_cx16_oracles() {
-    if !std::is_x86_feature_detected!("cmpxchg16b") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("cx16-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("cx16.c"), harness()).unwrap();
+    let cx16_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
         SelectionTier::Full,
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
-            for p in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY, &RBX] {
+            for (pool, p) in [
+                ("normal", &keel_codegen::x86_64::REGISTERS),
+                ("tiny", &TINY),
+                ("empty", &EMPTY),
+                ("rbx", &RBX),
+            ] {
                 let (b, _) = compile(s, a, p, Features::for_level(CpuLevel::V2)).unwrap();
-                fs::write(d.join("cx16.o"), b).unwrap();
-                common::command(
-                    Command::new("cc")
-                        .args([
-                            "-O2",
-                            "-g",
-                            "-mcx16",
-                            "-pthread",
-                            "-fasynchronous-unwind-tables",
-                        ])
-                        .arg(d.join("cx16.c"))
-                        .arg(d.join("cx16.o"))
-                        .arg("-o")
-                        .arg(d.join("cx16")),
-                );
-                common::command(&mut Command::new(d.join("cx16")));
+                native_program!(format!("cx16-{s:?}-{a:?}-{pool}"))
+                    .requires(&["cmpxchg16b"])
+                    .file("cx16.c", cx16_c)
+                    .file("cx16.o", b)
+                    .link([
+                        "-O2",
+                        "-g",
+                        "-mcx16",
+                        "-pthread",
+                        "-fasynchronous-unwind-tables",
+                        "cx16.c",
+                        "cx16.o",
+                    ])
+                    .stdout("CX16 ABI/scalar/LOCK/live-RBX/frame/fault/unwind/counter PASS\n")
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
