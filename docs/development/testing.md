@@ -23,10 +23,18 @@ python3 tools/test.py generators                   # Generated-file staleness an
 python3 tools/test.py cranelift                    # The separate keel-cranelift workspace
 ```
 
-GNU assembler oracle tests require GNU binutils. On macOS, `as` is Apple's
-assembler, so set `KEEL_GNU_AS` to the absolute path of an x86-64 GNU
-cross-assembler before running the workspace suite. These tests retain both
-the Clang and GNU comparisons; they do not skip a missing oracle silently.
+Oracle tests find external tools through `crates/keel-test-support`. Set
+`KEEL_CLANG`, `KEEL_GNU_AS` or `KEEL_GNU_LD` to name a tool explicitly.
+Otherwise GNU as and GNU ld are searched on `PATH`: `as` and `ld` on Linux,
+then the `x86_64-linux-gnu-` and `x86_64-elf-` cross tools; off Linux, `as` is
+not GNU as, so only the cross tools qualify. A bare-ELF GNU as such as
+`x86_64-elf-as` gets `--divide`, so `/` is division rather than a comment.
+
+A test that cannot run because a tool or host capability is missing records a
+skip: it prints `KEEL-SKIP: <reason>` and appends a line to the skip log
+described under [Test environment](#test-environment). A skipped test still
+reports as passed to Cargo. Set `KEEL_REQUIRE_ORACLES=1`
+on a qualification host to turn every skip into a failure.
 
 All main-workspace crates inherit the lint policy in the root manifest.
 `tools/test.py lint` runs `cargo fmt --all --check`, then

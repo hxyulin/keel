@@ -428,8 +428,10 @@ KEEL_TEST_ASSEMBLER=native cargo test -p keel-codegen --test run
 relaxation, symbol differences, ELF symbols, sections and relocations.
 `x86_sections` compares merge, COMDAT and section declarations with Clang and,
 on Linux, GNU as. Backend fixtures require structured emission and reassembled
-text to produce identical objects. GNU as comparisons use `x86_64-elf-as` off
-Linux; set `KEEL_GNU_AS` to override it.
+text to produce identical objects. GNU as comparisons use `as` on Linux and
+`x86_64-elf-as` or `x86_64-linux-gnu-as` elsewhere; set `KEEL_GNU_AS` to
+override it. A missing GNU as records a skip (see
+[the testing guide](../../development/testing.md)).
 
 To profile assembler stages (parse, per-pass layout, branch checks, ELF
 finalization):
