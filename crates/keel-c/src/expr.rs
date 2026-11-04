@@ -39,22 +39,6 @@ fn broadcast_constant(e: &Expr<'_>, layout: CDataLayout) -> Option<Const> {
     (f.class <= Class::Arithmetic).then_some(f.value)
 }
 
-/// An integer constant expression used as a builtin immediate, in the AST's
-/// integer encoding. Any undefined behavior makes it invalid, unlike the
-/// general evaluator, which wraps overflow and saturates float conversions.
-fn integer_constant_control(e: &Expr<'_>, layout: CDataLayout) -> Option<i64> {
-    if layout != CDataLayout::NATIVE_LP64 || !e.ty.is_integer() {
-        return None;
-    }
-    match Eval::new(layout, &|_| false, Policy::STRICT).eval(e, Comma::Reject)? {
-        Folded {
-            value: Const::Int(c),
-            class: Class::Integer,
-        } => c.literal(),
-        _ => None,
-    }
-}
-
 fn binary_prec(p: &str) -> Option<u8> {
     Some(match p {
         "||" => 1,
@@ -2082,7 +2066,7 @@ mod integer_layout_tests {
 
     // Expression-only seam: never invoke IR generation with the test model.
     // No production constructor selects WASM32.
-    fn expression<'a>(src: &'a str, arena: &'a Bump, layout: CDataLayout) -> Expr<'a> {
+    pub(super) fn expression<'a>(src: &'a str, arena: &'a Bump, layout: CDataLayout) -> Expr<'a> {
         let mut p = Parser::new(
             src,
             "layout-expression.c",
@@ -2294,13 +2278,8 @@ mod integer_layout_tests {
     fn native_proofs_explicitly_reject_the_private_model() {
         let arena = Bump::new();
         let e = expression("1L + 2L", &arena, CDataLayout::WASM32);
-        assert_eq!(integer_constant_control(&e, CDataLayout::WASM32), None);
         assert_eq!(broadcast_constant(&e, CDataLayout::WASM32), None);
         let e = expression("1L + 2L", &arena, CDataLayout::NATIVE_LP64);
-        assert_eq!(
-            integer_constant_control(&e, CDataLayout::NATIVE_LP64),
-            Some(3)
-        );
         assert_eq!(
             broadcast_constant(&e, CDataLayout::NATIVE_LP64).and_then(Const::int),
             Some(3)
@@ -2356,46 +2335,6 @@ mod integer_layout_tests {
             assert_eq!(
                 eval::eval_constant_with_layout(&e, false, layout).and_then(Const::int),
                 Some(0)
-            );
-        }
-        // These deliberately remain native proofs with stricter validity rules
-        // than the wrapping/saturating general evaluator.
-        for src in [
-            "2147483647 + 1",
-            "1 << 32",
-            "1 << -1",
-            "(-2147483647 - 1) / -1",
-            "(int)1e100",
-            "(1, 2)",
-        ] {
-            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
-            assert_eq!(
-                integer_constant_control(&e, CDataLayout::NATIVE_LP64),
-                None,
-                "{src}"
-            );
-        }
-        for src in [
-            "(int)(__int128)1 + 2",
-            "__builtin_bswap16(0x0100)",
-            "(int)1.5e0",
-        ] {
-            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
-            assert!(
-                integer_constant_control(&e, CDataLayout::NATIVE_LP64).is_some(),
-                "{src}"
-            );
-        }
-        for src in [
-            "(int)(1.5 + 1.0)",
-            "(long)(void *)1",
-            "(int)(__int128)1 << 40",
-        ] {
-            let e = expression(src, &arena, CDataLayout::NATIVE_LP64);
-            assert_eq!(
-                integer_constant_control(&e, CDataLayout::NATIVE_LP64),
-                None,
-                "{src}"
             );
         }
         let e = expression(
