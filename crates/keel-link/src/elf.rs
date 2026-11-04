@@ -259,6 +259,40 @@ pub fn link_selected(selection: &Selection<'_>, options: Options) -> Result<Exec
     link_prepared(&selection.prepared, resolved)
 }
 
+/// Selected definition of each global name, as `(unit, symbol)`.
+type Globals = BTreeMap<String, (usize, usize)>;
+/// Size and alignment of each common symbol.
+type Commons = BTreeMap<String, (u64, u64)>;
+/// Output `(section, offset)` of each placed common symbol.
+type CommonLocations = BTreeMap<String, (usize, u64)>;
+
+/// Allocated input sections and the metadata parsed with them. Section
+/// indices in `sections`, `unwind_sections`, `sframe_section`, `note_plan` and
+/// each `Unit::sections` agree until a phase renumbers them.
+struct Parsed {
+    sections: Vec<Section>,
+    units: Vec<Unit>,
+    unwind_sections: BTreeMap<usize, unwind::Frames>,
+    sframe_section: Option<(usize, sframe::Table)>,
+    warnings: Vec<String>,
+    note_plan: notes::Plan,
+    object_properties: Vec<notes::Properties>,
+}
+
+/// `(p_type, p_flags, p_offset, p_filesz, p_memsz, p_align)`.
+type ProgramHeader = (u32, u32, u64, u64, u64, u64);
+
+/// The `.got` output section and the slot offset of each selected
+/// `(unit, symbol)` that is not an import.
+struct Got {
+    section: usize,
+    slots: BTreeMap<(usize, usize), u64>,
+}
+
+/// Link phases, in order: `parse_units`, `resolve_globals`, `collect` (GC),
+/// `merge_metadata` (unwind and SFrame), `allocate_commons`, `plan_imports`,
+/// `plan_got`, dynamic and note preparation, `layout`, then the `Placed`
+/// phases that write bytes and `program_headers`.
 fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<Executable> {
     let ResolvedOptions {
         options,
@@ -274,450 +308,584 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     if script.is_some() && (arm || !libraries.is_empty() || options.gc_sections) {
         return Err("scripts currently require static x86-64 output without --gc-sections".into());
     }
-    let mut sections = Vec::new();
-    let mut units = Vec::new();
-    let mut unwind_sections = BTreeMap::new();
-    let mut sframe_section = None;
-    let mut warnings = Vec::new();
-    let mut note_plan = notes::Plan::default();
-    let mut object_properties = Vec::new();
+    let mut parsed = parse_units(inputs, arm)?;
+    let (mut globals, mut commons) = resolve_globals(&parsed.units)?;
+    if let Some(script) = script {
+        return link_script(script, parsed, globals, &options);
+    }
+    let mut sframe_targets = collect(
+        &mut parsed,
+        &mut globals,
+        &mut commons,
+        &options,
+        !libraries.is_empty(),
+    )?;
+    merge_metadata(&mut parsed, &mut sframe_targets, options.gc_sections)?;
+    let Parsed {
+        mut sections,
+        units,
+        unwind_sections,
+        sframe_section,
+        warnings,
+        mut note_plan,
+        object_properties,
+    } = parsed;
+    let (common_locations, common_sizes) =
+        allocate_commons(&mut sections, &units, &globals, commons)?;
+    let bounds = bounds::symbols(&sections, &units, &globals)?;
+    let imports = plan_imports(&units, &globals, &bounds, libraries)?;
+    // GOT keys retain selected raw identities, including independent locals.
+    // Build after the final symbol/section rewrites; address validation stays lazy.
+    let selected = selected::Index::new(&units, &globals, &imports);
+    check_property_references(&units, &globals, &selected, libraries)?;
+    let got = plan_got(&mut sections, &units, &selected, arm)?;
+    let mut dynamic = if libraries.is_empty() {
+        None
+    } else {
+        let definitions = dynamic_definitions(&units, &globals, &common_sizes);
+        let absolute = absolute_imports(&units, &sections, &selected)?;
+        let lifecycle = lifecycle::Plan::new(&sections, &units, &globals)?;
+        Some(dynamic::Dynamic::prepare(
+            &mut sections,
+            imports.clone(),
+            definitions,
+            libraries,
+            &options,
+            absolute,
+            lifecycle,
+        )?)
+    };
+    let unwind_header = unwind::prepare(&mut sections, &unwind_sections)?;
+    note_plan.prepare(
+        &mut sections,
+        &object_properties,
+        dynamic.as_ref().is_some_and(|d| !d.stubs.is_empty()),
+    )?;
+    let segments = layout(&mut sections, page)?;
+    let mut linker_symbols = bounds;
+    linker_symbols.insert("_GLOBAL_OFFSET_TABLE_".into(), (got.section, false));
+    if let Some(d) = &dynamic {
+        linker_symbols.insert("_DYNAMIC".into(), (d.table, false));
+    }
+    let placed = Placed {
+        sections: &sections,
+        units: &units,
+        globals: &globals,
+        selected: &selected,
+        linker_symbols: &linker_symbols,
+        common_locations: &common_locations,
+        common_sizes: &common_sizes,
+    };
+    let entry = placed.entry(&options.entry)?;
+    let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(page);
+    let mut bytes = placed.image(file_end, &got, arm)?;
+    placed.relocate(&mut bytes, &got, &mut dynamic, arm)?;
+    if let Some((section, table)) = &sframe_section {
+        table.finish(
+            &mut bytes,
+            *section,
+            &sections,
+            sframe_targets.as_ref().unwrap(),
+        )?;
+    }
+    if let Some(d) = dynamic.as_mut() {
+        d.emit(&mut bytes, &sections, &placed.dynamic_exports()?)?;
+    }
+    if let Some(header) = unwind_header {
+        unwind::emit(&mut bytes, &sections, &unwind_sections, header)?;
+    }
+    let (shoff, section_headers) = placed.tables(&mut bytes, dynamic.as_ref())?;
+    let phdrs = program_headers(
+        &sections,
+        &segments,
+        page,
+        dynamic.as_ref(),
+        unwind_header,
+        sframe_section.as_ref().map(|(section, _)| *section),
+        &note_plan,
+    )?;
+    write_headers(
+        &mut bytes,
+        &sections,
+        arm,
+        entry,
+        shoff,
+        section_headers,
+        &phdrs,
+    );
+    Ok(Executable { bytes, warnings })
+}
+
+/// Parse and validate every input object. Output section indices are assigned
+/// in input order.
+fn parse_units(inputs: &[input::Named<'_>], arm: bool) -> Result<Parsed> {
+    let mut parsed = Parsed {
+        sections: Vec::new(),
+        units: Vec::new(),
+        unwind_sections: BTreeMap::new(),
+        sframe_section: None,
+        warnings: Vec::new(),
+        note_plan: notes::Plan::default(),
+        object_properties: Vec::new(),
+    };
     for input in inputs {
         let mut properties = notes::Properties::new();
-        let mut parse = || -> Result<Unit> {
-            let file =
-                ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
-            if file.architecture()
-                != if arm {
-                    object::Architecture::Aarch64
-                } else {
-                    object::Architecture::X86_64
-                }
-                || !file.is_64()
-                || !file.is_little_endian()
-                || file.kind() != object::ObjectKind::Relocatable
+        let unit = parsed
+            .parse_unit(input, arm, &mut properties)
+            .map_err(|e| format!("{}: {e}", input.name))?;
+        parsed.units.push(unit);
+        parsed.object_properties.push(properties);
+    }
+    Ok(parsed)
+}
+
+impl Parsed {
+    /// Validate one relocatable object, append its allocated sections, and
+    /// return its symbols and relocations. GNU property notes go to `properties`.
+    fn parse_unit(
+        &mut self,
+        input: &input::Named<'_>,
+        arm: bool,
+        properties: &mut notes::Properties,
+    ) -> Result<Unit> {
+        let Self {
+            sections,
+            unwind_sections,
+            sframe_section,
+            warnings,
+            note_plan,
+            ..
+        } = self;
+        let file =
+            ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
+        if file.architecture()
+            != if arm {
+                object::Architecture::Aarch64
+            } else {
+                object::Architecture::X86_64
+            }
+            || !file.is_64()
+            || !file.is_little_endian()
+            || file.kind() != object::ObjectKind::Relocatable
+        {
+            return Err(format!(
+                "expected a little-endian {} ELF64 relocatable object",
+                if arm { "AArch64" } else { "x86-64" }
+            ));
+        }
+        let header = file.elf_header();
+        if !matches!(header.e_ident().os_abi, 0 | 3) || header.e_flags(file.endian()) != 0 {
+            return Err("unsupported ELF OS ABI or machine flags".into());
+        }
+        let group_plan = &input.groups;
+        if let Some(symbol) = file.symbols().find(|s| {
+            matches!(s.flags(),
+            SymbolFlags::Elf { st_info, .. } if st_info & 15 == object::elf::STT_TLS)
+        }) {
+            return Err(format!(
+                "TLS symbol {} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported",
+                symbol.name().unwrap_or("?")
+            ));
+        }
+        // object ignores REL/RELA tables not linked to its chosen symbol
+        // table (and sh_info=0). Validate every association before consuming
+        // notes or trusting its per-section relocation iterators.
+        for section in file.sections() {
+            let raw = section.elf_section_header();
+            if !matches!(
+                raw.sh_type(file.endian()),
+                object::elf::SHT_REL | object::elf::SHT_RELA
+            ) {
+                continue;
+            }
+            let name = section.name().map_err(|e| e.to_string())?;
+            let link = raw.sh_link(file.endian());
+            if link == 0 || link as usize != file.elf_symbol_table().section().0 {
+                return Err(format!(
+                    "unsupported relocation table {name} sh_link {link}: expected the selected SHT_SYMTAB"
+                ));
+            }
+            let info = raw.sh_info(file.endian());
+            let target = file
+                .section_by_index(object::SectionIndex(info as usize))
+                .map_err(|_| format!("invalid relocation table {name} sh_info {info}"))?;
+            if info == 0
+                || matches!(
+                    target.elf_section_header().sh_type(file.endian()),
+                    object::elf::SHT_REL | object::elf::SHT_RELA
+                )
             {
                 return Err(format!(
-                    "expected a little-endian {} ELF64 relocatable object",
-                    if arm { "AArch64" } else { "x86-64" }
+                    "unsupported relocation table {name} sh_info {info}"
                 ));
             }
-            let header = file.elf_header();
-            if !matches!(header.e_ident().os_abi, 0 | 3) || header.e_flags(file.endian()) != 0 {
-                return Err("unsupported ELF OS ABI or machine flags".into());
-            }
-            let group_plan = &input.groups;
-            if let Some(symbol) = file.symbols().find(|s| {
-                matches!(s.flags(),
-                SymbolFlags::Elf { st_info, .. } if st_info & 15 == object::elf::STT_TLS)
-            }) {
-                return Err(format!(
-                    "TLS symbol {} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported",
-                    symbol.name().unwrap_or("?")
-                ));
-            }
-            // object ignores REL/RELA tables not linked to its chosen symbol
-            // table (and sh_info=0). Validate every association before consuming
-            // notes or trusting its per-section relocation iterators.
-            for section in file.sections() {
-                let raw = section.elf_section_header();
-                if !matches!(
-                    raw.sh_type(file.endian()),
-                    object::elf::SHT_REL | object::elf::SHT_RELA
-                ) {
-                    continue;
-                }
-                let name = section.name().map_err(|e| e.to_string())?;
-                let link = raw.sh_link(file.endian());
-                if link == 0 || link as usize != file.elf_symbol_table().section().0 {
-                    return Err(format!(
-                        "unsupported relocation table {name} sh_link {link}: expected the selected SHT_SYMTAB"
-                    ));
-                }
-                let info = raw.sh_info(file.endian());
-                let target = file
-                    .section_by_index(object::SectionIndex(info as usize))
-                    .map_err(|_| format!("invalid relocation table {name} sh_info {info}"))?;
-                if info == 0
-                    || matches!(
-                        target.elf_section_header().sh_type(file.endian()),
-                        object::elf::SHT_REL | object::elf::SHT_RELA
-                    )
+        }
+        let mut unit = Unit {
+            name: input.name.clone(),
+            sections: BTreeMap::new(),
+            symbols: BTreeMap::new(),
+            relocs: Vec::new(),
+            consumed_properties: BTreeSet::new(),
+            groups: group_plan.membership.clone(),
+        };
+        for section in file.sections() {
+            if group_plan.discarded.contains(&section.index().0) {
+                // TLS is a whole-input unsupported contract, including
+                // losing groups without STT_TLS symbols. Keep ordinary
+                // live-section validation (notably unwind) in its original
+                // order, but do not let selection hide this boundary.
+                let flags = section.elf_section_header().sh_flags(file.endian());
+                if flags & u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
+                    == u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
                 {
-                    return Err(format!(
-                        "unsupported relocation table {name} sh_info {info}"
-                    ));
-                }
-            }
-            let mut unit = Unit {
-                name: input.name.clone(),
-                sections: BTreeMap::new(),
-                symbols: BTreeMap::new(),
-                relocs: Vec::new(),
-                consumed_properties: BTreeSet::new(),
-                groups: group_plan.membership.clone(),
-            };
-            for section in file.sections() {
-                if group_plan.discarded.contains(&section.index().0) {
-                    // TLS is a whole-input unsupported contract, including
-                    // losing groups without STT_TLS symbols. Keep ordinary
-                    // live-section validation (notably unwind) in its original
-                    // order, but do not let selection hide this boundary.
-                    let flags = section.elf_section_header().sh_flags(file.endian());
-                    if flags & u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
-                        == u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
-                    {
-                        let name = section.name().map_err(|e| e.to_string())?;
-                        return Err(format!(
-                            "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
-                        ));
-                    }
-                    continue;
-                }
-                let name = section.name().map_err(|e| e.to_string())?.to_owned();
-                let original_data = section.data().map_err(|e| e.to_string())?;
-                let data = group_plan
-                    .frames
-                    .get(&section.index().0)
-                    .map_or(original_data, |f| f.data.as_slice());
-                let input_size = if group_plan.frames.contains_key(&section.index().0) {
-                    data.len() as u64
-                } else {
-                    section.size()
-                };
-                let raw = section.elf_section_header();
-                match raw.sh_type(file.endian()) {
-                    object::elf::SHT_REL => {
-                        return Err("REL relocations are unsupported; use RELA".into());
-                    }
-                    object::elf::SHT_RELA | object::elf::SHT_SYMTAB
-                        if raw.sh_entsize(file.endian()) != 24
-                            || !data.len().is_multiple_of(24) =>
-                    {
-                        return Err(format!("malformed ELF record table {name}"));
-                    }
-                    _ => {}
-                }
-                let SectionFlags::Elf { sh_flags } = section.flags() else {
-                    unreachable!()
-                };
-                if name == ".note.GNU-stack" && sh_flags & 4 != 0 {
-                    return Err("executable stack requests are unsupported".into());
-                }
-                let kind = raw.sh_type(file.endian());
-                if arm
-                    && (name == ".eh_frame_hdr"
-                        || name == ".sframe"
-                        || name.starts_with(".note.gnu.property")
-                        || name == ".note.ABI-tag"
-                        || matches!(kind, 14..=16 | 0x70000001))
-                {
-                    return Err(format!(
-                        "AArch64 ELF input section {name} is not yet supported"
-                    ));
-                }
-                let sframe = sframe::validate_section(
-                    &name,
-                    kind,
-                    sh_flags,
-                    section.align(),
-                    raw.sh_entsize(file.endian()),
-                    raw.sh_link(file.endian()),
-                    raw.sh_info(file.endian()),
-                )?;
-                let note = notes::validate(
-                    &name,
-                    kind,
-                    sh_flags,
-                    section.align(),
-                    raw.sh_entsize(file.endian()),
-                    raw.sh_link(file.endian()),
-                    raw.sh_info(file.endian()),
-                )?;
-                let linux_note = name == ".note.Linux";
-                if linux_note {
-                    notes::linux(data)?;
-                    section.elf_linked_rela().map_err(|e| e.to_string())?;
-                    if section.relocations().next().is_some() {
-                        return Err("relocations into .note.Linux are unsupported".into());
-                    }
-                }
-                if let Some(note) = note {
-                    end(0, section.size())?;
-                    if data.len() as u64 != section.size() {
-                        return Err(format!("invalid section size for {name}"));
-                    }
-                    section.elf_linked_rela().map_err(|e| e.to_string())?;
-                    if section.relocations().next().is_some() {
-                        return Err(format!("relocations into {name} are unsupported"));
-                    }
-                    match note {
-                        notes::Kind::Property => {
-                            notes::properties(data, &mut properties)?;
-                            unit.consumed_properties.insert(section.index().0);
-                            continue;
-                        }
-                        notes::Kind::Abi => {
-                            notes::abi(data)?;
-                            if note_plan.abi.replace(sections.len()).is_some() {
-                                return Err(
-                                    "additional .note.ABI-tag contracts are unsupported".into()
-                                );
-                            }
-                        }
-                    }
-                }
-                let lifecycle = lifecycle::validate(
-                    &name,
-                    kind,
-                    sh_flags & !u64::from(object::elf::SHF_GROUP),
-                    section.size(),
-                    section.align(),
-                    raw.sh_entsize(file.endian()),
-                )?;
-                let frame = name == ".eh_frame" || kind == object::elf::SHT_X86_64_UNWIND;
-                if name == ".eh_frame_hdr" {
-                    return Err(
-                        "input .eh_frame_hdr is unsupported; the linker generates it".into(),
-                    );
-                }
-                if frame
-                    && (name != ".eh_frame"
-                        || !matches!(
-                            kind,
-                            object::elf::SHT_PROGBITS | object::elf::SHT_X86_64_UNWIND
-                        )
-                        || sh_flags & !u64::from(object::elf::SHF_GROUP)
-                            != u64::from(object::elf::SHF_ALLOC)
-                        || raw.sh_entsize(file.endian()) != 0)
-                {
-                    return Err(".eh_frame requires PROGBITS or SHT_X86_64_UNWIND, SHF_ALLOC only, and no entry size".into());
-                }
-                if sh_flags & 2 == 0 {
-                    if name.starts_with(".debug") || name.starts_with(".zdebug") {
-                        warnings.push(format!("{}: omitted debug section {name}", input.name));
-                    }
-                    continue;
-                }
-                if sh_flags & u64::from(object::elf::SHF_TLS) != 0 {
+                    let name = section.name().map_err(|e| e.to_string())?;
                     return Err(format!(
                         "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
                     ));
                 }
-                // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS/GNU_RETAIN. In particular,
-                // TLS, compression and link-order semantics are rejected.
-                // Group membership was validated and selected before parsing.
-                if sh_flags & !0x200237 != 0 || sh_flags & 5 == 5 {
-                    return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
+                continue;
+            }
+            let name = section.name().map_err(|e| e.to_string())?.to_owned();
+            let original_data = section.data().map_err(|e| e.to_string())?;
+            let data = group_plan
+                .frames
+                .get(&section.index().0)
+                .map_or(original_data, |f| f.data.as_slice());
+            let input_size = if group_plan.frames.contains_key(&section.index().0) {
+                data.len() as u64
+            } else {
+                section.size()
+            };
+            let raw = section.elf_section_header();
+            match raw.sh_type(file.endian()) {
+                object::elf::SHT_REL => {
+                    return Err("REL relocations are unsupported; use RELA".into());
                 }
-                let bss = section.kind() == object::SectionKind::UninitializedData;
-                if !lifecycle
-                    && !sframe
-                    && note.is_none()
-                    && !linux_note
-                    && !matches!(
-                        section.kind(),
-                        object::SectionKind::Text
-                            | object::SectionKind::Data
-                            | object::SectionKind::ReadOnlyData
-                            | object::SectionKind::ReadOnlyString
-                            | object::SectionKind::UninitializedData
-                            | object::SectionKind::Elf(object::elf::SHT_X86_64_UNWIND)
-                    )
+                object::elf::SHT_RELA | object::elf::SHT_SYMTAB
+                    if raw.sh_entsize(file.endian()) != 24 || !data.len().is_multiple_of(24) =>
                 {
-                    return Err(format!(
-                        "unsupported allocated section {name} ({:?})",
-                        section.kind()
-                    ));
+                    return Err(format!("malformed ELF record table {name}"));
                 }
-                let size = end(0, input_size)?;
-                let alignment = section.align().max(1);
-                align(0, alignment)?;
-                if !bss && data.len() as u64 != size {
-                    return Err(format!("invalid section size for {name}"));
-                }
-                if frame {
-                    if size != 0 && alignment < 4 {
-                        return Err(".eh_frame alignment must be at least 4".into());
-                    }
-                    let frames =
-                        unwind::Frames::parse(data).map_err(|e| format!(".eh_frame: {e}"))?;
-                    unwind_sections.insert(sections.len(), frames);
-                }
-                if sframe {
-                    if sframe_section.is_some() {
-                        return Err(".sframe: second selected SFrame producer is unsupported; merging is not implemented (empty headers also count)".into());
-                    }
-                    sframe_section = Some((sections.len(), sframe::Table::parse(data)?));
-                }
-                unit.sections.insert(section.index().0, sections.len());
-                sections.push(Section {
-                    name,
-                    flags: sh_flags & 0x200007,
-                    kind,
-                    align: alignment,
-                    size,
-                    bss,
-                    data: if sframe {
-                        sframe_section.as_ref().unwrap().1.rebuild()?
-                    } else {
-                        data.to_vec()
-                    },
-                    offset: 0,
-                });
-                // The generic relocation iterator skips malformed tables. Validate
-                // explicitly before consuming it so bad inputs cannot mislink.
+                _ => {}
+            }
+            let SectionFlags::Elf { sh_flags } = section.flags() else {
+                unreachable!()
+            };
+            if name == ".note.GNU-stack" && sh_flags & 4 != 0 {
+                return Err("executable stack requests are unsupported".into());
+            }
+            let kind = raw.sh_type(file.endian());
+            if arm
+                && (name == ".eh_frame_hdr"
+                    || name == ".sframe"
+                    || name.starts_with(".note.gnu.property")
+                    || name == ".note.ABI-tag"
+                    || matches!(kind, 14..=16 | 0x70000001))
+            {
+                return Err(format!(
+                    "AArch64 ELF input section {name} is not yet supported"
+                ));
+            }
+            let sframe = sframe::validate_section(
+                &name,
+                kind,
+                sh_flags,
+                section.align(),
+                raw.sh_entsize(file.endian()),
+                raw.sh_link(file.endian()),
+                raw.sh_info(file.endian()),
+            )?;
+            let note = notes::validate(
+                &name,
+                kind,
+                sh_flags,
+                section.align(),
+                raw.sh_entsize(file.endian()),
+                raw.sh_link(file.endian()),
+                raw.sh_info(file.endian()),
+            )?;
+            let linux_note = name == ".note.Linux";
+            if linux_note {
+                notes::linux(data)?;
                 section.elf_linked_rela().map_err(|e| e.to_string())?;
-                let mut unwind_relocations = BTreeSet::new();
-                let mut sframe_relocations = BTreeSet::new();
-                for (offset, r) in section.relocations() {
-                    let Some(offset) = group_plan.offset(section.index().0, offset) else {
-                        continue;
-                    };
-                    let RelocationFlags::Elf { r_type: kind } = r.flags() else {
-                        return Err("non-ELF relocation".into());
-                    };
-                    if kind == 0 {
-                        continue;
-                    }
-                    if r.has_implicit_addend() {
-                        return Err("REL relocations are unsupported; use RELA".into());
-                    }
-                    if sframe {
-                        sframe_section.as_ref().unwrap().1.relocation(
-                            offset,
-                            kind,
-                            &mut sframe_relocations,
-                        )?;
-                    }
-                    let width = if arm {
-                        aarch64::width(kind)?
-                    } else {
-                        reloc::x86_64::width(kind)?
-                    };
-                    if bss || offset.checked_add(width).is_none_or(|e| e > size) {
-                        return Err("relocation field is outside file-backed section data".into());
-                    }
-                    if let Some(frames) = unwind_sections.get(&(sections.len() - 1)) {
-                        if !unwind_relocations.insert(offset) {
-                            return Err("duplicate .eh_frame pointer relocation".into());
-                        }
-                        frames
-                            .relocation(
-                                offset,
-                                if arm {
-                                    use object::elf::*;
-                                    match kind {
-                                        R_AARCH64_ABS64 => R_X86_64_64,
-                                        R_AARCH64_ABS32 => R_X86_64_32,
-                                        R_AARCH64_PREL64 => R_X86_64_PC64,
-                                        R_AARCH64_PREL32 => R_X86_64_PC32,
-                                        _ => kind,
-                                    }
-                                } else {
-                                    kind
-                                },
-                            )
-                            .map_err(|e| format!(".eh_frame: {e}"))?;
-                    }
-                    let RelocationTarget::Symbol(symbol) = r.target() else {
-                        return Err("unsupported relocation target".into());
-                    };
-                    unit.relocs.push(Reloc {
-                        section: sections.len() - 1,
-                        offset,
-                        symbol: symbol.0,
-                        kind,
-                        addend: r.addend(),
-                    });
-                }
-                if sframe {
-                    sframe_section
-                        .as_ref()
-                        .unwrap()
-                        .1
-                        .require_relocations(&sframe_relocations)?;
+                if section.relocations().next().is_some() {
+                    return Err("relocations into .note.Linux are unsupported".into());
                 }
             }
-            for s in file.symbols() {
-                if group_plan.dead_symbol(s.index().0, s.section()) {
-                    // Surviving named global references rebind through the
-                    // ordinary global resolver. Locals cannot be substituted.
-                    if !group_plan.live.contains(&s.index().0) {
+            if let Some(note) = note {
+                end(0, section.size())?;
+                if data.len() as u64 != section.size() {
+                    return Err(format!("invalid section size for {name}"));
+                }
+                section.elf_linked_rela().map_err(|e| e.to_string())?;
+                if section.relocations().next().is_some() {
+                    return Err(format!("relocations into {name} are unsupported"));
+                }
+                match note {
+                    notes::Kind::Property => {
+                        notes::properties(data, properties)?;
+                        unit.consumed_properties.insert(section.index().0);
                         continue;
                     }
-                    if !s.is_global() && !s.is_weak() {
-                        return Err(format!(
-                            "reference to discarded COMDAT local `{}` is unsupported",
-                            s.name().unwrap_or("?")
-                        ));
+                    notes::Kind::Abi => {
+                        notes::abi(data)?;
+                        if note_plan.abi.replace(sections.len()).is_some() {
+                            return Err("additional .note.ABI-tag contracts are unsupported".into());
+                        }
                     }
                 }
-                let SymbolFlags::Elf {
-                    st_info: info,
-                    st_other: other,
-                } = s.flags()
-                else {
-                    unreachable!()
+            }
+            let lifecycle = lifecycle::validate(
+                &name,
+                kind,
+                sh_flags & !u64::from(object::elf::SHF_GROUP),
+                section.size(),
+                section.align(),
+                raw.sh_entsize(file.endian()),
+            )?;
+            let frame = name == ".eh_frame" || kind == object::elf::SHT_X86_64_UNWIND;
+            if name == ".eh_frame_hdr" {
+                return Err("input .eh_frame_hdr is unsupported; the linker generates it".into());
+            }
+            if frame
+                && (name != ".eh_frame"
+                    || !matches!(
+                        kind,
+                        object::elf::SHT_PROGBITS | object::elf::SHT_X86_64_UNWIND
+                    )
+                    || sh_flags & !u64::from(object::elf::SHF_GROUP)
+                        != u64::from(object::elf::SHF_ALLOC)
+                    || raw.sh_entsize(file.endian()) != 0)
+            {
+                return Err(".eh_frame requires PROGBITS or SHT_X86_64_UNWIND, SHF_ALLOC only, and no entry size".into());
+            }
+            if sh_flags & 2 == 0 {
+                if name.starts_with(".debug") || name.starts_with(".zdebug") {
+                    warnings.push(format!("{}: omitted debug section {name}", input.name));
+                }
+                continue;
+            }
+            if sh_flags & u64::from(object::elf::SHF_TLS) != 0 {
+                return Err(format!(
+                    "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
+                ));
+            }
+            // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS/GNU_RETAIN. In particular,
+            // TLS, compression and link-order semantics are rejected.
+            // Group membership was validated and selected before parsing.
+            if sh_flags & !0x200237 != 0 || sh_flags & 5 == 5 {
+                return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
+            }
+            let bss = section.kind() == object::SectionKind::UninitializedData;
+            if !lifecycle
+                && !sframe
+                && note.is_none()
+                && !linux_note
+                && !matches!(
+                    section.kind(),
+                    object::SectionKind::Text
+                        | object::SectionKind::Data
+                        | object::SectionKind::ReadOnlyData
+                        | object::SectionKind::ReadOnlyString
+                        | object::SectionKind::UninitializedData
+                        | object::SectionKind::Elf(object::elf::SHT_X86_64_UNWIND)
+                )
+            {
+                return Err(format!(
+                    "unsupported allocated section {name} ({:?})",
+                    section.kind()
+                ));
+            }
+            let size = end(0, input_size)?;
+            let alignment = section.align().max(1);
+            align(0, alignment)?;
+            if !bss && data.len() as u64 != size {
+                return Err(format!("invalid section size for {name}"));
+            }
+            if frame {
+                if size != 0 && alignment < 4 {
+                    return Err(".eh_frame alignment must be at least 4".into());
+                }
+                let frames = unwind::Frames::parse(data).map_err(|e| format!(".eh_frame: {e}"))?;
+                unwind_sections.insert(sections.len(), frames);
+            }
+            if sframe {
+                if sframe_section.is_some() {
+                    return Err(".sframe: second selected SFrame producer is unsupported; merging is not implemented (empty headers also count)".into());
+                }
+                *sframe_section = Some((sections.len(), sframe::Table::parse(data)?));
+            }
+            unit.sections.insert(section.index().0, sections.len());
+            sections.push(Section {
+                name,
+                flags: sh_flags & 0x200007,
+                kind,
+                align: alignment,
+                size,
+                bss,
+                data: if sframe {
+                    sframe_section.as_ref().unwrap().1.rebuild()?
+                } else {
+                    data.to_vec()
+                },
+                offset: 0,
+            });
+            // The generic relocation iterator skips malformed tables. Validate
+            // explicitly before consuming it so bad inputs cannot mislink.
+            section.elf_linked_rela().map_err(|e| e.to_string())?;
+            let mut unwind_relocations = BTreeSet::new();
+            let mut sframe_relocations = BTreeSet::new();
+            for (offset, r) in section.relocations() {
+                let Some(offset) = group_plan.offset(section.index().0, offset) else {
+                    continue;
                 };
-                if info >> 4 > 2 || !matches!(info & 15, 0..=4) {
+                let RelocationFlags::Elf { r_type: kind } = r.flags() else {
+                    return Err("non-ELF relocation".into());
+                };
+                if kind == 0 {
+                    continue;
+                }
+                if r.has_implicit_addend() {
+                    return Err("REL relocations are unsupported; use RELA".into());
+                }
+                if sframe {
+                    sframe_section.as_ref().unwrap().1.relocation(
+                        offset,
+                        kind,
+                        &mut sframe_relocations,
+                    )?;
+                }
+                let width = if arm {
+                    aarch64::width(kind)?
+                } else {
+                    reloc::x86_64::width(kind)?
+                };
+                if bss || offset.checked_add(width).is_none_or(|e| e > size) {
+                    return Err("relocation field is outside file-backed section data".into());
+                }
+                if let Some(frames) = unwind_sections.get(&(sections.len() - 1)) {
+                    if !unwind_relocations.insert(offset) {
+                        return Err("duplicate .eh_frame pointer relocation".into());
+                    }
+                    frames
+                        .relocation(
+                            offset,
+                            if arm {
+                                use object::elf::*;
+                                match kind {
+                                    R_AARCH64_ABS64 => R_X86_64_64,
+                                    R_AARCH64_ABS32 => R_X86_64_32,
+                                    R_AARCH64_PREL64 => R_X86_64_PC64,
+                                    R_AARCH64_PREL32 => R_X86_64_PC32,
+                                    _ => kind,
+                                }
+                            } else {
+                                kind
+                            },
+                        )
+                        .map_err(|e| format!(".eh_frame: {e}"))?;
+                }
+                let RelocationTarget::Symbol(symbol) = r.target() else {
+                    return Err("unsupported relocation target".into());
+                };
+                unit.relocs.push(Reloc {
+                    section: sections.len() - 1,
+                    offset,
+                    symbol: symbol.0,
+                    kind,
+                    addend: r.addend(),
+                });
+            }
+            if sframe {
+                sframe_section
+                    .as_ref()
+                    .unwrap()
+                    .1
+                    .require_relocations(&sframe_relocations)?;
+            }
+        }
+        for s in file.symbols() {
+            if group_plan.dead_symbol(s.index().0, s.section()) {
+                // Surviving named global references rebind through the
+                // ordinary global resolver. Locals cannot be substituted.
+                if !group_plan.live.contains(&s.index().0) {
+                    continue;
+                }
+                if !s.is_global() && !s.is_weak() {
                     return Err(format!(
-                        "unsupported symbol binding/type for {}",
+                        "reference to discarded COMDAT local `{}` is unsupported",
                         s.name().unwrap_or("?")
                     ));
                 }
-                let mut symbol = Symbol {
-                    name: s.name().map_err(|e| e.to_string())?.into(),
-                    section: if group_plan.dead_symbol(s.index().0, s.section()) {
-                        SymbolSection::Undefined
-                    } else {
-                        s.section()
-                    },
-                    value: s.address(),
-                    size: s.size(),
-                    info,
-                    other,
-                };
-                if let SymbolSection::Section(index) = symbol.section {
-                    let section = file.section_by_index(index).map_err(|e| e.to_string())?;
-                    if symbol
-                        .value
-                        .checked_add(symbol.size)
-                        .is_none_or(|e| e > section.size())
-                    {
-                        return Err(format!(
-                            "symbol {} extends outside its section",
-                            symbol.name
-                        ));
-                    }
-                }
-                if let SymbolSection::Section(index) = symbol.section
-                    && let Some(filtered) = group_plan.frames.get(&index.0)
-                {
-                    if symbol.info & 15 == 3 {
-                        symbol.value = 0;
-                        symbol.size = 0;
-                    } else if let Some(value) = filtered.offset(symbol.value) {
-                        // An addressable symbol must fit within one retained record.
-                        if symbol.size != 0
-                            && filtered.offset(symbol.value + symbol.size - 1)
-                                != Some(value + symbol.size - 1)
-                        {
-                            return Err("symbol spans discarded .eh_frame records".into());
-                        }
-                        symbol.value = value;
-                    } else {
-                        continue;
-                    }
-                }
-                unit.symbols.insert(s.index().0, symbol);
             }
-            Ok(unit)
-        };
-        units.push(parse().map_err(|e| format!("{}: {e}", input.name))?);
-        object_properties.push(properties);
+            let SymbolFlags::Elf {
+                st_info: info,
+                st_other: other,
+            } = s.flags()
+            else {
+                unreachable!()
+            };
+            if info >> 4 > 2 || !matches!(info & 15, 0..=4) {
+                return Err(format!(
+                    "unsupported symbol binding/type for {}",
+                    s.name().unwrap_or("?")
+                ));
+            }
+            let mut symbol = Symbol {
+                name: s.name().map_err(|e| e.to_string())?.into(),
+                section: if group_plan.dead_symbol(s.index().0, s.section()) {
+                    SymbolSection::Undefined
+                } else {
+                    s.section()
+                },
+                value: s.address(),
+                size: s.size(),
+                info,
+                other,
+            };
+            if let SymbolSection::Section(index) = symbol.section {
+                let section = file.section_by_index(index).map_err(|e| e.to_string())?;
+                if symbol
+                    .value
+                    .checked_add(symbol.size)
+                    .is_none_or(|e| e > section.size())
+                {
+                    return Err(format!(
+                        "symbol {} extends outside its section",
+                        symbol.name
+                    ));
+                }
+            }
+            if let SymbolSection::Section(index) = symbol.section
+                && let Some(filtered) = group_plan.frames.get(&index.0)
+            {
+                if symbol.info & 15 == 3 {
+                    symbol.value = 0;
+                    symbol.size = 0;
+                } else if let Some(value) = filtered.offset(symbol.value) {
+                    // An addressable symbol must fit within one retained record.
+                    if symbol.size != 0
+                        && filtered.offset(symbol.value + symbol.size - 1)
+                            != Some(value + symbol.size - 1)
+                    {
+                        return Err("symbol spans discarded .eh_frame records".into());
+                    }
+                    symbol.value = value;
+                } else {
+                    continue;
+                }
+            }
+            unit.symbols.insert(s.index().0, symbol);
+        }
+        Ok(unit)
     }
-    let mut globals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-    let mut commons: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+}
+
+/// Choose the definition each global name binds to, as `(unit, symbol)`, and
+/// the largest size and alignment requested for each common symbol.
+fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
+    let mut globals: Globals = BTreeMap::new();
+    let mut commons: Commons = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for (&si, s) in &u.symbols {
             if !s.global() || s.rank() == 0 {
@@ -750,51 +918,119 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             globals.insert(s.name.clone(), (ui, si));
         }
     }
-    if let Some(script) = script {
-        if sframe_section.is_some() {
-            return Err("SFrame reconstruction with linker scripts is unsupported".into());
-        }
-        unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
-        note_plan.prepare(&mut sections, &object_properties, false)?;
-        return script::link(script, sections, units, globals, &options, warnings);
+    Ok((globals, commons))
+}
+
+/// Linker scripts lay out sections themselves and do not support GC, so only
+/// the unwind merge and note preparation run before handing over.
+fn link_script(
+    script: script::Script,
+    parsed: Parsed,
+    globals: Globals,
+    options: &Options,
+) -> Result<Executable> {
+    let Parsed {
+        mut sections,
+        mut units,
+        mut unwind_sections,
+        sframe_section,
+        warnings,
+        mut note_plan,
+        object_properties,
+    } = parsed;
+    if sframe_section.is_some() {
+        return Err("SFrame reconstruction with linker scripts is unsupported".into());
     }
+    unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
+    note_plan.prepare(&mut sections, &object_properties, false)?;
+    script::link(script, sections, units, globals, options, warnings)
+}
+
+/// Bind SFrame functions to their original symbols, then run section GC when
+/// requested. GC renumbers and drops output sections and remaps `parsed`,
+/// `globals` and the returned bindings itself; this phase remaps
+/// `note_plan.abi` and drops commons whose global was collected.
+fn collect(
+    parsed: &mut Parsed,
+    globals: &mut Globals,
+    commons: &mut Commons,
+    options: &Options,
+    dynamic: bool,
+) -> Result<Option<sframe::Bindings>> {
+    let Parsed {
+        sections,
+        units,
+        unwind_sections,
+        sframe_section,
+        note_plan,
+        ..
+    } = parsed;
     // Bind original identities and validate even dead ranges before GC or merge.
     let mut sframe_targets = sframe_section
         .as_ref()
-        .map(|(section, table)| {
-            table.bind(*section, &units, &sections, &globals, options.gc_sections)
-        })
+        .map(|(section, table)| table.bind(*section, units, sections, globals, options.gc_sections))
         .transpose()?;
     if options.gc_sections {
         let remap = gc::collect(
-            &mut sections,
-            &mut units,
-            &mut unwind_sections,
-            &mut globals,
+            sections,
+            units,
+            unwind_sections,
+            globals,
             gc::Roots {
                 entry: &options.entry,
-                dynamic: !libraries.is_empty(),
+                dynamic,
             },
-            &mut sframe_section,
+            sframe_section,
             &mut sframe_targets,
         )?;
         note_plan.abi = note_plan.abi.and_then(|i| remap[i]);
         commons.retain(|name, _| globals.contains_key(name));
     }
-    let section_remap = unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
+    Ok(sframe_targets)
+}
+
+/// Merge the input `.eh_frame` sections into one output section and, after GC,
+/// rebuild the SFrame table over the live functions. The merge renumbers output
+/// sections and remaps `parsed` itself; this phase remaps `note_plan.abi`, the
+/// SFrame section and the SFrame bindings.
+fn merge_metadata(
+    parsed: &mut Parsed,
+    sframe_targets: &mut Option<sframe::Bindings>,
+    gc_sections: bool,
+) -> Result<()> {
+    let Parsed {
+        sections,
+        units,
+        unwind_sections,
+        sframe_section,
+        note_plan,
+        ..
+    } = parsed;
+    let section_remap = unwind::merge(sections, units, unwind_sections)?;
     note_plan.abi = note_plan.abi.map(|i| section_remap[i]);
-    if let Some((section, table)) = &mut sframe_section {
+    if let Some((section, table)) = sframe_section {
         *section = section_remap[*section];
         sframe_targets
             .as_mut()
             .unwrap()
             .remap(&section_remap.iter().copied().map(Some).collect::<Vec<_>>())?;
-        if options.gc_sections {
+        if gc_sections {
             let targets = sframe_targets.as_mut().unwrap();
-            let indices = table.order(targets, &sections);
-            table.reconstruct(targets, indices, *section, &mut sections, &mut units)?;
+            let indices = table.order(targets, sections);
+            table.reconstruct(targets, indices, *section, sections, units)?;
         }
     }
+    Ok(())
+}
+
+/// Append `.bss.common` and place each common symbol that is still the selected
+/// definition. Returns each placed symbol's `(section, offset)` and its size.
+fn allocate_commons(
+    sections: &mut Vec<Section>,
+    units: &[Unit],
+    globals: &Globals,
+    commons: Commons,
+) -> Result<(CommonLocations, BTreeMap<String, u64>)> {
     let mut common_locations = BTreeMap::new();
     let mut common_sizes = BTreeMap::new();
     let mut common = Section {
@@ -819,9 +1055,19 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         common.align = common.align.max(alignment);
     }
     sections.push(common);
-    let bounds = bounds::symbols(&sections, &units, &globals)?;
+    Ok((common_locations, common_sizes))
+}
+
+/// Check undefined globals against the linker-defined bounds and the shared
+/// libraries, and number the imports in name order starting at 1.
+fn plan_imports(
+    units: &[Unit],
+    globals: &Globals,
+    bounds: &BTreeMap<String, (usize, bool)>,
+    libraries: &[dynamic::Library<'_>],
+) -> Result<BTreeMap<String, dynamic::Import>> {
     let mut imports: BTreeMap<String, dynamic::Import> = BTreeMap::new();
-    for u in &units {
+    for u in units {
         for s in u.symbols.values() {
             if !s.global() || s.section != SymbolSection::Undefined || globals.contains_key(&s.name)
             {
@@ -880,9 +1126,17 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     for (i, import) in imports.values_mut().enumerate() {
         import.index = (i + 1) as u32;
     }
-    // GOT keys retain selected raw identities, including independent locals.
-    // Build after the final symbol/section rewrites; address validation stays lazy.
-    let selected = selected::Index::new(&units, &globals, &imports);
+    Ok(imports)
+}
+
+/// Reject references, from inputs or shared libraries, into GNU property
+/// sections that note parsing consumed.
+fn check_property_references(
+    units: &[Unit],
+    globals: &Globals,
+    selected: &selected::Index<'_>,
+    libraries: &[dynamic::Library<'_>],
+) -> Result<()> {
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
             let selection = selected.get(ui, r.symbol)?;
@@ -920,6 +1174,17 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             }
         }
     }
+    Ok(())
+}
+
+/// Assign a GOT slot to each selected non-import target of a GOT relocation and
+/// append the `.got` section.
+fn plan_got(
+    sections: &mut Vec<Section>,
+    units: &[Unit],
+    selected: &selected::Index<'_>,
+    arm: bool,
+) -> Result<Got> {
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
@@ -948,62 +1213,70 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         data: vec![0; got_size as usize],
         offset: 0,
     });
-    let mut dynamic = if libraries.is_empty() {
-        None
-    } else {
-        let mut definitions = Vec::new();
-        for (name, &(ui, si)) in &globals {
-            let s = &units[ui].symbols[&si];
-            if s.other & 3 == 2 || s.other & 3 == 1 {
-                continue;
-            }
-            if matches!(s.section,SymbolSection::Section(i) if !units[ui].sections.contains_key(&i.0))
-            {
-                continue;
-            }
-            definitions.push(dynamic::Definition {
-                name: name.clone(),
-                info: s.info,
-                other: s.other,
-                size: common_sizes.get(name).copied().unwrap_or(s.size),
-            });
+    Ok(Got {
+        section: got_section,
+        slots: got,
+    })
+}
+
+/// The executable's dynamic symbol definitions: every selected global with
+/// default or protected visibility in a retained section.
+fn dynamic_definitions(
+    units: &[Unit],
+    globals: &Globals,
+    common_sizes: &BTreeMap<String, u64>,
+) -> Vec<dynamic::Definition> {
+    let mut definitions = Vec::new();
+    for (name, &(ui, si)) in globals {
+        let s = &units[ui].symbols[&si];
+        if s.other & 3 == 2 || s.other & 3 == 1 {
+            continue;
         }
-        let mut absolute = 0;
-        for (ui, u) in units.iter().enumerate() {
-            for r in &u.relocs {
-                if let Some(name) = selected.get(ui, r.symbol)?.import {
-                    match r.kind {
-                        1 if sections[r.section].flags & 1 != 0 => absolute += 1,
-                        4 => {}
-                        9 | 41 | 42 => {}
-                        _ => {
-                            return Err(format!(
-                                "{}: relocation {} against import `{name}` requires writable 64-bit data, a PLT32 call, or GOT addressing; use PIC (copy/text relocations are unsupported)",
-                                u.name, r.kind
-                            ));
-                        }
+        if matches!(s.section,SymbolSection::Section(i) if !units[ui].sections.contains_key(&i.0)) {
+            continue;
+        }
+        definitions.push(dynamic::Definition {
+            name: name.clone(),
+            info: s.info,
+            other: s.other,
+            size: common_sizes.get(name).copied().unwrap_or(s.size),
+        });
+    }
+    definitions
+}
+
+/// Count absolute 64-bit relocations against imports in writable data, and
+/// reject the import relocations that would need copy or text relocations.
+fn absolute_imports(
+    units: &[Unit],
+    sections: &[Section],
+    selected: &selected::Index<'_>,
+) -> Result<usize> {
+    let mut absolute = 0;
+    for (ui, u) in units.iter().enumerate() {
+        for r in &u.relocs {
+            if let Some(name) = selected.get(ui, r.symbol)?.import {
+                match r.kind {
+                    1 if sections[r.section].flags & 1 != 0 => absolute += 1,
+                    4 => {}
+                    9 | 41 | 42 => {}
+                    _ => {
+                        return Err(format!(
+                            "{}: relocation {} against import `{name}` requires writable 64-bit data, a PLT32 call, or GOT addressing; use PIC (copy/text relocations are unsupported)",
+                            u.name, r.kind
+                        ));
                     }
                 }
             }
         }
-        let lifecycle = lifecycle::Plan::new(&sections, &units, &globals)?;
-        Some(dynamic::Dynamic::prepare(
-            &mut sections,
-            imports.clone(),
-            definitions,
-            libraries,
-            &options,
-            absolute,
-            lifecycle,
-        )?)
-    };
-    let unwind_header = unwind::prepare(&mut sections, &unwind_sections)?;
-    note_plan.prepare(
-        &mut sections,
-        &object_properties,
-        dynamic.as_ref().is_some_and(|d| !d.stubs.is_empty()),
-    )?;
-    let registration_alignments = bounds::alignments(&sections);
+    }
+    Ok(absolute)
+}
+
+/// Assign file offsets to every section, grouped into read-only, executable
+/// and writable LOAD segments.
+fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
+    let registration_alignments = bounds::alignments(sections);
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
     let mut cursor = page;
@@ -1016,7 +1289,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         cursor = if permissions == 4 { page } else { start };
         let mut file_end = cursor;
         for bss in [false, true] {
-            for index in bounds::order(&sections, lifecycle::order(&sections, permissions, bss)) {
+            for index in bounds::order(sections, lifecycle::order(sections, permissions, bss)) {
                 let section = &mut sections[index];
                 cursor = align(
                     cursor,
@@ -1041,14 +1314,31 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             });
         }
     }
-    let mut linker_symbols = bounds;
-    linker_symbols.insert("_GLOBAL_OFFSET_TABLE_".into(), (got_section, false));
-    if let Some(d) = &dynamic {
-        linker_symbols.insert("_DYNAMIC".into(), (d.table, false));
-    }
+    Ok(segments)
+}
+
+/// Read-only view of the laid-out link, shared by the phases that write bytes.
+struct Placed<'a> {
+    sections: &'a [Section],
+    units: &'a [Unit],
+    globals: &'a Globals,
+    selected: &'a selected::Index<'a>,
+    linker_symbols: &'a BTreeMap<String, (usize, bool)>,
+    common_locations: &'a CommonLocations,
+    common_sizes: &'a BTreeMap<String, u64>,
+}
+
+impl Placed<'_> {
     // Output symbol tables already traverse selected definitions or locals.
     // Use those symbols directly instead of looking up and selecting them again.
-    let definition_address = |ui: usize, s: &Symbol| -> Result<u64> {
+    fn definition_address(&self, ui: usize, s: &Symbol) -> Result<u64> {
+        let Self {
+            sections,
+            units,
+            linker_symbols,
+            common_locations,
+            ..
+        } = self;
         match s.section {
             SymbolSection::Absolute => Ok(s.value),
             SymbolSection::Undefined
@@ -1078,117 +1368,152 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                 units[ui].name, s.name
             )),
         }
-    };
-    let address = |ui: usize, si: usize| -> Result<u64> {
-        let selection = selected.get(ui, si)?;
-        definition_address(selection.key.0, selection.definition)
-    };
-    let &(entry_u, entry_s) = globals
-        .get(&options.entry)
-        .ok_or_else(|| format!("missing entry symbol `{}`", options.entry))?;
-    let entry_symbol = &units[entry_u].symbols[&entry_s];
-    let entry_section = entry_symbol
-        .section
-        .index()
-        .and_then(|i| units[entry_u].sections.get(&i.0))
-        .ok_or("entry must be defined in an executable section")?;
-    if sections[*entry_section].flags & 4 == 0
-        || entry_symbol.value >= sections[*entry_section].size
-    {
-        return Err("entry must be inside an executable section".into());
     }
-    let entry = address(entry_u, entry_s)?;
-    let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(page);
-    let mut bytes = vec![0; file_end as usize];
-    if !arm {
-        lifecycle::code_padding(&mut bytes, &sections);
+
+    fn address(&self, ui: usize, si: usize) -> Result<u64> {
+        let selection = self.selected.get(ui, si)?;
+        self.definition_address(selection.key.0, selection.definition)
     }
-    for s in &sections {
-        if !s.bss && !s.data.is_empty() {
-            bytes[s.offset as usize..s.offset as usize + s.data.len()].copy_from_slice(&s.data);
+
+    /// The entry address, which must lie inside an executable section.
+    fn entry(&self, name: &str) -> Result<u64> {
+        let Self {
+            sections,
+            units,
+            globals,
+            ..
+        } = self;
+        let &(entry_u, entry_s) = globals
+            .get(name)
+            .ok_or_else(|| format!("missing entry symbol `{}`", name))?;
+        let entry_symbol = &units[entry_u].symbols[&entry_s];
+        let entry_section = entry_symbol
+            .section
+            .index()
+            .and_then(|i| units[entry_u].sections.get(&i.0))
+            .ok_or("entry must be defined in an executable section")?;
+        if sections[*entry_section].flags & 4 == 0
+            || entry_symbol.value >= sections[*entry_section].size
+        {
+            return Err("entry must be inside an executable section".into());
         }
+        self.address(entry_u, entry_s)
     }
-    for (&(ui, si), &offset) in &got {
-        put64(
-            &mut bytes,
-            (sections[got_section].offset + offset) as usize,
-            address(ui, si)?,
-        );
-    }
-    for (ui, u) in units.iter().enumerate() {
-        for r in &u.relocs {
-            let selection = selected.get(ui, r.symbol)?;
-            let import = selection.import;
-            if let (Some(name), Some(d)) = (import, dynamic.as_mut())
-                && r.kind == object::elf::R_X86_64_64
-            {
-                let offset = sections[r.section].offset + r.offset;
-                d.relocations.push((
-                    BASE + offset,
-                    d.imports[name].index,
-                    object::elf::R_X86_64_64,
-                    r.addend,
-                ));
-                bytes[offset as usize..offset as usize + 8].fill(0);
-                continue;
+
+    /// The file image with section contents and GOT slots, before relocation.
+    fn image(&self, file_end: u64, got: &Got, arm: bool) -> Result<Vec<u8>> {
+        let sections = self.sections;
+        let mut bytes = vec![0; file_end as usize];
+        if !arm {
+            lifecycle::code_padding(&mut bytes, sections);
+        }
+        for s in sections {
+            if !s.bss && !s.data.is_empty() {
+                bytes[s.offset as usize..s.offset as usize + s.data.len()].copy_from_slice(&s.data);
             }
-            let result = || -> Result<(usize, [u8; 8], usize)> {
-                let offset = sections[r.section].offset + r.offset;
-                let p = i128::from(BASE + offset);
-                let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
-                    if reloc::x86_64::uses_got(r.kind) {
-                        i128::from(d.slot(name, &sections))
-                    } else {
-                        i128::from(d.stub(name, &sections)?)
-                    }
-                } else if if arm {
-                    aarch64::got(r.kind)
-                } else {
-                    reloc::x86_64::uses_got(r.kind)
-                } {
-                    i128::from(BASE + sections[got_section].offset + got[&selection.key])
-                } else {
-                    i128::from(definition_address(selection.key.0, selection.definition)?)
-                } + i128::from(r.addend);
-                if arm {
-                    let width = aarch64::width(r.kind)? as usize;
-                    let encoded = aarch64::apply(
-                        r.kind,
-                        value,
-                        p,
-                        &bytes[offset as usize..offset as usize + width],
-                    )?;
-                    let mut data = [0u8; 8];
-                    data[..width].copy_from_slice(&encoded);
-                    return Ok((offset as usize, data, width));
-                }
-                let field =
-                    reloc::x86_64::encode(r.kind, value, BASE + offset).map_err(|e| match e {
-                        reloc::x86_64::Error::Unsupported => {
-                            format!("unsupported x86-64 relocation {}", r.kind)
-                        }
-                        reloc::x86_64::Error::Overflow => format!(
-                            "relocation {} overflow for `{}`",
-                            r.kind, u.symbols[&r.symbol].name
-                        ),
-                    })?;
-                Ok((offset as usize, field.bytes, field.width))
-            };
-            let (offset, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
-            bytes[offset..offset + width].copy_from_slice(&data[..width]);
         }
+        for (&(ui, si), &offset) in &got.slots {
+            put64(
+                &mut bytes,
+                (sections[got.section].offset + offset) as usize,
+                self.address(ui, si)?,
+            );
+        }
+        Ok(bytes)
     }
-    if let Some((section, table)) = &sframe_section {
-        table.finish(
-            &mut bytes,
-            *section,
-            &sections,
-            sframe_targets.as_ref().unwrap(),
-        )?;
+
+    /// Apply every input relocation. Absolute 64-bit references to imports
+    /// become dynamic relocations instead.
+    fn relocate(
+        &self,
+        bytes: &mut [u8],
+        got: &Got,
+        dynamic: &mut Option<dynamic::Dynamic>,
+        arm: bool,
+    ) -> Result<()> {
+        let Self {
+            sections,
+            units,
+            selected,
+            ..
+        } = self;
+        for (ui, u) in units.iter().enumerate() {
+            for r in &u.relocs {
+                let selection = selected.get(ui, r.symbol)?;
+                let import = selection.import;
+                if let (Some(name), Some(d)) = (import, dynamic.as_mut())
+                    && r.kind == object::elf::R_X86_64_64
+                {
+                    let offset = sections[r.section].offset + r.offset;
+                    d.relocations.push((
+                        BASE + offset,
+                        d.imports[name].index,
+                        object::elf::R_X86_64_64,
+                        r.addend,
+                    ));
+                    bytes[offset as usize..offset as usize + 8].fill(0);
+                    continue;
+                }
+                let result = || -> Result<(usize, [u8; 8], usize)> {
+                    let offset = sections[r.section].offset + r.offset;
+                    let p = i128::from(BASE + offset);
+                    let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
+                        if reloc::x86_64::uses_got(r.kind) {
+                            i128::from(d.slot(name, sections))
+                        } else {
+                            i128::from(d.stub(name, sections)?)
+                        }
+                    } else if if arm {
+                        aarch64::got(r.kind)
+                    } else {
+                        reloc::x86_64::uses_got(r.kind)
+                    } {
+                        i128::from(BASE + sections[got.section].offset + got.slots[&selection.key])
+                    } else {
+                        i128::from(self.definition_address(selection.key.0, selection.definition)?)
+                    } + i128::from(r.addend);
+                    if arm {
+                        let width = aarch64::width(r.kind)? as usize;
+                        let encoded = aarch64::apply(
+                            r.kind,
+                            value,
+                            p,
+                            &bytes[offset as usize..offset as usize + width],
+                        )?;
+                        let mut data = [0u8; 8];
+                        data[..width].copy_from_slice(&encoded);
+                        return Ok((offset as usize, data, width));
+                    }
+                    let field = reloc::x86_64::encode(r.kind, value, BASE + offset).map_err(
+                        |e| match e {
+                            reloc::x86_64::Error::Unsupported => {
+                                format!("unsupported x86-64 relocation {}", r.kind)
+                            }
+                            reloc::x86_64::Error::Overflow => format!(
+                                "relocation {} overflow for `{}`",
+                                r.kind, u.symbols[&r.symbol].name
+                            ),
+                        },
+                    )?;
+                    Ok((offset as usize, field.bytes, field.width))
+                };
+                let (offset, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
+                bytes[offset..offset + width].copy_from_slice(&data[..width]);
+            }
+        }
+        Ok(())
     }
-    if let Some(d) = dynamic.as_mut() {
+
+    /// Section index and address of every exported global, for `.dynsym`.
+    fn dynamic_exports(&self) -> Result<BTreeMap<String, (u64, u16)>> {
+        let Self {
+            units,
+            globals,
+            common_locations,
+            ..
+        } = self;
         let mut definitions = BTreeMap::new();
-        for (name, &(ui, si)) in &globals {
+        for (name, &(ui, si)) in *globals {
             let s = &units[ui].symbols[&si];
             let index = match s.section {
                 SymbolSection::Absolute => 0xfff1,
@@ -1206,48 +1531,97 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             if index >= 0xff00 && index != 0xfff1 {
                 return Err("too many output sections".into());
             }
-            definitions.insert(name.clone(), (definition_address(ui, s)?, index as u16));
+            definitions.insert(
+                name.clone(),
+                (self.definition_address(ui, s)?, index as u16),
+            );
         }
-        d.emit(&mut bytes, &sections, &definitions)?;
+        Ok(definitions)
     }
-    if let Some(header) = unwind_header {
-        unwind::emit(&mut bytes, &sections, &unwind_sections, header)?;
-    }
-    // Section headers and a global symbol table make readelf/nm useful without
-    // promising source debugging or retaining input debug sections.
-    let mut names = vec![0];
-    let mut headers = vec![[0u8; 64]];
-    for (index, s) in sections.iter().enumerate() {
-        let name = string(&mut names, &s.name);
-        let (kind, link, info, entsize) = dynamic
-            .as_ref()
-            .and_then(|d| d.section_header(index))
-            .unwrap_or((s.kind, 0, 0, if matches!(s.kind, 14..=16) { 8 } else { 0 }));
-        headers.push(shdr(
-            name,
-            kind,
-            s.flags,
-            BASE + s.offset,
-            s.offset,
-            s.size,
-            link,
-            info,
-            s.align,
-            entsize,
-        ));
-    }
-    let mut strings = vec![0];
-    let mut symbols = vec![0; 24];
-    // Keep local names for debugger function bounds and prologue unwinding.
-    // ELF requires all local records to precede the first nonlocal record.
-    for (ui, unit) in units.iter().enumerate() {
-        for s in unit.symbols.values() {
-            if s.global() || s.name.is_empty() {
-                continue;
+
+    /// Append the section headers and the symbol and string tables. Returns
+    /// the section header offset and count.
+    fn tables(
+        &self,
+        bytes: &mut Vec<u8>,
+        dynamic: Option<&dynamic::Dynamic>,
+    ) -> Result<(u64, usize)> {
+        let Self {
+            sections,
+            units,
+            globals,
+            linker_symbols,
+            common_locations,
+            common_sizes,
+            ..
+        } = self;
+        // Section headers and a global symbol table make readelf/nm useful without
+        // promising source debugging or retaining input debug sections.
+        let mut names = vec![0];
+        let mut headers = vec![[0u8; 64]];
+        for (index, s) in sections.iter().enumerate() {
+            let name = string(&mut names, &s.name);
+            let (kind, link, info, entsize) = dynamic
+                .and_then(|d| d.section_header(index))
+                .unwrap_or((s.kind, 0, 0, if matches!(s.kind, 14..=16) { 8 } else { 0 }));
+            headers.push(shdr(
+                name,
+                kind,
+                s.flags,
+                BASE + s.offset,
+                s.offset,
+                s.size,
+                link,
+                info,
+                s.align,
+                entsize,
+            ));
+        }
+        let mut strings = vec![0];
+        let mut symbols = vec![0; 24];
+        // Keep local names for debugger function bounds and prologue unwinding.
+        // ELF requires all local records to precede the first nonlocal record.
+        for (ui, unit) in units.iter().enumerate() {
+            for s in unit.symbols.values() {
+                if s.global() || s.name.is_empty() {
+                    continue;
+                }
+                let index = match s.section {
+                    SymbolSection::Absolute => 0xfff1,
+                    SymbolSection::Section(i) => {
+                        unit.sections.get(&i.0).map(|i| i + 1).unwrap_or(0)
+                    }
+                    _ => 0,
+                };
+                if index == 0 {
+                    continue;
+                }
+                if index >= 0xff00 && index != 0xfff1 {
+                    return Err("too many output sections".into());
+                }
+                symbols.extend_from_slice(&symbol_record(
+                    string(&mut strings, &s.name),
+                    s.info,
+                    s.other,
+                    index as u16,
+                    self.definition_address(ui, s)?,
+                    s.size,
+                ));
             }
+        }
+        let first_global =
+            u32::try_from(symbols.len() / 24).map_err(|_| "too many local symbols")?;
+        for (name, &(ui, si)) in *globals {
+            let s = &units[ui].symbols[&si];
+            // Nonallocated metadata symbols are not part of the executable image.
             let index = match s.section {
                 SymbolSection::Absolute => 0xfff1,
-                SymbolSection::Section(i) => unit.sections.get(&i.0).map(|i| i + 1).unwrap_or(0),
+                SymbolSection::Common => {
+                    common_locations.get(name).map(|(i, _)| i + 1).unwrap_or(0)
+                }
+                SymbolSection::Section(i) => {
+                    units[ui].sections.get(&i.0).map(|i| i + 1).unwrap_or(0)
+                }
                 _ => 0,
             };
             if index == 0 {
@@ -1257,81 +1631,58 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                 return Err("too many output sections".into());
             }
             symbols.extend_from_slice(&symbol_record(
-                string(&mut strings, &s.name),
+                string(&mut strings, name),
                 s.info,
                 s.other,
                 index as u16,
-                definition_address(ui, s)?,
-                s.size,
+                self.definition_address(ui, s)?,
+                common_sizes.get(name).copied().unwrap_or(s.size),
             ));
         }
-    }
-    let first_global = u32::try_from(symbols.len() / 24).map_err(|_| "too many local symbols")?;
-    for (name, &(ui, si)) in &globals {
-        let s = &units[ui].symbols[&si];
-        // Nonallocated metadata symbols are not part of the executable image.
-        let index = match s.section {
-            SymbolSection::Absolute => 0xfff1,
-            SymbolSection::Common => common_locations.get(name).map(|(i, _)| i + 1).unwrap_or(0),
-            SymbolSection::Section(i) => units[ui].sections.get(&i.0).map(|i| i + 1).unwrap_or(0),
-            _ => 0,
-        };
-        if index == 0 {
-            continue;
+        for (name, &(index, stop)) in *linker_symbols {
+            if !units.iter().any(|u| {
+                u.symbols
+                    .values()
+                    .any(|s| s.global() && s.section == SymbolSection::Undefined && s.name == *name)
+            }) {
+                continue;
+            }
+            if index + 1 >= 0xff00 {
+                return Err("too many output sections".into());
+            }
+            // GLOBAL, hidden and absent from .dynsym.
+            symbols.extend_from_slice(&symbol_record(
+                string(&mut strings, name),
+                if linker_owned(name) { 0x11 } else { 0x10 },
+                2,
+                (index + 1) as u16,
+                BASE + sections[index].offset + if stop { sections[index].size } else { 0 },
+                0,
+            ));
         }
-        if index >= 0xff00 && index != 0xfff1 {
-            return Err("too many output sections".into());
-        }
-        symbols.extend_from_slice(&symbol_record(
-            string(&mut strings, name),
-            s.info,
-            s.other,
-            index as u16,
-            definition_address(ui, s)?,
-            common_sizes.get(name).copied().unwrap_or(s.size),
-        ));
+        let shoff = symbol_and_section_tables(
+            bytes,
+            &mut headers,
+            names,
+            &symbols,
+            &strings,
+            first_global,
+        )?;
+        Ok((shoff, headers.len()))
     }
-    for (name, &(index, stop)) in &linker_symbols {
-        if !units.iter().any(|u| {
-            u.symbols
-                .values()
-                .any(|s| s.global() && s.section == SymbolSection::Undefined && s.name == *name)
-        }) {
-            continue;
-        }
-        if index + 1 >= 0xff00 {
-            return Err("too many output sections".into());
-        }
-        // GLOBAL, hidden and absent from .dynsym.
-        symbols.extend_from_slice(&symbol_record(
-            string(&mut strings, name),
-            if linker_owned(name) { 0x11 } else { 0x10 },
-            2,
-            (index + 1) as u16,
-            BASE + sections[index].offset + if stop { sections[index].size } else { 0 },
-            0,
-        ));
-    }
-    let shoff = symbol_and_section_tables(
-        &mut bytes,
-        &mut headers,
-        names,
-        &symbols,
-        &strings,
-        first_global,
-    )?;
-    bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    if sections.iter().any(|s| s.flags & 0x200000 != 0) {
-        bytes[7] = 3;
-    }
-    put16(&mut bytes, 16, 2);
-    put16(&mut bytes, 18, if arm { 183 } else { 62 });
-    put32(&mut bytes, 20, 1);
-    put64(&mut bytes, 24, entry);
-    put64(&mut bytes, 32, 64);
-    put64(&mut bytes, 40, shoff);
-    put16(&mut bytes, 52, 64);
-    put16(&mut bytes, 54, 56);
+}
+
+/// Program headers, in file order: PHDR and INTERP for dynamic output, the LOAD
+/// segments, DYNAMIC, GNU_EH_FRAME, GNU_SFRAME, notes and GNU_STACK.
+fn program_headers(
+    sections: &[Section],
+    segments: &[Segment],
+    page: u64,
+    dynamic: Option<&dynamic::Dynamic>,
+    unwind_header: Option<usize>,
+    sframe_section: Option<usize>,
+    note_plan: &notes::Plan,
+) -> Result<Vec<ProgramHeader>> {
     let phnum = segments.len()
         + 1
         + usize::from(unwind_header.is_some())
@@ -1341,17 +1692,13 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     if 64 + 56 * phnum > page as usize {
         return Err("ELF program headers exceed the reserved first page".into());
     }
-    put16(&mut bytes, 56, phnum as u16);
-    put16(&mut bytes, 58, 64);
-    put16(&mut bytes, 60, headers.len() as u16);
-    put16(&mut bytes, 62, (headers.len() - 1) as u16);
     let mut phdrs = Vec::new();
-    if let Some(d) = &dynamic {
+    if let Some(d) = dynamic {
         phdrs.push((6, 4, 64, (phnum * 56) as u64, (phnum * 56) as u64, 8));
         let s = &sections[d.interp];
         phdrs.push((3, 4, s.offset, s.size, s.size, 1));
     }
-    for s in &segments {
+    for s in segments {
         phdrs.push((
             1,
             s.flags,
@@ -1361,7 +1708,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             page,
         ));
     }
-    if let Some(d) = &dynamic {
+    if let Some(d) = dynamic {
         let s = &sections[d.table];
         phdrs.push((2, 6, s.offset, s.size, s.size, 8));
     }
@@ -1369,22 +1716,50 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         let s = &sections[header];
         phdrs.push((object::elf::PT_GNU_EH_FRAME, 4, s.offset, s.size, s.size, 4));
     }
-    if let Some((section, _)) = &sframe_section {
-        let s = &sections[*section];
+    if let Some(section) = sframe_section {
+        let s = &sections[section];
         phdrs.push((sframe::PT_GNU_SFRAME, 4, s.offset, s.size, s.size, 8));
     }
-    phdrs.extend(note_plan.headers(&sections));
+    phdrs.extend(note_plan.headers(sections));
     phdrs.push((0x6474e551, 6, 0, 0, 0, 16));
     if phdrs.len() != phnum {
         return Err("inconsistent ELF program header count".into());
     }
+    Ok(phdrs)
+}
+/// Write the ELF file header and the program header table.
+fn write_headers(
+    bytes: &mut [u8],
+    sections: &[Section],
+    arm: bool,
+    entry: u64,
+    shoff: u64,
+    section_headers: usize,
+    phdrs: &[ProgramHeader],
+) {
+    bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    if sections.iter().any(|s| s.flags & 0x200000 != 0) {
+        bytes[7] = 3;
+    }
+    put16(bytes, 16, 2);
+    put16(bytes, 18, if arm { 183 } else { 62 });
+    put32(bytes, 20, 1);
+    put64(bytes, 24, entry);
+    put64(bytes, 32, 64);
+    put64(bytes, 40, shoff);
+    put16(bytes, 52, 64);
+    put16(bytes, 54, 56);
+    put16(bytes, 56, phdrs.len() as u16);
+    put16(bytes, 58, 64);
+    put16(bytes, 60, section_headers as u16);
+    put16(bytes, 62, (section_headers - 1) as u16);
     for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {
         let at = 64 + i * 56;
-        put32(&mut bytes, at, *kind);
-        put32(&mut bytes, at + 4, *flags);
-        put64(&mut bytes, at + 8, *offset);
+        put32(bytes, at, *kind);
+        put32(bytes, at + 4, *flags);
+        put64(bytes, at + 8, *offset);
         put64(
-            &mut bytes,
+            bytes,
             at + 16,
             if *kind == 0x6474e551 {
                 0
@@ -1393,7 +1768,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             },
         );
         put64(
-            &mut bytes,
+            bytes,
             at + 24,
             if *kind == 0x6474e551 {
                 0
@@ -1401,11 +1776,10 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                 BASE + offset
             },
         );
-        put64(&mut bytes, at + 32, *filesz);
-        put64(&mut bytes, at + 40, *memsz);
-        put64(&mut bytes, at + 48, *alignment);
+        put64(bytes, at + 32, *filesz);
+        put64(bytes, at + 40, *memsz);
+        put64(bytes, at + 48, *alignment);
     }
-    Ok(Executable { bytes, warnings })
 }
 /// Append .symtab, .strtab, .shstrtab and the section header table, and
 /// return the header table offset. `symbols` starts with the null record, and
