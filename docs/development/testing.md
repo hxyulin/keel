@@ -55,7 +55,6 @@ coverage; the component default does not narrow automatic change selection.
 | `cli` | `keel` |
 | `wasm` | `keel-wasm` |
 | `llvm` | `keel-llvm` |
-| `toolchain` | `keel-toolchain` |
 | `full` or no component | Entire workspace |
 
 Combine named components in one invocation. Use `--unit` for library unit tests

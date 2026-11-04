@@ -544,8 +544,7 @@ and [dyld TLV implementation](https://github.com/apple-oss-distributions/dyld/bl
 
 ```sh
 cargo test -p keel-c --test sections
-cargo test -p keel-ir --test sections -p keel-toolchain --test foundations \
-  -p keel-llvm --test export
+cargo test -p keel-ir --test sections -p keel-llvm --test export
 cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked \
   --target-dir target/keel-cranelift
 ```

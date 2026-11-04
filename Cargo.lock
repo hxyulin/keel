@@ -533,14 +533,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keel-toolchain"
-version = "0.1.0"
-dependencies = [
- "keel-codegen",
- "keel-ir",
-]
-
-[[package]]
 name = "keel-wasm"
 version = "0.1.0"
 dependencies = [
