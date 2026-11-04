@@ -86,9 +86,7 @@ it; use `run_pipeline` or `run_passes`.
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
-| `loop-memory` (opt-in) | Hoist an invariant load through a cloned loop guard |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
-| `sign-extend-idiom` (opt-in) | Recognize a manual signed-byte conversion |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `constant-args`, `empty-calls`, `unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
@@ -347,18 +345,6 @@ must read an exact field or a pointer derived from an entry parameter, so the
 pass removes the later stores. Limits are 64 blocks, 2,048 instructions and
 eight fields (`cargo test -p keel-opt --test stack_cache`).
 
-### loop-memory
-
-`loop-memory` hoists one invariant ordinary load out of an unrotated two-block
-loop. The header's first test is cloned before the loop, so the zero-trip exit
-keeps its original arguments and only the entered path runs the load. The
-header compares a unit-step i32 or i64 induction variable against an invariant
-bound using at most 16 nontrapping integer instructions. The body is one block
-of at most 128 instructions whose only load comes before any store or other
-effect; later stores must be disjoint by `AliasInfo`. The exit has one incoming
-edge and ends in a return. Functions are limited to 512 blocks and 8192
-instructions, with at most eight transformations. No tier runs it.
-
 ## Module cleanup
 
 `constant-args` substitutes an integer or floating literal into a local body
@@ -388,14 +374,6 @@ when unsigned `bound - iv >= 2`, which keeps both increments in range without
 wrapping. The lanes combine once with wrapping addition, then the original loop
 handles the remaining iteration. Loads of the second iteration run only after
 both iterations are known to exist.
-
-### sign-extend-idiom
-
-`sign-extend-idiom` rewrites the C shape `b = state & 255; b < 128 ? b : b - 256`
-into `sext.i64(trunc.i8(state))` and removes the negative arm. It needs the
-exact header, arm and merge shape on i64, and rejects negative-arm source
-locations. Run DCE afterwards. Tests:
-`cargo test -p keel-opt --test sign_extend_idiom`.
 
 ### if-convert
 

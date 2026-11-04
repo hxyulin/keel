@@ -43,7 +43,6 @@ mod instcombine;
 mod internal_fast_calls;
 mod known_bits;
 mod load_reuse;
-mod loop_memory;
 mod loop_rotate;
 mod loop_strength_reduce;
 mod loop_unroll;
@@ -73,7 +72,6 @@ mod module_cleanup;
 mod phi_simplify;
 mod sccp;
 mod scratch;
-mod sign_extend_idiom;
 mod simplify_cfg;
 mod small_memory;
 mod stack_address;
@@ -359,7 +357,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &fast::Cfg,
     &fast::Local,
     &SMALL_MEMORY,
-    &sign_extend_idiom::SignExtendIdiom,
     &BUILTINS[0],
     &BUILTINS[1],
     &BUILTINS[2],
@@ -378,7 +375,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[15],
     &BUILTINS[16],
     &load_reuse::LoadReuse,
-    &loop_memory::LoopMemory,
     &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,
     &loop_unroll::LoopUnroll,
