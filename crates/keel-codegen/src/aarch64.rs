@@ -124,8 +124,13 @@ mod constant_plan;
 mod dispatch_tail;
 mod extended_add;
 mod integer_neon;
+mod intrinsic;
 mod leaf_calls;
 mod linux;
+mod lower_control;
+mod lower_memory;
+mod lower_scalar;
+mod lower_vector;
 mod native;
 mod neon;
 mod output;
@@ -2034,11 +2039,11 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    fn inst(&mut self, inst: Inst) {
-        let func = self.func;
-        let result = func.inst_results(inst).first().copied();
+    /// Lowers an instruction that selection or a backend cover claimed;
+    /// gives whether there was one.
+    fn cover(&mut self, inst: Inst, result: Option<Value>) -> bool {
         if self.selection.covered(inst) {
-            return;
+            return true;
         }
         if let Some(&p) = self.extended_adds.get(&inst) {
             let a = self.use_reg(p.base, S0);
@@ -2054,7 +2059,7 @@ impl<'a> FunctionCompiler<'a> {
                 ],
             );
             self.def_done(result, d);
-            return;
+            return true;
         }
         if let Some(&value) = self.absolute_values.get(&inst) {
             let ty = self.ty(value);
@@ -2084,851 +2089,100 @@ impl<'a> FunctionCompiler<'a> {
                 },
             );
             self.def_done(result, d);
-            return;
+            return true;
         }
         if let Some(&difference) = self.absolute_differences.get(&inst) {
             self.vector_absolute_difference(difference, result);
-            return;
+            return true;
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {
             self.vector_absolute(value, result);
-            return;
+            return true;
         }
         if let Some(&minmax) = self.packed_minmax.get(&inst) {
             self.vector_minmax(minmax, result);
-            return;
+            return true;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
             let at = self.mem(addr, S0, Type::F64);
             let d = self.def_freg(result);
             self.mach("ldr", [Reg::d(d).into(), at.into()]);
             self.def_done(result, d);
-            return;
+            return true;
         }
         if let Some(&addr) = self.replicate_loads.get(&inst) {
             self.vector_replicate_load(addr, result);
-            return;
+            return true;
         }
         if let Some(&add) = self.widening_adds.get(&inst) {
             self.vector_widening_add(add, result);
-            return;
+            return true;
         }
         if let Some(matched) = self.selection.matches.get(&inst).cloned() {
             self.selected(result, matched);
+            return true;
+        }
+        false
+    }
+
+    /// Lowers one instruction: through a cover that claimed it, the i128
+    /// lowering, or its instruction family.
+    fn inst(&mut self, inst: Inst) {
+        let func = self.func;
+        let result = func.inst_results(inst).first().copied();
+        if self.cover(inst, result) {
             return;
         }
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }
         match *func.inst_data(inst) {
-            InstData::Neon { op, ty, ref args } => {
-                if op.memory().is_some() {
-                    self.neon_memory(op, ty, args, func.inst_results(inst));
-                } else {
-                    self.neon(op, ty, args, result);
-                }
-            }
-            InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
-            InstData::VectorSelect { args } => self.vector_select(args, result),
-            InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
-            InstData::VectorReduce { op, arg } => self.vector_reduce(op, arg, result),
-            InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
-            InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
-            InstData::VectorShuffle { args, ref lanes } => {
-                self.vector_shuffle_window(args, lanes, result)
-            }
-            InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
-            InstData::VectorInsert { args, lane } => self.vector_insert(args, lane, result),
-            InstData::VectorFcmp { .. } => {
-                unreachable!("legalized vector operation")
-            }
-            InstData::StackAddr { .. } | InstData::Iconst { .. }
-                if result.is_some_and(|r| {
-                    self.folded_values.contains(&r)
-                        || matches!(self.defined(r), Some(Loc::Remat(_)))
-                }) => {}
-            InstData::Convert {
-                op: ConvertOp::IntToPtr,
-                ty: Type::Ptr,
-                ..
-            } if result.is_some_and(|r| {
-                matches!(self.defined(r), Some(Loc::Remat(v)) if v == r)
-                    && matches!(
-                        crate::regalloc::remat_recipe(self.func, r),
-                        Some(crate::regalloc::RematRecipe::NullPtr)
-                    )
-            }) => {}
-            InstData::Icmp { .. } | InstData::Fcmp { .. }
-                if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
-            InstData::Iconst { imm, .. } => {
-                let d = self.def_reg(result);
-                self.materialize(d, imm as u64, true);
-                self.def_done(result, d);
-            }
-            InstData::F80const { .. } => unreachable!("f80 rejected before lowering"),
-            InstData::Fconst { ty, bits } => {
-                let d = self.def_freg(result);
-                let fd = freg(d, ty);
-                let value = match ty {
-                    Type::F32 => Some(f64::from(f32::from_bits(bits as u32))),
-                    Type::F64 => Some(f64::from_bits(bits)),
-                    _ => None,
-                };
-                if bits == 0 {
-                    let zero = if ty == Type::F32 { "wzr" } else { "xzr" };
-                    self.mach("fmov", [(fd).into(), (zero).into()]);
-                } else if let Some(value) = value
-                    && let Some(imm8) = fmov_imm8(value)
-                {
-                    self.native(
-                        if ty == Type::F32 {
-                            Opcode::FMOV_S_floatimm
-                        } else {
-                            Opcode::FMOV_D_floatimm
-                        },
-                        [(FieldId::Rd, d.into()), (FieldId::imm8, imm8)],
-                        |out| write!(out, "fmov\t{fd}, #{value:?}"),
-                    );
-                } else {
-                    let is64 = ty == Type::F64;
-                    self.materialize(S0, bits, is64);
-                    let src = if is64 { Reg::x(S0) } else { Reg::w(S0) };
-                    self.mach("fmov", [(fd).into(), (src).into()]);
-                }
-                self.def_done(result, d);
-            }
-            InstData::Call {
-                func: callee,
-                ref args,
-            } => {
-                let decl = func.callee(callee);
-                let sret = self.move_args(args, &decl.sig.params);
-                self.out.branch_name(
-                    true,
-                    if self.linux {
-                        Name::Text(&decl.name)
-                    } else {
-                        Name::Symbol(&decl.name)
-                    },
-                );
-                self.call_result(result, sret);
-            }
-            // Only the call itself can throw, so the call-site entry
-            // covers just the `bl`.
-            InstData::Invoke {
-                func: callee,
-                ref args,
-                ref dests,
-            } => {
-                let decl = func.callee(callee);
-                let sret = self.move_args(args, &decl.sig.params);
-                let site = format!("L{}_{inst}", func.name);
-                self.out.label(format!("{site}_begin"));
-                self.out.branch_name(
-                    true,
-                    if self.linux {
-                        Name::Text(&decl.name)
-                    } else {
-                        Name::Symbol(&decl.name)
-                    },
-                );
-                self.out.label(format!("{site}_end"));
-                let pad = self.label(dests[1].block);
-                self.eh.sites.push((site, pad, dests[1].block));
-                self.call_result(result, sret);
-                self.block_args(&dests[0], 0);
-                self.branch_unless_next(dests[0].block);
-            }
-            // The unwinder enters with the exception in x0 and the selector
-            // in x1, and the callee-saved registers restored.
-            InstData::LandingPad { .. } => {
-                let results = func.inst_results(inst);
-                let (exception, selector) = (results[0], results[1]);
-                if let Some(loc) = self.defined(exception) {
-                    self.emit_move(loc, Loc::Reg(0));
-                }
-                if let Some(loc) = self.defined(selector) {
-                    self.emit_move(loc, Loc::Reg(1));
-                }
-            }
-            InstData::EhTypeid { typeinfo } => {
-                let d = self.def_reg(result);
-                let index = self.eh.type_index(Some(typeinfo));
-                self.materialize(d, index, false);
-                self.def_done(result, d);
-            }
-            // Arguments into registers, then this function's epilogue, then
-            // a jump: the callee returns straight to our caller.
-            InstData::ReturnCall {
-                func: callee,
-                ref args,
-            } => {
-                let decl = func.callee(callee);
-                self.move_args(args, &decl.sig.params);
-                self.epilogue();
-                self.out.branch_name(
-                    false,
-                    if self.linux {
-                        Name::Text(&decl.name)
-                    } else {
-                        Name::Symbol(&decl.name)
-                    },
-                );
-            }
-            InstData::ReturnCallIndirect {
-                sig,
-                callee,
-                ref args,
-            } => {
-                self.move_args(args, &func.signature(sig).params);
-                // The epilogue restores callee-saved registers, which may
-                // hold the target, so it moves to x16 first.
-                let target = self.use_reg(callee, S0);
-                self.move_gp(S0, target, true);
-                self.epilogue();
-                self.mach("br", [(Reg::x(S0)).into()]);
-            }
-            InstData::CallIndirect {
-                sig,
-                callee,
-                ref args,
-            } => {
-                let sret = self.move_args(args, &func.signature(sig).params);
-                // The callee is in an allocated register, which the argument
-                // moves leave alone (they write x0–x8, x16 and x17), or in a
-                // spill slot, reloaded after the moves so x16 is free.
-                let target = self.use_reg(callee, S0);
-                self.mach("blr", [(Reg::x(target)).into()]);
-                self.call_result(result, sret);
-            }
-            InstData::SymbolAddr { symbol } => {
-                let d = self.def_reg(result);
-                let name = func.symbol_name(symbol);
-                let thread_local = self
-                    .symbols
-                    .data_object(name)
-                    .is_some_and(|d| d.thread_local);
-                if thread_local && self.linux {
-                    self.linux_tls_address(d, name);
-                } else if thread_local {
-                    // The symbol is the variable's descriptor; calling its
-                    // getter with the descriptor in x0 returns the address
-                    // in x0. The getter preserves every register but x0,
-                    // x16, x17 and x30, none of which hold values.
-                    self.out.symbolic(Symbolic::PageAddress {
-                        register: 0,
-                        kind: PageKind::ThreadLocal,
-                        target: self.symbol(name),
-                    });
-                    self.out.symbolic(Symbolic::PageOffset {
-                        register: 0,
-                        base: 0,
-                        load: true,
-                        kind: PageKind::ThreadLocal,
-                        target: self.symbol(name),
-                    });
-                    self.mach(
-                        "ldr",
-                        [(Reg::x(S0)).into(), Address::base(Reg::x(0)).into()],
-                    );
-                    self.mach("blr", [(Reg::x(S0)).into()]);
-                    self.mach("mov", [(Reg::x(d)).into(), (Reg::x(0)).into()]);
-                } else if self.symbols.defines(name) && !self.symbols.exports_weak_odr(name) {
-                    // dyld may coalesce an exported weak_odr definition with
-                    // another image's, so code reads its address from the
-                    // GOT, as an import's.
-                    self.out.symbolic(Symbolic::PageAddress {
-                        register: d,
-                        kind: PageKind::Direct,
-                        target: self.symbol(name),
-                    });
-                    self.out.symbolic(Symbolic::PageOffset {
-                        register: d,
-                        base: d,
-                        load: false,
-                        kind: PageKind::Direct,
-                        target: self.symbol(name),
-                    });
-                } else {
-                    self.out.symbolic(Symbolic::PageAddress {
-                        register: d,
-                        kind: PageKind::Got,
-                        target: self.symbol(name),
-                    });
-                    self.out.symbolic(Symbolic::PageOffset {
-                        register: d,
-                        base: d,
-                        load: true,
-                        kind: PageKind::Got,
-                        target: self.symbol(name),
-                    });
-                }
-                self.def_done(result, d);
-            }
-            InstData::StackAddr { slot } => {
-                let d = self.def_reg(result);
-                let offset = self.stack_slot_offsets[slot.index()];
-                // `add` takes a 12-bit immediate, optionally shifted by 12.
-                self.mach(
-                    "add",
-                    [
-                        (Reg::x(d)).into(),
-                        (self.base).into(),
-                        Arg::imm(offset & 0xfff),
-                    ],
-                );
-                if offset >> 12 != 0 {
-                    self.mach(
-                        "add",
-                        [
-                            (Reg::x(d)).into(),
-                            (Reg::x(d)).into(),
-                            Arg::imm(offset >> 12),
-                            Arg::shift("lsl", 12),
-                        ],
-                    );
-                }
-                self.def_done(result, d);
-            }
-            InstData::Unary { op, arg } if op.is_float() => {
-                let ty = self.ty(arg);
-                let d = self.def_freg(result);
-                let a = self.use_freg(arg, FS0);
-                let mnemonic = match op {
-                    UnaryOp::Fneg => "fneg",
-                    UnaryOp::Fabs => "fabs",
-                    UnaryOp::Fsqrt => "fsqrt",
-                    UnaryOp::Fceil => "frintp",
-                    UnaryOp::Ffloor => "frintm",
-                    UnaryOp::Ftrunc => "frintz",
-                    UnaryOp::Fnearest => "frintn",
-                    _ => unreachable!("integer operation"),
-                };
-                self.mach(mnemonic, [(freg(d, ty)).into(), (freg(a, ty)).into()]);
-                self.def_done(result, d);
-            }
-            InstData::Unary { op, arg } => {
-                let d = self.def_reg(result);
-                self.unary(op, arg, d);
-                self.def_done(result, d);
-            }
-            InstData::Binary {
-                op: BinaryOp::Fcopysign,
-                args,
-            } => {
-                // The sign bit of `args[1]` with the rest of `args[0]`,
-                // spliced in general registers.
-                let ty = self.ty(args[0]);
-                let d = self.def_freg(result);
-                let a = self.use_freg(args[0], FS0);
-                let b = self.use_freg(args[1], FS1);
-                let (bits, ra, rb) = if ty == Type::F32 {
-                    (31, Reg::w(S0), Reg::w(S1))
-                } else {
-                    (63, Reg::x(S0), Reg::x(S1))
-                };
-                self.mach("fmov", [(ra).into(), (freg(a, ty)).into()]);
-                self.mach("fmov", [(rb).into(), (freg(b, ty)).into()]);
-                self.mach(
-                    "bfxil",
-                    [(rb).into(), (ra).into(), Arg::imm(0), Arg::imm(bits)],
-                );
-                self.mach("fmov", [(freg(d, ty)).into(), (rb).into()]);
-                self.def_done(result, d);
-            }
-            InstData::Fma { args } => {
-                let ty = self.ty(args[0]);
-                let d = self.def_freg(result);
-                let a = self.use_freg(args[0], FS0);
-                let b = self.use_freg(args[1], FS1);
-                let c = self.use_freg(args[2], FS2);
-                let [fa, fb, fc, fd] = [a, b, c, d].map(|r| freg(r, ty));
-                self.mach(
-                    "fmadd",
-                    [(fd).into(), (fa).into(), (fb).into(), (fc).into()],
-                );
-                self.def_done(result, d);
-            }
-            InstData::Overflow { op, args } => self.overflow(inst, op, args),
-            InstData::Binary { op, args } if op.is_float() => {
-                let ty = self.ty(args[0]);
-                let d = self.def_freg(result);
-                let a = self.use_freg(args[0], FS0);
-                let b = self.use_freg(args[1], FS1);
-                let mnemonic = match op {
-                    BinaryOp::Fadd => "fadd",
-                    BinaryOp::Fsub => "fsub",
-                    BinaryOp::Fmul => "fmul",
-                    BinaryOp::Fdiv => "fdiv",
-                    BinaryOp::Fmin => "fmin",
-                    BinaryOp::Fmax => "fmax",
-                    _ => unreachable!("integer operation"),
-                };
-                let (fa, fb, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
-                self.mach(mnemonic, [(fd).into(), (fa).into(), (fb).into()]);
-                self.def_done(result, d);
-            }
-            InstData::Binary { op, args } => {
-                let d = self.def_reg(result);
-                self.binary(op, args, d);
-                self.def_done(result, d);
-            }
-            InstData::Select { args } if self.ty(args[1]).is_vector() => {
-                let d = self.def_freg(result);
-                self.test_value(args[0]);
-                let a = self.use_freg(args[1], FS1);
-                let b = self.use_freg(args[2], FS2);
-                let skip = format!("L{}_{inst}_vselect", func.name);
-                self.move_vector(FS0, b);
-                self.conditional("eq", Name::Text(&skip));
-                self.move_vector(FS0, a);
-                self.out.label(skip);
-                self.move_vector(d, FS0);
-                self.def_done(result, d);
-            }
-            InstData::Select { args } if self.ty(args[1]).is_float() => {
-                let ty = self.ty(args[1]);
-                let d = self.def_freg(result);
-                self.test_value(args[0]);
-                let a = self.use_freg(args[1], FS1);
-                let b = self.use_freg(args[2], FS2);
-                let (a, b, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
-                self.mach(
-                    "fcsel",
-                    [(fd).into(), (a).into(), (b).into(), Arg::from("ne")],
-                );
-                self.def_done(result, d);
-            }
-            InstData::Select { args } => {
-                let d = self.def_reg(result);
-                let ty = self.ty(args[1]);
-                let cc = if let Some(&compare) = self.selection.select_compares.get(&inst) {
-                    self.compare(compare)
-                } else {
-                    self.test_value(args[0]);
-                    "ne"
-                };
-                // CMP uses S0/S1 before either arm is staged. use_reg only
-                // loads, moves wide constants, or computes a stack address;
-                // all preserve NZCV and the other arm's reserved scratch.
-                let a = self.use_reg(args[1], S1);
-                let b = self.use_reg(args[2], S2);
-                let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
-                self.mach("csel", [(rd).into(), (a).into(), (b).into(), Arg::from(cc)]);
-                self.def_done(result, d);
-            }
-            InstData::Convert {
-                op: op @ (ConvertOp::SpairwiseAddLong | ConvertOp::UpairwiseAddLong),
-                ty,
-                arg,
-            } => self.vector_pairwise_long(op, ty, arg, result),
-            InstData::Convert {
-                op: ConvertOp::NarrowLow,
-                ty,
-                arg,
-            } => self.vector_narrow(ty, arg, result),
-            InstData::Convert {
-                op:
-                    op @ (ConvertOp::SwidenLow
-                    | ConvertOp::UwidenLow
-                    | ConvertOp::SwidenHigh
-                    | ConvertOp::UwidenHigh),
-                ty,
-                arg,
-            } => {
-                self.vector_widen(op, ty, arg, result);
-            }
-            InstData::Convert {
-                op: ConvertOp::Bitcast,
-                ty,
-                arg,
-            } if ty.is_vector() && self.ty(arg).is_vector() => {
-                self.vector_bitcast(arg, result);
-            }
-            InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
-                self.float_convert(op, ty, arg, result);
-            }
-            InstData::Convert { op, ty, arg } => {
-                let d = self.def_reg(result);
-                let a = self.use_reg(arg, S0);
-                let from = self.ty(arg);
-                match op {
-                    ConvertOp::Sext => match from {
-                        Type::I8 => self.mach("sxtb", [(reg(d, ty)).into(), (Reg::w(a)).into()]),
-                        Type::I16 => self.mach("sxth", [(reg(d, ty)).into(), (Reg::w(a)).into()]),
-                        _ => self.mach("sxtw", [(Reg::x(d)).into(), (Reg::w(a)).into()]),
-                    },
-                    // Writing a w register clears the upper 32 bits.
-                    ConvertOp::Uext if self.zero_extended_narrow(arg) => {
-                        if d != a {
-                            self.move_gp(d, a, false);
-                        }
-                    }
-                    ConvertOp::Uext => match from {
-                        Type::I8 => self.mach("uxtb", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
-                        Type::I16 => self.mach("uxth", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
-                        _ => self.move_gp(d, a, false),
-                    },
-                    // The low bits are already right; upper bits are
-                    // unspecified. A pointer is a 64-bit address already.
-                    // Either way the bits just move.
-                    ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
-                        if a != d {
-                            self.move_gp(d, a, true);
-                        }
-                    }
-                    _ => unreachable!("float conversions are lowered by float_convert"),
-                }
-                self.def_done(result, d);
-            }
-            InstData::Icmp { .. } | InstData::Fcmp { .. } => {
-                let d = self.def_reg(result);
-                let cc = self.compare(inst);
-                self.mach("cset", [(Reg::w(d)).into(), (cc).into()]);
-                self.def_done(result, d);
-            }
-            // Load the pointer, store it advanced by a slot, then read the
-            // argument: the result may share the list's register.
-            InstData::AggregateVaArg { .. } => {
-                unreachable!("aggregate va_arg rejected before AArch64 emission")
-            }
-            InstData::VaArg { ty, list, .. } if self.linux => {
-                self.linux_va_arg(ty, list, result, inst)
-            }
-            InstData::VaArg { ty, list, .. } => {
-                let a = self.use_reg(list, S2);
-                self.mach(
-                    "ldr",
-                    [(Reg::x(S0)).into(), Address::base(Reg::x(a)).into()],
-                );
-                let bytes = if ty.is_vector() {
-                    ty.bytes().unwrap()
-                } else {
-                    8
-                };
-                if bytes == 16 {
-                    self.mach("add", [Reg::x(S0).into(), Reg::x(S0).into(), Arg::imm(15)]);
-                    self.mach("and", [Reg::x(S0).into(), Reg::x(S0).into(), Arg::imm(-16)]);
-                }
-                self.mach(
-                    "add",
-                    [
-                        (Reg::x(S1)).into(),
-                        (Reg::x(S0)).into(),
-                        Arg::imm(i64::from(bytes)),
-                    ],
-                );
-                self.mach(
-                    "str",
-                    [(Reg::x(S1)).into(), Address::base(Reg::x(a)).into()],
-                );
-                if ty.is_float() || ty.is_vector() {
-                    let d = self.def_freg(result);
-                    self.mach(
-                        "ldr",
-                        [(freg(d, ty)).into(), Address::base(Reg::x(S0)).into()],
-                    );
-                    self.def_done(result, d);
-                } else {
-                    let d = self.def_reg(result);
-                    self.mach(
-                        "ldr",
-                        [(reg(d, ty)).into(), Address::base(Reg::x(S0)).into()],
-                    );
-                    self.def_done(result, d);
-                }
-            }
-            InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
-                let d = self.def_freg(result);
-                let a = self.mem(addr, S0, ty);
-                self.mach("ldr", [(freg(d, ty)).into(), (a).into()]);
-                self.def_done(result, d);
-            }
-            InstData::Load { ty, addr, .. } => {
-                let d = self.def_reg(result);
-                let a = self.mem(addr, S0, ty);
-                let op = match ty {
-                    Type::I8 => "ldrb",
-                    Type::I16 => "ldrh",
-                    _ => "ldr",
-                };
-                self.mach(op, [(reg(d, ty)).into(), (a).into()]);
-                self.def_done(result, d);
-            }
-            InstData::Store { value, addr, .. }
-                if self.ty(value).is_float() || self.ty(value).is_vector() =>
-            {
-                let ty = self.ty(value);
-                let v = self.use_freg(value, FS0);
-                let a = self.mem(addr, S1, ty);
-                self.mach("str", [(freg(v, ty)).into(), (a).into()]);
-            }
-            InstData::Store { value, addr, .. } => {
-                let ty = self.ty(value);
-                let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some(_) if ty == Type::I64 => Reg::XZR,
-                    Some(_) => Reg::WZR,
-                    None => reg(self.use_reg(value, S0), ty),
-                };
-                let a = self.mem(addr, S1, ty);
-                let op = match ty {
-                    Type::I8 => "strb",
-                    Type::I16 => "strh",
-                    _ => "str",
-                };
-                self.mach(op, [(v).into(), (a).into()]);
-            }
-            InstData::AtomicLoad { ty, ordering, addr } => {
-                let d = self.def_reg(result);
-                let a = self.use_reg(addr, S0);
-                let op = if ordering == Ordering::Relaxed {
-                    "ldr"
-                } else {
-                    "ldar"
-                };
-                self.atomic(
-                    op,
-                    "",
-                    ty,
-                    [reg(d, ty).into(), Address::base(Reg::x(a)).into()],
-                );
-                self.def_done(result, d);
-            }
-            InstData::AtomicStore {
-                ordering,
-                value,
-                addr,
-            } => {
-                let ty = self.ty(value);
-                let v = self.use_reg(value, S0);
-                let a = self.use_reg(addr, S1);
-                let op = if ordering == Ordering::Relaxed {
-                    "str"
-                } else {
-                    "stlr"
-                };
-                self.atomic(
-                    op,
-                    "",
-                    ty,
-                    [reg(v, ty).into(), Address::base(Reg::x(a)).into()],
-                );
-            }
-            InstData::AtomicRmw { op, args, .. } if self.linux => {
-                self.linux_atomic(op, &args, result, inst, false)
-            }
-            InstData::AtomicCas { args, .. } if self.linux => {
-                self.linux_atomic(RmwOp::Xchg, &args, result, inst, true)
-            }
-            InstData::AtomicRmw { op, ordering, args } => {
-                let ty = self.ty(args[1]);
-                let a = self.use_reg(args[0], S0);
-                let mut v = self.use_reg(args[1], S1);
-                // LSE has no subtract or and: add the negation, clear the
-                // complement.
-                let mnemonic = match op {
-                    RmwOp::Sub => {
-                        self.mach("neg", [(reg(S1, ty)).into(), (reg(v, ty)).into()]);
-                        v = S1;
-                        "ldadd"
-                    }
-                    RmwOp::And => {
-                        self.mach("mvn", [(reg(S1, ty)).into(), (reg(v, ty)).into()]);
-                        v = S1;
-                        "ldclr"
-                    }
-                    RmwOp::Add => "ldadd",
-                    RmwOp::Or => "ldset",
-                    RmwOp::Xor => "ldeor",
-                    RmwOp::Xchg => "swp",
-                    RmwOp::Umin => "ldumin",
-                    RmwOp::Umax => "ldumax",
-                    RmwOp::Smin => "ldsmin",
-                    RmwOp::Smax => "ldsmax",
-                };
-                // The old value goes to a scratch register, so it never
-                // shares one with the operands.
-                let order = ordering_suffix(ordering);
-                let (rv, rd) = (reg(v, ty), reg(S2, ty));
-                self.atomic(
-                    mnemonic,
-                    order,
-                    ty,
-                    [rv.into(), rd.into(), Address::base(Reg::x(a)).into()],
-                );
-                if let Some(loc) = result.and_then(|r| self.defined(r)) {
-                    self.emit_move(loc, Loc::Reg(S2));
-                }
-            }
-            InstData::AtomicCas { ordering, args } => {
-                // `cas` compares with its first register and overwrites it
-                // with the old value, so the expected value goes in a
-                // scratch register.
-                let ty = self.ty(args[1]);
-                let a = self.use_reg(args[0], S0);
-                let expected = self.use_reg(args[1], S1);
-                self.move_gp(S2, expected, true);
-                let new = self.use_reg(args[2], S1);
-                let order = ordering_suffix(ordering);
-                let (rs, rt) = (reg(S2, ty), reg(new, ty));
-                self.atomic(
-                    "cas",
-                    order,
-                    ty,
-                    [rs.into(), rt.into(), Address::base(Reg::x(a)).into()],
-                );
-                if let Some(loc) = result.and_then(|r| self.defined(r)) {
-                    self.emit_move(loc, Loc::Reg(S2));
-                }
-            }
-            InstData::Fence { ordering } => {
-                let barrier = if ordering == Ordering::Acquire {
-                    Arg::Barrier(9)
-                } else {
-                    Arg::Barrier(11)
-                };
-                self.mach("dmb", [barrier]);
-            }
-            InstData::Jump { ref dest } => {
-                self.block_args(dest, 0);
-                #[cfg(feature = "experimental-dispatch")]
-                if !self.emit_dispatch_tail(inst) {
-                    self.branch_unless_next(dest.block);
-                }
-                #[cfg(not(feature = "experimental-dispatch"))]
-                self.branch_unless_next(dest.block);
-            }
-            InstData::Brif {
-                cond,
-                dests: [ref then_dest, ref else_dest],
-            } => {
-                // Take the same false edge, with the same landing pads and
-                // edge copies, whether testing a register or a comparison.
-                let test = match func.value_def(func.resolve(cond)) {
-                    ValueDef::Result(compare, _)
-                        if self.fused_compares.contains(&func.resolve(cond)) =>
-                    {
-                        BrifTest::Flags(invert_cond(self.compare(compare)))
-                    }
-                    _ if !self.has_inline_asm && matches!(self.ty(cond), Type::I32 | Type::I64) => {
-                        let c = self.use_reg(cond, S0);
-                        BrifTest::Zero(reg(c, self.ty(cond)))
-                    }
-                    _ => {
-                        self.test_value(cond);
-                        BrifTest::Flags("eq")
-                    }
-                };
-                // Copy block arguments only on their own edge. A fallthrough
-                // edge, or the only edge with moves, can copy inline;
-                // otherwise the false edge needs a landing pad.
-                let then_noop = self.block_args_noop(then_dest, 0);
-                if then_noop
-                    && (self.next_block == Some(else_dest.block)
-                        || !self.block_args_noop(else_dest, 1))
-                {
-                    match &test {
-                        BrifTest::Flags(condition) => {
-                            self.conditional(
-                                invert_cond(condition),
-                                self.block_name(then_dest.block),
-                            );
-                        }
-                        BrifTest::Zero(register) => {
-                            self.compare_branch(*register, true, self.block_name(then_dest.block));
-                        }
-                    }
-                    self.block_args(else_dest, 1);
-                    self.branch_unless_next(else_dest.block);
-                } else if self.block_args_noop(else_dest, 1) {
-                    self.brif_false(&test, self.block_name(else_dest.block));
-                    self.block_args(then_dest, 0);
-                    self.branch_unless_next(then_dest.block);
-                } else {
-                    let pad = format!("L{}_{inst}_else", func.name);
-                    self.brif_false(&test, Name::Text(&pad));
-                    self.block_args(then_dest, 0);
-                    self.out
-                        .branch_name(false, self.block_name(then_dest.block));
-                    self.out.label(pad.clone());
-                    self.block_args(else_dest, 1);
-                    self.branch_unless_next(else_dest.block);
-                }
-            }
-            InstData::Switch {
-                arg,
-                ref dests,
-                ref cases,
-            } => self.switch(inst, arg, dests, cases, None),
-            InstData::Intrinsic { id, ref args } => match id {
-                // The libc functions take the same arguments in the same
-                // order. memset's `int c` only uses its low byte, so the
-                // unspecified upper bits of the i8 are harmless.
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
-                    let params: Vec<AbiParam> = id
-                        .info()
-                        .params
-                        .iter()
-                        .map(|&ty| AbiParam::new(ty))
-                        .collect();
-                    self.move_args(args, &params);
-                    self.out.branch(true, self.symbol(&id.to_string()));
-                    if id == Intrinsic::Memcmp {
-                        self.call_result(result, None);
-                    }
-                }
-                // What clang emits for __builtin_debugtrap; a debugger can
-                // step past it.
-                Intrinsic::Debugtrap => self.mach("brk", [Arg::imm(0xf000)]),
-                // Apple's va_list is a pointer to the next argument slot.
-                Intrinsic::VaStart if self.linux => self.linux_va_start(args[0]),
-                Intrinsic::VaStart => {
-                    let list = self.use_reg(args[0], S1);
-                    self.address(Loc::Reg(S0), "x29", self.variadic_offset);
-                    self.mach(
-                        "str",
-                        [(Reg::x(S0)).into(), Address::base(Reg::x(list)).into()],
-                    );
-                }
-                // Round up to keep `sp` 16-byte aligned; the memory starts
-                // above the outgoing arguments, which stay at `sp`.
-                Intrinsic::StackAlloc => {
-                    let size = self.use_reg(args[0], S0);
-                    self.mach(
-                        "add",
-                        [(Reg::x(S0)).into(), (Reg::x(size)).into(), Arg::imm(15)],
-                    );
-                    self.mach(
-                        "and",
-                        [(Reg::x(S0)).into(), (Reg::x(S0)).into(), Arg::imm(-16)],
-                    );
-                    self.mach(
-                        "sub",
-                        [(Reg::SP).into(), (Reg::SP).into(), (Reg::x(S0)).into()],
-                    );
-                    let d = self.def_reg(result);
-                    self.address(Loc::Reg(d), "sp", self.copy_base);
-                    self.def_done(result, d);
-                }
-                Intrinsic::StackSave => {
-                    let d = self.def_reg(result);
-                    self.mach("mov", [(Reg::x(d)).into(), (Reg::SP).into()]);
-                    self.def_done(result, d);
-                }
-                // Lifetime markers constrain IR transformations but change no runtime state.
-                Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {}
-                Intrinsic::StackRestore => {
-                    let mark = self.use_reg(args[0], S0);
-                    self.mach("mov", [(Reg::SP).into(), (Reg::x(mark)).into()]);
-                }
-                keel_ir::x86_intrinsics!() => unreachable!("rejected x86 intrinsic"),
-
-                Intrinsic::FrameAddress => {
-                    let d = self.def_reg(result);
-                    self.mach("mov", [(Reg::x(d)).into(), (Reg::x(29)).into()]);
-                    self.def_done(result, d);
-                }
-            },
+            InstData::Neon { .. }
+            | InstData::VectorIcmp { .. }
+            | InstData::VectorSelect { .. }
+            | InstData::VectorBinary { .. }
+            | InstData::VectorReduce { .. }
+            | InstData::VectorUnary { .. }
+            | InstData::VectorSplat { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorFcmp { .. } => self.vector_inst(inst, result),
+            InstData::Iconst { .. }
+            | InstData::F80const { .. }
+            | InstData::Fconst { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::StackAddr { .. } => self.constant_inst(inst, result),
+            InstData::Unary { .. }
+            | InstData::Binary { .. }
+            | InstData::Fma { .. }
+            | InstData::Overflow { .. }
+            | InstData::Select { .. }
+            | InstData::Convert { .. }
+            | InstData::Icmp { .. }
+            | InstData::Fcmp { .. } => self.scalar_inst(inst, result),
+            InstData::AggregateVaArg { .. }
+            | InstData::VaArg { .. }
+            | InstData::Load { .. }
+            | InstData::Store { .. }
+            | InstData::AtomicLoad { .. }
+            | InstData::AtomicStore { .. }
+            | InstData::AtomicRmw { .. }
+            | InstData::AtomicCas { .. }
+            | InstData::Fence { .. } => self.memory_inst(inst, result),
+            InstData::Call { .. }
+            | InstData::Invoke { .. }
+            | InstData::LandingPad { .. }
+            | InstData::EhTypeid { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. }
+            | InstData::CallIndirect { .. }
+            | InstData::Jump { .. }
+            | InstData::Brif { .. }
+            | InstData::Switch { .. }
+            | InstData::Trap
+            | InstData::Return { .. } => self.control_inst(inst, result),
+            InstData::Intrinsic { id, ref args } => self.intrinsic(id, args, result),
             InstData::X86RflagsRegion { .. } => unreachable!("rejected x86 FLAGS region"),
             InstData::InlineAsm { ref args, .. } => {
                 let plan = self.asm_plans.remove(&inst).expect("asm was planned");
@@ -2941,30 +2195,6 @@ impl<'a> FunctionCompiler<'a> {
                         self.emit_move(dst, asm_loc(r));
                     }
                 }
-            }
-            InstData::Trap => self.mach("brk", [Arg::imm(1)]),
-            InstData::Return { ref args } => {
-                // A struct result in registers is loaded from where the
-                // function wrote it.
-                if let Some(Purpose::Sret(layout)) = func.sig.params.first().map(|p| &p.purpose)
-                    && let Some(area) = self.param_areas[0]
-                {
-                    self.load_struct_regs(layout, area);
-                }
-                if let Some(&value) = args.first() {
-                    let src = self.loc(value);
-                    self.emit_move(return_loc(self.ty(value)), src);
-                    if self.ty(value) == Type::I128 {
-                        let hi = self.hi(value);
-                        self.emit_move(Loc::Reg(1), hi);
-                    }
-                    let ret = &func.sig.returns[0];
-                    self.extend_in_place(0, ret.ty, ret.ext);
-                }
-                self.epilogue();
-                self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], |out| {
-                    out.write_str("ret")
-                });
             }
         }
     }
