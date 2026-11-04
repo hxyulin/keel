@@ -390,6 +390,7 @@ dependencies = [
  "keel-ir",
  "keel-llvm",
  "keel-opt",
+ "keel-test-support",
  "serde_json",
  "target-lexicon",
 ]
@@ -425,6 +426,10 @@ dependencies = [
  "keel-ir",
  "profiling",
 ]
+
+[[package]]
+name = "keel-test-support"
+version = "0.1.0"
 
 [[package]]
 name = "libc"

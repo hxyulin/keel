@@ -31,3 +31,4 @@ keel-asm = { path = "../keel-asm" }
 # Kernel C sources are compiled to Keel IR in-process for differential tests.
 keel-c = { path = "../keel-c" }
 keel-opt = { path = "../keel-opt" }
+keel-test-support = { path = "../keel-test-support" }

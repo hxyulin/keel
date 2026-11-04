@@ -11,7 +11,7 @@ pub fn host_ok() -> bool {
     let ok = cfg!(all(target_os = "macos", target_arch = "aarch64"))
         && Command::new("clang").arg("--version").output().is_ok();
     if !ok {
-        eprintln!("skipping: executable differential tests need macOS arm64 and clang");
+        keel_test_support::skip_part!("executable differential tests need arm64 macOS and clang");
     }
     ok
 }
