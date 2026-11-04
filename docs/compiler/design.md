@@ -680,6 +680,16 @@ implicitly fused because that changes rounding.
 Target selection prepares instruction-kind and operand-use facts once per
 function.
 
+Each backend's `FunctionCompiler::new` (`new_for_target` on aarch64) runs
+the per-function phases in a fixed order: preflight checks, the call area
+at the bottom of the frame, selection and the target covers, allocation,
+then the spill area, the private slots, IR stack slots and the frame size.
+The phases are in `x86_64/plan.rs` and `aarch64/plan.rs`. Emission first
+lowers an instruction through the cover that claimed it, if any, then
+tries the i128 lowering (and on x86 the AVX and x87 ones), and otherwise
+lowers it by instruction family in `<target>/lower_*.rs`. Target-independent
+intrinsics lower in `x86_64/intrinsic_family.rs` and `aarch64/intrinsic.rs`.
+
 Aarch64 scalar loads and stores can also consume a single-use, same-block
 `ptradd` with an i64 register offset. A single-use i64 shift can be absorbed
 when its masked count is zero or log2(access bytes), producing a register-offset
