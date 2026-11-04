@@ -1,3 +1,5 @@
+; expect: exit 0
+; stdout: 10401 independent native oracle cases passed
 ; Reduced private initialization fixture, NOT the actual escaping-memset corpus.
 func @private_acc(ptr, i64) -> i64 cc(c) {
     ss0 = stack_slot 24, align 8

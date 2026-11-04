@@ -31,4 +31,5 @@ int main(void) {
         }
     }
     printf("%u independent native oracle cases passed\n", checks);
+    return 0;
 }

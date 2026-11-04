@@ -238,7 +238,7 @@ fn aliased_definitions_and_join_parameters_are_rejected_without_overwriting() {
 }
 #[test]
 fn promotion_then_conversion_activates_on_private_loop_diamond() {
-    let src = include_str!("stack_promote/private.keel");
+    let src = include_str!("../../keel-codegen/tests/programs/stack_promote.keel");
     let mut m = keel_ir::parse(src).unwrap();
     keel_opt::run_passes(
         &mut m,
