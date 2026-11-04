@@ -361,3 +361,30 @@ block0:
         Outcome::Trap(Trap::Misaligned { align: 8, .. })
     ));
 }
+
+#[test]
+fn load_trace_records_each_executed_load_in_order() {
+    let m = module(
+        "\
+func @f(ptr) -> i32 {
+block0(v0: ptr):
+    v1 = iconst.i64 4
+    v2 = ptradd v0, v1
+    v3 = load.i32 v2
+    v4 = load.i32 v0
+    v5 = iadd v3, v4
+    return v5
+}
+",
+    );
+    let mut interp = Interpreter::new(&m).with_load_trace();
+    let base = interp
+        .memory_mut()
+        .alloc_bytes(&[1, 0, 0, 0, 2, 0, 0, 0], 4);
+    assert_eq!(
+        interp.call("f", &[Val::Ptr(base)]),
+        Outcome::Return(vec![Val::I32(3)])
+    );
+    assert_eq!(interp.load_trace(), [base + 4, base]);
+    assert!(Interpreter::new(&m).load_trace().is_empty());
+}

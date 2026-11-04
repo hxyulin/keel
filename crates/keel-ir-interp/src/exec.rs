@@ -492,6 +492,9 @@ impl<'m> Interpreter<'m> {
             }
             InstData::Load { flags, ty, addr } => {
                 let addr = self.access_addr(&frame.get(*addr)?, flags)?;
+                if let Some(trace) = &mut self.load_trace {
+                    trace.push(addr);
+                }
                 self.load(*ty, addr)?
             }
             InstData::Store { flags, value, addr } => {

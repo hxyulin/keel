@@ -133,6 +133,8 @@ pub struct Interpreter<'m> {
     memory: Memory,
     step_limit: u64,
     depth_limit: usize,
+    /// Addresses of executed `load` instructions, when tracing is on.
+    load_trace: Option<Vec<u64>>,
 }
 
 impl<'m> Interpreter<'m> {
@@ -160,6 +162,7 @@ impl<'m> Interpreter<'m> {
             memory: Memory::default(),
             step_limit: 1_000_000,
             depth_limit: 1_000,
+            load_trace: None,
         };
         for func in functions {
             // A later definition replaces an earlier one, as in the module.
@@ -179,6 +182,20 @@ impl<'m> Interpreter<'m> {
     pub fn with_depth_limit(mut self, depth: usize) -> Self {
         self.depth_limit = depth;
         self
+    }
+
+    /// Records the address of every executed `load` instruction, in order,
+    /// so a test can check how many loads a loop performs. Atomic loads and
+    /// intrinsics such as `memcpy` are not recorded.
+    pub fn with_load_trace(mut self) -> Self {
+        self.load_trace = Some(Vec::new());
+        self
+    }
+
+    /// The addresses recorded since [`Interpreter::with_load_trace`]; empty
+    /// when tracing is off.
+    pub fn load_trace(&self) -> &[u64] {
+        self.load_trace.as_deref().unwrap_or_default()
     }
 
     pub fn memory(&self) -> &Memory {
