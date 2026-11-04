@@ -9,7 +9,6 @@ fn queries_and_specialized_operations_use_architectural_semantics() {
     packet::check(
         include_str!("../fixtures/x86_queries.c"),
         include_str!("../fixtures/x86_queries_runner.c"),
-        "KEEL_C_QUERIES_EXPORT_DIR",
         "queries",
         Some(&["-mavx2", "-DREFERENCE"]),
     );

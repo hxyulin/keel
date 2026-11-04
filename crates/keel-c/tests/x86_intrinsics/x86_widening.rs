@@ -2,7 +2,8 @@ use keel_codegen::regalloc::{AllocationTier, Pools};
 use keel_codegen::x86_features::{CpuLevel, FeatureSelector, Features};
 use keel_codegen::{CodegenPipeline, SelectionTier};
 use keel_ir::{Module, Target};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 
 fn compile(source: &str) -> Module {
     let source = keel_c::preprocess(
@@ -86,10 +87,7 @@ fn sources() -> (String, String, String) {
 
 #[test]
 fn widening_matches_vendor_and_scalar_oracles() {
-    let directory = std::env::var_os("KEEL_C_WIDENING_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-widening"));
-    fs::create_dir_all(&directory).unwrap();
+    let directory = keel_test_support::TempDir::new("c-widening");
     let (source, narrow, harness) = sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(
@@ -213,17 +211,12 @@ fn widening_matches_vendor_and_scalar_oracles() {
         .unwrap();
         assert_eq!(object, chunks.finish().unwrap());
         let filename = format!("keel-{name}.o");
-        fs::write(directory.join(&filename), object).unwrap();
-        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-        if std::is_x86_feature_detected!("avx2") {
-            command(Command::new("clang").current_dir(&directory).args([
-                "oracle.o",
-                "harness.o",
-                &filename,
-                "-o",
-                "run",
-            ]));
-            command(&mut Command::new(directory.join("run")));
-        }
+        native_program!(name)
+            .requires(&["avx2"])
+            .file("oracle.o", fs::read(directory.join("oracle.o")).unwrap())
+            .file("harness.o", fs::read(directory.join("harness.o")).unwrap())
+            .file(&*filename, object)
+            .link(["oracle.o", "harness.o", &filename])
+            .check();
     }
 }

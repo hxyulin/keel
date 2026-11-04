@@ -5,7 +5,6 @@ fn state_and_streaming_operations_preserve_explicit_effects() {
     packet::check(
         include_str!("../fixtures/x86_state_intrinsics.c"),
         include_str!("../fixtures/x86_state_intrinsics_runner.c"),
-        "KEEL_C_STATE_EXPORT_DIR",
         "state",
         None,
     );

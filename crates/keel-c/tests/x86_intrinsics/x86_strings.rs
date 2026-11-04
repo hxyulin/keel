@@ -9,7 +9,6 @@ fn sse42_strings_and_crc_preserve_vendor_results() {
     packet::check(
         include_str!("../fixtures/x86_strings.c"),
         include_str!("../fixtures/x86_strings_runner.c"),
-        "KEEL_C_STRINGS_EXPORT_DIR",
         "strings",
         Some(&["-mavx2", "-DREFERENCE"]),
     );

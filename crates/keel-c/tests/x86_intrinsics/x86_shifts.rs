@@ -569,11 +569,9 @@ fn avx2_shift_controls_shapes_and_feature_permissions() {
 
 #[test]
 fn avx2_shifts_match_vendor_scalar_and_object_routes() {
-    use std::{fs, path::PathBuf, process::Command};
-    let directory = std::env::var_os("KEEL_C_AVX2_SHIFT_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-avx2-shifts"));
-    fs::create_dir_all(&directory).unwrap();
+    use keel_test_support::native_program;
+    use std::{fs, process::Command};
+    let directory = keel_test_support::TempDir::new("c-avx2-shifts");
     let (source, harness) = avx2_shift_sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(
@@ -650,7 +648,7 @@ fn avx2_shifts_match_vendor_scalar_and_object_routes() {
         fs::write(directory.join(format!("{name}.o")), object).unwrap();
     }
     // The oracle is freestanding; the protected-page harness needs Linux libc
-    // and is compiled natively below or by the remote native runner.
+    // and is compiled where the program runs.
     let output = Command::new("clang")
         .current_dir(&directory)
         .args([
@@ -671,54 +669,43 @@ fn avx2_shifts_match_vendor_scalar_and_object_routes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("avx2") {
-        for compiler in ["clang", "gcc"] {
-            let output = Command::new(compiler)
-                .current_dir(&directory)
-                .args(["-mavx2", "-O2", "-c", "harness.c", "-o", "harness.o"])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let output = Command::new(compiler)
-                .current_dir(&directory)
-                .args(["-mavx2", "-O2", "-c", "oracle.c", "-o", "native-oracle.o"])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            for name in ["baseline", "trees", "optimized-spill"] {
-                let output = Command::new(compiler)
-                    .current_dir(&directory)
-                    .args([
-                        "harness.o",
-                        "native-oracle.o",
-                        &format!("{name}.o"),
-                        "-o",
-                        "run",
-                    ])
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                let output = Command::new(directory.join("run")).output().unwrap();
-                assert!(output.status.success(), "{compiler} {name}: {output:?}");
-            }
+    let oracle_c = fs::read(directory.join("oracle.c")).unwrap();
+    let harness_c = fs::read(directory.join("harness.c")).unwrap();
+    for compiler in ["cc", "gcc"] {
+        for name in ["baseline", "trees", "optimized-spill"] {
+            let object = format!("{name}.o");
+            native_program!(format!("{name}-{compiler}"))
+                .requires(&["avx2"])
+                .file("oracle.c", &oracle_c)
+                .file("harness.c", &harness_c)
+                .file(&*object, fs::read(directory.join(&object)).unwrap())
+                .step([
+                    compiler,
+                    "-mavx2",
+                    "-O2",
+                    "-c",
+                    "harness.c",
+                    "-o",
+                    "harness.o",
+                ])
+                .step([
+                    compiler,
+                    "-mavx2",
+                    "-O2",
+                    "-c",
+                    "oracle.c",
+                    "-o",
+                    "native-oracle.o",
+                ])
+                .step([
+                    compiler,
+                    "harness.o",
+                    "native-oracle.o",
+                    &object,
+                    "-o",
+                    "program",
+                ])
+                .check();
         }
-    } else {
-        keel_test_support::skip_part!("host lacks AVX2");
     }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    keel_test_support::skip_part!("requires x86-64 Linux");
-    eprintln!("AVX2 shift artifacts: {}", directory.display());
 }

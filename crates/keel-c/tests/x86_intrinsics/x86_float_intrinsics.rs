@@ -5,7 +5,8 @@ use keel_codegen::{
     x86_features::{FeatureSelector, Features},
 };
 use keel_ir::Target;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 
 const SOURCE: &str = include_str!("../fixtures/x86_float_intrinsics.c");
 const HARNESS: &str = include_str!("../fixtures/x86_float_intrinsics_runner.c");
@@ -180,10 +181,7 @@ fn vendor_float_wrappers_keep_effects_and_validate_controls() {
 
 #[test]
 fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
-    let directory = std::env::var_os("KEEL_FLOAT_INTRINSICS_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("x86-float-intrinsics"));
-    fs::create_dir_all(&directory).unwrap();
+    let directory = keel_test_support::TempDir::new("x86-float-intrinsics");
     fs::write(directory.join("kernels.c"), SOURCE).unwrap();
     fs::write(directory.join("runner.c"), HARNESS).unwrap();
     // Reference compilation is independent of Keel's embedded headers/lowering.
@@ -210,7 +208,6 @@ fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
     let mut optimized = raw.clone();
     keel_opt::optimize(&mut optimized).unwrap();
     keel_ir::verify_module(&optimized).unwrap();
-    let native = native_supported();
     for (selection, module) in [
         (SelectionTier::Baseline, &raw),
         (SelectionTier::Full, &optimized),
@@ -248,36 +245,21 @@ fn floating_vendor_oracles_cover_rounding_status_and_lane_layouts() {
                     bytes,
                     keel_asm::x86::assemble_object_with_features(&text, features()).unwrap()
                 );
-                let path = directory.join(format!("{selection:?}-{allocation:?}-{spilled}.o"));
-                fs::write(&path, bytes).unwrap();
-                if native {
-                    let runner = directory.join("run");
-                    command(
-                        Command::new("clang")
-                            .arg(directory.join("runner.c"))
-                            .arg(directory.join("reference.o"))
-                            .arg(&path)
-                            .arg("-o")
-                            .arg(&runner),
-                    );
-                    command(&mut Command::new(runner));
-                }
+                let name = format!("{selection:?}-{allocation:?}-{spilled}");
+                let object = format!("{name}.o");
+                native_program!(name)
+                    .requires(&["sse3", "sse4.1", "avx", "fma", "f16c"])
+                    .file("runner.c", HARNESS)
+                    .file(
+                        "reference.o",
+                        fs::read(directory.join("reference.o")).unwrap(),
+                    )
+                    .file(&*object, bytes)
+                    .link(["runner.c", "reference.o", &object])
+                    .check();
             }
         }
     }
-}
-
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-fn native_supported() -> bool {
-    std::is_x86_feature_detected!("sse3")
-        && std::is_x86_feature_detected!("sse4.1")
-        && std::is_x86_feature_detected!("avx")
-        && std::is_x86_feature_detected!("fma")
-        && std::is_x86_feature_detected!("f16c")
-}
-#[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
-fn native_supported() -> bool {
-    false
 }
 
 #[test]

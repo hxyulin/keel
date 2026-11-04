@@ -370,11 +370,8 @@ fn command(c: &mut std::process::Command) {
 }
 #[test]
 fn wide_abi_intrinsics_and_exact_memory_footprints() {
-    use std::{fs, path::PathBuf, process::Command};
-    let dir = std::env::var_os("KEEL_C_X86_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-x86-intrinsics"));
-    fs::create_dir_all(&dir).unwrap();
+    use std::{fs, process::Command};
+    let dir = keel_test_support::TempDir::new("c-x86-intrinsics");
     let (source, harness) = abi_sources();
     fs::write(dir.join("kernels.c"), &source).unwrap();
     fs::write(dir.join("oracle.c"), source.replace(" k_", " c_")).unwrap();
@@ -441,25 +438,24 @@ fn wide_abi_intrinsics_and_exact_memory_footprints() {
         )
         .unwrap();
         let object = keel_asm::x86::assemble_program_object_with_features(&code, features).unwrap();
-        fs::write(dir.join(format!("keel-{name}.o")), object).unwrap();
-        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-        if std::is_x86_feature_detected!("avx2") {
-            for compiler in ["clang", "gcc"] {
-                if Command::new(compiler).arg("--version").output().is_err() {
-                    continue;
-                }
-                let exe = format!("run-{compiler}-{name}");
-                command(Command::new(compiler).current_dir(&dir).args([
+        let filename = format!("keel-{name}.o");
+        for compiler in ["cc", "gcc"] {
+            native_program!(format!("{name}-{compiler}"))
+                .requires(&["avx2"])
+                .file("oracle.c", fs::read(dir.join("oracle.c")).unwrap())
+                .file("harness.c", fs::read(dir.join("harness.c")).unwrap())
+                .file(&*filename, &object)
+                .step([
+                    compiler,
                     "-mavx2",
                     "-O1",
                     "oracle.c",
                     "harness.c",
-                    &format!("keel-{name}.o"),
+                    &filename,
                     "-o",
-                    &exe,
-                ]));
-                command(&mut Command::new(dir.join(exe)));
-            }
+                    "program",
+                ])
+                .check();
         }
     }
 }
@@ -527,11 +523,8 @@ fn integer_family_sources() -> (String, String, String) {
 #[test]
 fn integer_minmax_abs_sign_and_blend_match_vendor_and_scalar_oracles() {
     use keel_codegen::regalloc::Pools;
-    use std::{fs, path::PathBuf, process::Command};
-    let directory = std::env::var_os("KEEL_C_INTEGER_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-integer-intrinsics"));
-    fs::create_dir_all(&directory).unwrap();
+    use std::{fs, process::Command};
+    let directory = keel_test_support::TempDir::new("c-integer-intrinsics");
     let (source, narrow, harness) = integer_family_sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(
@@ -628,18 +621,13 @@ fn integer_minmax_abs_sign_and_blend_match_vendor_and_scalar_oracles() {
             .unwrap();
             assert_eq!(object, chunks.finish().unwrap());
             let filename = format!("keel-{name}-{spilled}.o");
-            fs::write(directory.join(&filename), object).unwrap();
-            #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-            if std::is_x86_feature_detected!("avx2") {
-                command(Command::new("clang").current_dir(&directory).args([
-                    "oracle.o",
-                    "harness.o",
-                    &filename,
-                    "-o",
-                    "run",
-                ]));
-                command(&mut Command::new(directory.join("run")));
-            }
+            native_program!(format!("{name}-{spilled}"))
+                .requires(&["avx2"])
+                .file("oracle.o", fs::read(directory.join("oracle.o")).unwrap())
+                .file("harness.o", fs::read(directory.join("harness.o")).unwrap())
+                .file(&*filename, object)
+                .link(["oracle.o", "harness.o", &filename])
+                .check();
         }
     }
 }
@@ -1489,11 +1477,8 @@ fn packed_integer_bindings_preserve_types_features_and_operand_evaluation() {
 #[test]
 fn packed_integer_families_match_vendor_and_scalar_oracles() {
     use keel_codegen::regalloc::Pools;
-    use std::{fs, path::PathBuf, process::Command};
-    let directory = std::env::var_os("KEEL_C_PACKED_INTEGER_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-packed-integer"));
-    fs::create_dir_all(&directory).unwrap();
+    use std::{fs, process::Command};
+    let directory = keel_test_support::TempDir::new("c-packed-integer");
     let (source, harness) = packed_integer_sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(
@@ -1591,25 +1576,15 @@ fn packed_integer_families_match_vendor_and_scalar_oracles() {
         "-o",
         "harness.o",
     ]));
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("avx2") {
-        for name in ["baseline", "trees", "optimized-spill"] {
-            command(Command::new("clang").current_dir(&directory).args([
-                "harness.o",
-                "oracle.o",
-                &format!("{name}.o"),
-                "-o",
-                "run",
-            ]));
-            command(&mut Command::new(directory.join("run")));
-        }
-    } else {
-        keel_test_support::skip_part!("host lacks AVX2");
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    {
-        keel_test_support::skip_part!("requires x86-64 Linux");
-        eprintln!("native packed-integer artifacts: {}", directory.display());
+    for name in ["baseline", "trees", "optimized-spill"] {
+        let object = format!("{name}.o");
+        native_program!(name)
+            .requires(&["avx2"])
+            .file("harness.o", fs::read(directory.join("harness.o")).unwrap())
+            .file("oracle.o", fs::read(directory.join("oracle.o")).unwrap())
+            .file(&*object, fs::read(directory.join(&object)).unwrap())
+            .link(["harness.o", "oracle.o", &object])
+            .check();
     }
 }
 
@@ -1729,3 +1704,4 @@ mod x86_avx512_control_casts;
 
 #[path = "x86_intrinsics/x86_avx512_scalar_fma.rs"]
 mod x86_avx512_scalar_fma;
+use keel_test_support::native_program;

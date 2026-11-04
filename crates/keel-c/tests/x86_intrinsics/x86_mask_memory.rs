@@ -5,7 +5,8 @@ use keel_codegen::{
     x86_features::{CpuLevel, FeatureSelector, Features},
 };
 use keel_ir::Target;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 fn frontend(source: &str) -> Result<keel_ir::Module, String> {
     let target = Target::X86_64LinuxGnu;
     let source = keel_c::preprocess(
@@ -169,10 +170,7 @@ fn gather_scale_and_memory_features_are_checked() {
 }
 #[test]
 fn mask_memory_and_gathers_match_guarded_scalar_and_vendor_oracles() {
-    let directory = std::env::var_os("KEEL_C_MASK_MEMORY_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-mask-memory"));
-    fs::create_dir_all(&directory).unwrap();
+    let directory = keel_test_support::TempDir::new("c-mask-memory");
     let (source, runner) = sources();
     fs::write(directory.join("kernels.c"), &source).unwrap();
     fs::write(directory.join("runner.c"), runner).unwrap();
@@ -259,24 +257,17 @@ fn mask_memory_and_gathers_match_guarded_scalar_and_vendor_oracles() {
             },
         ]));
     }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("avx2") {
-        for name in ["baseline", "optimized-spill"] {
-            command(Command::new("clang").current_dir(&directory).args([
-                "runner.o",
+    for name in ["baseline", "optimized-spill"] {
+        let object = format!("{name}.o");
+        native_program!(name)
+            .requires(&["avx2"])
+            .file("runner.o", fs::read(directory.join("runner.o")).unwrap())
+            .file(
                 "reference.o",
-                &format!("{name}.o"),
-                "-o",
-                "run",
-            ]));
-            command(&mut Command::new(directory.join("run")));
-        }
-    } else {
-        keel_test_support::skip_part!("host lacks AVX2");
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    {
-        keel_test_support::skip_part!("requires x86-64 Linux");
-        eprintln!("native masked memory artifacts: {}", directory.display());
+                fs::read(directory.join("reference.o")).unwrap(),
+            )
+            .file(&*object, fs::read(directory.join(&object)).unwrap())
+            .link(["runner.o", "reference.o", &object])
+            .check();
     }
 }

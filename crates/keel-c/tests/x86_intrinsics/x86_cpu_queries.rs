@@ -5,7 +5,8 @@ use keel_codegen::{
     x86_features::{CpuLevel, FeatureSelector, Features, module_features},
 };
 use keel_ir::Target;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::native_program;
+use std::{fs, process::Command};
 const SOURCE: &str = include_str!("../fixtures/x86_cpu_queries.c");
 const RUNNER: &str = include_str!("../fixtures/x86_cpu_queries_runner.c");
 fn frontend(source: &str, target: Target) -> Result<keel_ir::Module, String> {
@@ -150,10 +151,7 @@ fn safe_xcr0_queries_do_not_enable_unguarded_xgetbv() {
 }
 #[test]
 fn baseline_queries_and_explicit_dispatch_match_native_capabilities() {
-    let directory = std::env::var_os("KEEL_C_CPU_QUERY_EXPORT_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("c-cpu-query"));
-    fs::create_dir_all(&directory).unwrap();
+    let directory = keel_test_support::TempDir::new("c-cpu-query");
     fs::write(directory.join("kernels.c"), SOURCE).unwrap();
     fs::write(directory.join("runner.c"), RUNNER).unwrap();
     let raw = frontend(SOURCE, Target::X86_64LinuxGnu).unwrap();
@@ -217,20 +215,13 @@ fn baseline_queries_and_explicit_dispatch_match_native_capabilities() {
         "-o",
         "runner.o",
     ]));
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     for name in ["baseline", "trees", "optimized-spill"] {
-        command(Command::new("clang").current_dir(&directory).args([
-            "runner.o",
-            &format!("{name}.o"),
-            "-o",
-            "run",
-        ]));
-        command(&mut Command::new(directory.join("run")));
-    }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    {
-        keel_test_support::skip_part!("requires x86-64 Linux");
-        eprintln!("native runtime CPU artifacts: {}", directory.display());
+        let object = format!("{name}.o");
+        native_program!(name)
+            .file("runner.o", fs::read(directory.join("runner.o")).unwrap())
+            .file(&*object, fs::read(directory.join(&object)).unwrap())
+            .link(["runner.o", &object])
+            .check();
     }
 }
 

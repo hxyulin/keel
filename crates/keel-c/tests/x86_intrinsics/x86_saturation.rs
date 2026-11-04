@@ -5,7 +5,7 @@ use keel_codegen::{
     x86_features::{CpuLevel, FeatureSelector, Features},
 };
 use keel_ir::Target;
-use std::{fs, process::Command};
+use keel_test_support::native_program;
 
 const OPS: [(&str, &str, &str); 8] = [
     ("adds_epi8", "paddsb", "signed char"),
@@ -161,11 +161,6 @@ fn source() -> String {
 #[test]
 fn strict_v1_parity_and_native_oracles() {
     let module = compile(&source(), Target::X86_64LinuxGnu).unwrap();
-    let dir = std::env::var_os("KEEL_C_SAT_EXPORT_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("keel-c-sat-{}", std::process::id())));
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("kernels.c"), source()).unwrap();
     let mut harness = String::from(
         "#include <emmintrin.h>\n#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n#include <sys/mman.h>\n#include <unistd.h>\n",
     );
@@ -200,7 +195,6 @@ fn strict_v1_parity_and_native_oracles() {
         harness += "};\n";
     }
     harness += include_str!("../fixtures/x86_saturation_harness.c");
-    fs::write(dir.join("harness.c"), harness).unwrap();
     let empty = Pools {
         caller_saved: &[],
         callee_saved: &[],
@@ -262,28 +256,23 @@ fn strict_v1_parity_and_native_oracles() {
         for (_, op, _) in OPS {
             assert!(text.contains(op), "missing {op}: {text}");
         }
-        fs::write(dir.join(format!("{label}.o")), object).unwrap();
-        fs::write(dir.join(format!("{label}.s")), text).unwrap();
-        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            for cc in ["gcc", "clang"] {
-                let result = Command::new(cc)
-                    .args(["-O2", "-march=x86-64", "-mno-avx", "-fno-tree-vectorize"])
-                    .arg(dir.join("harness.c"))
-                    .arg(dir.join(format!("{label}.o")))
-                    .arg("-o")
-                    .arg(dir.join(format!("{cc}-{label}")))
-                    .output()
-                    .unwrap();
-                assert!(
-                    result.status.success(),
-                    "{cc}: {}",
-                    String::from_utf8_lossy(&result.stderr)
-                );
-                let result = Command::new(dir.join(format!("{cc}-{label}")))
-                    .output()
-                    .unwrap();
-                assert!(result.status.success(), "{cc} {label}: {result:?}");
-            }
+        let object_name = format!("{label}.o");
+        for cc in ["gcc", "cc"] {
+            native_program!(format!("{label}-{cc}"))
+                .file("harness.c", &harness)
+                .file(&*object_name, &object)
+                .step([
+                    cc,
+                    "-O2",
+                    "-march=x86-64",
+                    "-mno-avx",
+                    "-fno-tree-vectorize",
+                    "harness.c",
+                    &object_name,
+                    "-o",
+                    "program",
+                ])
+                .check();
         }
     }
 }
