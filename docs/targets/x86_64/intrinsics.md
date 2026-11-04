@@ -1069,10 +1069,12 @@ oversized counts, as do the raw per-lane shift intrinsics. Inactive result
 lanes preserve the merge source.
 
 Standard C scalar-count `_mm512_{slli,srli,srai}_epi{32,64}` wrappers also
-accept runtime counts. They convert the count to `unsigned int`, zero-extend
-it into the low qword of an XMM count, and use the shared-count typed form.
-Counts above 255 retain their saturating meaning; wider C arguments first
-undergo the specified conversion to 32 bits. Each argument is evaluated once.
+accept runtime counts. A count that is an integer constant in 0..255 after
+conversion to `unsigned int` selects the typed immediate form. Any other count
+is converted to `unsigned int`, zero-extended into the low qword of an XMM
+count, and uses the shared-count typed form. Counts above 255 retain their
+saturating meaning; wider C arguments first undergo the specified conversion
+to 32 bits. Each argument is evaluated once.
 
 Scalar broadcasts accept `i32`, `i64`, `f32` or `f64` and return the matching
 512-bit shape. Block broadcasts repeat `i32x4`, `i64x4`, `f32x4` or `f64x4`
@@ -1232,8 +1234,9 @@ same shape as the data. Shifts saturate at 32 or 64; logical shifts produce
 zero and arithmetic shifts fill with the sign. Rotations reduce counts
 modulo the lane width. All operations are pure and require F plus VL.
 
-The C scalar-count shift wrappers accept runtime unsigned counts through
-the shared-count path, including the 32-bit argument conversion described
+The C scalar-count shift wrappers select the immediate form for constant
+counts in 0..255 and accept other unsigned counts, including runtime ones,
+through the shared-count path, with the 32-bit argument conversion described
 above. Immediate rotation wrappers require constants in 0..255. C exposes
 masked and mask-zero forms throughout, plus unmasked rotations and narrow
 qword arithmetic-right shifts where these have no legacy interface.
@@ -1646,9 +1649,10 @@ Inactive lanes retain merge bits. All forms require F plus BW, and narrow
 forms also require VL. C supplies masked and mask-zero interfaces at all
 widths, all 512-bit unmasked forms, and narrow variable-word shifts. Existing
 narrow unmasked immediate/shared-count interfaces keep their prior contracts.
-Standard C `slli`, `srli` and `srai` wrappers accept runtime unsigned scalar
-counts through the shared-count form, with the same 32-bit conversion rule
-as the foundation dword/qword wrappers. Direct typed immediate operations
+Standard C `slli`, `srli` and `srai` wrappers use the immediate form for
+constant counts in 0..255 and accept other unsigned scalar counts, including
+runtime ones, through the shared-count form, with the same 32-bit conversion
+rule as the foundation dword/qword wrappers. Direct typed immediate operations
 still require constants in 0..255.
 
 BW multiplication names are `mullw`, `mulhw`, `mulhuw` and `mulhrsw`, followed

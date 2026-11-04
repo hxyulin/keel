@@ -7,6 +7,11 @@ typedef unsigned short __mmask16;
 typedef unsigned int __mmask32;
 typedef unsigned long long __mmask64;
 typedef int __keel_avx512_i32x16 __attribute__((vector_size(64)));
+/* Scalar-count shifts: a constant count in 0..255 selects the imm8 builtin, and
+ * any other count uses the shared-count form. Both saturate oversized counts.
+ * Only the selected operand is evaluated. */
+#define __keel_shift_imm(c) __builtin_choose_expr(__builtin_constant_p(c),(unsigned int)(c),256u)
+#define __keel_shift_by(c,imm,count) __builtin_choose_expr(__keel_shift_imm(c)<=255u,imm,count)
 #define _mm512_cmp_epi32_mask(a,b,p) ((__mmask16)__builtin_keel_avx512_cmpd((__keel_avx512_i32x16)(a),(__keel_avx512_i32x16)(b),(int)(p)))
 #define _mm512_cmp_epu32_mask(a,b,p) ((__mmask16)__builtin_keel_avx512_cmpud((__keel_avx512_i32x16)(a),(__keel_avx512_i32x16)(b),(int)(p)))
 #define _mm512_mask_add_epi32(src,k,a,b) ((__m512i)__builtin_keel_avx512_maskaddd((__keel_avx512_i32x16)(src),(short)(k),(__keel_avx512_i32x16)(a),(__keel_avx512_i32x16)(b)))

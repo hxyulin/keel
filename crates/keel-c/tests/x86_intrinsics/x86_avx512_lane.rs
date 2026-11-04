@@ -390,9 +390,9 @@ fn avx512_c_lane_controls_and_all_typed_routes() {
             })
         })
         .collect();
-    // Public scalar-count wrappers use shared shifts. Direct immediate IR
-    // variants retain separate backend coverage.
-    assert_eq!(covered.len(), 38);
+    // Public scalar-count wrappers reach both the immediate and the
+    // shared-count shifts.
+    assert_eq!(covered.len(), 44);
 }
 #[test]
 fn avx512_c_lane_native_wrappers_and_single_evaluation() {
