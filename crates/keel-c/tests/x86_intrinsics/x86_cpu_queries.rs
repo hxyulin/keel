@@ -228,10 +228,10 @@ fn baseline_queries_and_explicit_dispatch_match_native_capabilities() {
         command(&mut Command::new(directory.join("run")));
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    eprintln!(
-        "native runtime CPU execution skipped: requires x86-64 Linux; artifacts: {}",
-        directory.display()
-    );
+    {
+        keel_test_support::skip_part!("requires x86-64 Linux");
+        eprintln!("native runtime CPU artifacts: {}", directory.display());
+    }
 }
 
 #[test]

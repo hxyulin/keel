@@ -552,7 +552,7 @@ fn avx512_unmasked_headers_native_and_single_evaluation() {
         if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
             #[cfg(target_arch = "x86_64")]
             if !std::is_x86_feature_detected!("avx512f") {
-                eprintln!("SKIP native unmasked headers: AVX512F unavailable");
+                keel_test_support::skip_part!("host lacks AVX512F");
                 continue;
             }
             let output = Command::new("cc")
@@ -803,8 +803,7 @@ void ternary_once(const void*a,const void*b,const void*c,void*out){
     if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
         #[cfg(target_arch = "x86_64")]
         if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("SKIP native ternary header: AVX512F unavailable");
-            return;
+            keel_test_support::skip!("host lacks AVX512F");
         }
         let directory =
             std::env::temp_dir().join(format!("keel-avx512-ternary-c-{}", std::process::id()));
@@ -935,8 +934,7 @@ __m512 maskzero_basic(__mmask16 k,const void*p,__m512 a){return _mm512_maskz_sqr
     if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
         #[cfg(target_arch = "x86_64")]
         if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("SKIP native FMA/mask headers: AVX512F unavailable");
-            return;
+            keel_test_support::skip!("host lacks AVX512F");
         }
         let directory =
             std::env::temp_dir().join(format!("keel-avx512-fma-mask-c-{}", std::process::id()));
@@ -1097,8 +1095,7 @@ void byte_narrow(const void*a,void*out){_mm512_mask_cvtusepi64_storeu_epi8(out,0
     if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
         #[cfg(target_arch = "x86_64")]
         if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("SKIP native scalar headers: AVX512F unavailable");
-            return;
+            keel_test_support::skip!("host lacks AVX512F");
         }
         let directory = std::env::temp_dir().join(format!(
             "keel-avx512-scalar-convert-c-{}",
@@ -1183,8 +1180,7 @@ fn avx512_named_comparison_headers_match_system_masks() {
     if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
         #[cfg(target_arch = "x86_64")]
         if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("SKIP native named masks: AVX512F unavailable");
-            return;
+            keel_test_support::skip!("host lacks AVX512F");
         }
         let directory =
             std::env::temp_dir().join(format!("keel-avx512-named-masks-c-{}", std::process::id()));

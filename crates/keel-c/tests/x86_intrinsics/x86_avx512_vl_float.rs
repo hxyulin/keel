@@ -111,7 +111,7 @@ fn vl_float_standard_wrappers_match_raw_hardware_bits_and_flags() {
         if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
             #[cfg(target_arch = "x86_64")]
             if !std::is_x86_feature_detected!("avx512vl") {
-                eprintln!("SKIP native VL floating C wrappers: AVX512VL unavailable");
+                keel_test_support::skip_part!("host lacks AVX512VL");
                 continue;
             }
             let output = Command::new("cc")

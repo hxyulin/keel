@@ -263,13 +263,9 @@ fn symbol_names(bytes: &[u8]) -> Vec<String> {
 }
 #[test]
 fn elf_system_gc_and_native_acceptance() {
-    let ld = std::env::var("KEEL_TEST_GNU_LD").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-ld".into()
-        } else {
-            "ld".into()
-        }
-    });
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
+    };
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("sections-elf");
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
@@ -296,7 +292,8 @@ void _start(void) {}
             let input = dir.join("input.o");
             fs::write(&input, &bytes).unwrap();
             let exe = dir.join("gc");
-            run(Command::new(&ld)
+            run(ld
+                .command()
                 .arg("--gc-sections")
                 .arg(&input)
                 .arg("-o")
@@ -507,13 +504,9 @@ fn elf_weak_identity_and_archive_extraction_with_gc() {
     let target = Target::X86_64LinuxGnu;
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("sections-elf-archive");
     fs::create_dir_all(&dir).unwrap();
-    let ld = std::env::var("KEEL_TEST_GNU_LD").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-ld".into()
-        } else {
-            "ld".into()
-        }
-    });
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
+    };
     let member_src = "int weak_data __attribute__((weak,retain)) = 31; int weak_fn(void) __attribute__((weak,retain)); int weak_fn(void) {return 37;} static int archived_root __attribute__((retain)) = 17; int anchor(void) {return weak_data + weak_fn();}";
     let member = object(&module(member_src, target, false, true), target, false);
     let o = object::File::parse(member.as_slice()).unwrap();
@@ -531,7 +524,7 @@ fn elf_weak_identity_and_archive_extraction_with_gc() {
     let _ = fs::remove_file(&archive);
     let ar = std::env::var("KEEL_TEST_GNU_AR").unwrap_or_else(|_| {
         if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-ar".into()
+            "x86_64-elf-ar".into()
         } else {
             "ar".into()
         }
@@ -569,7 +562,7 @@ fn elf_weak_identity_and_archive_extraction_with_gc() {
         fs::write(&start_o, &start).unwrap();
         for reverse in [false, true] {
             let exe = dir.join("gc");
-            let mut c = Command::new(&ld);
+            let mut c = ld.command();
             c.arg("--gc-sections").arg(&start_o);
             if reverse {
                 c.arg(&strong_o).arg(&archive);
@@ -875,13 +868,7 @@ fn registration_pointer(file: &object::File<'_>, address: u64) -> u64 {
 fn c_registration_tables_with_native_bounds_and_system_gc() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-registration-bounds");
     fs::create_dir_all(&dir).unwrap();
-    let ld = std::env::var("KEEL_TEST_GNU_LD").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-ld".into()
-        } else {
-            "ld".into()
-        }
-    });
+    let ld = keel_test_support::gnu_ld();
     // This fixture invokes an x86 GNU linker and the Darwin system linker.
     for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
         for debug in [false, true] {
@@ -898,12 +885,17 @@ fn c_registration_tables_with_native_bounds_and_system_gc() {
                     })
                     .collect();
                 if target != Target::Aarch64AppleDarwin {
+                    let Some(ld) = ld else {
+                        keel_test_support::skip_part!(keel_test_support::NO_GNU_LD);
+                        continue;
+                    };
                     let native = keel_link::elf::link(&inputs, Default::default()).unwrap();
                     for (i, bytes) in objects.iter().enumerate() {
                         fs::write(dir.join(format!("{i}.o")), bytes).unwrap();
                     }
                     let exe = dir.join("elf-gc");
-                    run(Command::new(&ld)
+                    run(ld
+                        .command()
                         .arg("--gc-sections")
                         // Bound references must not become implicit GC roots:
                         // the C retain attributes keep these records alive.
@@ -1614,13 +1606,15 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
     let tool = |env: &str, suffix: &str| {
         std::env::var(env).unwrap_or_else(|_| {
             if cfg!(target_os = "macos") {
-                format!("/opt/homebrew/bin/x86_64-elf-{suffix}")
+                format!("x86_64-elf-{suffix}")
             } else {
                 suffix.into()
             }
         })
     };
-    let ld = tool("KEEL_TEST_GNU_LD", "ld");
+    let Some(ld) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
+    };
     let readelf = tool("KEEL_TEST_GNU_READELF", "readelf");
     let target = Target::X86_64LinuxGnu;
     // A defined access uses local-exec TPOFF32; a separate TU's declaration
@@ -1687,7 +1681,8 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
                 fs::write(&input, &bytes).unwrap();
                 fs::write(&other, &imported).unwrap();
                 fs::write(&start, &entry_bytes).unwrap();
-                run(Command::new(&ld)
+                run(ld
+                    .command()
                     .arg("--gc-sections")
                     .arg("-e")
                     .arg("_start")
@@ -1738,7 +1733,8 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
                 );
                 let wrong_o = dir.join("wrong.o");
                 fs::write(&wrong_o, &wrong).unwrap();
-                let output = Command::new(&ld)
+                let output = ld
+                    .command()
                     .arg("-e")
                     .arg("imported")
                     .arg(&other)

@@ -30,6 +30,7 @@ keel-wasm = { path = "../keel-wasm" }
 keel-codegen = { path = "../keel-codegen" }
 keel-asm = { path = "../keel-asm" }
 keel-link = { path = "../keel-link" }
+keel-test-support = { path = "../keel-test-support" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 
 [lints]

@@ -444,6 +444,7 @@ dependencies = [
  "keel-ir",
  "keel-link",
  "keel-opt",
+ "keel-test-support",
  "keel-wasm",
  "memchr",
  "memmap2",

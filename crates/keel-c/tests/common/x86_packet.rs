@@ -52,7 +52,7 @@ pub fn check(
     let mut optimized = module.clone();
     keel_opt::optimize(&mut optimized).unwrap();
     if !native_supported() {
-        eprintln!("native {name} execution skipped: requires x86-64 Linux with AVX2");
+        keel_test_support::skip_part!("requires x86-64 Linux with AVX2");
     }
     let runner_object = directory.join("runner.o");
     if native_supported() {

@@ -272,11 +272,11 @@ fn mask_memory_and_gathers_match_guarded_scalar_and_vendor_oracles() {
             command(&mut Command::new(directory.join("run")));
         }
     } else {
-        eprintln!("native masked memory execution skipped: host lacks AVX2");
+        keel_test_support::skip_part!("host lacks AVX2");
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    eprintln!(
-        "native masked memory execution skipped: requires x86-64 Linux; artifacts: {}",
-        directory.display()
-    );
+    {
+        keel_test_support::skip_part!("requires x86-64 Linux");
+        eprintln!("native masked memory artifacts: {}", directory.display());
+    }
 }

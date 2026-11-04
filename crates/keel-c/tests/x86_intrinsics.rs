@@ -1604,13 +1604,13 @@ fn packed_integer_families_match_vendor_and_scalar_oracles() {
             command(&mut Command::new(directory.join("run")));
         }
     } else {
-        eprintln!("native packed-integer execution skipped: host lacks AVX2");
+        keel_test_support::skip_part!("host lacks AVX2");
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    eprintln!(
-        "native packed-integer execution skipped: requires x86-64 Linux; artifacts: {}",
-        directory.display()
-    );
+    {
+        keel_test_support::skip_part!("requires x86-64 Linux");
+        eprintln!("native packed-integer artifacts: {}", directory.display());
+    }
 }
 
 #[path = "x86_intrinsics/x86_avx512_packed.rs"]

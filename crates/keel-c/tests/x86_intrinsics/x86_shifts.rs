@@ -716,9 +716,9 @@ fn avx2_shifts_match_vendor_scalar_and_object_routes() {
             }
         }
     } else {
-        eprintln!("native AVX2 execution skipped: host lacks AVX2");
+        keel_test_support::skip_part!("host lacks AVX2");
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-    eprintln!("native AVX2 execution skipped: requires an x86-64 Linux host");
+    keel_test_support::skip_part!("requires x86-64 Linux");
     eprintln!("AVX2 shift artifacts: {}", directory.display());
 }

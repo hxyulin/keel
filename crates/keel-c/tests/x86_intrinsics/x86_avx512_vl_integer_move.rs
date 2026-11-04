@@ -154,7 +154,7 @@ fn vl_integer_move_and_blend_wrappers_match_bits_without_fp_effects() {
         if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
             #[cfg(target_arch = "x86_64")]
             if !std::is_x86_feature_detected!("avx512vl") {
-                eprintln!("SKIP native VL integer/move C wrappers: AVX512VL unavailable");
+                keel_test_support::skip_part!("host lacks AVX512VL");
                 continue;
             }
             let output = Command::new("cc")

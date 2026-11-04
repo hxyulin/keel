@@ -109,7 +109,7 @@ fn cd_wrappers_match_system_intrinsics_and_require_features() {
             if !std::is_x86_feature_detected!("avx512cd")
                 || !std::is_x86_feature_detected!("avx512vl")
             {
-                eprintln!("SKIP native C CD: unavailable");
+                keel_test_support::skip_part!("host lacks AVX512CD, AVX512VL");
                 continue;
             }
             let output = Command::new("cc")

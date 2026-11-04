@@ -109,7 +109,7 @@ fn vl_pack_wrappers_scalar_native_guard_pages_and_partial_prefixes() {
         if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
             #[cfg(target_arch = "x86_64")]
             if !std::is_x86_feature_detected!("avx512vl") {
-                eprintln!("SKIP native C VL pack: unavailable");
+                keel_test_support::skip_part!("host lacks AVX512VL");
                 continue;
             }
             let output = Command::new("cc")

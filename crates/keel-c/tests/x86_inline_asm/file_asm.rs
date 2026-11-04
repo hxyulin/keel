@@ -395,9 +395,11 @@ fn emitted_module_asm_matches_clang_and_gnu_sections_symbols_and_relocations() {
     std::fs::write(&input, text).unwrap();
     for gnu in [false, true] {
         let mut command = if gnu {
-            let mut command = std::process::Command::new(
-                std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()),
-            );
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut command = gnu.command();
             command.args(["--64", "-mrelax-relocations=no"]);
             command
         } else {
