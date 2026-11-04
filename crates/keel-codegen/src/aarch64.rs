@@ -4950,12 +4950,10 @@ impl<'a> FunctionCompiler<'a> {
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
-            .map(
-                |(i, d)| match d.args.is_empty() && self.edge_moves(i).is_empty() {
-                    true => self.label(d.block),
-                    false => format!("L{}_{inst}_edge{i}", self.func.name),
-                },
-            )
+            .map(|(i, d)| match self.block_args_noop(d, i) {
+                true => self.label(d.block),
+                false => format!("L{}_{inst}_edge{i}", self.func.name),
+            })
             .collect();
         let (min, span) = (plan.min, plan.span);
         if plan.jump_table() {
@@ -5007,7 +5005,7 @@ impl<'a> FunctionCompiler<'a> {
             if dests
                 .iter()
                 .enumerate()
-                .all(|(i, dest)| dest.args.is_empty() && self.edge_moves(i).is_empty())
+                .all(|(i, dest)| self.block_args_noop(dest, i))
             {
                 self.branch_unless_next(dests[0].block);
             } else {
@@ -5015,7 +5013,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
-            if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
+            if !self.block_args_noop(dest, i) {
                 self.out.label(target.clone());
                 self.block_args(dest, i);
                 self.out.branch_name(false, self.block_name(dest.block));

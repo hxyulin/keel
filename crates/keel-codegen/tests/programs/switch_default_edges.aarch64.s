@@ -25,15 +25,13 @@ Lsparse_default_block0:
 	cmp	w9, #260
 	b.eq	Lsparse_default_inst2_edge2
 	cmp	w9, #288
-	b.eq	Lsparse_default_inst2_edge3
+	b.eq	Lsparse_default_block2
 	b	Lsparse_default_block1
 Lsparse_default_inst2_edge1:
 	mov	x9, x12
 	b	Lsparse_default_block2
 Lsparse_default_inst2_edge2:
 	mov	x9, x13
-	b	Lsparse_default_block2
-Lsparse_default_inst2_edge3:
 	b	Lsparse_default_block2
 Lsparse_default_block1:
 	; v5 = iconst.i32 41
@@ -68,14 +66,9 @@ Ltrap_default_block0:
 	movz	x10, #0x1
 	; switch v0, block1, [259: block2(v1), 288: block2(v1)]
 	cmp	w9, #259
-	b.eq	Ltrap_default_inst1_edge1
+	b.eq	Ltrap_default_block2
 	cmp	w9, #288
-	b.eq	Ltrap_default_inst1_edge2
-	b	Ltrap_default_block1
-Ltrap_default_inst1_edge1:
-	b	Ltrap_default_block2
-Ltrap_default_inst1_edge2:
-	b	Ltrap_default_block2
+	b.eq	Ltrap_default_block2
 Ltrap_default_block1:
 	; v2 = iconst.i32 0
 	movz	x10, #0x0

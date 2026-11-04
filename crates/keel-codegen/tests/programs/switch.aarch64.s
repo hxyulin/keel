@@ -27,13 +27,11 @@ Ldense_inst1_table:
 	.long	Ldense_block2-Ldense_inst1_table
 	.long	Ldense_block1-Ldense_inst1_table
 	.long	Ldense_block5-Ldense_inst1_table
-	.long	Ldense_inst1_edge4-Ldense_inst1_table
+	.long	Ldense_block3-Ldense_inst1_table
 	.long	Ldense_block4-Ldense_inst1_table
 	.long	Ldense_block5-Ldense_inst1_table
 	.long	Ldense_block2-Ldense_inst1_table
 	.long	Ldense_inst1_edge7-Ldense_inst1_table
-Ldense_inst1_edge4:
-	b	Ldense_block3
 Ldense_inst1_edge7:
 	mov	x9, x10
 	b	Ldense_block3
@@ -92,24 +90,18 @@ Ldense_off_block0:
 	; switch v0, block2(v0), [1000: block1, 1001: block2(v0), 1002: block1, 1003: block1, 1005: block2(v0)]
 	sub	x16, x9, #1000
 	cmp	x16, #5
-	b.hi	Ldense_off_inst0_edge0
+	b.hi	Ldense_off_block2
 	adr	x17, Ldense_off_inst0_table
 	ldrsw	x16, [x17, x16, lsl #2]
 	add	x17, x17, x16
 	br	x17
 Ldense_off_inst0_table:
 	.long	Ldense_off_block1-Ldense_off_inst0_table
-	.long	Ldense_off_inst0_edge2-Ldense_off_inst0_table
+	.long	Ldense_off_block2-Ldense_off_inst0_table
 	.long	Ldense_off_block1-Ldense_off_inst0_table
 	.long	Ldense_off_block1-Ldense_off_inst0_table
-	.long	Ldense_off_inst0_edge0-Ldense_off_inst0_table
-	.long	Ldense_off_inst0_edge5-Ldense_off_inst0_table
-Ldense_off_inst0_edge0:
-	b	Ldense_off_block2
-Ldense_off_inst0_edge2:
-	b	Ldense_off_block2
-Ldense_off_inst0_edge5:
-	b	Ldense_off_block2
+	.long	Ldense_off_block2-Ldense_off_inst0_table
+	.long	Ldense_off_block2-Ldense_off_inst0_table
 Ldense_off_block1:
 	; v1 = iconst.i64 7
 	movz	x9, #0x7
@@ -153,7 +145,7 @@ Ldense_big_block0:
 	movk	w17, #0x1, lsl #16
 	sub	w16, w9, w17
 	cmp	w16, #4
-	b.hi	Ldense_big_inst3_edge0
+	b.hi	Ldense_big_block2
 	adr	x17, Ldense_big_inst3_table
 	ldrsw	x16, [x17, w16, uxtw #2]
 	add	x17, x17, x16
@@ -164,8 +156,6 @@ Ldense_big_inst3_table:
 	.long	Ldense_big_inst3_edge3-Ldense_big_inst3_table
 	.long	Ldense_big_block1-Ldense_big_inst3_table
 	.long	Ldense_big_inst3_edge5-Ldense_big_inst3_table
-Ldense_big_inst3_edge0:
-	b	Ldense_big_block2
 Ldense_big_inst3_edge1:
 	mov	x9, x10
 	b	Ldense_big_block2
