@@ -61,13 +61,13 @@ it; use `run_pipeline` or `run_passes`.
 
 | Pass | What it does |
 |---|---|
-| `inline` | Bounded private direct-call expansion; see [inlining](#inlining) |
+| `inline` (opt-in) | Bounded private direct-call expansion; see [inlining](#inlining) |
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
 | `canonicalize` | Establish the [canonical form](#canonical-form) |
 | `simplify-cfg` | Fold constant `brif` and `switch`, compose arguments through jump-only blocks, merge a block into its only predecessor, drop unreachable blocks |
-| `const-fold` | Evaluate instructions on constants with the machine's semantics; trapping divisions stay |
+| `const-fold` (opt-in) | Evaluate instructions on constants with the machine's semantics; trapping divisions stay |
 | `instcombine` | Worklist combining; see [scalar simplification](#scalar-simplification) |
 | `call-contracts` | Apply direct `noreturn` and `nounwind` contracts; see [function attributes](function-attributes.md#optimizer-consumers) |
 | `memory-forward` (opt-in) | Block-local exact-address load reuse and store-to-load forwarding |
@@ -92,6 +92,18 @@ it; use `run_pipeline` or `run_passes`.
 | `fast-cfg`, `fast-local`, `fast-loop-reduce` | The bounded Fast tier; see [Fast](#fast-tier) |
 
 `-p pass,pass,...` selects any pipeline explicitly, overriding the tier.
+
+No tier runs the opt-in passes. `memory-forward` applies `restrict` parameter
+contracts within a block, and `call-load-reuse` keeps loads across calls whose
+scoped contracts LLVM import supplies. The other three are test entry points
+for code that tiers run inside other passes:
+
+- The binding-aware inliners share `inline`'s legality checks, cloning and
+  growth budgets.
+- `instcombine`, the Wasm basic pipeline and required inline-assembly cleanup
+  use the `const-fold` kernel.
+- `loop-reduce` and `loop-reduce-multi` run `if-convert` on a trial copy of a
+  conditional reduction.
 
 ## Scalar simplification
 
@@ -362,9 +374,8 @@ moves the arm instructions before the decision and selects each join argument
 with the original condition. Only integer constants, compares, selects,
 wrapping arithmetic, logic, masked shifts and rotates, high multiply, bit
 counts and integer conversions may be speculated; new opcodes do not enter
-implicitly. Full's reduction passes normalize
-[conditional multi-reductions](simd-ir.md#conditional-multi-reduction-normalization)
-privately instead.
+implicitly. Full's reduction passes run it on a private copy to normalize
+[conditional multi-reductions](simd-ir.md#conditional-multi-reduction-normalization).
 
 ## Fast tier
 

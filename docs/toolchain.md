@@ -94,7 +94,7 @@ keel cc -O --tune apple-m5 hello.c -o hello.s
 keel opt -p instcombine,dce input.keel
 ```
 
-Opt-in passes include `if-convert`.
+[Optimizer passes](compiler/optimizer.md#passes) lists the opt-in passes that no tier runs.
 `--verify-each` / `--no-verify-each` control IR verification after every pass
 (on by default in debug builds); `--opt-report file.json` writes an
 optimization report.
