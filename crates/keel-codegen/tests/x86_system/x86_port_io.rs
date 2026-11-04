@@ -140,6 +140,11 @@ fn registry_and_contract() {
 
 #[test]
 fn raw_opt_pipeline_matrix() {
+    pipeline_matrix();
+}
+
+/// Checks every planned configuration and returns its generated assembly.
+fn pipeline_matrix() -> Vec<String> {
     let raw = keel_ir::parse(&source()).unwrap();
     keel_ir::verify_module(&raw).unwrap();
     let mut opt = raw.clone();
@@ -159,13 +164,7 @@ fn raw_opt_pipeline_matrix() {
     };
     let expected = expected_io();
     assert_eq!(expected.len(), 96);
-    let export = std::env::var_os("KEEL_PORT_IO_MATRIX_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("recipes.ir"), source()).unwrap();
-        fs::write(dir.join("optimized.ir"), opt.to_string()).unwrap();
-    }
-    let mut configurations = 0;
+    let mut matrix = Vec::new();
     for (stage_index, m) in [&raw, &opt].into_iter().enumerate() {
         let mut count = 0;
         for f in &m.functions {
@@ -253,19 +252,14 @@ fn raw_opt_pipeline_matrix() {
                             .unwrap();
                             assert_eq!(text_bytes(&obj), *bytes, "{line}");
                         }
-                        if let Some(dir) = &export {
-                            fs::write(dir.join(format!("matrix-{configurations:03}.s")), &text)
-                                .unwrap();
-                            fs::write(dir.join(format!("matrix-{configurations:03}.o")), &object)
-                                .unwrap();
-                        }
-                        configurations += 1;
+                        matrix.push(text);
                     }
                 }
             }
         }
     }
-    assert_eq!(configurations, 20);
+    assert_eq!(matrix.len(), 20);
+    matrix
 }
 
 #[test]
@@ -341,11 +335,11 @@ fn run(cmd: &mut Command) {
 fn assemble_oracles(dir: &Path, source: &str, stem: &str) -> (Vec<u8>, Vec<u8>) {
     let input = dir.join(format!("{stem}.s"));
     fs::write(&input, source).unwrap();
-    let clang = std::env::var("KEEL_PORT_IO_CLANG").expect("set KEEL_PORT_IO_CLANG explicitly");
-    let gnu = std::env::var("KEEL_PORT_IO_GNU_AS").expect("set KEEL_PORT_IO_GNU_AS explicitly");
+    let (clang, gnu) = oracle_tools().unwrap();
     let co = dir.join(format!("{stem}.clang.o"));
     let go = dir.join(format!("{stem}.gnu.o"));
-    run(Command::new(clang)
+    run(clang
+        .command()
         .args([
             "-target",
             "x86_64-unknown-linux-gnu",
@@ -356,28 +350,38 @@ fn assemble_oracles(dir: &Path, source: &str, stem: &str) -> (Vec<u8>, Vec<u8>) 
         .arg(&input)
         .arg("-o")
         .arg(&co));
-    run(Command::new(gnu).arg("--64").arg(&input).arg("-o").arg(&go));
+    run(gnu.command().arg("--64").arg(&input).arg("-o").arg(&go));
     (
         text_bytes(&fs::read(co).unwrap()),
         text_bytes(&fs::read(go).unwrap()),
     )
 }
 
+/// Clang and an x86-64 GNU as, or the reason to skip.
+fn oracle_tools() -> Result<
+    (
+        &'static keel_test_support::Tool,
+        &'static keel_test_support::Tool,
+    ),
+    &'static str,
+> {
+    let clang = keel_test_support::clang().ok_or(keel_test_support::NO_CLANG)?;
+    let gnu = keel_test_support::gnu_as().ok_or(keel_test_support::NO_GNU_AS)?;
+    Ok((clang, gnu))
+}
+
 #[test]
-#[ignore = "requires explicitly forced Clang and GNU assembler; compile only"]
-fn forced_clang_gnu_exact_crossoracle() {
-    let dir = std::env::var_os("KEEL_PORT_IO_EVIDENCE_DIR")
-        .map(std::path::PathBuf::from)
-        .expect("set evidence directory");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("recipes.ir"), source()).unwrap();
+fn port_io_streams_match_clang_and_gnu() {
+    if let Err(reason) = oracle_tools() {
+        keel_test_support::skip!("{reason}");
+    }
+    let dir = keel_test_support::TempDir::new("port-io-oracles");
+    let dir = dir.path();
     let mut m = keel_ir::parse(&source()).unwrap();
     let expected = expected_io();
     // Cross-check complete generated instruction streams for every matrix
     // configuration, including forced spills. Only alignment padding differs.
-    let matrix = dir.join("matrix");
-    for n in 0..144 {
-        let generated = fs::read_to_string(matrix.join(format!("matrix-{n:03}.s"))).unwrap();
+    for (n, generated) in pipeline_matrix().into_iter().enumerate() {
         let text = generated
             .lines()
             .filter(|l| !l.trim().starts_with(".p2align"))
@@ -386,7 +390,7 @@ fn forced_clang_gnu_exact_crossoracle() {
             + "\n";
         assert_eq!(io_lines(&text).len(), 96);
         let ours = text_bytes(&keel_asm::x86::assemble_object(&text).unwrap());
-        let (clang, gnu) = assemble_oracles(&dir, &text, &format!("matrix-{n:03}"));
+        let (clang, gnu) = assemble_oracles(dir, &text, &format!("matrix-{n:03}"));
         assert!(
             ours == clang,
             "complete instruction stream Clang matrix {n}"
@@ -397,7 +401,6 @@ fn forced_clang_gnu_exact_crossoracle() {
         if stage == "opt" {
             keel_opt::optimize(&mut m).unwrap();
         }
-        fs::write(dir.join(format!("{stage}.ir")), m.to_string()).unwrap();
         // GNU and LLVM choose different NOP padding for .p2align. Remove
         // alignment directives from every oracle input; retain every instruction.
         let generated = keel_codegen::x86_64::compile(&m).unwrap();
@@ -408,14 +411,14 @@ fn forced_clang_gnu_exact_crossoracle() {
             .join("\n")
             + "\n";
         let ours = text_bytes(&keel_asm::x86::assemble_object(&text).unwrap());
-        let (clang, gnu) = assemble_oracles(&dir, &text, stage);
+        let (clang, gnu) = assemble_oracles(dir, &text, stage);
         assert_eq!(ours, clang, "complete body Clang {stage}");
         assert_eq!(ours, gnu, "complete body GNU {stage}");
         let lines = io_lines(&text);
         assert_eq!(lines.len(), 96);
         for (n, (line, bytes)) in lines.iter().zip(&expected).enumerate() {
             let (clang, gnu) = assemble_oracles(
-                &dir,
+                dir,
                 &format!(".intel_syntax noprefix\n.text\n{line}\n"),
                 &format!("{stage}-io-{n}"),
             );

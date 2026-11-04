@@ -8,11 +8,7 @@ use keel_codegen::{
 };
 use keel_ir::{InstData, Intrinsic, MemoryEffects, Type};
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::Path, process::Command};
 
 fn ids() -> Vec<Intrinsic> {
     Intrinsic::ALL
@@ -234,8 +230,12 @@ fn exact_registry_signatures() {
     }
 }
 #[test]
-fn exhaustive_source_only_matrix() {
-    check_source_matrix(true);
+fn exhaustive_matrix_matches_clang_and_gnu() {
+    let matrix = check_source_matrix(true);
+    match oracle_tools() {
+        Ok(_) => cross_check(matrix),
+        Err(reason) => keel_test_support::skip_part!("{reason}"),
+    }
 }
 
 #[test]
@@ -243,22 +243,15 @@ fn source_matrix_boundary_smoke() {
     check_source_matrix(false);
 }
 
-fn check_source_matrix(exhaustive: bool) {
+/// Checks the matrix and returns each configuration's generated assembly.
+fn check_source_matrix(exhaustive: bool) -> Vec<String> {
     let source = recipes();
     let raw = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&raw).unwrap();
     let mut optimized = raw.clone();
     keel_opt::optimize(&mut optimized).unwrap();
     keel_ir::verify_module(&optimized).unwrap();
-    let export = exhaustive
-        .then(|| std::env::var_os("KEEL_STRING_IO_EXPORT"))
-        .flatten()
-        .map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("recipes.ir"), source).unwrap();
-        fs::write(d.join("optimized.ir"), optimized.to_string()).unwrap();
-    }
+    let mut matrix = Vec::new();
     let tiny = Pools {
         caller_saved: &[6, 7],
         callee_saved: &[3],
@@ -384,10 +377,7 @@ fn check_source_matrix(exhaustive: bool) {
                             !text.lines().any(|l| matches!(l.trim(), "cld" | "std")),
                             "no implicit DF normalization"
                         );
-                        if let Some(d) = &export {
-                            fs::write(d.join(format!("matrix-{config:03}.s")), text).unwrap();
-                            fs::write(d.join(format!("matrix-{config:03}.o")), object).unwrap();
-                        }
+                        matrix.push(text);
                         config += 1;
                     }
                 }
@@ -397,6 +387,7 @@ fn check_source_matrix(exhaustive: bool) {
     }
     assert_eq!(config, if exhaustive { 20 } else { 4 });
     assert_eq!(checked_lines.len(), 12);
+    matrix
 }
 #[test]
 fn malformed_types_and_memory_ordering() {
@@ -497,9 +488,20 @@ fn run(c: &mut Command) {
         String::from_utf8_lossy(&o.stderr)
     );
 }
+/// Clang and an x86-64 GNU as, or the reason to skip.
+fn oracle_tools() -> Result<
+    (
+        &'static keel_test_support::Tool,
+        &'static keel_test_support::Tool,
+    ),
+    &'static str,
+> {
+    let clang = keel_test_support::clang().ok_or(keel_test_support::NO_CLANG)?;
+    let gas = keel_test_support::gnu_as().ok_or(keel_test_support::NO_GNU_AS)?;
+    Ok((clang, gas))
+}
 fn oracles(d: &Path, stem: &str, text: &str) -> (Vec<u8>, Vec<u8>) {
-    let clang = std::env::var("KEEL_STRING_IO_CLANG").expect("explicit Clang path required");
-    let gas = std::env::var("KEEL_STRING_IO_GAS").expect("explicit GNU as path required");
+    let (clang, gas) = oracle_tools().unwrap();
     let input = d.join(format!("{stem}.s"));
     fs::write(&input, text).unwrap();
     // LLVM emits F3 66 for REP word I/O; GAS/Keel emit 66 F3. Force
@@ -519,7 +521,8 @@ fn oracles(d: &Path, stem: &str, text: &str) -> (Vec<u8>, Vec<u8>) {
     fs::write(&clang_input, clang_text).unwrap();
     let co = d.join(format!("{stem}.clang.o"));
     let go = d.join(format!("{stem}.gas.o"));
-    run(Command::new(clang)
+    run(clang
+        .command()
         .args([
             "-target",
             "x86_64-unknown-linux-gnu",
@@ -530,21 +533,18 @@ fn oracles(d: &Path, stem: &str, text: &str) -> (Vec<u8>, Vec<u8>) {
         .arg(&clang_input)
         .arg("-o")
         .arg(&co));
-    run(Command::new(gas).arg("--64").arg(&input).arg("-o").arg(&go));
+    run(gas.command().arg("--64").arg(&input).arg("-o").arg(&go));
     (
         section(&fs::read(co).unwrap()),
         section(&fs::read(go).unwrap()),
     )
 }
-#[test]
-#[ignore = "requires exported compile matrix and explicitly forced Clang/GAS"]
-fn forced_clang_gas() {
-    let d =
-        PathBuf::from(std::env::var_os("KEEL_STRING_IO_EXPORT").expect("matrix export required"));
-    let output = d.join("oracles");
-    fs::create_dir_all(&output).unwrap();
-    for n in 0..144 {
-        let source = fs::read_to_string(d.join(format!("matrix-{n:03}.s"))).unwrap();
+/// Assembles every matrix stream and each literal instruction with Clang and
+/// GNU as, and compares their bytes with Keel's.
+fn cross_check(matrix: Vec<String>) {
+    let scratch = keel_test_support::TempDir::new("string-io-oracles");
+    let output = scratch.path();
+    for (n, source) in matrix.into_iter().enumerate() {
         // Normalize only assembler-specific NOP alignment padding. Every
         // compiler-generated instruction and checked boundary remains present.
         let source = source
@@ -554,7 +554,7 @@ fn forced_clang_gas() {
             .join("\n")
             + "\n";
         let ours = section(&keel_asm::x86::assemble_object(&source).unwrap());
-        let (c, g) = oracles(&output, &format!("matrix-{n:03}"), &source);
+        let (c, g) = oracles(output, &format!("matrix-{n:03}"), &source);
         assert!(
             ours == c,
             "Clang stream {n}: first mismatch {:?}, lengths {} {}",
@@ -577,14 +577,15 @@ fn forced_clang_gas() {
                 _ => panic!(),
             }
         );
-        let (c, g) = oracles(&output, &format!("literal-{}", id as usize), &text);
+        let (c, g) = oracles(output, &format!("literal-{}", id as usize), &text);
         let bytes = expected_bytes(out, w, rep);
         assert_eq!(c, bytes);
         assert_eq!(g, bytes);
         // Independently retain LLVM's unconstrained mnemonic encoding too.
         let native = output.join(format!("literal-{}.native-clang.o", id as usize));
-        let clang = std::env::var("KEEL_STRING_IO_CLANG").unwrap();
-        run(Command::new(clang)
+        let clang = oracle_tools().unwrap().0;
+        run(clang
+            .command()
             .args([
                 "-target",
                 "x86_64-unknown-linux-gnu",
