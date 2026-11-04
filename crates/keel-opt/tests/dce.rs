@@ -28,7 +28,11 @@ fn repeated_edge_arguments_stay_live_and_unused_parameters_die() {
     let sum = func.ins(InsertPoint::End(join)).iadd(a, b);
     func.ins(InsertPoint::End(join)).return_(&[sum]);
     keel_ir::verify(&func).unwrap();
-    assert!(keel_opt::find_pass("dce").unwrap().run(&mut func));
+    assert!(
+        keel_opt::find_pass("dce")
+            .unwrap()
+            .run(&mut func, &Default::default())
+    );
     keel_ir::verify(&func).unwrap();
     assert_eq!(func.block_params(join).len(), 2);
     assert!(
@@ -39,7 +43,11 @@ fn repeated_edge_arguments_stay_live_and_unused_parameters_die() {
     for input in [0, 1, 255, 256, u32::MAX as u64] {
         assert_eq!(execute(&func, &[input]), 2);
     }
-    assert!(!keel_opt::find_pass("dce").unwrap().run(&mut func));
+    assert!(
+        !keel_opt::find_pass("dce")
+            .unwrap()
+            .run(&mut func, &Default::default())
+    );
 }
 
 #[test]
@@ -121,7 +129,7 @@ block0(v0: ptr, v1: {ty}):
             assert!(
                 !keel_opt::find_pass("dce")
                     .unwrap()
-                    .run(&mut live.functions[0])
+                    .run(&mut live.functions[0], &Default::default())
             );
         }
     }

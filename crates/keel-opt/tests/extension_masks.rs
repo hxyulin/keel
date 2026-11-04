@@ -87,7 +87,7 @@ fn zero_extension_mask_handles_raw_aliases_and_shared_producers() {
     assert!(
         keel_opt::find_pass("instcombine")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     keel_ir::verify_module(&module).unwrap();
     let f = &module.functions[0];
@@ -228,7 +228,7 @@ fn masked_sign_extension_resolves_raw_aliases_without_rewriting_shared_and() {
     keel_ir::verify_module(&module).unwrap();
     keel_opt::find_pass("instcombine")
         .unwrap()
-        .run(&mut module.functions[0]);
+        .run(&mut module.functions[0], &Default::default());
     keel_ir::verify_module(&module).unwrap();
     let f = &module.functions[0];
     let keel_ir::ValueDef::Result(convert, 0) = f.value_def(Value::new(6)) else {
@@ -285,7 +285,7 @@ fn redundant_mask_preserves_stale_result_alias_and_raw_return() {
             .unwrap();
         keel_opt::find_pass(pass)
             .unwrap()
-            .run(&mut module.functions[0]);
+            .run(&mut module.functions[0], &Default::default());
         keel_ir::verify_module(&module).unwrap();
         let f = &module.functions[0];
         assert_eq!(support::execute(f, &[7, 42]), 42);
@@ -337,14 +337,14 @@ fn stale_mask_alias_chain_and_earlier_live_replacements_stay_bound() {
             let alias = module.functions[0].value_def(stale);
             keel_opt::find_pass(pass)
                 .unwrap()
-                .run(&mut module.functions[0]);
+                .run(&mut module.functions[0], &Default::default());
             keel_ir::verify_module(&module).unwrap();
             assert_eq!(module.functions[0].value_def(stale), alias);
             assert_eq!(support::execute(&module.functions[0], &[7, 42]), expected);
             assert!(
                 !keel_opt::find_pass(pass)
                     .unwrap()
-                    .run(&mut module.functions[0])
+                    .run(&mut module.functions[0], &Default::default())
             );
         }
     }
@@ -373,7 +373,7 @@ fn stale_mask_result_can_alias_a_loop_header_parameter() {
         assert_eq!(support::execute(&module.functions[0], &[7, 42, 1]), 42);
         keel_opt::find_pass(pass)
             .unwrap()
-            .run(&mut module.functions[0]);
+            .run(&mut module.functions[0], &Default::default());
         keel_ir::verify_module(&module).unwrap();
         assert_eq!(
             module.functions[0].value_def(stale),
@@ -383,7 +383,7 @@ fn stale_mask_result_can_alias_a_loop_header_parameter() {
         assert!(
             !keel_opt::find_pass(pass)
                 .unwrap()
-                .run(&mut module.functions[0])
+                .run(&mut module.functions[0], &Default::default())
         );
     }
 }
@@ -416,14 +416,14 @@ fn live_mask_resolves_a_raw_extension_source_alias_to_overflow_flag() {
     assert_eq!(support::execute(&module.functions[0], &[127, 1, 7]), 1);
     keel_opt::find_pass("instcombine")
         .unwrap()
-        .run(&mut module.functions[0]);
+        .run(&mut module.functions[0], &Default::default());
     keel_ir::verify_module(&module).unwrap();
     assert_eq!(module.functions[0].resolve(masked), extended);
     assert_eq!(support::execute(&module.functions[0], &[127, 1, 7]), 1);
     assert!(
         !keel_opt::find_pass("instcombine")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
 }
 
@@ -454,7 +454,7 @@ fn live_mask_folds_and_converges_with_reversed_cross_block_layout() {
         assert!(
             !keel_opt::find_pass(pass)
                 .unwrap()
-                .run(&mut optimized.functions[0])
+                .run(&mut optimized.functions[0], &Default::default())
         );
     }
 }
@@ -483,7 +483,7 @@ fn stale_single_result_aliases_survive_local_folds_and_all_optimizer_tiers() {
             assert!(
                 !keel_opt::find_pass(pass)
                     .unwrap()
-                    .run(&mut optimized.functions[0])
+                    .run(&mut optimized.functions[0], &Default::default())
             );
             assert_eq!(optimized.to_string(), original.to_string());
             assert_eq!(

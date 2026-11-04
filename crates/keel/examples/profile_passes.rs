@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for (i, pass) in passes.iter().enumerate() {
                     if pass.requires_canonical_form() && !canonical {
                         let start = Instant::now();
-                        canonicalize.run(func);
+                        canonicalize.run(func, &keel_opt::OptimizationContext::default());
                         times[passes.len()][0] += start.elapsed().as_secs_f64() * 1000.;
                         let start = Instant::now();
                         keel_ir::verify(func).map_err(|e| format!("invalid IR: {e:?}"))?;
@@ -41,7 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         canonical = true;
                     }
                     let start = Instant::now();
-                    let changed = pass.run(func);
+                    let context = keel_opt::OptimizationContext {
+                        canonical: pass.requires_canonical_form(),
+                        ..Default::default()
+                    };
+                    let changed = pass.run(func, &context);
                     times[i][0] += start.elapsed().as_secs_f64() * 1000.;
                     canonical = pass.produces_canonical_form() || (canonical && !changed);
                     let start = Instant::now();

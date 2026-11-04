@@ -112,11 +112,9 @@ fn declarations_and_indirect_calls_do_not_supply_a_definition() {
         keel_ir::parse(&scalar("alwaysinline", "(i8 uext) -> i8 sext", "return v0")).unwrap();
     let r = m.functions[1].callees().next().unwrap().0;
     m.functions[1].callee_mut(r).attrs.noninterposable = true;
-    let pass = keel_opt::PASSES
-        .iter()
-        .find(|p| p.name() == "inline-noninterposable")
-        .unwrap();
-    assert_eq!(pass.run_module(&mut m), Some(false));
+    let before = m.to_string();
+    keel_opt::run_passes(&mut m, &["inline-noninterposable"]).unwrap();
+    assert_eq!(m.to_string(), before);
     assert_eq!(calls(&m, "caller"), 1);
 }
 
@@ -239,8 +237,9 @@ fn exported_binding_keeps_soft_limits_hard_stack_and_exact_abi_checks() {
     .unwrap();
     let r = m.functions[1].callees().next().unwrap().0;
     m.functions[1].callee_mut(r).sig.params[0].ext = keel_ir::ArgExt::Sext;
-    let pass = keel_opt::find_pass("inline-noninterposable").unwrap();
-    assert_eq!(pass.run_module(&mut m), Some(false));
+    let before = m.to_string();
+    keel_opt::run_passes(&mut m, &["inline-noninterposable"]).unwrap();
+    assert_eq!(m.to_string(), before);
     assert_eq!(calls(&m, "caller"), 1);
 }
 

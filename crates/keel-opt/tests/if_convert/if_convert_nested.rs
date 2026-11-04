@@ -125,7 +125,7 @@ fn triangle_rejects_effects_traps_fp_and_noncanonical_definitions() {
         assert!(
             !keel_opt::find_pass("if-convert")
                 .unwrap()
-                .run(&mut m.functions[0])
+                .run(&mut m.functions[0], &Default::default())
         );
         assert_eq!(m.to_string(), before);
     }
@@ -141,7 +141,7 @@ fn outside_uses_and_unreachable_predecessors_prevent_motion() {
         assert!(
             !keel_opt::find_pass("if-convert")
                 .unwrap()
-                .run(&mut after.functions[0])
+                .run(&mut after.functions[0], &Default::default())
         );
         assert_eq!(after.to_string(), before.to_string());
     }

@@ -20,10 +20,16 @@ fn optimize(m: &mut Module, pass: &str) -> Vec<InlineSite> {
 }
 // Deliberately stale call-site attributes are rejected by the inliner too.
 fn unchecked(m: &mut Module, name: &str) -> Vec<InlineSite> {
-    let pass = keel_opt::PASSES.iter().find(|p| p.name() == name).unwrap();
-    let mut sites = Vec::new();
-    pass.run_module_with_report(m, &mut sites);
-    sites
+    let mut report = OptimizationReport::default();
+    keel_opt::Pipeline::named(&[name])
+        .unwrap()
+        .options(keel_opt::OptimizeOptions {
+            verification: keel_opt::VerificationPolicy::Disabled,
+        })
+        .report(&mut report)
+        .run(m)
+        .unwrap();
+    report.invocations.remove(0).inline_sites
 }
 fn run(source: &str, pass: &str) -> (Module, Vec<InlineSite>) {
     let mut m = keel_ir::parse(source).unwrap();

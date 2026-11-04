@@ -13,11 +13,15 @@ impl Pass for TailCalls {
     fn description(&self) -> &'static str {
         "recognize frame-independent scalar direct tail calls"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module))
+    fn run_module(
+        &self,
+        module: &mut Module,
+        context: &mut crate::ModuleContext<'_>,
+    ) -> Option<bool> {
+        context.whole_module(module, run)
     }
 }
 

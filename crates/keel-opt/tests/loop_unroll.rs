@@ -481,7 +481,9 @@ fn in_memory_aliased_body_results_do_not_resurrect_dead_computations() {
         let memory = HashMap::from([(0x1000, 1), (0x1008, 1)]);
         let inputs = [0x1000, 2, 3, 0];
         let expected = execute(&before, &inputs, &memory, None);
-        let changed = keel_opt::find_pass("loop-unroll").unwrap().run(f);
+        let changed = keel_opt::find_pass("loop-unroll")
+            .unwrap()
+            .run(f, &Default::default());
         keel_ir::verify(f).unwrap();
         let actual = execute(f, &inputs, &memory, None);
         println!(
@@ -542,7 +544,9 @@ fn in_memory_header_aliases_and_multiresult_body_are_rejected() {
         keel_ir::verify(f).unwrap();
         let count = f.layout_insts().count();
         assert!(
-            !keel_opt::find_pass("loop-unroll").unwrap().run(f),
+            !keel_opt::find_pass("loop-unroll")
+                .unwrap()
+                .run(f, &Default::default()),
             "case {which}"
         );
         keel_ir::verify(f).unwrap();

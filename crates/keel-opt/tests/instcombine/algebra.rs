@@ -7,7 +7,7 @@ fn apply(source: &str) -> (keel_ir::Module, keel_ir::Module) {
     assert!(
         !keel_opt::find_pass("instcombine")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     (original, module)
 }

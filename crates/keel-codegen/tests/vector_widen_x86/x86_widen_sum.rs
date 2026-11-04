@@ -33,12 +33,12 @@ fn signed_sum_all_codegen_paths_features_allocators_and_spills() {
                         inner: &selection,
                         features,
                     };
-                    let context = keel_opt::OptimizationContext {
-                        target: keel_opt::VectorTarget::X86Sse2,
-                        capabilities: vector_capabilities(Target::X86_64LinuxGnu, &selector)
+                    let context = keel_opt::OptimizationContext::new(
+                        keel_opt::VectorTarget::X86Sse2,
+                        vector_capabilities(Target::X86_64LinuxGnu, &selector)
                             .unwrap()
                             .with_wide_preference(true),
-                    };
+                    );
                     let mut module = keel_ir::parse(SOURCE).unwrap();
                     keel_opt::Pipeline::named(keel_opt::DEFAULT_PIPELINE)
                         .unwrap()

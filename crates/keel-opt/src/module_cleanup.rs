@@ -12,23 +12,15 @@ impl Pass for EmptyCalls {
     fn description(&self) -> &'static str {
         "remove void calls to bound definitions consisting only of a return"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(remove_empty_calls(module, &|_| true))
-    }
-    fn run_module_for_functions(
+    fn run_module(
         &self,
         module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        _sites: Option<&mut Vec<crate::InlineSite>>,
-        changed: &mut Vec<bool>,
+        context: &mut crate::ModuleContext<'_>,
     ) -> Option<bool> {
-        let result = remove_empty_calls(module, enabled);
-        changed.clear();
-        changed.resize(module.functions.len(), result);
-        Some(result)
+        Some(remove_empty_calls(module, context.enabled))
     }
 }
 
@@ -93,23 +85,15 @@ impl Pass for UnusedFunctions {
     fn description(&self) -> &'static str {
         "discard local function bodies unreachable from emitted roots"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(remove_unused_functions(module, &|_| true))
-    }
-    fn run_module_for_functions(
+    fn run_module(
         &self,
         module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        _sites: Option<&mut Vec<crate::InlineSite>>,
-        changed: &mut Vec<bool>,
+        context: &mut crate::ModuleContext<'_>,
     ) -> Option<bool> {
-        let result = remove_unused_functions(module, enabled);
-        changed.clear();
-        changed.resize(module.functions.len(), result);
-        Some(result)
+        Some(remove_unused_functions(module, context.enabled))
     }
 }
 

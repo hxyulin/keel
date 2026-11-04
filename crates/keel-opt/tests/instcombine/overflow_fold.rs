@@ -38,7 +38,7 @@ fn both_drivers_fold_both_results_at_every_integer_width_boundary() {
                             assert!(!module.to_string().contains("_overflow"));
                             assert_eq!(constant(&module, 2) as $u, result, "{pass} {source}");
                             assert_eq!(constant(&module, 3), i64::from(flag), "{pass} {source}");
-                            assert!(!keel_opt::find_pass(pass).unwrap().run(&mut module.functions[0]));
+                            assert!(!keel_opt::find_pass(pass).unwrap().run(&mut module.functions[0], &Default::default()));
                         }
                     }
                 }

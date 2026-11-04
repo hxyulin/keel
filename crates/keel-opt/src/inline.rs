@@ -7,7 +7,7 @@
 //! policies consume budgets in layout order. ABI by-value arguments get a fresh snapshot.
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
-use crate::{InlineSite, Pass};
+use crate::{InlineSite, ModuleContext, OptimizationContext, Pass, PassFamily};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic,
@@ -50,52 +50,14 @@ impl Pass for Inline {
     fn description(&self) -> &'static str {
         "inline bounded private direct-call functions"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module))
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        run_scheduled(module, context, InlinePolicy::DEFAULT)
     }
-    fn run_module_with_report(
-        &self,
-        module: &mut Module,
-        sites: &mut Vec<InlineSite>,
-    ) -> Option<bool> {
-        Some(run_observed(module, Some(sites)).changed)
-    }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report = run_observed(module, sites);
-        Some(report.changed_callers(module, changed))
-    }
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
-        let report = run_observed_policy_scoped(
-            module,
-            sites,
-            InlinePolicy {
-                admit_noninterposable: false,
-                cheap_reserve: false,
-                cost: InlineCost::Default,
-            },
-            Some(&callers),
-        );
-        Some(report.changed_callers(module, changed))
+    fn family(&self) -> PassFamily {
+        PassFamily::Inline
     }
 }
 /// Inline bounded helpers to expose constants or eliminate a single local call.
@@ -108,66 +70,21 @@ impl Pass for InlineSize {
     fn description(&self) -> &'static str {
         "inline bounded hinted, constant-argument or single-use local helpers"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
         false
     }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report = run_observed_policy_scoped(
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        run_scheduled(
             module,
-            sites,
+            context,
             InlinePolicy {
-                admit_noninterposable: true,
-                cheap_reserve: false,
                 cost: InlineCost::Size,
+                ..InlinePolicy::NONINTERPOSABLE
             },
-            None,
-        );
-        Some(report.changed_callers(module, changed))
-    }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(
-            run_observed_policy_scoped(
-                module,
-                None,
-                InlinePolicy {
-                    admit_noninterposable: true,
-                    cheap_reserve: false,
-                    cost: InlineCost::Size,
-                },
-                None,
-            )
-            .changed,
         )
     }
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
-        let report = run_observed_policy_scoped(
-            module,
-            sites,
-            InlinePolicy {
-                admit_noninterposable: true,
-                cheap_reserve: false,
-                cost: InlineCost::Size,
-            },
-            Some(&callers),
-        );
-        Some(report.changed_callers(module, changed))
+    fn family(&self) -> PassFamily {
+        PassFamily::Inline
     }
 }
 
@@ -183,6 +100,38 @@ struct InlinePolicy {
     cheap_reserve: bool,
     cost: InlineCost,
 }
+impl InlinePolicy {
+    const DEFAULT: Self = Self {
+        admit_noninterposable: false,
+        cheap_reserve: false,
+        cost: InlineCost::Default,
+    };
+    const NONINTERPOSABLE: Self = Self {
+        admit_noninterposable: true,
+        ..Self::DEFAULT
+    };
+}
+
+/// Inlines into the functions `context` enables and records the callers it changed.
+fn run_scheduled(
+    module: &mut Module,
+    context: &mut ModuleContext<'_>,
+    policy: InlinePolicy,
+) -> Option<bool> {
+    let callers = enabled_callers(module, context);
+    let report =
+        run_observed_policy_scoped(module, context.sites.as_deref_mut(), policy, Some(&callers));
+    Some(report.changed_callers(module, context.changed))
+}
+
+fn enabled_callers(module: &Module, context: &ModuleContext<'_>) -> FxHashSet<String> {
+    module
+        .functions
+        .iter()
+        .filter(|f| context.enabled(f))
+        .map(|f| f.name.clone())
+        .collect()
+}
 
 /// Binding-aware Full integration. Shares ordinary legality, growth budgets
 /// and cloning, with bounded read-only leaves and one-level SCC wrappers.
@@ -195,52 +144,14 @@ impl Pass for InlineNoninterposable {
     fn description(&self) -> &'static str {
         "inline bounded direct-call functions with exact binding or equivalent bodies"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, true, false).changed)
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        run_scheduled(module, context, InlinePolicy::NONINTERPOSABLE)
     }
-    fn run_module_with_report(
-        &self,
-        module: &mut Module,
-        sites: &mut Vec<InlineSite>,
-    ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), true, false).changed)
-    }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report = run_observed_policy(module, sites, true, false);
-        Some(report.changed_callers(module, changed))
-    }
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
-        let report = run_observed_policy_scoped(
-            module,
-            sites,
-            InlinePolicy {
-                admit_noninterposable: true,
-                cheap_reserve: false,
-                cost: InlineCost::Default,
-            },
-            Some(&callers),
-        );
-        Some(report.changed_callers(module, changed))
+    fn family(&self) -> PassFamily {
+        PassFamily::Inline
     }
 }
 
@@ -255,79 +166,28 @@ impl Pass for InlineCheapReserve {
     fn description(&self) -> &'static str {
         "fair bounded cheap-helper reserve"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
         false
     }
-    fn run_module_with_inline_budget(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-        budget: &mut InlineBudget,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        let callers = enabled_callers(module, context);
         let report = run_observed_policy_budgeted(
             module,
-            sites,
+            context.sites.as_deref_mut(),
             InlinePolicy {
-                admit_noninterposable: true,
                 cheap_reserve: true,
-                cost: InlineCost::Default,
+                ..InlinePolicy::NONINTERPOSABLE
             },
             Some(&callers),
-            budget,
+            context.budget,
         );
-        Some(report.changed_callers(module, changed))
+        Some(report.changed_callers(module, context.changed))
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, true, true).changed)
+    fn uses_inline_budget(&self) -> bool {
+        true
     }
-    fn run_module_with_report(
-        &self,
-        module: &mut Module,
-        sites: &mut Vec<InlineSite>,
-    ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), true, true).changed)
-    }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let report = run_observed_policy(module, sites, true, true);
-        Some(report.changed_callers(module, changed))
-    }
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let callers = module
-            .functions
-            .iter()
-            .filter(|f| enabled(f))
-            .map(|f| f.name.clone())
-            .collect();
-        let report = run_observed_policy_scoped(
-            module,
-            sites,
-            InlinePolicy {
-                admit_noninterposable: true,
-                cheap_reserve: true,
-                cost: InlineCost::Default,
-            },
-            Some(&callers),
-        );
-        Some(report.changed_callers(module, changed))
+    fn family(&self) -> PassFamily {
+        PassFamily::Inline
     }
 }
 
@@ -950,10 +810,6 @@ fn asm_template_is_duplicable(template: &str) -> bool {
             );
         }
     })
-}
-
-pub fn run(module: &mut Module) -> bool {
-    run_with_report(module).changed
 }
 
 pub fn run_with_report(module: &mut Module) -> InlineReport {
@@ -1801,7 +1657,7 @@ mod byval_tests {
             .unwrap();
             keel_ir::verify_module(&module).unwrap();
             let before = module.functions[1].layout_insts().count();
-            assert!(run(&mut module));
+            assert!(run_with_report(&mut module).changed);
             keel_ir::verify_module(&module).unwrap();
             let caller = &module.functions[1];
             assert_eq!(

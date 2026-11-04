@@ -10,7 +10,7 @@ impl crate::Pass for LoopRotate {
     fn description(&self) -> &'static str {
         "rotate small single-exit loops while retaining their entry guard"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &crate::OptimizationContext) -> bool {
         if f.debug_return.is_some()
             || f.debug_loc.is_some()
             || !f.debug_vars.is_empty()

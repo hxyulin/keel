@@ -19,11 +19,15 @@ impl crate::Pass for CallLoadReuse {
     fn description(&self) -> &'static str {
         "reuse successful loads across proven lifetime-preserving calls (opt-in)"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module))
+    fn run_module(
+        &self,
+        module: &mut Module,
+        context: &mut crate::ModuleContext<'_>,
+    ) -> Option<bool> {
+        context.whole_module(module, run)
     }
 }
 

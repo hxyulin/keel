@@ -86,7 +86,7 @@ impl Pass for Noop {
     fn requires_canonical_form(&self) -> bool {
         true
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         false
     }
 }
@@ -128,7 +128,7 @@ impl Pass for Break {
     fn description(&self) -> &'static str {
         "test verification failure"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         let inst = f.layout_insts().last().unwrap().1;
         f.remove_inst(inst);
         true
@@ -201,11 +201,16 @@ fn signature_and_caller_restrictions_are_site_decisions() {
         }
         // Exercise decisions directly: a deliberately mismatched ABI or replaced
         // tail call need not constitute valid whole-module input for verification.
-        let mut sites = Vec::new();
-        keel_opt::find_pass("inline")
+        let mut report = OptimizationReport::default();
+        keel_opt::Pipeline::named(&["inline"])
             .unwrap()
-            .run_module_with_report(&mut module, &mut sites);
-        assert_eq!(sites[0].outcome, expected);
+            .options(keel_opt::OptimizeOptions {
+                verification: keel_opt::VerificationPolicy::Disabled,
+            })
+            .report(&mut report)
+            .run(&mut module)
+            .unwrap();
+        assert_eq!(report.invocations[0].inline_sites[0].outcome, expected);
     }
 }
 
@@ -320,7 +325,7 @@ fn deterministic_cache_distinguishes_configured_pass_instances() {
         fn deterministic(&self) -> bool {
             true
         }
-        fn run(&self, f: &mut Function) -> bool {
+        fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
             self.calls.fetch_add(1, Ordering::Relaxed);
             let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
             let mut changed = false;
@@ -404,10 +409,14 @@ fn module_changes_and_verification_failures_preserve_plain_report_parity() {
         fn description(&self) -> &'static str {
             "test module mutation boundary"
         }
-        fn run(&self, _: &mut Function) -> bool {
+        fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
             unreachable!("module hook handles the pass")
         }
-        fn run_module(&self, module: &mut Module) -> Option<bool> {
+        fn run_module(
+            &self,
+            module: &mut Module,
+            _: &mut keel_opt::ModuleContext<'_>,
+        ) -> Option<bool> {
             if self.invalidate {
                 let f = &mut module.functions[0];
                 let terminator = f.layout_insts().last().unwrap().1;
@@ -474,7 +483,7 @@ fn failed_canonical_restoration_does_not_execute_or_report_the_requested_pass() 
         fn requires_canonical_form(&self) -> bool {
             true
         }
-        fn run(&self, _: &mut Function) -> bool {
+        fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
             panic!("requested pass ran after failed restoration")
         }
     }

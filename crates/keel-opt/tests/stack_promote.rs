@@ -186,7 +186,9 @@ fn debugger_homes_and_aliased_load_definitions_are_preserved() {
     let result = f.first_result(i);
     let replacement = f.block_params(f.entry_block().unwrap())[1];
     f.replace_all_uses(result, replacement);
-    keel_opt::find_pass("stack-promote").unwrap().run(f);
+    keel_opt::find_pass("stack-promote")
+        .unwrap()
+        .run(f, &Default::default());
     assert_eq!(f.resolve(result), replacement);
     assert_eq!(memory(f), 4);
 }

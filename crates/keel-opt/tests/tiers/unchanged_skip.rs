@@ -14,7 +14,7 @@ impl Pass for Observer {
     fn description(&self) -> &'static str {
         "count runs"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         self.0.fetch_add(1, Ordering::Relaxed);
         false
     }
@@ -32,7 +32,7 @@ impl Pass for TouchG {
     fn description(&self) -> &'static str {
         "report a change to @g"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         f.name == "g"
     }
 }
@@ -46,10 +46,10 @@ impl Pass for ModuleNoop {
     fn description(&self) -> &'static str {
         "report a module change"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, _: &mut Module) -> Option<bool> {
+    fn run_module(&self, _: &mut Module, _: &mut keel_opt::ModuleContext<'_>) -> Option<bool> {
         Some(self.0)
     }
 }
@@ -104,7 +104,7 @@ impl Pass for Liar {
     fn description(&self) -> &'static str {
         "edit a function and report no change"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         (self.0)(f);
         false
     }
@@ -119,10 +119,10 @@ impl Pass for ModuleLiar {
     fn description(&self) -> &'static str {
         "edit a function and report no module change"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
+    fn run_module(&self, module: &mut Module, _: &mut keel_opt::ModuleContext<'_>) -> Option<bool> {
         add_constant(&mut module.functions[0]);
         Some(false)
     }

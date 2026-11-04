@@ -14,7 +14,7 @@ fn canonical(source: &str) -> (keel_ir::Module, keel_ir::Module) {
     assert!(
         !keel_opt::find_pass("canonicalize")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     (original, module)
 }
@@ -126,7 +126,7 @@ impl Pass for ExposeLiteral {
     fn description(&self) -> &'static str {
         "alias an operand to a literal"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         f.replace_all_uses(Value::new(0), Value::new(2));
         true
     }
@@ -142,8 +142,12 @@ impl Pass for Consumer {
     fn requires_canonical_form(&self) -> bool {
         true
     }
-    fn run(&self, f: &mut Function) -> bool {
-        assert!(!keel_opt::find_pass("canonicalize").unwrap().run(f));
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
+        assert!(
+            !keel_opt::find_pass("canonicalize")
+                .unwrap()
+                .run(f, &Default::default())
+        );
         let inst = f
             .layout_insts()
             .find(|(_, i)| matches!(f.inst_data(*i), InstData::Binary { .. }))

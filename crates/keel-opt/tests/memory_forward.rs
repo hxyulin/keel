@@ -7,7 +7,7 @@ fn optimize(source: &str) -> Module {
     assert!(
         !keel_opt::find_pass("memory-forward")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     module
 }

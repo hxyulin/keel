@@ -435,9 +435,13 @@ fn transitive_proof_requires_unique_exact_legal_binding() {
         }
         // Some cases intentionally bypass verification to exercise defensive
         // treatment of malformed linkage and mismatched/duplicate bindings.
-        keel_opt::find_pass("call-load-reuse")
+        keel_opt::Pipeline::named(&["call-load-reuse"])
             .unwrap()
-            .run_module(&mut m);
+            .options(keel_opt::OptimizeOptions {
+                verification: keel_opt::VerificationPolicy::Disabled,
+            })
+            .run(&mut m)
+            .unwrap();
         assert_eq!(loads(&m), 2, "mode {mode}");
     }
     let src =

@@ -12,22 +12,18 @@ impl Pass for ConstantArgs {
     fn description(&self) -> &'static str {
         "propagate common literal arguments into nonescaping local definitions"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module, &|_| true))
-    }
-    fn run_module_for_functions(
+    fn run_module(
         &self,
         module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        _sites: Option<&mut Vec<crate::InlineSite>>,
-        changed: &mut Vec<bool>,
+        context: &mut crate::ModuleContext<'_>,
     ) -> Option<bool> {
+        let enabled = context.enabled;
         let result = run(module, enabled);
-        changed.clear();
-        changed.extend(module.functions.iter().map(|f| result && enabled(f)));
+        let changed = module.functions.iter().map(|f| result && enabled(f));
+        context.changed.extend(changed);
         Some(result)
     }
 }

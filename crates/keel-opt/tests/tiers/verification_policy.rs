@@ -15,13 +15,14 @@ impl Pass for RemoveTerminator {
     fn description(&self) -> &'static str {
         "invalid-pass reducer"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         let inst = f.layout_insts().last().unwrap().1;
         f.remove_inst(inst);
         true
     }
-    fn run_module(&self, m: &mut Module) -> Option<bool> {
-        self.module.then(|| self.run(&mut m.functions[0]))
+    fn run_module(&self, m: &mut Module, _: &mut keel_opt::ModuleContext<'_>) -> Option<bool> {
+        self.module
+            .then(|| self.run(&mut m.functions[0], &Default::default()))
     }
 }
 
@@ -36,7 +37,7 @@ impl Pass for CanonicalConsumer {
     fn requires_canonical_form(&self) -> bool {
         true
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         assert!(!f.to_string().contains("iadd v1, v0"));
         self.0.fetch_add(1, Ordering::Relaxed);
         false
@@ -161,18 +162,18 @@ impl Pass for Touch {
     fn description(&self) -> &'static str {
         "report one function changed"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         f.name == self.target
     }
-    fn run_module_tracked(
+    fn run_module(
         &self,
         m: &mut Module,
-        _: Option<&mut Vec<keel_opt::InlineSite>>,
-        changed: &mut Vec<bool>,
+        context: &mut keel_opt::ModuleContext<'_>,
     ) -> Option<bool> {
         self.module.then(|| {
-            changed.clear();
-            changed.extend(m.functions.iter().map(|f| f.name == self.target));
+            context
+                .changed
+                .extend(m.functions.iter().map(|f| f.name == self.target));
             true
         })
     }

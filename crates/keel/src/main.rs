@@ -226,10 +226,7 @@ impl Options {
         let capabilities =
             keel_codegen::x86_features::vector_capabilities(self.target()?, &selector)
                 .map_err(str::to_string)?;
-        Ok(keel_opt::OptimizationContext {
-            target,
-            capabilities,
-        })
+        Ok(keel_opt::OptimizationContext::new(target, capabilities))
     }
 
     fn run_optimization(

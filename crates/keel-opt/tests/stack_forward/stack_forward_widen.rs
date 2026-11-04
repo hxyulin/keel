@@ -30,7 +30,7 @@ fn parse(s: &str) -> Module {
 fn pass(m: &mut Module) -> bool {
     keel_opt::find_pass("stack-forward")
         .unwrap()
-        .run(&mut m.functions[0])
+        .run(&mut m.functions[0], &Default::default())
 }
 fn widen(m: &Module) -> Option<Inst> {
     let f = &m.functions[0];

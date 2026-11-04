@@ -15,7 +15,7 @@ impl crate::Pass for LoopStrengthReduce {
     fn description(&self) -> &'static str {
         "replace invariant induction products with same-width wrapping recurrences"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn run(&self, f: &mut Function, _: &crate::OptimizationContext) -> bool {
         run(f)
     }
     fn deterministic(&self) -> bool {

@@ -53,11 +53,11 @@ impl crate::Pass for LoopVectorize {
     fn description(&self) -> &'static str {
         "vectorize contiguous counted loops with runtime alias checks and scalar tails"
     }
-    fn run(&self, f: &mut Function) -> bool {
-        run(f, VectorTarget::Portable)
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
     }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run(f, target)
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        run(f, context.target)
     }
     fn deterministic(&self) -> bool {
         true
@@ -72,15 +72,11 @@ impl crate::Pass for LoopReduce {
     fn description(&self) -> &'static str {
         "unrolled read-only wrapping i32/i64 sum loops with independent vector accumulators"
     }
-    fn run(&self, f: &mut Function) -> bool {
-        self.run_for_target(f, VectorTarget::Portable)
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
     }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        let changed = run_candidates(f, target, true);
-        normalize_conditional_loop(f, target, false) || changed
-    }
-    fn run_with_context(&self, f: &mut Function, context: crate::OptimizationContext) -> bool {
-        let changed = run_candidates_with_context(f, context, true, false);
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        let changed = run_candidates_with_context(f, *context, true, false);
         // Conditional normalization and every other recipe retain 128-bit policy.
         normalize_conditional_loop(f, context.target, false) || changed
     }
@@ -98,10 +94,11 @@ impl crate::Pass for MultiLoopReduce {
     fn description(&self) -> &'static str {
         "vectorize bounded same-width independent integer sum recurrences"
     }
-    fn run(&self, f: &mut Function) -> bool {
-        self.run_for_target(f, VectorTarget::Portable)
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
     }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        let target = context.target;
         let changed = run_extended(f, target, true, true);
         normalize_conditional_loop(f, target, true) || changed
     }
@@ -118,17 +115,17 @@ impl crate::Pass for FastLoopReduce {
     fn description(&self) -> &'static str {
         "bounded small-function single-stream integer sum vectorization"
     }
-    fn run(&self, f: &mut Function) -> bool {
-        self.run_for_target(f, VectorTarget::Portable)
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
     }
-    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
         // Bound eligibility work before constructing CFG/dominators. Large
         // functions stay on Fast's local-only path. These limits apply before
         // any transformation, not to the scalar loop retained after unrolling.
         if f.layout_insts().take(257).count() > 256 || f.blocks().take(17).count() > 16 {
             return false;
         }
-        run_candidates_with_budget(f, target, true, true)
+        run_candidates_with_budget(f, context.target, true, true)
     }
     fn deterministic(&self) -> bool {
         true
@@ -1804,7 +1801,7 @@ fn normalize_conditional_loop(f: &mut Function, target: VectorTarget, multi: boo
         return false;
     }
     let mut trial = f.clone();
-    crate::Pass::run(&crate::load_reuse::LoadReuse, &mut trial);
+    crate::load_reuse::run(&mut trial);
     // A C ternary often skips one arm and enters the join directly. Give
     // that edge an empty block so the existing, guarded diamond converter
     // can validate and normalize it without speculating memory operations.

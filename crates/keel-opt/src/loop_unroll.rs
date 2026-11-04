@@ -21,7 +21,10 @@ impl crate::Pass for LoopUnroll {
     fn description(&self) -> &'static str {
         "unroll bounded wrapping integer additive reductions with two accumulators"
     }
-    fn run(&self, f: &mut Function) -> bool {
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Unroll
+    }
+    fn run(&self, f: &mut Function, _: &crate::OptimizationContext) -> bool {
         run(f)
     }
     fn deterministic(&self) -> bool {

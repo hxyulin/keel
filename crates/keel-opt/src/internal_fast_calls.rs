@@ -12,11 +12,15 @@ impl Pass for InternalFastCalls {
     fn description(&self) -> &'static str {
         "use private fast transport without C-only narrow extensions"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module))
+    fn run_module(
+        &self,
+        module: &mut Module,
+        context: &mut crate::ModuleContext<'_>,
+    ) -> Option<bool> {
+        context.whole_module(module, run)
     }
 }
 

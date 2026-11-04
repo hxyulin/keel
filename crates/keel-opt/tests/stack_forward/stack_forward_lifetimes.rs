@@ -63,12 +63,12 @@ block258:
     assert!(
         !keel_opt::find_pass("stack-promote")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     assert!(
         keel_opt::find_pass("stack-forward")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     keel_ir::verify_module(&m).unwrap();
     assert_eq!(loads(&m), 0);
@@ -178,7 +178,7 @@ fn debug_home_is_never_forwarded_in_dynamic_function() {
     assert!(
         !keel_opt::find_pass("stack-forward")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     assert_eq!(loads(&m), 1);
 }

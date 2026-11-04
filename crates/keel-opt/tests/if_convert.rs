@@ -227,7 +227,11 @@ fn aliased_definitions_and_join_parameters_are_rejected_without_overwriting() {
         let to = Value::new(1);
         f.replace_all_uses(from, to);
         let before = f.to_string();
-        assert!(!keel_opt::find_pass("if-convert").unwrap().run(f));
+        assert!(
+            !keel_opt::find_pass("if-convert")
+                .unwrap()
+                .run(f, &Default::default())
+        );
         assert_eq!(f.to_string(), before);
         assert_eq!(f.resolve(from), to);
     }
@@ -320,7 +324,9 @@ fn hoisted_instruction_source_locations_are_retained() {
         scope: None,
     };
     f.set_inst_loc(arm, Some(location));
-    keel_opt::find_pass("if-convert").unwrap().run(f);
+    keel_opt::find_pass("if-convert")
+        .unwrap()
+        .run(f, &Default::default());
     assert_eq!(f.inst_loc(arm), Some(location));
     assert_eq!(f.inst_block(arm), f.entry_block().unwrap());
     keel_ir::verify_module(&m).unwrap();

@@ -36,7 +36,7 @@ fn all_valid_integer_cast_pairs_preserve_bits_and_only_valid_pairs_collapse() {
                         assert!(
                             !keel_opt::find_pass("instcombine")
                                 .unwrap()
-                                .run(&mut module.functions[0])
+                                .run(&mut module.functions[0], &Default::default())
                         );
                         if s == 4 || m == 4 || d == 4 {
                             continue;
@@ -81,7 +81,7 @@ fn combine_comparison(source: &str) -> (keel_ir::Module, keel_ir::Module) {
     assert!(
         !keel_opt::find_pass("instcombine")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     keel_ir::verify_module(&module).unwrap();
     (original, module)

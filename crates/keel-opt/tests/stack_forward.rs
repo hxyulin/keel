@@ -554,7 +554,7 @@ block3:
     assert!(
         !keel_opt::find_pass("stack-forward")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     assert_eq!(m.to_string(), before);
 }
@@ -596,7 +596,7 @@ fn excluded_memory_cannot_request_conditional_cleanup() {
         assert!(
             !keel_opt::find_pass("stack-forward")
                 .unwrap()
-                .run(&mut m.functions[0]),
+                .run(&mut m.functions[0], &Default::default()),
             "{src}"
         );
         keel_ir::verify_module(&m).unwrap();
@@ -640,7 +640,7 @@ fn debug_home_and_returns_twice_keep_conditional_memory_live() {
         assert!(
             !keel_opt::find_pass("stack-forward")
                 .unwrap()
-                .run(&mut m.functions[0])
+                .run(&mut m.functions[0], &Default::default())
         );
         keel_ir::verify_module(&m).unwrap();
         assert_eq!(m.to_string(), before);

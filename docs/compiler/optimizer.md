@@ -1,16 +1,34 @@
 # Optimizer
 
-`keel-opt` runs function passes (`fn(&mut Function) -> bool`) and module passes
-through `Pass::run_module`. This page states each pass's contract: what it
-does, which tiers run it, what it preserves and where it stops. The tier
-pipelines are defined in code by `OptimizationTier::pipeline`,
-`BALANCED_PIPELINE`, `SIZE_PIPELINE` and `DEFAULT_PIPELINE` in
-`crates/keel-opt/src/lib.rs`. Balanced and Size join shared round arrays, and
-Full repeats `FULL_ROUND` three times before `FULL_EPILOGUE`.
-[Optimization levels](optimization-levels.md) summarizes the tiers. Pass-specific admission rules live in each pass module's
+`keel-opt` runs function passes through `Pass::run` and module passes through
+`Pass::run_module`. This page states each pass's contract: what it does, which
+tiers run it, what it preserves and where it stops. The tier pipelines are
+defined in code by `OptimizationTier::pipeline`, `BALANCED_PIPELINE`,
+`SIZE_PIPELINE` and `DEFAULT_PIPELINE` in `crates/keel-opt/src/lib.rs`. Balanced
+and Size join shared round arrays, and Full repeats `FULL_ROUND` three times
+before `FULL_EPILOGUE`. [Optimization levels](optimization-levels.md)
+summarizes the tiers. Pass-specific admission rules live in each pass module's
 rustdoc.
 
 ## Pass manager
+
+`Pipeline` is the one entry point: it takes the passes, an
+`OptimizationContext`, `OptimizeOptions` and an optional report.
+`optimize`, `optimize_with_tier`, `run_passes`, `run_passes_for_target`,
+`run_passes_for_target_with_report` and `run_pipeline` are shorthands for it.
+`PASSES` lists the registered passes, each a named static in `lib.rs`.
+
+A function pass receives the `OptimizationContext`: the vector target and
+capabilities, the pointer `DataLayout` and whether the function is canonical on
+entry. `OptimizationContext::new` gives the native vector targets
+`DataLayout::NATIVE64` and the portable target no layout. A module pass
+receives a `ModuleContext`. It names the functions the pass may change, collects
+inline sites for a report and records which functions the pass changed.
+Behavior comes from pass properties, never from pass names:
+`requires_canonical_form`, `produces_canonical_form`, `deterministic`,
+`uses_inline_budget` (Full's shared inlining allowance) and `family`, which
+names the function policy (inlining, unrolling or vectorization) that adds the
+pass to or removes it from a function's schedule.
 
 The manager runs each pass over the module before moving to the next and
 verifies, after every pass, each function the pass reports changed, plus any
@@ -55,11 +73,12 @@ This is a structural form, not a promise that equivalent trees are identical.
 Later passes can break it by recording aliases or folding values to literals.
 `Pass::requires_canonical_form()` declares an entry requirement: the manager
 restores the form right before a requesting pass when an earlier pass reported
-a change, unless that pass promised `produces_canonical_form()`. A pass that
-reports no change must not mutate the function. This applies to explicit and
-custom pipelines too. The guarantee holds on entry to a requesting pass, not
-during its rewrites or on optimizer exit. Direct calls to `Pass::run` bypass
-it; use `run_pipeline` or `run_passes`.
+a change, unless that pass promised `produces_canonical_form()`, and sets
+`OptimizationContext::canonical`. A pass that reports no change must not mutate
+the function. This applies to explicit and custom pipelines too. The guarantee
+holds on entry to a requesting pass, not during its rewrites or on optimizer
+exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
+`canonical` false; use `Pipeline` or `run_passes`.
 
 ## Passes
 
@@ -261,11 +280,13 @@ rebuilt from stored bytes in little-endian order. Across blocks, a store must
 dominate the load and be the only writer of every byte in the forwarded range.
 Stores are removed only when no load from the object remains.
 
-Native x86-64 and AArch64 pipelines also forward an exact eight-byte `i64`
-store into a pointer load using `inttoptr`. This preserves all address bits,
-including null, and neither moves nor widens a memory access. Partial stores,
-overlapping writers and over-aligned pointer loads do not qualify. The
-layout-independent and Wasm pipelines do not apply this reinterpretation.
+With `DataLayout::NATIVE64`, which the native x86-64 and AArch64 contexts
+carry, `stack-forward` also forwards an exact eight-byte `i64` store into a
+pointer load using `inttoptr`. This preserves all address bits, including null,
+and neither moves nor widens a memory access. Partial stores, overlapping
+writers and over-aligned pointer loads do not qualify. Contexts without a
+layout, including the portable and Wasm pipelines, do not apply this
+reinterpretation.
 
 Full also recovers complete `i32x4` constructors from these byte facts. Four
 copies of one `i32` become `vsplat`, and four extracts from at most two `i32x4`

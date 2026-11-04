@@ -6,6 +6,7 @@ mod unchanged_skip;
 mod verification_policy;
 
 mod support;
+use keel_ir::Function;
 use keel_opt::{OptimizationTier, Pass};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -48,9 +49,11 @@ impl Pass for CustomPass {
     fn description(&self) -> &'static str {
         "delegate constant folding"
     }
-    fn run(&self, func: &mut keel_ir::Function) -> bool {
+    fn run(&self, func: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         self.0.fetch_add(1, Ordering::Relaxed);
-        keel_opt::find_pass("const-fold").unwrap().run(func)
+        keel_opt::find_pass("const-fold")
+            .unwrap()
+            .run(func, &Default::default())
     }
 }
 
@@ -71,7 +74,7 @@ impl Pass for BrokenPass {
     fn description(&self) -> &'static str {
         "remove the terminator"
     }
-    fn run(&self, func: &mut keel_ir::Function) -> bool {
+    fn run(&self, func: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
         let terminator = func.layout_insts().last().unwrap().1;
         func.remove_inst(terminator);
         true

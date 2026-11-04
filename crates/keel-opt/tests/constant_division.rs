@@ -115,7 +115,9 @@ fn full_pipeline_shares_quotient_and_preserves_locations() {
     });
     f.set_inst_loc(division, loc);
     let old_count = f.num_insts();
-    keel_opt::find_pass("instcombine").unwrap().run(f);
+    keel_opt::find_pass("instcombine")
+        .unwrap()
+        .run(f, &Default::default());
     for (_, i) in f.layout_insts() {
         use keel_ir::EntityRef;
         if i.index() >= old_count || i == division {

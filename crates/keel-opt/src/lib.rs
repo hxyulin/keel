@@ -11,7 +11,7 @@
 //! or the `verify-each` feature. Scoped options can override that default.
 //! Callers must validate input modules before optimization; the CLI always does.
 
-use keel_ir::{Function, Module, VerifierError, verify};
+use keel_ir::{DataLayout, Function, Module, VerifierError, verify};
 use std::fmt;
 
 mod adjacent_abs;
@@ -50,18 +50,36 @@ pub mod private_aggregate;
 mod tail_calls;
 pub use loop_vectorize::VectorTarget;
 
-/// Per-invocation immutable target context. Legacy entrypoints retain 128-bit policy.
+/// Per-invocation immutable target context.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct OptimizationContext {
     pub target: VectorTarget,
     pub capabilities: keel_ir::VectorCapabilities,
+    /// Pointer storage model. `None` turns off rewrites that depend on it.
+    pub layout: Option<DataLayout>,
+    /// Every instruction is canonical on entry. The pass manager sets this to
+    /// [`Pass::requires_canonical_form`] for each run, whatever the caller passed.
+    pub canonical: bool,
+}
+impl OptimizationContext {
+    /// The native vector targets have eight-byte integral pointers. Portable
+    /// policy, which Wasm also uses, does not establish a pointer layout.
+    pub const fn new(target: VectorTarget, capabilities: keel_ir::VectorCapabilities) -> Self {
+        let layout = match target {
+            VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon => Some(DataLayout::NATIVE64),
+            VectorTarget::Portable => None,
+        };
+        Self {
+            target,
+            capabilities,
+            layout,
+            canonical: false,
+        }
+    }
 }
 impl From<VectorTarget> for OptimizationContext {
     fn from(target: VectorTarget) -> Self {
-        Self {
-            target,
-            capabilities: keel_ir::VectorCapabilities::BASELINE,
-        }
+        Self::new(target, keel_ir::VectorCapabilities::BASELINE)
     }
 }
 
@@ -77,79 +95,28 @@ mod stack_cache;
 mod stack_forward;
 mod stack_promote;
 
-/// A replaceable optimization pass over one function.
-/// `run` must report true whenever it mutates the function, including aliases.
+/// A replaceable optimization pass. Function passes implement `run`; module
+/// passes implement `run_module` and return false from `run`.
 pub trait Pass: Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
-    fn run(&self, func: &mut Function) -> bool;
 
-    /// Module passes return Some after running; function passes use the default.
-    fn run_module(&self, _module: &mut Module) -> Option<bool> {
+    /// Runs on one function. Must report true whenever it mutates the
+    /// function, including aliases.
+    fn run(&self, func: &mut Function, context: &OptimizationContext) -> bool;
+
+    /// Module passes return `Some(changed)`. They must leave functions that
+    /// `context` does not enable unchanged, along with their call and ABI
+    /// contracts. `None` declines: the manager then runs `run` on each
+    /// enabled function.
+    fn run_module(&self, _module: &mut Module, _context: &mut ModuleContext<'_>) -> Option<bool> {
         None
-    }
-
-    /// Optional module observation hook; default preserves custom-pass dispatch.
-    fn run_module_with_report(
-        &self,
-        module: &mut Module,
-        _sites: &mut Vec<InlineSite>,
-    ) -> Option<bool> {
-        self.run_module(module)
-    }
-
-    /// Runs a module pass (observed when `sites` is given) and sets
-    /// `changed[i]` for each function it may have changed, indexed after the
-    /// pass. The default marks every function whenever the module changed.
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        let result = match sites {
-            Some(sites) => self.run_module_with_report(module, sites),
-            None => self.run_module(module),
-        }?;
-        changed.clear();
-        changed.resize(module.functions.len(), result);
-        Some(result)
-    }
-
-    /// Module dispatch with Full's pipeline-owned expansion allowance.
-    /// The default preserves custom-pass dispatch and change tracking.
-    fn run_module_with_inline_budget(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-        _budget: &mut InlineBudget,
-    ) -> Option<bool> {
-        self.run_module_for_functions(module, enabled, sites, changed)
     }
 
     /// Whether the function is scheduled for this invocation. Checked before
     /// canonical restoration so protected bodies remain unchanged.
     fn enabled_for(&self, _function: &Function) -> bool {
         true
-    }
-
-    /// Run a module pass for scheduled functions while inspecting the complete
-    /// module. The default admits unscoped hooks only when every body is enabled.
-    /// Overrides must preserve unscheduled bodies and any call/ABI contracts.
-    fn run_module_for_functions(
-        &self,
-        module: &mut Module,
-        enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        if module.functions.iter().all(enabled) {
-            self.run_module_tracked(module, sites, changed)
-        } else {
-            None
-        }
     }
 
     /// Whether this function pass depends only on the function and target.
@@ -161,36 +128,9 @@ pub trait Pass: Sync {
         false
     }
 
-    /// Target-aware passes may override this; ordinary passes ignore it.
-    fn run_for_target(&self, func: &mut Function, _target: VectorTarget) -> bool {
-        self.run(func)
-    }
-
-    /// The manager runs a pass that requires canonical form with this, once
-    /// every instruction is canonical. Passes may rely on that to skip checks.
-    fn run_canonical(&self, func: &mut Function, target: VectorTarget) -> bool {
-        self.run_for_target(func, target)
-    }
-
-    /// Additive context dispatch preserves existing target-aware overrides.
-    fn run_with_context(&self, func: &mut Function, context: OptimizationContext) -> bool {
-        self.run_for_target(func, context.target)
-    }
-    /// Preserve canonical overrides independently of ordinary target dispatch.
-    /// A new context-aware pass that requires canonical form MUST also override
-    /// this hook, usually by forwarding to its `run_with_context`. Overriding only
-    /// `run_with_context` affects noncanonical dispatch only: the default here
-    /// deliberately calls the legacy `run_canonical` override for compatibility.
-    fn run_canonical_with_context(
-        &self,
-        func: &mut Function,
-        context: OptimizationContext,
-    ) -> bool {
-        self.run_canonical(func, context.target)
-    }
-
     /// Request the structural form documented in `docs/compiler/optimizer.md`.
-    /// The manager restores it on entry when an earlier pass changed the IR.
+    /// The manager restores it on entry when an earlier pass changed the IR,
+    /// and then sets [`OptimizationContext::canonical`].
     fn requires_canonical_form(&self) -> bool {
         false
     }
@@ -199,97 +139,96 @@ pub trait Pass: Sync {
     fn produces_canonical_form(&self) -> bool {
         false
     }
+
+    /// Whether the pass charges the pipeline-wide Full inlining allowance. The
+    /// manager sizes [`ModuleContext`]'s budget from the input module, and
+    /// reports it, only when some pass in the pipeline returns true.
+    fn uses_inline_budget(&self) -> bool {
+        false
+    }
+
+    /// Which function policy removes this pass from a schedule.
+    fn family(&self) -> PassFamily {
+        PassFamily::Other
+    }
 }
 
+/// The function policy (`FunctionPolicy::inline`, `unroll` or `vectorize`)
+/// that controls a pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PassFamily {
+    #[default]
+    Other,
+    Inline,
+    Unroll,
+    Vectorize,
+}
+
+/// One module pass invocation's scheduling and observation state.
+pub struct ModuleContext<'a> {
+    enabled: &'a dyn Fn(&Function) -> bool,
+    /// Inline decisions, collected only when a report was requested.
+    pub sites: Option<&'a mut Vec<InlineSite>>,
+    /// After the pass, per function, whether the pass may have changed it.
+    /// The manager clears it first. Entries the pass leaves out take the
+    /// pass's overall result.
+    pub changed: &'a mut Vec<bool>,
+    pub(crate) budget: &'a mut InlineBudget,
+}
+impl fmt::Debug for ModuleContext<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ModuleContext")
+            .field("sites", &self.sites)
+            .field("changed", &self.changed)
+            .field("budget", &self.budget)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ModuleContext<'_> {
+    /// Whether this invocation may change `function`.
+    pub fn enabled(&self, function: &Function) -> bool {
+        (self.enabled)(function)
+    }
+
+    /// Runs a transform that cannot limit itself to enabled functions, only
+    /// when every function is enabled. Otherwise it declines.
+    pub fn whole_module(
+        &self,
+        module: &mut Module,
+        run: impl FnOnce(&mut Module) -> bool,
+    ) -> Option<bool> {
+        module
+            .functions
+            .iter()
+            .all(|f| self.enabled(f))
+            .then(|| run(module))
+    }
+}
+
+/// A function pass with a plain kernel and its canonical-form properties.
 struct BuiltinPass {
-    pub name: &'static str,
-    pub description: &'static str,
-    pub run: fn(&mut Function) -> bool,
+    name: &'static str,
+    description: &'static str,
+    run: fn(&mut Function, &OptimizationContext) -> bool,
+    requires_canonical: bool,
+    produces_canonical: bool,
 }
-
-const SMALL_MEMORY: BuiltinPass = BuiltinPass {
-    name: "small-memory",
-    description: "expand ordinary constant memory intrinsics of at most 32 bytes",
-    run: small_memory::run,
-};
-
-const BUILTINS: &[BuiltinPass] = &[
-    BuiltinPass {
-        name: "const-fold",
-        description: "evaluate instructions whose operands are constants",
-        run: const_fold::run,
-    },
-    BuiltinPass {
-        name: "simplify-cfg",
-        description: "fold constant branches, skip empty blocks, merge straight-line blocks, remove unreachable blocks",
-        run: simplify_cfg::run,
-    },
-    BuiltinPass {
-        name: "gvn",
-        description: "replace equivalent pure instructions with a dominating computation",
-        run: gvn::run,
-    },
-    BuiltinPass {
-        name: "dce",
-        description: "remove unused pure instructions and block parameters",
-        run: dce::run,
-    },
-    BuiltinPass {
-        name: "gcm",
-        description: "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
-        run: gcm::run,
-    },
-    BuiltinPass {
-        name: "instcombine",
-        description: "combine integer identities, fold constants, and reduce power-of-two arithmetic",
-        run: instcombine::run,
-    },
-    BuiltinPass {
-        name: "phi-simplify",
-        description: "replace trivial block parameters with their dominating incoming value",
-        run: phi_simplify::run,
-    },
-    BuiltinPass {
-        name: "memory-forward",
-        description: "forward exact-address ordinary loads and stores within a block",
-        run: memory_forward::run,
-    },
-    BuiltinPass {
-        name: "known-bits",
-        description: "prove integer bits and ranges to remove redundant masks and fold comparisons",
-        run: known_bits::run,
-    },
-    BuiltinPass {
-        name: "canonicalize",
-        description: "resolve operand aliases and normalize integer operand order and comparisons",
-        run: canonicalize::run,
-    },
-    BuiltinPass {
-        name: "stack-forward",
-        description: "forward bytes in private fixed stack objects exposed by inlining",
-        run: stack_forward::run,
-    },
-    BuiltinPass {
-        name: "call-contracts",
-        description: "trim direct noreturn call continuations and lower direct nounwind invokes",
-        run: call_contracts::run,
-    },
-    BuiltinPass {
-        name: "stack-promote",
-        description: "promote initialized disjoint private stack fields to loop SSA (opt-in)",
-        run: stack_promote::run,
-    },
-    BuiltinPass {
-        name: "if-convert",
-        description: "convert bounded nontrapping scalar diamonds to selects (opt-in)",
-        run: if_convert::run,
-    },
-    BuiltinPass {
-        name: "adjacent-abs",
-        description: "convert a private scalar absolute-value triangle without moving memory",
-        run: adjacent_abs::run,
-    },
-];
+impl BuiltinPass {
+    const fn new(
+        name: &'static str,
+        description: &'static str,
+        run: fn(&mut Function, &OptimizationContext) -> bool,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            run,
+            requires_canonical: false,
+            produces_canonical: false,
+        }
+    }
+}
 
 impl Pass for BuiltinPass {
     fn name(&self) -> &'static str {
@@ -298,75 +237,177 @@ impl Pass for BuiltinPass {
     fn description(&self) -> &'static str {
         self.description
     }
-    fn run(&self, func: &mut Function) -> bool {
-        (self.run)(func)
-    }
-    fn run_for_target(&self, func: &mut Function, target: VectorTarget) -> bool {
-        // These two native targets have eight-byte integral pointers. Portable
-        // vector policy does not establish a pointer layout (including Wasm).
-        if matches!(target, VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon)
-            && self.name == "stack-forward"
-        {
-            return stack_forward::run_native64(func);
-        }
-        self.run(func)
+    fn run(&self, func: &mut Function, context: &OptimizationContext) -> bool {
+        (self.run)(func, context)
     }
     fn requires_canonical_form(&self) -> bool {
-        self.name == "instcombine"
-    }
-    fn run_canonical(&self, func: &mut Function, target: VectorTarget) -> bool {
-        if self.name == "instcombine" {
-            instcombine::run_canonical(func)
-        } else {
-            self.run_for_target(func, target)
-        }
+        self.requires_canonical
     }
     fn produces_canonical_form(&self) -> bool {
-        self.name == "canonicalize"
+        self.produces_canonical
     }
     fn deterministic(&self) -> bool {
         true
     }
 }
 
-pub const PASSES: &[&dyn Pass] = &[
-    &fast::Cfg,
-    &fast::Local,
-    &SMALL_MEMORY,
-    &BUILTINS[0],
-    &BUILTINS[1],
-    &BUILTINS[2],
-    &BUILTINS[3],
-    &BUILTINS[4],
-    &BUILTINS[5],
-    &BUILTINS[6],
-    &BUILTINS[7],
-    &BUILTINS[8],
-    &BUILTINS[9],
-    &BUILTINS[10],
-    &BUILTINS[11],
-    &BUILTINS[12],
-    &BUILTINS[13],
-    &load_reuse::LoadReuse,
-    &loop_rotate::LoopRotate,
-    &loop_strength_reduce::LoopStrengthReduce,
-    &loop_unroll::LoopUnroll,
-    &loop_vectorize::LoopVectorize,
-    &loop_vectorize::LoopReduce,
-    &loop_vectorize::MultiLoopReduce,
-    &loop_vectorize::FastLoopReduce,
-    &inline::Inline,
-    &inline::InlineNoninterposable,
-    &BUILTINS[14],
-    &inline::InlineCheapReserve,
-    &call_load_reuse::CallLoadReuse,
-    &internal_fast_calls::InternalFastCalls,
-    &tail_calls::TailCalls,
-    &constant_args::ConstantArgs,
-    &module_cleanup::EmptyCalls,
-    &module_cleanup::UnusedFunctions,
-    &private_aggregate::PrivateAggregateCleanup,
-    &inline::InlineSize,
+// The registry. Each pass is one named static; `PASSES` lists them in
+// `keel passes` order. Code that needs a particular pass uses its static, so
+// a pass's name decides nothing but its lookup.
+pub(crate) static FAST_CFG: &dyn Pass = &fast::Cfg;
+pub(crate) static FAST_LOCAL: &dyn Pass = &fast::Local;
+pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
+    "small-memory",
+    "expand ordinary constant memory intrinsics of at most 32 bytes",
+    |f, _| small_memory::run(f),
+);
+pub(crate) static CONST_FOLD: &dyn Pass = &BuiltinPass::new(
+    "const-fold",
+    "evaluate instructions whose operands are constants",
+    |f, _| const_fold::run(f),
+);
+pub(crate) static SIMPLIFY_CFG: &dyn Pass = &BuiltinPass::new(
+    "simplify-cfg",
+    "fold constant branches, skip empty blocks, merge straight-line blocks, remove unreachable blocks",
+    |f, _| simplify_cfg::run(f),
+);
+pub(crate) static GVN: &dyn Pass = &BuiltinPass::new(
+    "gvn",
+    "replace equivalent pure instructions with a dominating computation",
+    |f, _| gvn::run(f),
+);
+pub(crate) static DCE: &dyn Pass = &BuiltinPass::new(
+    "dce",
+    "remove unused pure instructions and block parameters",
+    |f, _| dce::run(f),
+);
+pub(crate) static GCM: &dyn Pass = &BuiltinPass::new(
+    "gcm",
+    "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
+    |f, _| gcm::run(f),
+);
+pub(crate) static INSTCOMBINE: &dyn Pass = &BuiltinPass {
+    requires_canonical: true,
+    ..BuiltinPass::new(
+        "instcombine",
+        "combine integer identities, fold constants, and reduce power-of-two arithmetic",
+        |f, context| {
+            if context.canonical {
+                instcombine::run_canonical(f)
+            } else {
+                instcombine::run(f)
+            }
+        },
+    )
+};
+pub(crate) static PHI_SIMPLIFY: &dyn Pass = &BuiltinPass::new(
+    "phi-simplify",
+    "replace trivial block parameters with their dominating incoming value",
+    |f, _| phi_simplify::run(f),
+);
+pub(crate) static MEMORY_FORWARD: &dyn Pass = &BuiltinPass::new(
+    "memory-forward",
+    "forward exact-address ordinary loads and stores within a block",
+    |f, _| memory_forward::run(f),
+);
+pub(crate) static KNOWN_BITS: &dyn Pass = &BuiltinPass::new(
+    "known-bits",
+    "prove integer bits and ranges to remove redundant masks and fold comparisons",
+    |f, _| known_bits::run(f),
+);
+pub(crate) static CANONICALIZE: &dyn Pass = &BuiltinPass {
+    produces_canonical: true,
+    ..BuiltinPass::new(
+        "canonicalize",
+        "resolve operand aliases and normalize integer operand order and comparisons",
+        |f, _| canonicalize::run(f),
+    )
+};
+pub(crate) static STACK_FORWARD: &dyn Pass = &BuiltinPass::new(
+    "stack-forward",
+    "forward bytes in private fixed stack objects exposed by inlining",
+    |f, context| stack_forward::run_with_layout(f, context.layout),
+);
+pub(crate) static CALL_CONTRACTS: &dyn Pass = &BuiltinPass::new(
+    "call-contracts",
+    "trim direct noreturn call continuations and lower direct nounwind invokes",
+    |f, _| call_contracts::run(f),
+);
+pub(crate) static STACK_PROMOTE: &dyn Pass = &BuiltinPass::new(
+    "stack-promote",
+    "promote initialized disjoint private stack fields to loop SSA",
+    |f, _| stack_promote::run(f),
+);
+pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
+    "if-convert",
+    "convert bounded nontrapping scalar diamonds to selects (opt-in)",
+    |f, _| if_convert::run(f),
+);
+pub(crate) static LOAD_REUSE: &dyn Pass = &load_reuse::LoadReuse;
+pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
+pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
+pub(crate) static LOOP_UNROLL: &dyn Pass = &loop_unroll::LoopUnroll;
+pub(crate) static LOOP_VECTORIZE: &dyn Pass = &loop_vectorize::LoopVectorize;
+pub(crate) static LOOP_REDUCE: &dyn Pass = &loop_vectorize::LoopReduce;
+pub(crate) static LOOP_REDUCE_MULTI: &dyn Pass = &loop_vectorize::MultiLoopReduce;
+pub(crate) static FAST_LOOP_REDUCE: &dyn Pass = &loop_vectorize::FastLoopReduce;
+pub(crate) static INLINE: &dyn Pass = &inline::Inline;
+pub(crate) static INLINE_NONINTERPOSABLE: &dyn Pass = &inline::InlineNoninterposable;
+pub(crate) static ADJACENT_ABS: &dyn Pass = &BuiltinPass::new(
+    "adjacent-abs",
+    "convert a private scalar absolute-value triangle without moving memory",
+    |f, _| adjacent_abs::run(f),
+);
+pub(crate) static INLINE_CHEAP_RESERVE: &dyn Pass = &inline::InlineCheapReserve;
+pub(crate) static CALL_LOAD_REUSE: &dyn Pass = &call_load_reuse::CallLoadReuse;
+pub(crate) static INTERNAL_FAST_CALLS: &dyn Pass = &internal_fast_calls::InternalFastCalls;
+pub(crate) static TAIL_CALLS: &dyn Pass = &tail_calls::TailCalls;
+pub(crate) static CONSTANT_ARGS: &dyn Pass = &constant_args::ConstantArgs;
+pub(crate) static EMPTY_CALLS: &dyn Pass = &module_cleanup::EmptyCalls;
+pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions;
+pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
+    &private_aggregate::PrivateAggregateCleanup;
+pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize;
+
+/// Every registered pass, in `keel passes` order.
+pub static PASSES: &[&dyn Pass] = &[
+    FAST_CFG,
+    FAST_LOCAL,
+    SMALL_MEMORY,
+    CONST_FOLD,
+    SIMPLIFY_CFG,
+    GVN,
+    DCE,
+    GCM,
+    INSTCOMBINE,
+    PHI_SIMPLIFY,
+    MEMORY_FORWARD,
+    KNOWN_BITS,
+    CANONICALIZE,
+    STACK_FORWARD,
+    CALL_CONTRACTS,
+    STACK_PROMOTE,
+    IF_CONVERT,
+    LOAD_REUSE,
+    LOOP_ROTATE,
+    LOOP_STRENGTH_REDUCE,
+    LOOP_UNROLL,
+    LOOP_VECTORIZE,
+    LOOP_REDUCE,
+    LOOP_REDUCE_MULTI,
+    FAST_LOOP_REDUCE,
+    INLINE,
+    INLINE_NONINTERPOSABLE,
+    ADJACENT_ABS,
+    INLINE_CHEAP_RESERVE,
+    CALL_LOAD_REUSE,
+    INTERNAL_FAST_CALLS,
+    TAIL_CALLS,
+    CONSTANT_ARGS,
+    EMPTY_CALLS,
+    UNUSED_FUNCTIONS,
+    PRIVATE_AGGREGATE_CLEANUP,
+    INLINE_SIZE,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
@@ -933,10 +974,8 @@ pub(crate) fn execute_pipeline(
     let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
-    let has_full_inlining = passes
-        .iter()
-        .any(|pass| pass.name() == "inline-cheap-reserve");
-    let mut inline_budget = if has_full_inlining {
+    let uses_inline_budget = passes.iter().any(|pass| pass.uses_inline_budget());
+    let mut inline_budget = if uses_inline_budget {
         InlineBudget::new(module)
     } else {
         InlineBudget::default()
@@ -955,15 +994,21 @@ pub(crate) fn execute_pipeline(
             );
         }
         let start = reporting.then(Instant::now);
-        let module_changed = pass.run_module_with_inline_budget(
+        versions.changed.clear();
+        let module_changed = pass.run_module(
             module,
-            &|f| pass.enabled_for(f),
-            inline_sites.as_mut(),
-            &mut versions.changed,
-            &mut inline_budget,
+            &mut ModuleContext {
+                enabled: &|f| pass.enabled_for(f),
+                sites: inline_sites.as_mut(),
+                changed: &mut versions.changed,
+                budget: &mut inline_budget,
+            },
         );
         let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
-        if has_full_inlining && let Some(report) = report.as_deref_mut() {
+        if let Some(changed) = module_changed {
+            versions.changed.resize(module.functions.len(), changed);
+        }
+        if uses_inline_budget && let Some(report) = report.as_deref_mut() {
             report.inline_budget = Some(inline_budget.clone());
         }
         if let Some(changed) = module_changed {
@@ -1085,6 +1130,7 @@ pub(crate) fn execute_pipeline(
             }
             let start = reporting.then(Instant::now);
             let function_context = OptimizationContext {
+                canonical: pass.requires_canonical_form(),
                 capabilities: if context.target == VectorTarget::X86Sse2 {
                     func.attrs
                         .target_features
@@ -1098,11 +1144,7 @@ pub(crate) fn execute_pipeline(
                 },
                 ..context
             };
-            let changed = if pass.requires_canonical_form() {
-                pass.run_canonical_with_context(func, function_context)
-            } else {
-                pass.run_with_context(func, function_context)
-            };
+            let changed = pass.run(func, &function_context);
             let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());
             #[cfg(debug_assertions)]
             analysis::debug_check_stamp(func);

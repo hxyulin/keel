@@ -1,4 +1,4 @@
-use keel_ir::{Function, VectorCapabilities, parse};
+use keel_ir::{DataLayout, Function, VectorCapabilities, parse};
 use keel_opt::{OptimizationContext, OptimizationReport, OptimizeOptions, Pass, VectorTarget};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,24 +13,11 @@ impl Pass for Custom<'_> {
     fn description(&self) -> &'static str {
         "dispatch test"
     }
-    fn run(&self, _: &mut Function) -> bool {
-        panic!("target override lost")
-    }
-    fn run_for_target(&self, _: &mut Function, target: VectorTarget) -> bool {
-        assert!(!self.canonical);
-        assert_eq!(target, VectorTarget::X86Sse2);
-        self.calls.fetch_add(1, Ordering::Relaxed);
-        false
-    }
-    fn run_with_context(&self, func: &mut Function, context: OptimizationContext) -> bool {
-        // A context-only override cannot supersede a legacy canonical override.
-        // Canonical context passes explicitly opt in through the canonical hook.
-        assert!(!self.canonical, "legacy canonical hook lost priority");
-        self.run_for_target(func, context.target)
-    }
-    fn run_canonical(&self, _: &mut Function, target: VectorTarget) -> bool {
-        assert!(self.canonical);
-        assert_eq!(target, VectorTarget::X86Sse2);
+    fn run(&self, _: &mut Function, context: &OptimizationContext) -> bool {
+        // The manager sets `canonical` exactly for passes that require it.
+        assert_eq!(context.canonical, self.canonical);
+        assert_eq!(context.target, VectorTarget::X86Sse2);
+        assert_eq!(context.layout, Some(DataLayout::NATIVE64));
         self.calls.fetch_add(1, Ordering::Relaxed);
         false
     }
@@ -39,11 +26,11 @@ impl Pass for Custom<'_> {
     }
 }
 #[test]
-fn context_preserves_custom_dispatch_and_observation() {
-    let context = OptimizationContext {
-        target: VectorTarget::X86Sse2,
-        capabilities: VectorCapabilities::new(true, true, true, 123),
-    };
+fn context_reaches_custom_passes_and_observation() {
+    let context = OptimizationContext::new(
+        VectorTarget::X86Sse2,
+        VectorCapabilities::new(true, true, true, 123),
+    );
     for canonical in [false, true] {
         let calls = AtomicUsize::new(0);
         let pass = Custom {
@@ -102,10 +89,10 @@ fn optimized(source: &str, context: OptimizationContext, names: &[&str]) -> Stri
 }
 #[test]
 fn only_plain_signed_sum_prefers_wide_complete_recipe() {
-    let wide = OptimizationContext {
-        target: VectorTarget::X86Sse2,
-        capabilities: VectorCapabilities::new(true, true, true, 0),
-    };
+    let wide = OptimizationContext::new(
+        VectorTarget::X86Sse2,
+        VectorCapabilities::new(true, true, true, 0),
+    );
     let text = optimized(SUM, wide, &["loop-reduce"]);
     assert!(text.contains("swiden_low.i64x4"), "{text}");
     assert_eq!(text.matches("load.i32x4").count(), 4, "{text}");
@@ -168,7 +155,7 @@ fn only_plain_signed_sum_prefers_wide_complete_recipe() {
         assert!(
             !optimized(
                 SUM,
-                OptimizationContext { target, ..wide },
+                OptimizationContext::new(target, wide.capabilities),
                 &["loop-reduce"]
             )
             .contains("i64x4")
@@ -194,10 +181,10 @@ fn only_plain_signed_sum_prefers_wide_complete_recipe() {
 
 #[test]
 fn context_does_not_widen_predicates_fp_or_multiple_streams() {
-    let wide = OptimizationContext {
-        target: VectorTarget::X86Sse2,
-        capabilities: VectorCapabilities::new(true, true, true, 0),
-    };
+    let wide = OptimizationContext::new(
+        VectorTarget::X86Sse2,
+        VectorCapabilities::new(true, true, true, 0),
+    );
     let conditional = include_str!("conditional_reduce/loops.keel");
     assert!(!optimized(conditional, wide, keel_opt::DEFAULT_PIPELINE).contains("i64x4"));
     let floating = SUM
@@ -226,8 +213,10 @@ impl Pass for ContextPass<'_> {
     fn description(&self) -> &'static str {
         "explicit context hook contract"
     }
-    fn run(&self, _: &mut Function) -> bool {
-        panic!("context lost")
+    fn run(&self, _: &mut Function, context: &OptimizationContext) -> bool {
+        assert_eq!(context.capabilities.effective_x86_features(), 123);
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        false
     }
     fn requires_canonical_form(&self) -> bool {
         self.canonical
@@ -235,29 +224,19 @@ impl Pass for ContextPass<'_> {
     fn deterministic(&self) -> bool {
         true
     }
-    fn run_with_context(&self, _: &mut Function, context: OptimizationContext) -> bool {
-        assert_eq!(context.capabilities.effective_x86_features(), 123);
-        self.calls.fetch_add(1, Ordering::Relaxed);
-        false
-    }
-    // Canonical context passes must explicitly forward; the default preserves
-    // legacy run_canonical overrides, which cannot be detected automatically.
-    fn run_canonical_with_context(&self, f: &mut Function, context: OptimizationContext) -> bool {
-        self.run_with_context(f, context)
-    }
 }
 #[test]
-fn context_hooks_and_deterministic_cache_are_scoped_to_one_invocation() {
+fn context_and_deterministic_cache_are_scoped_to_one_invocation() {
     for canonical in [false, true] {
         let calls = AtomicUsize::new(0);
         let pass = ContextPass {
             canonical,
             calls: &calls,
         };
-        let context = OptimizationContext {
-            target: VectorTarget::X86Sse2,
-            capabilities: VectorCapabilities::new(true, true, false, 123),
-        };
+        let context = OptimizationContext::new(
+            VectorTarget::X86Sse2,
+            VectorCapabilities::new(true, true, false, 123),
+        );
         let mut module = parse("func @f() {\nblock0:\n return\n}").unwrap();
         let options = OptimizeOptions::default();
         for prefer in [false, true] {
@@ -347,10 +326,10 @@ fn legacy_report_and_options_exhaustive_literals_compile_and_schema_is_unchanged
     let json = report.to_json();
     assert!(json.starts_with("{\"schema_version\":2,\"invocations\":["));
     assert!(!json.contains("context"));
-    let context = OptimizationContext {
-        target: VectorTarget::X86Sse2,
-        capabilities: VectorCapabilities::new(true, true, false, 123),
-    };
+    let context = OptimizationContext::new(
+        VectorTarget::X86Sse2,
+        VectorCapabilities::new(true, true, false, 123),
+    );
     let explicit = report.to_json_with_context(context);
     assert!(explicit.starts_with("{\"schema_version\":3,\"context\":{\"target\":\"x86-sse2\""));
     assert!(explicit.contains("\"preferred_bits\":128,\"effective_x86_features\":123"));
@@ -380,10 +359,8 @@ fn default_library_context_matches_legacy_pipelines_for_every_target() {
             let mut legacy = parse(SUM).unwrap();
             keel_opt::run_passes_for_target(&mut legacy, names, target).unwrap();
             // Maximum accepted capabilities still keep the default preference at 128.
-            let context = OptimizationContext {
-                target,
-                capabilities: VectorCapabilities::new(true, true, false, 0),
-            };
+            let context =
+                OptimizationContext::new(target, VectorCapabilities::new(true, true, false, 0));
             assert_eq!(optimized(SUM, context, names), legacy.to_string());
             assert!(!legacy.to_string().contains("i64x4"));
         }
@@ -400,10 +377,7 @@ fn function_permissions_override_vector_context_without_widening_neighbors() {
         fn description(&self) -> &'static str {
             "Check per-function vector permissions"
         }
-        fn run(&self, _: &mut Function) -> bool {
-            panic!("missing context")
-        }
-        fn run_with_context(&self, function: &mut Function, context: OptimizationContext) -> bool {
+        fn run(&self, function: &mut Function, context: &OptimizationContext) -> bool {
             let expected = if function.name == "wide" { 256 } else { 128 };
             assert_eq!(
                 context.capabilities.value_bits(),
@@ -415,10 +389,7 @@ fn function_permissions_override_vector_context_without_widening_neighbors() {
         }
     }
     let mut module=parse("func @wide() target_features(\"avx2\") {\nblock0:\n return\n}\nfunc @base() {\nblock0:\n return\n}\nfunc @narrow() target_features(\"-avx2,-avx\") {\nblock0:\n return\n}\n").unwrap();
-    let context = OptimizationContext {
-        target: VectorTarget::X86Sse2,
-        capabilities: VectorCapabilities::BASELINE,
-    };
+    let context = OptimizationContext::new(VectorTarget::X86Sse2, VectorCapabilities::BASELINE);
     keel_opt::Pipeline::new(&[&Observe])
         .context(context)
         .run(&mut module)

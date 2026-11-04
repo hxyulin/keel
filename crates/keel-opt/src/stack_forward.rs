@@ -11,19 +11,16 @@ use keel_ir::{
     Type, Value, ValueDef, VectorType,
 };
 
-/// The native x86-64/AArch64 contract has eight-byte integral addresses:
-/// storing an i64 then reading the identical bytes as ptr preserves every
-/// address bit, including zero. Portable/target-free entrypoints do not have
-/// this contract. No partial-byte or floating-point reinterpretation is added.
-pub(crate) fn run_native64(func: &mut Function) -> bool {
-    run_with_layout(func, Some(DataLayout::NATIVE64))
-}
-
+/// Forwarding without a pointer layout.
 pub fn run(func: &mut Function) -> bool {
     run_with_layout(func, None)
 }
 
-fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
+/// [`DataLayout::NATIVE64`] has eight-byte integral addresses: storing an i64
+/// then reading the identical bytes as ptr preserves every address bit,
+/// including zero. Without a layout there is no such contract. No
+/// partial-byte or floating-point reinterpretation is added.
+pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
     // Every rewrite below starts from a slot address.
     if func.num_stack_slots() == 0 {
         return false;

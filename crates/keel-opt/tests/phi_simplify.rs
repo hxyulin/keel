@@ -35,7 +35,7 @@ fn loop_copies_and_exit_copies_are_removed_but_induction_and_abi_stay() {
     assert!(
         !keel_opt::find_pass("phi-simplify")
             .unwrap()
-            .run(&mut module.clone().functions[0])
+            .run(&mut module.clone().functions[0], &Default::default())
     );
     for input in [0, 1, u64::MAX] {
         for count in 0..16 {
@@ -60,7 +60,7 @@ block1(v3: i64):
     assert!(
         !keel_opt::find_pass("phi-simplify")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     assert_eq!(execute(&module.functions[0], &[0, 10, 20]), 20);
     assert_eq!(execute(&module.functions[0], &[1, 10, 20]), 10);

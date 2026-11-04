@@ -108,7 +108,7 @@ fn target_free_portable_and_wasm_keep_pointer_memory_interpretation() {
     let mut direct = keel_ir::parse(&source).unwrap();
     keel_opt::find_pass(pass)
         .unwrap()
-        .run(&mut direct.functions[0]);
+        .run(&mut direct.functions[0], &Default::default());
     assert_eq!(loads(&direct), 1, "{direct}");
     let mut wasm = keel_ir::parse(&source).unwrap();
     keel_opt::optimize_wasm32_basic(&mut wasm).unwrap();

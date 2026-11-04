@@ -12,7 +12,7 @@ fn canonical(source: &str) -> keel_ir::Module {
     assert!(
         !keel_opt::find_pass("canonicalize")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     m
 }

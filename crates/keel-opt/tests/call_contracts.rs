@@ -255,7 +255,11 @@ fn existing_defensive_trap_keeps_identity_and_location() {
         scope: None,
     };
     f.set_inst_loc(trap, Some(loc));
-    assert!(!keel_opt::find_pass("call-contracts").unwrap().run(f));
+    assert!(
+        !keel_opt::find_pass("call-contracts")
+            .unwrap()
+            .run(f, &Default::default())
+    );
     assert!(!f.is_removed(trap));
     assert_eq!(f.inst_loc(trap), Some(loc));
     keel_ir::verify_module(&m).unwrap();

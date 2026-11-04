@@ -169,7 +169,7 @@ block0(v0: i128):
     assert!(
         !keel_opt::find_pass("known-bits")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     let source = source.replace("iconst.i64 0", "iconst.i64 64");
     let (_, module) = apply(&source, &["known-bits"]);

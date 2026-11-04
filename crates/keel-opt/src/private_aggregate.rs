@@ -25,11 +25,15 @@ impl crate::Pass for PrivateAggregateCleanup {
     fn description(&self) -> &'static str {
         "scalarize private two-word transport and clean up only changed modules"
     }
-    fn run(&self, _: &mut Function) -> bool {
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_with_cleanup(module))
+    fn run_module(
+        &self,
+        module: &mut Module,
+        context: &mut crate::ModuleContext<'_>,
+    ) -> Option<bool> {
+        context.whole_module(module, run_with_cleanup)
     }
 }
 

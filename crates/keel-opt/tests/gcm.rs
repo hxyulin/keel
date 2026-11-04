@@ -15,7 +15,11 @@ fn high_fanout_and_repeated_operands_keep_the_same_schedule() {
     }
     func.ins(InsertPoint::End(entry)).return_(&[sum]);
     let before = func.to_string();
-    assert!(!keel_opt::find_pass("gcm").unwrap().run(&mut func));
+    assert!(
+        !keel_opt::find_pass("gcm")
+            .unwrap()
+            .run(&mut func, &Default::default())
+    );
     keel_ir::verify(&func).unwrap();
     assert_eq!(before, func.to_string());
     for input in [0, 1, u64::MAX] {
@@ -63,7 +67,7 @@ block2:
     assert!(
         !keel_opt::find_pass("gcm")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
 }
 
@@ -145,7 +149,11 @@ block6:
 ";
     let mut module = keel_ir::parse(source).unwrap();
     let func = &mut module.functions[0];
-    assert!(keel_opt::find_pass("gcm").unwrap().run(func));
+    assert!(
+        keel_opt::find_pass("gcm")
+            .unwrap()
+            .run(func, &Default::default())
+    );
     keel_ir::verify(func).unwrap();
     // The invariant product goes to block3, the latest block outside the loop.
     let expected = "func @f(i64, i8, i64) -> i64 cc(c) {

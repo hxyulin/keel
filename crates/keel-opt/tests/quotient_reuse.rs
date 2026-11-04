@@ -136,7 +136,7 @@ fn inserted_product_keeps_remainder_location_and_pass_is_idempotent() {
     });
     f.set_inst_loc(rem, loc);
     let pass = keel_opt::find_pass("instcombine").unwrap();
-    assert!(pass.run(f));
+    assert!(pass.run(f, &Default::default()));
     let mul = f
         .layout_insts()
         .find(|(_, i)| {
@@ -152,6 +152,6 @@ fn inserted_product_keeps_remainder_location_and_pass_is_idempotent() {
         .1;
     assert_eq!(f.inst_loc(mul), loc);
     assert_eq!(f.inst_loc(rem), loc);
-    assert!(!pass.run(f));
+    assert!(!pass.run(f, &Default::default()));
     keel_ir::verify_module(&m).unwrap();
 }

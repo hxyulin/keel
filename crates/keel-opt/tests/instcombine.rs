@@ -48,7 +48,7 @@ fn power_of_two_arithmetic_is_exhaustive_at_i8_and_covers_wide_boundaries() {
                 assert!(
                     !keel_opt::find_pass("instcombine")
                         .unwrap()
-                        .run(&mut optimized.clone().functions[0])
+                        .run(&mut optimized.clone().functions[0], &Default::default())
                 );
             }
         }
@@ -240,7 +240,7 @@ fn sign_zero_i32_shift_masks_exhaust_bytes_counts_and_masks() {
             assert!(
                 !keel_opt::find_pass("instcombine")
                     .unwrap()
-                    .run(&mut optimized.clone().functions[0])
+                    .run(&mut optimized.clone().functions[0], &Default::default())
             );
         }
     }
@@ -281,7 +281,9 @@ fn load_fed_field_extraction_removes_only_the_covering_mask() {
             .layout_insts()
             .map(|(_, i)| (i, f.inst_data(i).clone()))
             .collect();
-        keel_opt::find_pass("instcombine").unwrap().run(f);
+        keel_opt::find_pass("instcombine")
+            .unwrap()
+            .run(f, &Default::default());
         assert_eq!(f.resolve(Value::new(6)), Value::new(4));
         let after: Vec<_> = f
             .layout_insts()
@@ -326,7 +328,7 @@ fn bounded_mask_and_or_sign_proof_covers_uri_byte_fields() {
         assert!(
             !keel_opt::find_pass("instcombine")
                 .unwrap()
-                .run(&mut optimized.clone().functions[0])
+                .run(&mut optimized.clone().functions[0], &Default::default())
         );
     }
 }
@@ -374,7 +376,7 @@ fn signed_shift_i32_mask_boundaries_match_independent_scalar_oracle() {
                     let mut second = optimized.clone();
                     let changed = keel_opt::find_pass("instcombine")
                         .unwrap()
-                        .run(&mut second.functions[0]);
+                        .run(&mut second.functions[0], &Default::default());
                     assert_eq!(changed, optimized.to_string() != second.to_string());
                     keel_ir::verify_module(&second).unwrap();
                     for &x in &inputs {

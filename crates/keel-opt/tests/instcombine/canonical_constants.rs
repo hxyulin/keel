@@ -33,7 +33,7 @@ fn integer_constants_get_a_stable_right_hand_position_at_every_width() {
             assert!(
                 !keel_opt::find_pass("instcombine")
                     .unwrap()
-                    .run(&mut module.clone().functions[0])
+                    .run(&mut module.clone().functions[0], &Default::default())
             );
             if ty != "i128" && !matches!(op, "umulhi" | "smulhi") {
                 for input in (0..256).chain([u64::MAX, 1 << 63]) {

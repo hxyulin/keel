@@ -39,7 +39,7 @@ block3(v7: i64, v8: i64):
     assert!(
         !keel_opt::find_pass("simplify-cfg")
             .unwrap()
-            .run(&mut second.functions[0])
+            .run(&mut second.functions[0], &Default::default())
     );
 }
 
@@ -74,7 +74,7 @@ block2(v2: i64):
     assert!(
         !keel_opt::find_pass("simplify-cfg")
             .unwrap()
-            .run(&mut module.functions[0])
+            .run(&mut module.functions[0], &Default::default())
     );
     assert!(module.functions[0].layout_insts().all(|(_, i)| matches!(
         module.functions[0].inst_data(i),
@@ -165,7 +165,7 @@ fn merging_long_chain_preserves_instruction_order_and_external_parameter_uses() 
     assert!(
         !keel_opt::find_pass("simplify-cfg")
             .unwrap()
-            .run(&mut again.functions[0])
+            .run(&mut again.functions[0], &Default::default())
     );
 }
 
@@ -290,7 +290,7 @@ block1:
         assert!(
             !keel_opt::find_pass("simplify-cfg")
                 .unwrap()
-                .run(&mut again.functions[0])
+                .run(&mut again.functions[0], &Default::default())
         );
     }
 }

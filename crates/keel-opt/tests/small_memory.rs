@@ -21,7 +21,7 @@ fn expand(source: &str) -> Module {
     assert!(
         !keel_opt::find_pass("small-memory")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     m
 }

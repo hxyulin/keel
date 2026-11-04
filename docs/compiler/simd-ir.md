@@ -370,9 +370,8 @@ operations are described with the [AArch64 backend](../targets/aarch64/README.md
 `keel_ir::VectorCapabilities` separates the maximum accepted value width, the
 complete signed-i32 sum recipe width and the preferred width.
 `keel_opt::OptimizationContext` pairs it with a `VectorTarget`, and
-`Pipeline::context` accepts it. APIs that take only a `VectorTarget` keep a
-128-bit policy. A pass that overrides `run_with_context` and requires canonical
-form must also override `run_canonical_with_context`.
+`Pipeline::context` accepts it. Every function pass receives the context in
+`Pass::run`. APIs that take only a `VectorTarget` keep a 128-bit policy.
 
 `keel_codegen::x86_features::vector_capabilities(target, selector)` projects
 the selector's effective features, including explicit additions and removals,

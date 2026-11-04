@@ -51,7 +51,7 @@ impl Pass for Cfg {
     fn description(&self) -> &'static str {
         "one CFG cleanup sweep, merging chains of at most 64 instructions"
     }
-    fn run(&self, func: &mut Function) -> bool {
+    fn run(&self, func: &mut Function, _: &crate::OptimizationContext) -> bool {
         let mut changed = simplify_cfg::fold_branches(func);
         changed |= simplify_cfg::skip_forwarding_blocks(func);
         let mut reachable = vec![false; func.num_blocks()];
@@ -76,7 +76,7 @@ impl Pass for Local {
     fn description(&self) -> &'static str {
         "one forward simplification sweep with a bounded block-local expression table"
     }
-    fn run(&self, func: &mut Function) -> bool {
+    fn run(&self, func: &mut Function, _: &crate::OptimizationContext) -> bool {
         let mut changed = false;
         let mut table: FxHashMap<InstData, Inst> = FxHashMap::default();
         let mut quotients = instcombine::Quotients::default();

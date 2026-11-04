@@ -84,7 +84,7 @@ fn optimize(source: &str) -> (keel_ir::Module, keel_ir::Module) {
     assert!(
         !keel_opt::find_pass("instcombine")
             .unwrap()
-            .run(&mut optimized.functions[0])
+            .run(&mut optimized.functions[0], &Default::default())
     );
     assert_eq!(snapshot, optimized.to_string());
     (original, optimized)
@@ -257,7 +257,9 @@ block0(v0: i64, v1: i64):
             scope: None,
         });
         f.set_inst_loc(outer, loc);
-        keel_opt::find_pass("instcombine").unwrap().run(f);
+        keel_opt::find_pass("instcombine")
+            .unwrap()
+            .run(f, &Default::default());
         assert_eq!(f.inst_data(inner), &inner_data);
         assert!(!f.is_removed(outer));
         assert_eq!(f.first_result(outer), result);

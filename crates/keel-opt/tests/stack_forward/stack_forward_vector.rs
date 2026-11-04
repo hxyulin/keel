@@ -36,7 +36,7 @@ fn parse(s: &str) -> Module {
 fn pass(m: &mut Module) -> bool {
     let changed = keel_opt::find_pass("stack-forward")
         .unwrap()
-        .run(&mut m.functions[0]);
+        .run(&mut m.functions[0], &Default::default());
     keel_ir::verify_module(m).unwrap();
     changed
 }

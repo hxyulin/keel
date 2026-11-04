@@ -24,11 +24,11 @@ fn guarded_single_exit_rotation_verifies_and_is_idempotent() {
     let mut m = keel_ir::parse(source()).unwrap();
     keel_ir::verify_module(&m).unwrap();
     let pass = keel_opt::find_pass("loop-rotate").unwrap();
-    assert!(pass.run(&mut m.functions[0]));
+    assert!(pass.run(&mut m.functions[0], &Default::default()));
     keel_ir::verify_module(&m).unwrap();
     let text = m.to_string();
     keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
-    assert!(!pass.run(&mut m.functions[0]));
+    assert!(!pass.run(&mut m.functions[0], &Default::default()));
     assert_eq!(text, m.to_string());
     assert!(keel_opt::DEFAULT_PIPELINE.contains(&"loop-rotate"));
 }
@@ -50,7 +50,7 @@ fn rejects_debug_calls_header_loads_and_multiple_exits() {
         assert!(
             !keel_opt::find_pass("loop-rotate")
                 .unwrap()
-                .run(&mut m.functions[0])
+                .run(&mut m.functions[0], &Default::default())
         );
         assert_eq!(before, m.to_string());
     }
@@ -59,7 +59,7 @@ fn rejects_debug_calls_header_loads_and_multiple_exits() {
     assert!(
         !keel_opt::find_pass("loop-rotate")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
 }
 #[test]
@@ -81,7 +81,7 @@ fn calls_and_locations_outside_the_loop_do_not_block_rotation() {
         assert!(
             keel_opt::find_pass("loop-rotate")
                 .unwrap()
-                .run(&mut m.functions[0]),
+                .run(&mut m.functions[0], &Default::default()),
             "{src}"
         );
         keel_ir::verify_module(&m).unwrap();
@@ -96,7 +96,7 @@ fn calls_and_locations_outside_the_loop_do_not_block_rotation() {
     assert!(
         !keel_opt::find_pass("loop-rotate")
             .unwrap()
-            .run(&mut m.functions[0])
+            .run(&mut m.functions[0], &Default::default())
     );
     assert_eq!(before, m.to_string());
 }

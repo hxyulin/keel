@@ -23,7 +23,7 @@ fn absorption_and_cancellation_preserve_all_i8_pairs_and_wide_edges() {
                 assert!(
                     !keel_opt::find_pass("instcombine")
                         .unwrap()
-                        .run(&mut module.functions[0])
+                        .run(&mut module.functions[0], &Default::default())
                 );
                 if ty == "i128" {
                     continue;

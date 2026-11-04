@@ -46,7 +46,7 @@ block0(v0: {ty}, v1: {ty}):
             assert!(
                 !keel_opt::find_pass("gvn")
                     .unwrap()
-                    .run(&mut module.functions[0])
+                    .run(&mut module.functions[0], &Default::default())
             );
             if ty == "i128" {
                 continue;

@@ -25,7 +25,7 @@ impl crate::Pass for LoadReuse {
     fn description(&self) -> &'static str {
         "reuse successful reads and exact stored values across bounded CFG chains"
     }
-    fn run(&self, func: &mut Function) -> bool {
+    fn run(&self, func: &mut Function, _: &crate::OptimizationContext) -> bool {
         run(func)
     }
     fn deterministic(&self) -> bool {
@@ -83,7 +83,7 @@ fn incoming(
     (depth + 1, facts)
 }
 
-fn run(func: &mut Function) -> bool {
+pub(crate) fn run(func: &mut Function) -> bool {
     // A debugger may edit source variable homes between source locations.
     // Avoid inferring availability anywhere in functions with such homes.
     if !func.debug_vars.is_empty() {

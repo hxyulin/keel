@@ -1,6 +1,7 @@
 //! Ordered function-local schedules with guarded module passes.
 use crate::{
-    OptError, OptimizationContext, OptimizationReport, OptimizationTier, OptimizeOptions, Pass,
+    ModuleContext, OptError, OptimizationContext, OptimizationReport, OptimizationTier,
+    OptimizeOptions, Pass, PassFamily,
 };
 use keel_ir::{Function, FunctionOptLevel, FunctionPolicy, Module};
 
@@ -19,35 +20,13 @@ impl Pass for ScopedPass<'_> {
     fn enabled_for(&self, function: &Function) -> bool {
         self.functions.contains(&function.name) && self.pass.enabled_for(function)
     }
-    fn run(&self, function: &mut Function) -> bool {
-        self.pass.run(function)
+    fn run(&self, function: &mut Function, context: &OptimizationContext) -> bool {
+        self.pass.run(function, context)
     }
-    fn run_module_tracked(
-        &self,
-        module: &mut Module,
-        sites: Option<&mut Vec<crate::InlineSite>>,
-        changed: &mut Vec<bool>,
-    ) -> Option<bool> {
-        self.pass
-            .run_module_for_functions(module, &|f| self.enabled_for(f), sites, changed)
+    // The manager builds `context` from `enabled_for` above.
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        self.pass.run_module(module, context)
     }
-    fn run_module_with_inline_budget(
-        &self,
-        module: &mut Module,
-        _enabled: &dyn Fn(&Function) -> bool,
-        sites: Option<&mut Vec<crate::InlineSite>>,
-        changed: &mut Vec<bool>,
-        budget: &mut crate::InlineBudget,
-    ) -> Option<bool> {
-        self.pass.run_module_with_inline_budget(
-            module,
-            &|f| self.enabled_for(f),
-            sites,
-            changed,
-            budget,
-        )
-    }
-
     fn deterministic(&self) -> bool {
         self.pass.deterministic()
     }
@@ -57,15 +36,11 @@ impl Pass for ScopedPass<'_> {
     fn produces_canonical_form(&self) -> bool {
         self.pass.produces_canonical_form()
     }
-    fn run_with_context(&self, function: &mut Function, context: OptimizationContext) -> bool {
-        self.pass.run_with_context(function, context)
+    fn uses_inline_budget(&self) -> bool {
+        self.pass.uses_inline_budget()
     }
-    fn run_canonical_with_context(
-        &self,
-        function: &mut Function,
-        context: OptimizationContext,
-    ) -> bool {
-        self.pass.run_canonical_with_context(function, context)
+    fn family(&self) -> PassFamily {
+        self.pass.family()
     }
 }
 
@@ -78,6 +53,12 @@ fn tier(level: FunctionOptLevel) -> OptimizationTier {
         FunctionOptLevel::Size => OptimizationTier::Size,
         _ => OptimizationTier::None,
     }
+}
+
+/// The same registered pass. Compares the vtable too: zero-sized passes
+/// may share an address.
+fn same(a: &dyn Pass, b: &dyn Pass) -> bool {
+    std::ptr::eq(a, b)
 }
 
 fn selected<'a>(
@@ -101,39 +82,37 @@ fn selected<'a>(
     let mut passes: Vec<_> = planned
         .into_iter()
         .filter(|pass| {
-            let name = pass.name();
-            !((name.starts_with("inline") && policy.inline == Some(false))
-                || (name == "loop-unroll" && policy.unroll == Some(false))
-                || ((name == "loop-vectorize"
-                    || name.starts_with("loop-reduce")
-                    || name == "fast-loop-reduce")
-                    && policy.vectorize == Some(false)))
+            let setting = match pass.family() {
+                PassFamily::Other => None,
+                PassFamily::Inline => policy.inline,
+                PassFamily::Unroll => policy.unroll,
+                PassFamily::Vectorize => policy.vectorize,
+            };
+            setting != Some(false)
         })
         .collect();
     if !policy.disabled() {
-        for (enabled, name) in [
-            (policy.inline, "inline-noninterposable"),
-            (policy.unroll, "loop-unroll"),
-            (policy.vectorize, "loop-vectorize"),
+        for (enabled, pass) in [
+            (policy.inline, crate::INLINE_NONINTERPOSABLE),
+            (policy.unroll, crate::LOOP_UNROLL),
+            (policy.vectorize, crate::LOOP_VECTORIZE),
         ] {
-            if enabled == Some(true) && !passes.iter().any(|pass| pass.name() == name) {
-                passes.push(crate::find_pass(name).expect("registered function policy pass"));
+            if enabled == Some(true) && !passes.iter().any(|&planned| same(planned, pass)) {
+                passes.push(pass);
             }
         }
     }
     if function.attrs.flatten && !policy.disabled() && policy.inline != Some(false) {
-        passes.retain(|pass| !pass.name().starts_with("inline"));
+        passes.retain(|pass| pass.family() != PassFamily::Inline);
         let mut flatten = Vec::new();
         for _ in 0..8 {
-            for name in [
-                "inline-noninterposable",
-                "simplify-cfg",
-                "canonicalize",
-                "instcombine",
-                "dce",
-            ] {
-                flatten.push(crate::find_pass(name).expect("registered flatten pass"));
-            }
+            flatten.extend([
+                crate::INLINE_NONINTERPOSABLE,
+                crate::SIMPLIFY_CFG,
+                crate::CANONICALIZE,
+                crate::INSTCOMBINE,
+                crate::DCE,
+            ]);
         }
         flatten.extend(passes);
         passes = flatten;
@@ -208,13 +187,13 @@ pub(super) fn run(
             .functions
             .iter()
             .zip(&schedules)
-            .filter(|(_, plan)| plan.iter().any(|pass| pass.name() == "unused-functions"))
+            .filter(|(_, plan)| plan.iter().any(|&pass| same(pass, crate::UNUSED_FUNCTIONS)))
             .map(|(function, _)| function.name.clone())
             .collect::<keel_ir::fxhash::FxHashSet<_>>();
         if !functions.is_empty() {
             order.push(scoped.len());
             scoped.push(ScopedPass {
-                pass: crate::find_pass("unused-functions").expect("registered reachability pass"),
+                pass: crate::UNUSED_FUNCTIONS,
                 functions,
             });
         }

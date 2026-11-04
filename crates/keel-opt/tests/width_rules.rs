@@ -113,7 +113,7 @@ fn optimize(source: &str, pipeline: Pipeline) -> Module {
             assert!(
                 !keel_opt::find_pass("instcombine")
                     .unwrap()
-                    .run(&mut module.functions[0]),
+                    .run(&mut module.functions[0], &Default::default()),
                 "{source}\n{snapshot}"
             );
             assert_eq!(snapshot, module.to_string());
