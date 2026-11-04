@@ -4,6 +4,9 @@
 //! manager verifies after every pass, and the output must parse and verify
 //! again. Run `BLESS=1 cargo test` to rewrite `.out` files.
 
+#[path = "golden/differential.rs"]
+mod differential;
+
 use std::path::Path;
 
 fn render(src: &str) -> String {
