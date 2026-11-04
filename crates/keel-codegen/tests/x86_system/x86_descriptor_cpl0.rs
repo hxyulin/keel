@@ -14,7 +14,7 @@ const LOAD_SOURCE: &str =
 fn descriptor_observation_payload_export_and_parity() {
     export_payload(
         SOURCE,
-        "KEEL_DESCRIPTOR_EXPORT_DIR",
+        "observe",
         "descriptor",
         "descriptor_observe",
         &[("sgdt", 1), ("sidt", 1)],
@@ -25,7 +25,7 @@ fn descriptor_observation_payload_export_and_parity() {
 fn descriptor_load_payload_export_and_parity() {
     export_payload(
         LOAD_SOURCE,
-        "KEEL_DESCRIPTOR_LOAD_EXPORT_DIR",
+        "table-loads",
         "descriptor-load",
         "descriptor_load",
         &[("lgdt", 1), ("lidt", 1)],
@@ -60,7 +60,7 @@ fn descriptor_status_payload_export_and_parity() {
         include_str!("../../../../suite/integration/x86-cpl0/cases/descriptor_status.keel");
     export_payload(
         source,
-        "KEEL_DESCRIPTOR_STATUS_EXPORT_DIR",
+        "status",
         "descriptor-status",
         "descriptor_status",
         &[("sldt", 4), ("str", 4), ("smsw", 4)],
@@ -69,11 +69,8 @@ fn descriptor_status_payload_export_and_parity() {
     assert!(keel_codegen::aarch64::compile(&m).is_err());
 }
 
-fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops: &[(&str, usize)]) {
-    let export = std::env::var_os(variable).map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+fn export_payload(source: &str, campaign: &str, prefix: &str, symbol: &str, ops: &[(&str, usize)]) {
+    let mut packet = keel_test_support::native_program!(campaign).cpl0(campaign);
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -103,14 +100,14 @@ fn export_payload(source: &str, variable: &str, prefix: &str, symbol: &str, ops:
                         .all(|sym| !sym.is_undefined() || sym.name().unwrap().is_empty()),
                     "payload needs an external helper"
                 );
-                if let Some(dir) = &export {
-                    let stem = format!("{prefix}-{s:?}-{a:?}-{spilled}");
-                    std::fs::write(dir.join(format!("{stem}.o")), object).unwrap();
-                    std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-                }
+                let stem = format!("{prefix}-{s:?}-{a:?}-{spilled}");
+                packet = packet
+                    .file(format!("{stem}.o"), object)
+                    .file(format!("{stem}.s"), text);
             }
         }
     }
+    packet.check();
 }
 
 #[test]

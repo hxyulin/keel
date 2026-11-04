@@ -49,10 +49,8 @@ fn system_register_registry_effects_and_foreign_rejection() {
 }
 #[test]
 fn system_register_tiers_parity_liveness_and_export() {
-    let dir = std::env::var_os("KEEL_SYSTEM_REGISTER_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &dir {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+    let mut packet =
+        keel_test_support::native_program!("system-registers").cpl0("system-registers");
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for s in [
             SelectionTier::Baseline,
@@ -73,17 +71,21 @@ fn system_register_tiers_parity_liveness_and_export() {
                         // Every unused third read must remain after optimization.
                         assert_eq!(count, if reg == "dr0" { 6 } else { 4 }, "{reg}: {text}");
                     }
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &dir
-                    {
+                    if level == CpuLevel::V1 {
                         let stem = format!("system-register-{s:?}-{a:?}-{spill}");
-                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+                        packet = packet
+                            .file(format!("{stem}.o"), bytes)
+                            .file(format!("{stem}.s"), text);
                     }
                 }
             }
         }
     }
+    let (bytes, text) = rematerialized();
+    packet
+        .file("system-register-remat.o", bytes)
+        .file("system-register-remat.s", text)
+        .check();
 }
 struct ConstantRemat;
 impl RegisterAllocator for ConstantRemat {
@@ -100,7 +102,11 @@ impl RegisterAllocator for ConstantRemat {
     }
 }
 #[test]
-fn rematerialized_system_write_input_exports() {
+fn rematerialized_system_write_input() {
+    rematerialized();
+}
+/// The forced-remat payload, which the system-registers campaign also links.
+fn rematerialized() -> (Vec<u8>, String) {
     let (bytes, text) = userspace::compile_with_allocator(
         SOURCE,
         CpuLevel::V1,
@@ -117,10 +123,5 @@ fn rematerialized_system_write_input_exports() {
         .unwrap();
     assert!(body.contains("movabs\trax, 95075992133360"), "{body}");
     assert!(body.contains("mov\tdr0, rax"), "{body}");
-    if let Some(dir) = std::env::var_os("KEEL_SYSTEM_REGISTER_EXPORT_DIR") {
-        let dir = std::path::PathBuf::from(dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("system-register-remat.o"), bytes).unwrap();
-        std::fs::write(dir.join("system-register-remat.s"), text).unwrap();
-    }
+    (bytes, text)
 }

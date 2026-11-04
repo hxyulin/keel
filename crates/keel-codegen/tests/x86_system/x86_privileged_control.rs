@@ -43,10 +43,7 @@ fn control_signatures_effects_and_literal_encodings() {
 
 #[test]
 fn privileged_controls_survive_optimization_with_parity_and_live_inputs() {
-    let export = std::env::var_os("KEEL_CPU_CONTROL_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+    let mut packet = keel_test_support::native_program!("cpu-control").cpl0("cpu-control");
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for selection in [
             SelectionTier::Baseline,
@@ -85,15 +82,15 @@ fn privileged_controls_survive_optimization_with_parity_and_live_inputs() {
                         file.symbols()
                             .all(|s| !s.is_undefined() || s.name().unwrap().is_empty())
                     );
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &export
-                    {
+                    if level == CpuLevel::V1 {
                         let stem = format!("cpu-control-{selection:?}-{allocation:?}-{spilled}");
-                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+                        packet = packet
+                            .file(format!("{stem}.o"), bytes)
+                            .file(format!("{stem}.s"), text);
                     }
                 }
             }
         }
     }
+    packet.check();
 }

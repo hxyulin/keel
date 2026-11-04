@@ -53,15 +53,6 @@ fn image_contract_and_transport_bytes() {
         code.ends_with(&[0x49, 0x8d, 0x62, 0x78, 0x4d, 0x8b, 0x52, 0x48, 0x48, 0xcf]),
         "{code:02x?}"
     );
-    if let Some(dir) = std::env::var_os("KEEL_IRETQ_EXPORT_DIR") {
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(std::path::Path::new(&dir).join("iretq-adapter.o"), object).unwrap();
-        std::fs::write(
-            std::path::Path::new(&dir).join("iretq-adapter.s"),
-            iretq::assembly(),
-        )
-        .unwrap();
-    }
 }
 
 #[test]
@@ -69,10 +60,13 @@ fn terminal_callers_tiers_and_export() {
     let original = keel_ir::parse(SOURCE).unwrap();
     keel_ir::verify_module(&original).unwrap();
     assert_eq!(original.decls[0], iretq::declaration());
-    let dir = std::env::var_os("KEEL_IRETQ_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &dir {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+    let adapter =
+        keel_asm::x86::assemble_program_object_with_features(&iretq::program(), Features::NONE)
+            .unwrap();
+    let mut packet = keel_test_support::native_program!("iretq")
+        .cpl0("iretq")
+        .file("iretq-adapter.o", adapter)
+        .file("iretq-adapter.s", iretq::assembly());
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for s in [
             SelectionTier::Baseline,
@@ -84,15 +78,15 @@ fn terminal_callers_tiers_and_export() {
                     let (bytes, text) = userspace::compile(SOURCE, level, s, a, spill);
                     assert!(text.contains("__keel_x86_iretq"), "{text}");
                     assert!(text.contains("ud2"), "{text}");
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &dir
-                    {
+                    if level == CpuLevel::V1 {
                         let name = format!("iretq-{s:?}-{a:?}-{spill}");
-                        std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
-                        std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
+                        packet = packet
+                            .file(format!("{name}.o"), bytes)
+                            .file(format!("{name}.s"), text);
                     }
                 }
             }
         }
     }
+    packet.check();
 }

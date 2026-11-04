@@ -33,10 +33,8 @@ fn interrupt_control_registry_effects_and_foreign_rejection() {
 }
 #[test]
 fn interrupt_control_tiers_adjacency_liveness_and_export() {
-    let dir = std::env::var_os("KEEL_INTERRUPT_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &dir {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+    let mut packet =
+        keel_test_support::native_program!("interrupt-control").cpl0("interrupt-control");
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for s in [
             SelectionTier::Baseline,
@@ -65,15 +63,15 @@ fn interrupt_control_tiers_adjacency_liveness_and_export() {
                     let lines = body.lines().map(str::trim).collect::<Vec<_>>();
                     let sti = lines.iter().position(|l| *l == "sti").unwrap();
                     assert_eq!(lines[sti + 1], "hlt", "{body}");
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &dir
-                    {
+                    if level == CpuLevel::V1 {
                         let name = format!("interrupt-{s:?}-{a:?}-{spill}");
-                        std::fs::write(dir.join(format!("{name}.o")), bytes).unwrap();
-                        std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
+                        packet = packet
+                            .file(format!("{name}.o"), bytes)
+                            .file(format!("{name}.s"), text);
                     }
                 }
             }
         }
     }
+    packet.check();
 }

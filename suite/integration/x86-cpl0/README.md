@@ -96,6 +96,39 @@ payload returning one (FAIL, exit 35), and a payload that prints PASS and then
 hangs (reported as timeout, not pass) have been run on x86-64 Linux with GNU
 binutils and QEMU 11.1.1.
 
+## Exported campaigns
+
+The keel-codegen `x86_system` tests compile the campaign payloads but never run
+them. With `KEEL_TEST_EXPORT_DIR` set, each campaign test writes one packet of
+kind `cpl0`, named after its `descriptor_campaign.py` mode. The x86 export
+runner passes each packet to the campaign:
+
+```sh
+KEEL_TEST_EXPORT_DIR="$PWD/target/x86-exports" \
+  cargo test -p keel-codegen --test x86_system
+python3 suite/integration/x86-exports/run.py target/x86-exports --filter x86_system
+```
+
+The runner needs QEMU and GNU binutils, but not an x86-64 host. It uses `as`,
+`ld`, `objcopy` and `objdump` on Linux and the `x86_64-elf-` tools elsewhere;
+`--binutils-prefix` and `--qemu` override them. A packet passes when its
+campaign exits zero. To run one campaign by hand, pass a packet directory as
+`--exports` together with the mode flag, such as `--msr`. The `observe` mode
+has no flag.
+
+| Packet | Test module | Campaign |
+| --- | --- | --- |
+| `observe` | `x86_descriptor_cpl0` | SGDT/SIDT |
+| `table-loads` | `x86_descriptor_cpl0` | LGDT/LIDT |
+| `status` | `x86_descriptor_cpl0` | SLDT/STR/SMSW |
+| `msr` | `x86_msr` | MSR |
+| `cpu-control` | `x86_privileged_control` | CLTS and cache control |
+| `system-loads`, `invlpg` | `x86_system_write` | LLDT/LTR/LMSW and INVLPG |
+| `system-registers` | `x86_system_registers` | Control and debug registers |
+| `interrupt-control` | `x86_interrupt_control` | Interrupt control and HLT |
+| `swapgs` | `x86_swapgs` | GS exchange |
+| `iretq` | `x86_iretq` | Owned IRETQ return |
+
 ## SGDT/SIDT campaign
 
 The assembly bridge `cases/descriptor_bridge.S` defines `guest_main` and calls
@@ -108,16 +141,6 @@ opaque call against a separate expected image: literal limits 31/511 and
 linker-known seed-table addresses, never values read from SGDT/SIDT output.
 This checks SGDT offsets 1–10, SIDT offsets 17–26 and all twelve canary bytes.
 The bridge uses integer-only assembly, no red zone, C runtime or SIMD helpers.
-
-Export all twelve explicit V1 variants from the current source tree, then run
-on a host with QEMU and GNU binutils (override tool paths as above):
-
-```sh
-KEEL_DESCRIPTOR_EXPORT_DIR=target/descriptor-cpl0-exports \
-  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
-python3 suite/integration/x86-cpl0/descriptor_campaign.py \
-  --exports target/descriptor-cpl0-exports --timeout 5
-```
 
 The campaign accepts exactly the twelve standard object filenames, links each
 with the bridge independently, and requires the exact two-line READY/PASS
@@ -140,16 +163,7 @@ containers and arbitrary FLAGS/x87 state remain outside this checkpoint.
 
 ## LGDT/LIDT campaign
 
-Export the twelve table-load objects, then use the same campaign with
-`--table-loads`:
-
-```sh
-KEEL_DESCRIPTOR_LOAD_EXPORT_DIR="$PWD/target/descriptor-load-exports" \
-  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --table-loads \
-  --exports target/descriptor-load-exports --timeout 5
-```
-
+The `--table-loads` mode reuses the bridge for the twelve table-load objects.
 The bridge calls the generated `descriptor_load` with known GDTR/IDTR images
 instead of loading them itself. Trusted SGDT/SIDT observations then check both
 bases and limits. Negative controls omit the loads or swap the table images.
@@ -161,13 +175,6 @@ negative controls return the exact READY/FAIL transcript and exit 35. This is
 bounded emulated evidence, not native bare-metal qualification.
 
 ## SLDT/STR/SMSW campaign
-
-```sh
-KEEL_DESCRIPTOR_STATUS_EXPORT_DIR="$PWD/target/descriptor-status-exports" \
-  cargo test -p keel-codegen --test x86_system -- x86_descriptor_
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --status \
-  --exports target/descriptor-status-exports --timeout 5
-```
 
 This mode runs exactly twelve generated objects, one independent assembly
 reference and five negative controls. Each positive payload must pass two
@@ -183,13 +190,6 @@ All eighteen verdicts match under QEMU 11.1.2 TCG on macOS ARM64. See
 for the API contract.
 
 ## MSR campaign
-
-```sh
-KEEL_MSR_EXPORT_DIR="$PWD/target/msr-exports" \
-  cargo test -p keel-codegen --test x86_system -- x86_msr::
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --msr \
-  --exports target/msr-exports --timeout 5
-```
 
 This mode requires twelve standard explicit-v1 MSR exports and one forced
 rematerialization export. The bridge checks
@@ -209,13 +209,6 @@ The other campaign modes are mutually exclusive with `--msr`. See
 
 ## CLTS and cache-control campaign
 
-```sh
-KEEL_CPU_CONTROL_EXPORT_DIR="$PWD/target/cpu-control-exports" \
-  cargo test -p keel-codegen --test x86_system -- x86_privileged_control::
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --cpu-control \
-  --exports target/cpu-control-exports --timeout 5
-```
-
 This mode requires exactly twelve v1 exports. It checks CLTS against three
 CR0 states, original integer inputs, incoming stack arguments and a 128-byte
 output with canaries. The generated WBINVD/INVD instructions are adjacent.
@@ -233,16 +226,6 @@ verdicts match. Faults and timeouts fail the campaign.
 API contracts.
 
 ## LLDT/LTR/LMSW and INVLPG campaigns
-
-```sh
-KEEL_SYSTEM_LOAD_EXPORT_DIR="$PWD/target/system-load-exports" \
-KEEL_INVLPG_EXPORT_DIR="$PWD/target/invlpg-exports" \
-  cargo test -p keel-codegen --test x86_system -- x86_system_write::
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --system-loads \
-  --exports target/system-load-exports --timeout 5
-python3 suite/integration/x86-cpl0/descriptor_campaign.py --invlpg \
-  --exports target/invlpg-exports --timeout 5
-```
 
 Each mode accepts exactly twelve v1 exports. The system-load bridge checks
 register and memory mutations against trusted selector/CR0 observations,

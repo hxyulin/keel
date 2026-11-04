@@ -38,11 +38,8 @@ fn system_write_signatures_effects_and_foreign_rejection() {
         assert!(keel_codegen::aarch64::compile(&m).is_err());
     }
 }
-fn export(source: &str, prefix: &str, variable: &str, symbols: &[&str], ops: &[(&str, usize)]) {
-    let dir = std::env::var_os(variable).map(std::path::PathBuf::from);
-    if let Some(dir) = &dir {
-        std::fs::create_dir_all(dir).unwrap();
-    }
+fn export(source: &str, prefix: &str, campaign: &str, symbols: &[&str], ops: &[(&str, usize)]) {
+    let mut packet = keel_test_support::native_program!(campaign).cpl0(campaign);
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for s in [
             SelectionTier::Baseline,
@@ -72,24 +69,24 @@ fn export(source: &str, prefix: &str, variable: &str, symbols: &[&str], ops: &[(
                         f.symbols()
                             .all(|s| !s.is_undefined() || s.name().unwrap().is_empty())
                     );
-                    if level == CpuLevel::V1
-                        && let Some(dir) = &dir
-                    {
+                    if level == CpuLevel::V1 {
                         let stem = format!("{prefix}-{s:?}-{a:?}-{spill}");
-                        std::fs::write(dir.join(format!("{stem}.o")), bytes).unwrap();
-                        std::fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+                        packet = packet
+                            .file(format!("{stem}.o"), bytes)
+                            .file(format!("{stem}.s"), text);
                     }
                 }
             }
         }
     }
+    packet.check();
 }
 #[test]
 fn descriptor_status_mutations_export_and_parity() {
     export(
         LOADS,
         "system-load",
-        "KEEL_SYSTEM_LOAD_EXPORT_DIR",
+        "system-loads",
         &["system_reg", "system_mem"],
         &[("lldt", 2), ("ltr", 2), ("lmsw", 2)],
     );
@@ -99,7 +96,7 @@ fn address_only_invalidation_export_and_parity() {
     export(
         INVALIDATE,
         "invlpg",
-        "KEEL_INVLPG_EXPORT_DIR",
+        "invlpg",
         &["invalidate"],
         &[("invlpg", 1)],
     );
