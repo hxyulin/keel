@@ -3,6 +3,7 @@ import importlib.util
 import contextlib
 import io
 from pathlib import Path
+import shutil
 import unittest
 from unittest import mock
 import tempfile
@@ -116,10 +117,25 @@ class SelectionTests(unittest.TestCase):
     def test_test_only_change_stays_in_owner(self):
         self.assertEqual(runner.changed_packages(["crates/ir/tests/smoke.rs"], self.packages), {"ir"})
 
-    def test_shared_fixture_change_broadens_beyond_cargo_consumers(self):
-        for path in ["crates/ir/tests/fixtures/input.c", "crates/ir/tests/common/helper.rs"]:
+    def test_unread_test_files_belong_to_their_package(self):
+        for path in ["crates/ir/tests/fixtures/input.c", "crates/ir/tests/common/mod.rs",
+                     "crates/ir/tests/golden/fold.keel", "crates/ir/tests/runner.py"]:
             with self.subTest(path=path):
-                self.assertEqual(runner.changed_packages([path], self.packages), set(self.packages))
+                self.assertEqual(runner.changed_packages([path], self.packages), {"ir"})
+
+    def test_literal_paths_select_runtime_fixture_readers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_sources(root, {
+                "crates/codegen/tests/corpus.rs":
+                    'let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../ir/tests/programs");',
+                "crates/unrelated/src/lib.rs": 'const DATA: &str = "crates/ir/tests/data/table.txt";',
+                "crates/cli/tests/words.rs": 'const TEXT: &str = "not a path";',
+            })
+            select = lambda path: runner.changed_packages([path], self.packages, root)
+            self.assertEqual(select("crates/ir/tests/programs/loop.c"), {"ir", "codegen"})
+            self.assertEqual(select("crates/ir/tests/data/table.txt"), {"ir", "unrelated"})
+            self.assertEqual(select("crates/ir/tests/other/input.c"), {"ir"})
 
     def test_static_fixture_edges_include_cross_crate_readers(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -248,7 +264,8 @@ class SelectionTests(unittest.TestCase):
             path.write_text(text)
 
     def test_unknown_and_deleted_paths_broaden(self):
-        for path in ["Cargo.lock", "tools/generate.py", "crates/deleted/src/lib.rs"]:
+        for path in ["Cargo.lock", ".cargo/config.toml", "third-party/lib/src/lib.rs",
+                     "crates/deleted/src/lib.rs"]:
             with self.subTest(path=path):
                 self.assertEqual(runner.changed_packages([path], self.packages), set(self.packages))
 
@@ -288,6 +305,240 @@ class SelectionTests(unittest.TestCase):
     def test_cargo_full_keeps_default_tests_and_doctests(self):
         commands = runner.commands("cargo", "cargo", "test-fast", ["ir"], False)
         self.assertEqual(commands, [["cargo", "test", "--profile", "test-fast", "--no-fail-fast", "-p", "ir"]])
+
+
+class ConsumerAndPolicyTests(unittest.TestCase):
+    def setUp(self):
+        # asm's tests use codegen; link's tests use asm, built without asm's dev-dependencies.
+        self.packages = {
+            "keel-ir": {"directory": "crates/keel-ir", "dependencies": []},
+            "asm": {"directory": "crates/asm", "dependencies": [{"name": "codegen", "kind": "dev"}]},
+            "codegen": {"directory": "crates/codegen",
+                        "dependencies": [{"name": "asm", "kind": None}, {"name": "keel-ir", "kind": None}]},
+            "cli": {"directory": "crates/cli", "dependencies": [{"name": "codegen", "kind": None}]},
+            "link": {"directory": "crates/link", "dependencies": [{"name": "asm", "kind": "dev"}]},
+            "build-user": {"directory": "crates/build-user",
+                           "dependencies": [{"name": "cli", "kind": "build"}]},
+        }
+
+    def test_consumers_follow_normal_edges_then_one_dev_hop(self):
+        self.assertEqual(runner.consumers({"codegen"}, self.packages),
+                         {"codegen", "cli", "build-user", "asm"})
+        self.assertEqual(runner.consumers({"asm"}, self.packages),
+                         {"asm", "codegen", "cli", "build-user", "link"})
+
+    def test_documentation_selects_nothing_unless_a_source_reads_it(self):
+        for path in ["docs/compiler/optimizer.md", "README.md", "suite/README.md",
+                     "crates/codegen/tests/fixtures/README.md", "docs/assets/chart.svg"]:
+            with self.subTest(path=path):
+                self.assertEqual(runner.changed_selection([path], self.packages), (set(), set()))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            SelectionTests.write_sources(root, {
+                "crates/codegen/src/lib.rs": '#![doc = include_str!("../README.md")]',
+                "crates/asm/tests/ledger.rs": 'include_str!("../../../docs/ledger.json");',
+            })
+            self.assertEqual(runner.changed_packages(["crates/codegen/README.md"], self.packages, root),
+                             {"codegen", "cli", "build-user", "asm"})
+            self.assertEqual(runner.changed_packages(["docs/ledger.json"], self.packages, root), {"asm"})
+
+    def test_policy_paths_select_their_checks(self):
+        cases = {
+            "suite/ir/llvm_import.py": {"suite ir"},
+            "suite/c/lua/suite.toml": {"suite c"},
+            "suite/common/harness.py": {"suite"},
+            "suite/configs.toml": {"suite"},
+            "tools/x86-isa/generate.py": {"generators"},
+            "tools/x86-isa/feature-policy.json": {"generators"},
+            "crates/keel-asm/tools/generate.py": {"generators"},
+            "crates/keel-asm/isa/a64.json": {"generators"},
+            "tools/test.py": {"tools"},
+            "tools/tests/test_test_runner.py": {"tools"},
+            "crates/keel-cranelift/src/lib.rs": {"cranelift"},
+        }
+        for path, checks in cases.items():
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(runner.changed_selection([path], self.packages, Path(directory)),
+                                 (set(), checks))
+
+    def test_generator_inputs_select_their_rust_readers(self):
+        packages = {**self.packages, "keel-asm": {"directory": "crates/keel-asm", "dependencies": []}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            SelectionTests.write_sources(root, {
+                "crates/codegen/tests/neon.rs": 'include_str!("../../keel-asm/isa/neon.txt");',
+            })
+            self.assertEqual(runner.changed_selection(["crates/keel-asm/isa/neon.txt"], packages, root),
+                             ({"codegen"}, {"generators"}))
+
+    def test_keel_ir_changes_and_cranelift_readers_select_cranelift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            SelectionTests.write_sources(root, {
+                "crates/keel-cranelift/tests/translate.rs": 'include_str!("../../codegen/tests/fixtures/core.keel");',
+            })
+            select = lambda path: runner.changed_selection([path], self.packages, root)
+            self.assertEqual(select("crates/keel-ir/src/lib.rs")[1], {"cranelift"})
+            self.assertEqual(select("crates/keel-ir/tests/golden.rs")[1], set())
+            self.assertEqual(select("crates/cli/src/main.rs")[1], set())
+            self.assertEqual(select("crates/codegen/tests/fixtures/core.keel"), ({"codegen"}, {"cranelift"}))
+
+
+@unittest.skipUnless(shutil.which("cargo") and (runner.ROOT / ".git").exists(), "needs cargo and the repository")
+class RepositorySelectionTests(unittest.TestCase):
+    """Selections on this repository's packages and sources."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.packages = runner.workspace_packages("cargo")
+        cached = runner.static_inputs(cls.packages, runner.ROOT)
+        cls.patch = mock.patch.object(runner, "static_inputs", lambda *_: cached)
+        cls.patch.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patch.stop()
+
+    def select(self, *paths):
+        return runner.changed_selection(list(paths), self.packages)
+
+    def test_revert_1550bde0_selects_codegen_opt_and_their_consumers(self):
+        # git show --stat 1550bde0: codegen and opt sources and tests, plus two docs pages.
+        paths = [
+            "crates/keel-codegen/src/kinds.rs", "crates/keel-codegen/src/select.rs",
+            "crates/keel-codegen/src/x86_64.rs", "crates/keel-codegen/tests/x86_scalar_selection.rs",
+            "crates/keel-codegen/tests/x86_scalar_selection/x86_integer_idioms.rs",
+            "crates/keel-opt/src/instcombine.rs", "crates/keel-opt/tests/instcombine.rs",
+            "crates/keel-opt/tests/instcombine/negation.rs", "crates/keel-opt/tests/loop_vectorize.rs",
+            "docs/compiler/optimizer.md", "docs/targets/x86_64/codegen.md",
+        ]
+        packages, checks = self.select(*paths)
+        self.assertEqual(packages, {"keel-codegen", "keel-opt", "keel", "keel-c", "keel-asm"})
+        self.assertEqual(checks, set())
+        self.assertLess(len(packages), len(self.packages))
+
+    def test_common_edits_select_narrow_sets(self):
+        cases = {
+            "docs/compiler/optimizer.md": (set(), set()),
+            "suite/README.md": (set(), set()),
+            "tools/x86-isa/generate.py": (set(), {"generators"}),
+            "crates/keel-opt/tests/golden/const_fold.keel": ({"keel-opt"}, set()),
+            # keel-asm's compiler coverage test reads keel-c's program directory.
+            "crates/keel-c/tests/programs/aggregate_snapshot.c": ({"keel-c", "keel-asm"}, set()),
+            "crates/keel-asm/tests/common/mod.rs": ({"keel-asm"}, set()),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.select(path), expected)
+        # keel-suite names the suite/ir group; keel-llvm's parity test runs the Python importer.
+        self.assertEqual(self.select("suite/ir/llvm_import.py"), ({"keel-suite", "keel-llvm"}, {"suite ir"}))
+
+
+class OptimizerQuickTests(unittest.TestCase):
+    @staticmethod
+    def batches(plan):
+        return [([c[i + 1] for i, a in enumerate(c) if a == "-p"],
+                 [c[i + 1] for i, a in enumerate(c) if a == "--test"]) for c in plan]
+
+    def test_optimizer_quick_runs_both_oracles_and_end_to_end_targets(self):
+        for backend in ["cargo", "nextest"]:
+            with self.subTest(backend=backend):
+                batches = self.batches(runner.commands("cargo", backend, "test-fast", ["keel-opt"], True))
+                self.assertEqual(batches, [(["keel-opt"], []),
+                                           (["keel"], list(runner.OPTIMIZER_E2E_TARGETS)),
+                                           (["keel-c"], ["run"]), (["keel-codegen"], ["run"])])
+
+    def test_selected_consumers_absorb_the_extra_targets(self):
+        batches = self.batches(runner.commands("cargo", "nextest", "test-fast",
+                                               ["keel", "keel-c", "keel-codegen", "keel-opt"], True))
+        self.assertEqual(batches[0], (["keel", "keel-c", "keel-opt"], []))
+        packages, targets = batches[1]
+        self.assertEqual(packages, ["keel-codegen"])
+        self.assertEqual(targets, [*runner.CODEGEN_CORE_TARGETS, "run"])
+        self.assertEqual(len(batches), 2)
+
+    def test_optimizer_targets_exist_and_named_or_full_runs_add_nothing(self):
+        for target in runner.OPTIMIZER_E2E_TARGETS:
+            self.assertTrue((runner.ROOT / "crates/keel/tests" / f"{target}.rs").is_file(), target)
+        for kwargs in [{"unit": True}, {"targets": ["golden"]}]:
+            self.assertEqual(len(runner.commands("cargo", "nextest", "test-fast", ["keel-opt"], True, **kwargs)), 1)
+        self.assertEqual(self.batches(runner.commands("cargo", "cargo", "test-fast", ["keel-opt"], False)),
+                         [(["keel-opt"], [])])
+
+
+class EnvironmentAndSkipTests(unittest.TestCase):
+    def test_libllvm_default_applies_only_to_apple_silicon(self):
+        self.assertIsNone(runner.default_libllvm("Linux", "x86_64"))
+        with mock.patch.object(runner.subprocess, "run",
+                               return_value=mock.Mock(stdout="/missing/sysroot\n")):
+            self.assertIsNone(runner.default_libllvm("Darwin", "arm64"))
+        with tempfile.TemporaryDirectory() as sysroot:
+            (Path(sysroot) / "lib").mkdir()
+            (Path(sysroot) / "lib/libLLVM.dylib").write_bytes(b"")
+            with mock.patch.object(runner.subprocess, "run", return_value=mock.Mock(stdout=sysroot + "\n")):
+                self.assertEqual(runner.default_libllvm("Darwin", "arm64"), Path(sysroot) / "lib/libLLVM.dylib")
+
+    def test_keel_executable_comes_from_the_bin_artifact(self):
+        messages = "\n".join([
+            "warning text",
+            '{"reason":"compiler-artifact","target":{"name":"keel_ir"},"executable":null}',
+            '{"reason":"compiler-artifact","target":{"name":"keel"},"executable":"/t/test-fast/keel"}',
+            '{"reason":"build-finished","success":true}',
+        ])
+        self.assertEqual(runner.keel_executable(messages), "/t/test-fast/keel")
+        self.assertIsNone(runner.keel_executable('{"reason":"build-finished"}'))
+
+    def test_skip_summary_groups_by_reason(self):
+        log = ("keel-asm::x86::gnu_matches\tGNU as not found\n"
+               "keel-llvm::import::flags\tKEEL_TEST_LIBLLVM is not set\n"
+               "keel-asm::x86::gnu_relocations\tGNU as not found\n"
+               "keel-c::odd_line\n")
+        self.assertEqual(runner.skip_summary(log), [
+            "Skipped tests: 4",
+            "  2: GNU as not found",
+            "      keel-asm::x86::gnu_matches",
+            "      keel-asm::x86::gnu_relocations",
+            "  1: KEEL_TEST_LIBLLVM is not set",
+            "      keel-llvm::import::flags",
+            "  1: no reason given",
+            "      keel-c::odd_line",
+        ])
+        self.assertEqual(runner.skip_summary(""), ["Skipped tests: none recorded"])
+        many = "".join(f"keel::t{i}\tno clang\n" for i in range(runner.SKIP_SUMMARY_TESTS + 3))
+        self.assertEqual(runner.skip_summary(many)[-1], "      ... and 3 more")
+
+    def test_each_run_gets_a_fresh_skip_log_that_is_summarized_and_removed(self):
+        logs = []
+
+        def run(command, cwd, env):
+            logs.append(env["KEEL_SKIP_LOG"])
+            if command[-1] == "skips":
+                with open(env["KEEL_SKIP_LOG"], "a") as log:
+                    log.write("keel-asm::numeric::sme\tSME is not available\n")
+            return mock.Mock(returncode=0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "report.json"
+            args = runner.arguments(["ir", "--report", str(report)])
+            for command, expected in [(["cargo", "skips"], "  1: SME is not available"),
+                                      (["cargo", "quiet"], "Skipped tests: none recorded")]:
+                output = io.StringIO()
+                with mock.patch.object(runner.subprocess, "run", run), contextlib.redirect_stdout(output):
+                    self.assertEqual(runner.run_plan(args, [("tests", command)], {}, True), 0)
+                self.assertIn(expected, output.getvalue())
+                self.assertFalse(Path(logs[-1]).exists())
+            self.assertNotEqual(logs[0], logs[1])
+            self.assertEqual(runner.json.loads(report.read_text())["skips"], [])
+
+    def test_check_commands_for_changed_paths(self):
+        plan = dict(runner.check_commands(["tools", "suite ir", "suite c", "cranelift"], "cargo", "python3", []))
+        self.assertEqual(plan["tools unit tests"][-4:], ["-s", "tools/tests", "-p", "test_*.py"])
+        self.assertEqual(plan["suite runner tests"], ["cargo", "suite", "check", "c", "ir"])
+        self.assertEqual(plan["keel-cranelift tests"][:4],
+                         ["cargo", "test", "--manifest-path", "crates/keel-cranelift/Cargo.toml"])
+        self.assertIn("--locked", plan["keel-cranelift tests"])
+        every = dict(runner.check_commands(["suite", "suite ir"], "cargo", "python3", []))
+        self.assertEqual(every["suite runner tests"], ["cargo", "suite", "check"])
 
 
 class CheckScopeTests(unittest.TestCase):
@@ -335,7 +586,7 @@ class CheckScopeTests(unittest.TestCase):
             ["lint"], args.cargo, runner.sys.executable, runner.lint_features(self.packages))}
         ran = []
 
-        def run(command, cwd):
+        def run(command, cwd, env):
             ran.append(labels[tuple(command)])
             return mock.Mock(returncode=101 if ran[-1] == failing else 0)
 
@@ -348,8 +599,10 @@ class CheckScopeTests(unittest.TestCase):
         self.assertIn("ok: format", results)
 
     def test_check_scopes_combine_with_each_other_but_not_with_test_selection(self):
-        self.assertEqual(runner.arguments(["lint", "generators"]).scopes, ["lint", "generators"])
+        self.assertEqual(runner.arguments(["lint", "generators", "cranelift"]).scopes,
+                         ["lint", "generators", "cranelift"])
         for args in [["lint", "codegen"], ["generators", "full"], ["lint", "--quick"],
+                     ["cranelift", "ir"], ["cranelift", "--quick"],
                      ["lint", "--changed", "main"], ["generators", "--unit"],
                      ["lint", "--test", "run"]]:
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()):

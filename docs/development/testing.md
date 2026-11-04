@@ -12,6 +12,7 @@ python3 tools/test.py linker --quick               # Linker package only
 python3 tools/test.py assembler linker --quick     # Both components
 python3 tools/test.py frontend --consumers --quick # Frontend and downstream tests
 python3 tools/test.py codegen --quick              # Core codegen development check
+python3 tools/test.py optimizer --quick            # Optimizer tests plus program oracles
 python3 tools/test.py codegen --unit --quick       # Library unit tests only
 python3 tools/test.py linker --test archive        # One integration-test target
 python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
@@ -19,6 +20,7 @@ python3 tools/test.py --dry-run                    # Print packages and commands
 python3 tools/test.py full                         # Merge-boundary workspace verification
 python3 tools/test.py lint                         # Merge-boundary format and clippy checks
 python3 tools/test.py generators                   # Generated-file staleness and generator tests
+python3 tools/test.py cranelift                    # The separate keel-cranelift workspace
 ```
 
 GNU assembler oracle tests require GNU binutils. On macOS, `as` is Apple's
@@ -40,9 +42,14 @@ inputs fails the check. Run it when a generator, its inputs or a generated file
 changes. Both generators rewrite only outputs whose content changed, so a no-op
 regeneration does not trigger rebuilds.
 
-Both modes run every step even after a failure, then list each step's result.
-They accept `--dry-run`, `--cargo` and `--report`, and cannot be combined with
-test components or test selection options.
+`tools/test.py cranelift` builds and tests `crates/keel-cranelift`, which has its
+own workspace and lock file, with
+`cargo test --manifest-path crates/keel-cranelift/Cargo.toml --locked`. Run it at
+merge boundaries; `--changed` also selects it for changes that reach `keel-ir`.
+
+These check modes run every step even after a failure, then list each step's
+result. They accept `--dry-run`, `--cargo` and `--report`, and cannot be
+combined with test components or test selection options.
 
 Use component and test-target selections during development. Full workspace
 verification belongs at a merge/fast-forward boundary or an explicitly requested
@@ -52,11 +59,13 @@ whole workspace; that is not the default development check.
 
 Named components run only their own packages by default. Building their test
 binaries still builds required dependencies, but does not run those dependencies'
-test suites. Add `--consumers` to include transitive workspace consumers,
-including dev dependencies. This can select much of the workspace for shared IR
-or assembler changes. `--direct` remains accepted and means the default component
-selection. Changes selected with `--changed` retain their conservative consumer
-coverage; the component default does not narrow automatic change selection.
+test suites. Add `--consumers` to include workspace consumers: packages that
+depend on the component through normal or build dependencies, transitively, plus
+the packages that dev-depend on any of those. The walk does not continue past a
+dev-dependency, because Cargo builds a dependency without its dev-dependencies.
+This can select much of the workspace for shared IR or assembler changes.
+`--direct` remains accepted and means the default component selection.
+`--changed` uses the same consumer walk.
 
 | Component | Packages |
 | --- | --- |
@@ -80,26 +89,47 @@ exhaustive tests within the selected targets. Named selections without target
 options or `--quick` include the component's integration tests and doctests.
 
 `--changed BASE` includes differences between BASE and the current working tree,
-including staged, unstaged and untracked files. A source change selects its
-package and consumers. Test sources and indexed fixtures select their owner and
-packages that import them through literal `include!`, `include_str!`,
-`include_bytes!` or `#[path]` dependencies. Imports into library sources also
-select the importing package's Cargo consumers. Module path attributes use
-conservative suffix matching to cover inline module bases. Cross-package imports
-of a `src/` tree also count as package dependencies, covering edits to ordinary
-child modules without parsing Rust's full module tree.
+including staged, unstaged and untracked files. Each path selects packages and
+checks:
 
-All three Rust macro delimiters are supported for literal includes. The index
-does not expand arbitrary procedural macros or execute generators.
+| Changed path | Selects |
+| --- | --- |
+| `tools/x86-isa/**`, `crates/keel-asm/tools/**`, `crates/keel-asm/isa/**` | the `generators` checks |
+| `*.md`, `docs/**` | nothing |
+| `crates/keel-cranelift/**` | the `cranelift` checks |
+| `suite/<group>/**` for `c`, `ir`, `asm`, `linker`, `integration` | `cargo suite check <group>` |
+| other `suite/**`, including `suite/common` | `cargo suite check` for every group |
+| other `tools/**` | the `tools/tests` unit tests |
+| `crates/<pkg>/tests/**` | `<pkg>` |
+| other files in `crates/<pkg>` | `<pkg>` and its consumers |
+| anything else, such as root manifests and `Cargo.lock` | the entire workspace |
 
-Unindexed fixtures, computed include paths, macro-supplied include names,
-identifier concatenation, conditional path attributes, root
-manifests, generator changes, unknown paths and deleted packages select the
-entire workspace. Generated `OUT_DIR` includes are build outputs rather than
-Git changed-file inputs. Runtime-only fixture discovery is not inferred from
-filenames and retains the full-workspace fallback. This is a conservative
-file/dependency selection, not execution coverage or proof that unselected code
-cannot be affected.
+The first matching row applies. The first six rows are the `PATH_POLICY` table
+in [the runner](../../tools/test.py).
+
+A Rust source that reads a changed path also selects its package. The runner
+finds readers in two ways:
+
+- Literal `include!`, `include_str!`, `include_bytes!` and `#[path]` arguments,
+  with all three macro delimiters. Imports into library sources also select the
+  importing package's consumers. Module path attributes use suffix matching to
+  cover inline module bases. A cross-package import of a `src/` tree counts as a
+  package dependency, which covers edits to its ordinary child modules.
+- String literals that name a repository path, for fixtures that tests list at
+  run time. Leading `..` components are dropped, so
+  `join("../keel-c/tests/programs")` in keel-asm makes every file under
+  `crates/keel-c/tests/programs` select keel-asm. A path built from separate
+  components is not recognized.
+
+`crates/keel-cranelift` sources are indexed as readers too, so a workspace
+fixture they read selects the `cranelift` checks.
+
+Computed include paths, macro-supplied include names, identifier
+concatenation and conditional path attributes select the entire workspace.
+Generated `OUT_DIR` includes are build outputs rather than Git changed-file
+inputs. The index does not expand procedural macros or run generators. This is a
+file and dependency selection, not execution coverage or proof that unselected
+code cannot be affected.
 
 ## Development and qualification coverage
 
@@ -147,6 +177,35 @@ elsewhere, because codegen copies the immediate into the instruction unchanged.
 Add a target to the core list only for a shared backend contract with bounded
 cost.
 
+keel-opt's own tests check IR text. Under `--quick`, a selection that includes
+keel-opt also runs the program-level oracles: `-p keel-codegen --test run`,
+`-p keel-c --test run`, and the `OPTIMIZER_E2E_TARGETS` in crates/keel/tests.
+Those targets compile C or IR through optimizing pipelines and compare the
+program's behavior with an independent oracle. A selected package already runs
+all of its targets, so it gets no extra command. A warm
+`tools/test.py optimizer --quick` took 33 to 36 seconds on an Apple M5 Max.
+keel-codegen's `run` target took 18 seconds of that, and keel-c's `run` target 10.
+
+## Test environment
+
+The runner sets these variables for its commands. It keeps a value already set
+in the environment, except for `KEEL_SKIP_LOG`.
+
+| Variable | Value |
+| --- | --- |
+| `KEEL_TEST_LIBLLVM` | `$(rustc --print sysroot)/lib/libLLVM.dylib` on Apple silicon, when keel-llvm is selected |
+| `KEEL_TEST_KEEL` | a `keel` binary built with the selected profile, when keel-opt or keel-llvm is selected without `--unit` |
+| `KEEL_SKIP_LOG` | a fresh temporary file for each run |
+
+The keel-llvm import tests and the native keel-opt and keel-llvm checks run
+only when these are set. Plain `cargo test` does not set them.
+
+A test that cannot run because a host tool or host is missing calls
+`keel_test_support::skip!(reason)`, which appends one line to the file named by
+`KEEL_SKIP_LOG`: `<crate>::<test>`, a tab and the reason. After the results list,
+the runner prints the skipped tests grouped by reason, and `--report` records
+them under `skips`.
+
 ## Parallel execution
 
 Install `cargo-nextest` to run test binaries in parallel:
@@ -184,11 +243,11 @@ nextest invocations at the same exports.
 
 ```sh
 python3 tools/test.py --report target/test-reports/full.json
-python3 -m unittest discover -s tools/tests -p test_test_runner.py
+python3 -m unittest discover -s tools/tests -p 'test_*.py'
 ```
 
-The JSON report records selected packages, quick/full coverage, commands, elapsed
-wall time and exit codes. It does not infer test counts. Build time is included;
+The JSON report records selected packages and checks, quick/full coverage,
+commands, elapsed wall time, exit codes and skipped tests. It does not infer test counts. Build time is included;
 compare warm execution separately before attributing a change to test code.
 A full runner exit succeeds only when all commands, including doctests, succeed.
 
