@@ -89,7 +89,6 @@ it; use `run_pipeline` or `run_passes`.
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
 | `loop-memory` (opt-in) | Hoist an invariant load through a cloned loop guard |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
-| `adjacent-diff`, `run-balance-predicate` (opt-in) | Ordered integer reduction experiments |
 | `sign-extend-idiom` (opt-in) | Recognize a manual signed-byte conversion |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `load-narrow` (opt-in) | Narrow fault-free private stack loads; see `load_narrow.rs` |
@@ -390,15 +389,6 @@ when unsigned `bound - iv >= 2`, which keeps both increments in range without
 wrapping. The lanes combine once with wrapping addition, then the original loop
 handles the remaining iteration. Loads of the second iteration run only after
 both iterations are known to exist.
-
-### Ordered reductions
-
-`adjacent-diff` recognizes a rotated loop summing absolute differences of
-consecutive signed i32 elements and loads two new elements per iteration,
-guarded against address wrap with the scalar loop as fallback.
-`run-balance-predicate` recognizes a credit/debit recurrence with an unsigned
-comparison. Both are explicit experiments. Full's `adjacent-abs` converts a
-private scalar absolute-value triangle without moving memory.
 
 ### sign-extend-idiom
 

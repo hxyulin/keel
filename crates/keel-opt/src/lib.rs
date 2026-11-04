@@ -15,7 +15,6 @@ use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
 mod adjacent_abs;
-mod adjacent_diff;
 mod analysis;
 mod assembly_symbols;
 mod branch_ranges;
@@ -73,7 +72,6 @@ mod memory_alias;
 mod memory_forward;
 mod module_cleanup;
 mod phi_simplify;
-mod run_balance_predicate;
 mod sccp;
 mod scratch;
 mod sign_extend_idiom;
@@ -312,21 +310,6 @@ const BUILTINS: &[BuiltinPass] = &[
         run: adjacent_abs::run,
     },
     BuiltinPass {
-        name: "adjacent-diff",
-        description: "ordered adjacent i32 absolute-difference SIMD reduction (opt-in)",
-        run: adjacent_diff::run,
-    },
-    BuiltinPass {
-        name: "run-balance-predicate",
-        description: "predicate a bounded wrapping running-state recurrence (opt-in)",
-        run: run_balance_predicate::run,
-    },
-    BuiltinPass {
-        name: "adjacent-diff-narrow",
-        description: "ordered adjacent i32 reduction with narrow history (opt-in)",
-        run: adjacent_diff::run_narrow,
-    },
-    BuiltinPass {
         name: "stack-promote-large",
         description: "bounded private field promotion with pruned SSA for large functions (opt-in)",
         run: stack_promote::run_large,
@@ -412,11 +395,8 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::InlineAggregateReserve,
     &inline::InlineNoninterposable,
     &BUILTINS[17],
-    &BUILTINS[18],
-    &BUILTINS[19],
-    &BUILTINS[20],
     &inline::InlineCheapReserve,
-    &BUILTINS[21],
+    &BUILTINS[18],
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
     &tail_calls::TailCalls,
