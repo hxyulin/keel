@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::Intrinsic;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -119,12 +120,6 @@ fn object(
 }
 #[test]
 fn crc32_typed_alias_spill_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("crc32.ir"), source()).unwrap();
-        fs::write(d.join("crc32.c"), harness()).unwrap();
-    }
     let d = common::temp("crc32-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("crc.c"), harness()).unwrap();
@@ -147,12 +142,7 @@ fn crc32_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V2)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("crc32-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V2)).unwrap();
             }
         }
     }
@@ -183,15 +173,12 @@ fn crc32_types_features_and_purity() {
             .contains("x86 architectural")
     );
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_crc32_castagnoli_seed_width_aliases() {
-    if !std::is_x86_feature_detected!("sse4.2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("crc32-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("crc.c"), harness()).unwrap();
+    let crc_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -200,18 +187,13 @@ fn native_crc32_castagnoli_seed_width_aliases() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V2)).unwrap();
-                fs::write(d.join("crc.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2"])
-                        .arg(d.join("crc.c"))
-                        .arg(d.join("crc.o"))
-                        .arg("-o")
-                        .arg(d.join("crc")),
-                );
-                common::command(&mut Command::new(d.join("crc")));
+                native_program!(format!("crc32-{s:?}-{a:?}-{empty}"))
+                    .requires(&["sse4.2"])
+                    .file("crc.c", &crc_c)
+                    .file("crc.o", b)
+                    .link(["-O2", "crc.c", "crc.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

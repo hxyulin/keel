@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Type, VectorType};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -101,12 +102,6 @@ fn object(
 }
 #[test]
 fn explicit_fma_native_and_fallback_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("fma.ir"), source()).unwrap();
-        fs::write(d.join("fma.c"), harness()).unwrap();
-    }
     for native in [false, true] {
         let mut features = Features::for_level(CpuLevel::V3);
         features.fma = native;
@@ -117,7 +112,7 @@ fn explicit_fma_native_and_fallback_exports() {
         ] {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for empty in [false, true] {
-                    let (b, text) = object(s, a, empty, features);
+                    let (_, text) = object(s, a, empty, features);
                     if native {
                         for suffix in ["ss", "sd", "ps", "pd"] {
                             assert!(text.contains(&format!("vfmadd213{suffix}")));
@@ -127,11 +122,6 @@ fn explicit_fma_native_and_fallback_exports() {
                         assert!(!text.contains("vfmadd"));
                         assert!(text.contains("fmaf"));
                     }
-                    if let Some(d) = &export {
-                        let name = format!("fma-{s:?}-{a:?}-{empty}-{native}");
-                        fs::write(d.join(format!("{name}.o")), b).unwrap();
-                        fs::write(d.join(format!("{name}.s")), text).unwrap();
-                    }
                 }
             }
         }
@@ -140,15 +130,12 @@ fn explicit_fma_native_and_fallback_exports() {
     let arm = keel_codegen::aarch64::compile(&m).unwrap();
     assert!(arm.contains("fmadd"));
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_explicit_fma_reference() {
-    if !std::is_x86_feature_detected!("fma") || !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("fma-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("fma.c"), harness()).unwrap();
+    let fma_c = harness();
     for native in [false, true] {
         let mut features = Features::for_level(CpuLevel::V3);
         features.fma = native;
@@ -160,28 +147,25 @@ fn native_explicit_fma_reference() {
             for a in [AllocationTier::Fast, AllocationTier::Full] {
                 for empty in [false, true] {
                     let (b, _) = object(s, a, empty, features);
-                    fs::write(d.join("fma.o"), b).unwrap();
-                    common::command(
-                        Command::new("clang")
-                            .args([
-                                "-O2",
-                                "-mavx2",
-                                "-mfma",
-                                "-fno-fast-math",
-                                "-ffp-contract=off",
-                            ])
-                            .arg(d.join("fma.c"))
-                            .arg(d.join("fma.o"))
-                            .arg("-lm")
-                            .arg("-o")
-                            .arg(d.join("fma")),
-                    );
-                    common::command(&mut Command::new(d.join("fma")));
+                    native_program!(format!("fma-{s:?}-{a:?}-{empty}-{native}"))
+                        .requires(&["fma", "avx2"])
+                        .file("fma.c", &fma_c)
+                        .file("fma.o", b)
+                        .link([
+                            "-O2",
+                            "-mavx2",
+                            "-mfma",
+                            "-fno-fast-math",
+                            "-ffp-contract=off",
+                            "fma.c",
+                            "fma.o",
+                            "-lm",
+                        ])
+                        .check();
                 }
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
 
 #[test]

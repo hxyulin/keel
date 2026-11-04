@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::VectorType;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -69,12 +70,6 @@ fn object(s: SelectionTier, a: AllocationTier, empty: bool) -> (Vec<u8>, String)
 }
 #[test]
 fn wide_memory_aggregates_emission_exports_and_alignment() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("aggregate.ir"), source()).unwrap();
-        fs::write(d.join("aggregate.c"), harness()).unwrap();
-    }
     let d = common::temp("wide-aggregate-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("aggregate.c"), harness()).unwrap();
@@ -97,26 +92,18 @@ fn wide_memory_aggregates_emission_exports_and_alignment() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty);
+                let (_, text) = object(s, a, empty);
                 assert!(text.contains("and\trsp, -32"));
-                if let Some(d) = &export {
-                    let name = format!("aggregate-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
             }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_wide_memory_aggregate_interop() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("wide-aggregate-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("aggregate.c"), harness()).unwrap();
+    let aggregate_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -125,18 +112,13 @@ fn native_wide_memory_aggregate_interop() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty);
-                fs::write(d.join("aggregate.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx2"])
-                        .arg(d.join("aggregate.c"))
-                        .arg(d.join("aggregate.o"))
-                        .arg("-o")
-                        .arg(d.join("aggregate")),
-                );
-                common::command(&mut Command::new(d.join("aggregate")));
+                native_program!(format!("aggregate-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("aggregate.c", &aggregate_c)
+                    .file("aggregate.o", b)
+                    .link(["-O2", "-mavx2", "aggregate.c", "aggregate.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

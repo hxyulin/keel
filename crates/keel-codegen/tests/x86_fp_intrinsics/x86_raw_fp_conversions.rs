@@ -8,7 +8,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Intrinsic, Type};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -207,12 +208,6 @@ fn object(
 }
 #[test]
 fn raw_fp_conversion_control_and_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("raw-fp.ir"), source()).unwrap();
-        fs::write(d.join("raw-fp.c"), harness()).unwrap();
-    }
     let d = common::temp("raw-fp-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("raw.c"), harness()).unwrap();
@@ -235,12 +230,7 @@ fn raw_fp_conversion_control_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("raw-fp-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
             }
         }
     }
@@ -257,15 +247,12 @@ fn raw_fp_conversion_control_and_exports() {
         .is_err()
     );
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_raw_fp_rounding_indefinite_and_exception_flags() {
-    if !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("raw-fp-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("raw.c"), harness()).unwrap();
+    let raw_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -274,20 +261,22 @@ fn native_raw_fp_rounding_indefinite_and_exception_flags() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                fs::write(d.join("raw.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx", "-fno-fast-math", "-ffp-contract=off"])
-                        .arg(d.join("raw.c"))
-                        .arg(d.join("raw.o"))
-                        .arg("-o")
-                        .arg(d.join("raw")),
-                );
-                common::command(&mut Command::new(d.join("raw")));
+                native_program!(format!("raw-fp-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx"])
+                    .file("raw.c", &raw_c)
+                    .file("raw.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "raw.c",
+                        "raw.o",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
 
 #[test]

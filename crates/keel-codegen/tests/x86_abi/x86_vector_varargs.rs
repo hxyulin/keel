@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::VectorType;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -148,12 +149,6 @@ fn object(s: SelectionTier, a: AllocationTier, empty: bool) -> (Vec<u8>, String)
 }
 #[test]
 fn q_varargs_register_save_and_overflow_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("varargs128.ir"), source()).unwrap();
-        fs::write(d.join("varargs128.c"), harness()).unwrap();
-    }
     let d = common::temp("q-vararg-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("varargs.c"), harness()).unwrap();
@@ -175,22 +170,17 @@ fn q_varargs_register_save_and_overflow_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty);
-                if let Some(d) = &export {
-                    let name = format!("varargs128-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty);
             }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_q_varargs_both_directions_and_stack_alignment() {
-    let d = common::temp("q-vararg-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("varargs.c"), harness()).unwrap();
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
+    }
+    let varargs_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -199,18 +189,12 @@ fn native_q_varargs_both_directions_and_stack_alignment() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty);
-                fs::write(d.join("varargs.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-msse2"])
-                        .arg(d.join("varargs.c"))
-                        .arg(d.join("varargs.o"))
-                        .arg("-o")
-                        .arg(d.join("varargs")),
-                );
-                common::command(&mut Command::new(d.join("varargs")));
+                native_program!(format!("varargs128-{s:?}-{a:?}-{empty}"))
+                    .file("varargs.c", &varargs_c)
+                    .file("varargs.o", b)
+                    .link(["-O2", "-msse2", "varargs.c", "varargs.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

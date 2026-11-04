@@ -6,7 +6,8 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -99,12 +100,6 @@ fn object(
 }
 #[test]
 fn bmi_typed_semantics_features_aliases_and_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("bmi.ir"), source()).unwrap();
-        fs::write(d.join("bmi.c"), harness()).unwrap();
-    }
     let d = common::temp("bmi-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("bmi.c"), harness()).unwrap();
@@ -121,14 +116,9 @@ fn bmi_typed_semantics_features_aliases_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, features()).unwrap();
+                let (_, text) = object(s, a, empty, features()).unwrap();
                 for op in ["bextr", "pdep", "pext"] {
                     assert!(text.contains(op));
-                }
-                if let Some(d) = &export {
-                    let name = format!("bmi-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
                 }
             }
         }
@@ -156,15 +146,12 @@ fn bmi_typed_semantics_features_aliases_and_exports() {
             .contains("x86 architectural")
     );
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_bmi_bit_extraction_deposit_reference() {
-    if !std::is_x86_feature_detected!("bmi1") || !std::is_x86_feature_detected!("bmi2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("bmi-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("bmi.c"), harness()).unwrap();
+    let bmi_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -173,18 +160,13 @@ fn native_bmi_bit_extraction_deposit_reference() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, features()).unwrap();
-                fs::write(d.join("bmi.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2"])
-                        .arg(d.join("bmi.c"))
-                        .arg(d.join("bmi.o"))
-                        .arg("-o")
-                        .arg(d.join("bmi")),
-                );
-                common::command(&mut Command::new(d.join("bmi")));
+                native_program!(format!("bmi-{s:?}-{a:?}-{empty}"))
+                    .requires(&["bmi1", "bmi2"])
+                    .file("bmi.c", &bmi_c)
+                    .file("bmi.o", b)
+                    .link(["-O2", "bmi.c", "bmi.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

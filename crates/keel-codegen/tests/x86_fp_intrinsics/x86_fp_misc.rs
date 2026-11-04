@@ -8,7 +8,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Intrinsic, Type};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -189,12 +190,6 @@ fn object(
 }
 #[test]
 fn round_approx_minmax_comi_typed_alias_spill_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("fp-misc.ir"), source()).unwrap();
-        fs::write(d.join("fp-misc.c"), harness()).unwrap();
-    }
     let d = common::temp("fp-misc-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("compare.c"), harness()).unwrap();
@@ -220,12 +215,7 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("fp-misc-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
             }
         }
     }
@@ -263,15 +253,12 @@ fn fp_misc_types_features_and_controls() {
         assert!(!c.id.info().pure);
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_round_approx_minmax_comi_flags_and_aliases() {
-    if !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("fp-misc-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness()).unwrap();
+    let compare_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -280,18 +267,20 @@ fn native_round_approx_minmax_comi_flags_and_aliases() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                fs::write(d.join("compare.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx", "-fno-fast-math", "-ffp-contract=off"])
-                        .arg(d.join("compare.c"))
-                        .arg(d.join("compare.o"))
-                        .arg("-o")
-                        .arg(d.join("compare")),
-                );
-                common::command(&mut Command::new(d.join("compare")));
+                native_program!(format!("fp-misc-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx"])
+                    .file("compare.c", &compare_c)
+                    .file("compare.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "compare.c",
+                        "compare.o",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

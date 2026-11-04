@@ -6,7 +6,8 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -111,12 +112,6 @@ fn f16c_typed_storage_rounding_and_exports() {
         m.to_string(),
         keel_ir::parse(&m.to_string()).unwrap().to_string()
     );
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("f16c.ir"), &source).unwrap();
-        fs::write(d.join("f16c.c"), harness()).unwrap();
-    }
     let d = common::temp("f16c-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("f16c.c"), harness()).unwrap();
@@ -140,15 +135,10 @@ fn f16c_typed_storage_rounding_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) =
+                let (_, text) =
                     object(&source, s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
                 assert!(text.contains("vcvtph2ps"));
                 assert!(text.contains("vcvtps2ph"));
-                if let Some(d) = &export {
-                    let name = format!("f16c-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
             }
         }
     }
@@ -217,48 +207,43 @@ fn f16c_requires_features_and_well_typed_constant_rounding() {
     keel_opt::optimize(&mut m).unwrap();
     assert_eq!(count,m.functions.iter().map(|f|f.layout_insts().filter(|(_,i)|matches!(f.inst_data(*i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_f16c())).count()).sum::<usize>());
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_f16c_all_half_patterns_rounding_and_flags() {
-    if !std::is_x86_feature_detected!("f16c") || !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("f16c-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("f16c.c"), harness()).unwrap();
-    let mut configurations = vec![
-        (Features::for_level(CpuLevel::V3), SelectionTier::Baseline),
-        (Features::for_level(CpuLevel::V3), SelectionTier::Trees),
-        (Features::for_level(CpuLevel::V3), SelectionTier::Full),
-    ];
-    if std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512vl") {
-        configurations.push((
-            Features::NONE.with_features("avx512f,avx512vl").unwrap(),
+    let f16c_c = harness();
+    let v3 = Features::for_level(CpuLevel::V3);
+    let avx512 = Features::NONE.with_features("avx512f,avx512vl").unwrap();
+    for (label, features, s, required) in [
+        ("v3", v3, SelectionTier::Baseline, &["f16c", "avx"][..]),
+        ("v3", v3, SelectionTier::Trees, &["f16c", "avx"]),
+        ("v3", v3, SelectionTier::Full, &["f16c", "avx"]),
+        (
+            "avx512",
+            avx512,
             SelectionTier::Full,
-        ));
-    }
-    for (features, s) in configurations {
+            &["f16c", "avx", "avx512f", "avx512vl"],
+        ),
+    ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(&source(), s, a, empty, features).unwrap();
-                fs::write(d.join("f16c.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args([
-                            "-O2",
-                            "-mavx",
-                            "-mf16c",
-                            "-fno-fast-math",
-                            "-ffp-contract=off",
-                        ])
-                        .arg(d.join("f16c.c"))
-                        .arg(d.join("f16c.o"))
-                        .arg("-o")
-                        .arg(d.join("f16c")),
-                );
-                common::command(&mut Command::new(d.join("f16c")));
+                native_program!(format!("f16c-{label}-{s:?}-{a:?}-{empty}"))
+                    .requires(required)
+                    .file("f16c.c", &f16c_c)
+                    .file("f16c.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx",
+                        "-mf16c",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "f16c.c",
+                        "f16c.o",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

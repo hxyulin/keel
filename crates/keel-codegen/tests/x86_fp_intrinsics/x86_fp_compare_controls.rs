@@ -8,7 +8,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Intrinsic, Type};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -176,12 +177,6 @@ fn object(
 }
 #[test]
 fn every_avx_compare_predicate_typed_alias_spill_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("compare32.ir"), source(false)).unwrap();
-        fs::write(d.join("compare32.c"), harness(false)).unwrap();
-    }
     let d = common::temp("compare32-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("compare.c"), harness(false)).unwrap();
@@ -204,13 +199,8 @@ fn every_avx_compare_predicate_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) =
+                let (_, _) =
                     object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("compare32-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
             }
         }
     }
@@ -258,15 +248,12 @@ fn compare_control_validation_and_unused_exception_effects() {
         assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),keel_ir::InstData::Intrinsic{id,..}if id.is_x86_fp_compare())));
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_all32_predicates_masks_signaling_and_aliases() {
-    if !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("compare32-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("compare.c"), harness(true)).unwrap();
+    let compare_c = harness(true);
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -275,18 +262,20 @@ fn native_all32_predicates_masks_signaling_and_aliases() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3), true).unwrap();
-                fs::write(d.join("compare.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx", "-fno-fast-math", "-ffp-contract=off"])
-                        .arg(d.join("compare.c"))
-                        .arg(d.join("compare.o"))
-                        .arg("-o")
-                        .arg(d.join("compare")),
-                );
-                common::command(&mut Command::new(d.join("compare")));
+                native_program!(format!("compare32-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx"])
+                    .file("compare.c", &compare_c)
+                    .file("compare.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "compare.c",
+                        "compare.o",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

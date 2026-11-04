@@ -81,6 +81,16 @@ pub const FEATURES: &[&str] = &[
     "avx512vl",
 ];
 
+/// Whether [`Program::check`] runs or exports anything on this host: true on
+/// x86-64 Linux and whenever `KEEL_TEST_EXPORT_DIR` is set.
+///
+/// A test that spends time building programs can check this first and skip
+/// with [`NOT_X86_LINUX`] otherwise.
+pub fn active() -> bool {
+    cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        || env::var_os("KEEL_TEST_EXPORT_DIR").is_some_and(|value| !value.is_empty())
+}
+
 /// Starts a [`Program`] named `name` for the calling test.
 ///
 /// The name must be unique within the test; it becomes the packet directory.

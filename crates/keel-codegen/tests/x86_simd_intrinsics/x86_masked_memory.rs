@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Intrinsic, Type};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -160,12 +161,6 @@ fn object(
 }
 #[test]
 fn masked_memory_typed_alias_spill_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("masked-memory.ir"), source()).unwrap();
-        fs::write(d.join("masked-memory.c"), harness()).unwrap();
-    }
     let d = common::temp("masked-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("masked.c"), harness()).unwrap();
@@ -187,12 +182,7 @@ fn masked_memory_typed_alias_spill_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("masked-memory-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
             }
         }
     }
@@ -231,15 +221,12 @@ fn masked_memory_feature_and_operand_validation() {
     let bad = source().replace("load.i32x4", "load.i64x2");
     assert!(keel_ir::verify_module(&keel_ir::parse(&bad).unwrap()).is_err());
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_masked_memory_fault_suppression_and_exact_lanes() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("masked-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("masked.c"), harness()).unwrap();
+    let masked_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -248,18 +235,13 @@ fn native_masked_memory_fault_suppression_and_exact_lanes() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3)).unwrap();
-                fs::write(d.join("masked.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2"])
-                        .arg(d.join("masked.c"))
-                        .arg(d.join("masked.o"))
-                        .arg("-o")
-                        .arg(d.join("masked")),
-                );
-                common::command(&mut Command::new(d.join("masked")));
+                native_program!(format!("masked-memory-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("masked.c", &masked_c)
+                    .file("masked.o", b)
+                    .link(["-O2", "masked.c", "masked.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

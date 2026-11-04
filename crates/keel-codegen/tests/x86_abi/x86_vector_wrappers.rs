@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::VectorType;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -201,12 +202,6 @@ fn object(s: SelectionTier, a: AllocationTier, empty: bool, wide: bool) -> (Vec<
 #[test]
 fn vector_wrapper_sseup_emission_exports_and_baseline() {
     object(SelectionTier::Full, AllocationTier::Full, true, false);
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("wrappers.ir"), source(true)).unwrap();
-        fs::write(d.join("wrappers.c"), harness()).unwrap();
-    }
     let d = common::temp("wrapper-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("wrappers.c"), harness()).unwrap();
@@ -229,25 +224,17 @@ fn vector_wrapper_sseup_emission_exports_and_baseline() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, true);
-                if let Some(d) = &export {
-                    let name = format!("wrappers-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, true);
             }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_vector_wrapper_sseup_interop() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("wrapper-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("wrappers.c"), harness()).unwrap();
+    let wrappers_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -256,20 +243,15 @@ fn native_vector_wrapper_sseup_interop() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, true);
-                fs::write(d.join("wrappers.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx2"])
-                        .arg(d.join("wrappers.c"))
-                        .arg(d.join("wrappers.o"))
-                        .arg("-o")
-                        .arg(d.join("wrappers")),
-                );
-                common::command(&mut Command::new(d.join("wrappers")));
+                native_program!(format!("wrappers-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("wrappers.c", &wrappers_c)
+                    .file("wrappers.o", b)
+                    .link(["-O2", "-mavx2", "wrappers.c", "wrappers.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
 
 #[test]

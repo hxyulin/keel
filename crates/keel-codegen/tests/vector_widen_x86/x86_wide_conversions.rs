@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{VectorReduceOp, VectorType};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -210,12 +211,6 @@ fn wide_conversion_reduction_matrix_emits_and_exports() {
     let mut fallback = Features::for_level(CpuLevel::V3);
     fallback.avx2 = false;
     object(SelectionTier::Full, AllocationTier::Full, true, fallback);
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("conversions.ir"), source()).unwrap();
-        fs::write(d.join("conversions.c"), harness()).unwrap();
-    }
     let d = common::temp("wide-convert-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("conversions.c"), harness()).unwrap();
@@ -232,25 +227,17 @@ fn wide_conversion_reduction_matrix_emits_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3));
-                if let Some(d) = &export {
-                    let name = format!("conversions-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V3));
             }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_wide_conversion_reduction_reference() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("wide-convert-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("conversions.c"), harness()).unwrap();
+    let conversions_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -259,18 +246,13 @@ fn native_wide_conversion_reduction_reference() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3));
-                fs::write(d.join("conversions.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx2"])
-                        .arg(d.join("conversions.c"))
-                        .arg(d.join("conversions.o"))
-                        .arg("-o")
-                        .arg(d.join("conversions")),
-                );
-                common::command(&mut Command::new(d.join("conversions")));
+                native_program!(format!("conversions-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("conversions.c", &conversions_c)
+                    .file("conversions.o", b)
+                    .link(["-O2", "-mavx2", "conversions.c", "conversions.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

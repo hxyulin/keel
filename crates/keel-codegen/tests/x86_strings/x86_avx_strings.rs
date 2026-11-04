@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::Intrinsic;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -25,7 +26,7 @@ const ONE_SIMD: Pools = Pools {
 /// The imm8 control reaches the encoding unchanged, so boundary controls cover
 /// its lowering. One native configuration still executes all 256 controls.
 const BOUNDARY_CONTROLS: [u8; 11] = [0, 1, 2, 4, 8, 16, 32, 64, 127, 128, 255];
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Fixture {
     Narrow,
     #[cfg_attr(
@@ -300,8 +301,6 @@ fn forced_harness() -> String {
 }
 #[test]
 fn forced_live_ymm0_string_mask_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    let prefix = "avx-strings-forced-wide";
     let temp = common::temp("avx-strings-forced-syntax");
     fs::create_dir_all(&temp).unwrap();
     fs::write(temp.join("forced.c"), forced_harness()).unwrap();
@@ -322,18 +321,13 @@ fn forced_live_ymm0_string_mask_exports() {
     );
     fs::remove_dir_all(temp).unwrap();
 
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join(format!("{prefix}.ir")), forced_source()).unwrap();
-        fs::write(d.join(format!("{prefix}.c")), forced_harness()).unwrap();
-    }
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
         SelectionTier::Full,
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
-            let (b, text) = object_with_forced_wide(
+            let (_, text) = object_with_forced_wide(
                 s,
                 a,
                 false,
@@ -351,23 +345,15 @@ fn forced_live_ymm0_string_mask_exports() {
                     .any(|l| l.contains("vmovups\tymmword ptr") && l.ends_with(", ymm0")),
                 "wide use must still read YMM0"
             );
-            if let Some(d) = &export {
-                let name = format!("{prefix}-{s:?}-{a:?}");
-                fs::write(d.join(format!("{name}.o")), b).unwrap();
-                fs::write(d.join(format!("{name}.s")), text).unwrap();
-            }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_forced_live_ymm0_across_string_masks() {
-    if !std::is_x86_feature_detected!("avx2") || !std::is_x86_feature_detected!("sse4.2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("avx-strings-forced-wide-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("forced.c"), forced_harness()).unwrap();
+    let forced_c = forced_harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -383,19 +369,14 @@ fn native_forced_live_ymm0_across_string_masks() {
                 true,
             )
             .unwrap();
-            fs::write(d.join("forced.o"), b).unwrap();
-            common::command(
-                Command::new("clang")
-                    .args(["-O2", "-march=x86-64", "-mno-avx"])
-                    .arg(d.join("forced.c"))
-                    .arg(d.join("forced.o"))
-                    .arg("-o")
-                    .arg(d.join("forced")),
-            );
-            common::command(&mut Command::new(d.join("forced")));
+            native_program!(format!("avx-strings-forced-wide-{s:?}-{a:?}"))
+                .requires(&["avx2", "sse4.2"])
+                .file("forced.c", &forced_c)
+                .file("forced.o", b)
+                .link(["-O2", "-march=x86-64", "-mno-avx", "forced.c", "forced.o"])
+                .check();
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
 #[test]
 fn exhaustive_avx_strings_controls_register_spill_and_wide_alias_exports() {
@@ -408,10 +389,6 @@ fn avx_strings_boundary_smoke() {
 }
 
 fn check_string_exports(exhaustive: bool) {
-    let export = exhaustive
-        .then(|| std::env::var_os("KEEL_X86_256_EXPORT_DIR"))
-        .flatten()
-        .map(PathBuf::from);
     let d = common::temp(if exhaustive {
         "avx-string-oracle"
     } else {
@@ -420,12 +397,6 @@ fn check_string_exports(exhaustive: bool) {
     fs::create_dir_all(&d).unwrap();
     let mut configurations = 0;
     for fixture in [Fixture::Narrow, Fixture::Wide] {
-        let wide = fixture == Fixture::Wide;
-        let name = if wide {
-            "avx-strings-wide"
-        } else {
-            "avx-strings"
-        };
         let c = harness(fixture);
         fs::write(d.join("oracle.c"), &c).unwrap();
         common::command(
@@ -443,11 +414,6 @@ fn check_string_exports(exhaustive: bool) {
                 .arg("-o")
                 .arg(d.join("oracle.o")),
         );
-        if let Some(e) = &export {
-            fs::create_dir_all(e).unwrap();
-            fs::write(e.join(format!("{name}.ir")), source(fixture)).unwrap();
-            fs::write(e.join(format!("{name}.c")), c).unwrap();
-        }
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -464,14 +430,9 @@ fn check_string_exports(exhaustive: bool) {
                     {
                         continue;
                     }
-                    let (b, text) =
+                    let (_, _) =
                         object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
                     configurations += 1;
-                    if let Some(e) = &export {
-                        let n = format!("{name}-{s:?}-{a:?}-{empty}");
-                        fs::write(e.join(format!("{n}.o")), b).unwrap();
-                        fs::write(e.join(format!("{n}.s")), text).unwrap();
-                    }
                 }
             }
         }
@@ -605,18 +566,12 @@ fn exact_oracle_instruction_bytes_gnu_and_clang() {
     }
     fs::remove_dir_all(d).unwrap();
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
-    if !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("avx-strings-native");
-    fs::create_dir_all(&d).unwrap();
     for wide in [false, true] {
-        if wide && !std::is_x86_feature_detected!("avx") {
-            continue;
-        }
         for s in [
             SelectionTier::Baseline,
             SelectionTier::Trees,
@@ -633,22 +588,17 @@ fn exhaustive_native_avx_strings_all_controls_lengths_flags_aliases() {
                     } else {
                         Fixture::Narrow
                     };
-                    fs::write(d.join("strings.c"), harness(fixture)).unwrap();
+                    let strings_c = harness(fixture);
                     let (b, _) =
                         object(s, a, empty, Features::for_level(CpuLevel::V3), fixture).unwrap();
-                    fs::write(d.join("strings.o"), b).unwrap();
-                    common::command(
-                        Command::new("clang")
-                            .args(["-O2", "-march=x86-64", "-mno-avx"])
-                            .arg(d.join("strings.c"))
-                            .arg(d.join("strings.o"))
-                            .arg("-o")
-                            .arg(d.join("strings")),
-                    );
-                    common::command(&mut Command::new(d.join("strings")));
+                    native_program!(format!("avx-strings-{fixture:?}-{s:?}-{a:?}-{empty}"))
+                        .requires(&["avx"])
+                        .file("strings.c", &strings_c)
+                        .file("strings.o", b)
+                        .link(["-O2", "-march=x86-64", "-mno-avx", "strings.c", "strings.o"])
+                        .check();
                 }
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

@@ -7,7 +7,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::Intrinsic;
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -165,12 +166,6 @@ fn object(
 }
 #[test]
 fn runtime_permute_masks_tests_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("legacy-sign-mask.ir"), source()).unwrap();
-        fs::write(d.join("legacy-sign-mask.c"), harness()).unwrap();
-    }
     let d = common::temp("legacy-sign-mask-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("bits.c"), harness()).unwrap();
@@ -193,12 +188,7 @@ fn runtime_permute_masks_tests_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V1)).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("legacy-sign-mask-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
+                let (_, _) = object(s, a, empty, Features::for_level(CpuLevel::V1)).unwrap();
             }
         }
     }
@@ -224,12 +214,12 @@ fn strict_v1_sign_mask_types_and_purity() {
             .contains("x86 architectural")
     );
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_runtime_permutations_masks_and_test_flags() {
-    let d = common::temp("legacy-sign-mask-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("bits.c"), harness()).unwrap();
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
+    }
+    let bits_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -238,18 +228,12 @@ fn native_runtime_permutations_masks_and_test_flags() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V1)).unwrap();
-                fs::write(d.join("bits.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2"])
-                        .arg(d.join("bits.c"))
-                        .arg(d.join("bits.o"))
-                        .arg("-o")
-                        .arg(d.join("bits")),
-                );
-                common::command(&mut Command::new(d.join("bits")));
+                native_program!(format!("legacy-sign-mask-{s:?}-{a:?}-{empty}"))
+                    .file("bits.c", &bits_c)
+                    .file("bits.o", b)
+                    .link(["-O2", "bits.c", "bits.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

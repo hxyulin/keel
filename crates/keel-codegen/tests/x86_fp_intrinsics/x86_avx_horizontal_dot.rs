@@ -8,7 +8,8 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::{Intrinsic, Type};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -207,12 +208,6 @@ fn object(
 }
 #[test]
 fn round_approx_minmax_comi_typed_alias_spill_export() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("avx-horizontal-dot.ir"), source(false)).unwrap();
-        fs::write(d.join("avx-horizontal-dot.c"), harness(false)).unwrap();
-    }
     let d = common::temp("avx-horizontal-dot-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("compare.c"), harness(false)).unwrap();
@@ -241,13 +236,8 @@ fn round_approx_minmax_comi_typed_alias_spill_export() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) =
+                let (_, _) =
                     object(s, a, empty, Features::for_level(CpuLevel::V3), false).unwrap();
-                if let Some(d) = &export {
-                    let name = format!("avx-horizontal-dot-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{name}.o")), b).unwrap();
-                    fs::write(d.join(format!("{name}.s")), text).unwrap();
-                }
             }
         }
     }
@@ -284,14 +274,11 @@ fn avx_horizontal_dot_features_controls_and_unused_effects() {
             .contains("x86 architectural")
     );
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_avx_horizontal_dot_controls_flags_and_aliases() {
-    if !std::is_x86_feature_detected!("avx") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("avx-horizontal-dot-native");
-    fs::create_dir_all(&d).unwrap();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -302,29 +289,26 @@ fn native_avx_horizontal_dot_controls_flags_and_aliases() {
                 // Execute every control once; the others share its lowering.
                 let all_controls =
                     (s, a, empty) == (SelectionTier::Baseline, AllocationTier::Fast, false);
-                fs::write(d.join("compare.c"), harness(all_controls)).unwrap();
+                let compare_c = harness(all_controls);
                 let (b, _) =
                     object(s, a, empty, Features::for_level(CpuLevel::V3), all_controls).unwrap();
-                fs::write(d.join("compare.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args([
-                            "-O2",
-                            "-march=x86-64",
-                            "-mavx",
-                            "-msse4.1",
-                            "-msse3",
-                            "-fno-fast-math",
-                            "-ffp-contract=off",
-                        ])
-                        .arg(d.join("compare.c"))
-                        .arg(d.join("compare.o"))
-                        .arg("-o")
-                        .arg(d.join("compare")),
-                );
-                common::command(&mut Command::new(d.join("compare")));
+                native_program!(format!("avx-horizontal-dot-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx"])
+                    .file("compare.c", &compare_c)
+                    .file("compare.o", b)
+                    .link([
+                        "-O2",
+                        "-march=x86-64",
+                        "-mavx",
+                        "-msse4.1",
+                        "-msse3",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "compare.c",
+                        "compare.o",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }

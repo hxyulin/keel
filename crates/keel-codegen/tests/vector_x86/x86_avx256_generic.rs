@@ -4,7 +4,8 @@ use crate::userspace;
 use crate::vector_common as common;
 use keel_asm_ir::x86::{CpuLevel, Features};
 use keel_codegen::{SelectionTier, regalloc::AllocationTier};
-use std::{fs, path::PathBuf, process::Command};
+use keel_test_support::{native, native_program};
+use std::{fs, process::Command};
 fn source() -> String {
     common::fixture_for(&keel_ir::VectorType::ALL_256)
 }
@@ -31,12 +32,6 @@ fn object_for(
 }
 #[test]
 fn packed_wide_corpus_emits_typed_objects_and_native_oracle_exports() {
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("generic.ir"), source()).unwrap();
-        fs::write(d.join("generic.c"), harness()).unwrap();
-    }
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -44,7 +39,7 @@ fn packed_wide_corpus_emits_typed_objects_and_native_oracle_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object(s, a, empty, Features::for_level(CpuLevel::V3));
+                let (_, text) = object(s, a, empty, Features::for_level(CpuLevel::V3));
                 for op in [
                     "vpaddb",
                     "vpmulld",
@@ -59,11 +54,6 @@ fn packed_wide_corpus_emits_typed_objects_and_native_oracle_exports() {
                     "vcmppd",
                 ] {
                     assert!(text.contains(op), "missing{op}");
-                }
-                if let Some(d) = &export {
-                    let n = format!("generic-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{n}.o")), b).unwrap();
-                    fs::write(d.join(format!("{n}.s")), text).unwrap();
                 }
             }
         }
@@ -82,16 +72,12 @@ fn wide_reference_harness_has_strict_c_syntax() {
     );
     fs::remove_dir_all(d).unwrap();
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_full_generic_256_reference() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
-    let d = common::temp("wide-native");
-    fs::create_dir_all(&d).unwrap();
-    let c = d.join("generic.c");
-    fs::write(&c, harness()).unwrap();
+    let generic_c = harness();
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -100,23 +86,23 @@ fn native_full_generic_256_reference() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object(s, a, empty, Features::for_level(CpuLevel::V3));
-                let o = d.join("wide.o");
-                let exe = d.join("wide");
-                fs::write(&o, b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx2", "-fno-fast-math", "-ffp-contract=off"])
-                        .arg(&c)
-                        .arg(&o)
-                        .arg("-lm")
-                        .arg("-o")
-                        .arg(&exe),
-                );
-                common::command(&mut Command::new(exe));
+                native_program!(format!("generic-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("generic.c", &generic_c)
+                    .file("wide.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx2",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "generic.c",
+                        "wide.o",
+                        "-lm",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
 
 fn abi_source() -> (String, String) {
@@ -169,7 +155,6 @@ fn abi_source() -> (String, String) {
 #[test]
 fn wide_sysv_abi_emission_and_exports() {
     let (ir, c) = abi_source();
-    let export = std::env::var_os("KEEL_X86_256_EXPORT_DIR").map(PathBuf::from);
     let d = common::temp("wide-abi-syntax");
     fs::create_dir_all(&d).unwrap();
     fs::write(d.join("abi.c"), &c).unwrap();
@@ -186,11 +171,6 @@ fn wide_sysv_abi_emission_and_exports() {
             .arg(d.join("abi.c")),
     );
     fs::remove_dir_all(d).unwrap();
-    if let Some(d) = &export {
-        fs::create_dir_all(d).unwrap();
-        fs::write(d.join("abi.ir"), &ir).unwrap();
-        fs::write(d.join("abi.c"), &c).unwrap();
-    }
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -198,27 +178,19 @@ fn wide_sysv_abi_emission_and_exports() {
     ] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
-                let (b, text) = object_for(&ir, s, a, empty, Features::for_level(CpuLevel::V3));
+                let (_, text) = object_for(&ir, s, a, empty, Features::for_level(CpuLevel::V3));
                 assert!(text.contains("vzeroupper"));
-                if let Some(d) = &export {
-                    let n = format!("abi-{s:?}-{a:?}-{empty}");
-                    fs::write(d.join(format!("{n}.o")), b).unwrap();
-                    fs::write(d.join(format!("{n}.s")), text).unwrap();
-                }
             }
         }
     }
 }
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_wide_sysv_abi_reference() {
-    if !std::is_x86_feature_detected!("avx2") {
-        return;
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
     }
     let (ir, c) = abi_source();
-    let d = common::temp("wide-abi-native");
-    fs::create_dir_all(&d).unwrap();
-    fs::write(d.join("abi.c"), c).unwrap();
+    let abi_c = c;
     for s in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -227,19 +199,21 @@ fn native_wide_sysv_abi_reference() {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for empty in [false, true] {
                 let (b, _) = object_for(&ir, s, a, empty, Features::for_level(CpuLevel::V3));
-                fs::write(d.join("abi.o"), b).unwrap();
-                common::command(
-                    Command::new("clang")
-                        .args(["-O2", "-mavx2", "-fno-fast-math", "-ffp-contract=off"])
-                        .arg(d.join("abi.c"))
-                        .arg(d.join("abi.o"))
-                        .arg("-lm")
-                        .arg("-o")
-                        .arg(d.join("abi")),
-                );
-                common::command(&mut Command::new(d.join("abi")));
+                native_program!(format!("abi-{s:?}-{a:?}-{empty}"))
+                    .requires(&["avx2"])
+                    .file("abi.c", &abi_c)
+                    .file("abi.o", b)
+                    .link([
+                        "-O2",
+                        "-mavx2",
+                        "-fno-fast-math",
+                        "-ffp-contract=off",
+                        "abi.c",
+                        "abi.o",
+                        "-lm",
+                    ])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(d).unwrap();
 }
