@@ -128,20 +128,13 @@ block2:
     assert_eq!(m.functions[0].sig.params.len(), 4);
 }
 #[test]
-fn named_registration_order_and_cleanup_policy_remain_explicit() {
-    let names: Vec<_> = keel_opt::PASSES.iter().map(|pass| pass.name()).collect();
-    assert!(
-        names
-            .windows(2)
-            .any(|pair| pair == ["private-aggregate", "private-aggregate-cleanup"])
-    );
+fn cleanup_policy_is_full_only() {
     for tier in [
         keel_opt::OptimizationTier::None,
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Basic,
         keel_opt::OptimizationTier::Full,
     ] {
-        assert!(!tier.pipeline().contains(&"private-aggregate"));
         assert_eq!(
             tier.pipeline().contains(&"private-aggregate-cleanup"),
             tier == keel_opt::OptimizationTier::Full
@@ -173,7 +166,7 @@ fn named_registration_order_and_cleanup_policy_remain_explicit() {
         ]
     );
     let mut m = parse(SOURCE).unwrap();
-    keel_opt::run_passes(&mut m, &["private-aggregate"]).unwrap();
+    assert_ne!(private_aggregate::run(&mut m), 0);
     verify_module(&m).unwrap();
     assert!(
         m.functions[0]
@@ -187,10 +180,10 @@ fn named_registration_order_and_cleanup_policy_remain_explicit() {
 #[test]
 fn conditional_cleanup_matches_the_explicit_pipeline_and_skips_unrelated_modules() {
     let mut expected = parse(SOURCE).unwrap();
+    assert_ne!(private_aggregate::run(&mut expected), 0);
     keel_opt::run_passes(
         &mut expected,
         &[
-            "private-aggregate",
             "stack-forward",
             "stack-promote",
             "canonicalize",
@@ -238,7 +231,7 @@ fn tail_and_returns_twice_endpoints_are_excluded() {
 #[test]
 fn explicit_custom_pipeline_verifies_module_rewrite() {
     let mut m = parse(SOURCE).unwrap();
-    keel_opt::run_pipeline(&mut m, &[&private_aggregate::PrivateAggregate]).unwrap();
+    keel_opt::run_pipeline(&mut m, &[&private_aggregate::PrivateAggregateCleanup]).unwrap();
     verify_module(&m).unwrap();
     assert_eq!(m.functions[0].sig.params.len(), 5);
 }

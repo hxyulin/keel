@@ -379,7 +379,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &constant_args::ConstantArgs,
     &module_cleanup::EmptyCalls,
     &module_cleanup::UnusedFunctions,
-    &private_aggregate::PrivateAggregate,
     &private_aggregate::PrivateAggregateCleanup,
     &inline::InlineSize,
 ];

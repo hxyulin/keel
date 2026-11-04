@@ -1,5 +1,5 @@
-//! Bounded private two-word byval transport. Full uses the conditional cleanup
-//! entry point; the standalone transport pass remains explicitly selectable.
+//! Bounded private two-word byval transport. Full runs it through the
+//! conditional cleanup entry point, `private-aggregate-cleanup`.
 //!
 //! Each call snapshots both words immediately before the call. Each byval
 //! parameter gets its own fresh, naturally aligned callee home: arbitrary
@@ -13,24 +13,6 @@ use keel_ir::{
     AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryEffects,
     MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value, ValueDef,
 };
-
-/// Explicit named/custom-pipeline entry point; absent from default pipelines.
-#[derive(Debug)]
-pub struct PrivateAggregate;
-impl crate::Pass for PrivateAggregate {
-    fn name(&self) -> &'static str {
-        "private-aggregate"
-    }
-    fn description(&self) -> &'static str {
-        "scalarize contained private two-word byval transport"
-    }
-    fn run(&self, _: &mut Function) -> bool {
-        false
-    }
-    fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run(module) != 0)
-    }
-}
 
 /// Keep cleanup coupled to transport: modules without a rewritten signature
 /// must not acquire another, unrelated round of scalar/stack optimization.
