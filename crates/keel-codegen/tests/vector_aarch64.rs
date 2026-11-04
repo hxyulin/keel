@@ -1,11 +1,14 @@
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 #[path = "vector_aarch64/neon_varargs.rs"]
 mod neon_varargs;
 #[path = "vector_aarch64/vector_widen_aarch64.rs"]
 mod vector_widen_aarch64;
 
-use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
+use codegen::Case;
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 use std::{fs, process::Command};
@@ -37,29 +40,22 @@ fn compile(
     allocation: AllocationTier,
     tiny: bool,
 ) -> (String, keel_asm_ir::Program) {
-    let mut module = keel_ir::parse(source).unwrap();
-    keel_ir::verify_module(&module).unwrap();
+    let mut module = codegen::parse(source);
     if matches!(selection, SelectionTier::Full) {
         keel_opt::optimize(&mut module).unwrap();
     }
-    let pipeline = CodegenPipeline {
-        selector: &selection,
-        allocator: &allocation,
-    };
     let pools = if tiny {
         &TINY
     } else {
         &keel_codegen::aarch64::REGISTERS
     };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-    assert_eq!(program.stats().text_bytes, 0);
-    let typed = assemble_program_object(&program, TargetFeatures::default())
-        .unwrap_or_else(|e| panic!("{e}\n{text}"));
-    let parsed = assemble_object(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
-    assert_eq!(typed, parsed, "typed/source Mach-O differ");
-    (text, program)
+    let out = Case::aarch64(&module)
+        .selector(&selection)
+        .allocator(&allocation)
+        .pools(pools)
+        .no_text_fallback()
+        .compile();
+    (out.text, out.program)
 }
 #[test]
 fn neon_operations_emit_zero_text_and_identical_objects() {
@@ -111,7 +107,11 @@ fn vector_operations_execute_unaligned_edges_masks_and_spills() {
             for tiny in [false, true] {
                 let (_, program) = compile(&source, selection, allocation, tiny);
                 oracle.run(
-                    &assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                    &keel_asm::assemble_program_object(
+                        &program,
+                        keel_asm::TargetFeatures::default(),
+                    )
+                    .unwrap(),
                     &format!("{selection:?} {allocation:?} tiny={tiny}"),
                 );
             }
@@ -128,7 +128,8 @@ fn apple_vector_abi_calls_varargs_cycles_and_partial_register_preservation_execu
         for tiny in [false, true] {
             let (_, program) = compile(&source, SelectionTier::Full, allocation, tiny);
             oracle.run(
-                &assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+                &keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                    .unwrap(),
                 &format!("{allocation:?} tiny={tiny}"),
             );
         }
@@ -204,7 +205,7 @@ fn native_neon_instruction_encodings_match_clang() {
     let file = object::File::parse(&*bytes).unwrap();
     let reference = file.section_by_name("__text").unwrap().data().unwrap();
     assert_eq!(
-        keel_asm::assemble_program(&program, TargetFeatures::default())
+        keel_asm::assemble_program(&program, keel_asm::TargetFeatures::default())
             .unwrap()
             .text,
         reference
@@ -310,7 +311,8 @@ fn homogeneous_vector_aggregates_and_indirect_structs_interoperate_with_clang() 
         for tiny in [false, true] {
             let (_, p) = compile(&source, SelectionTier::Full, allocation, tiny);
             oracle.run(
-                &assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+                &keel_asm::assemble_program_object(&p, keel_asm::TargetFeatures::default())
+                    .unwrap(),
                 &format!("{allocation:?} tiny={tiny}"),
             );
         }
@@ -377,7 +379,7 @@ fn unaligned_large_vector_spills_survive_dynamic_stack_and_hva_calls() {
         let object = dir.join("test.o");
         fs::write(
             &object,
-            assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+            keel_asm::assemble_program_object(&p, keel_asm::TargetFeatures::default()).unwrap(),
         )
         .unwrap();
         let exe = dir.join("test");
@@ -510,7 +512,8 @@ fn constant_shift_counts_and_zero_splats_execute() {
         let object = dir.join("test.o");
         fs::write(
             &object,
-            assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                .unwrap(),
         )
         .unwrap();
         let exe = dir.join("test");

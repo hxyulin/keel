@@ -1,20 +1,18 @@
 //! Bounded I32x4 min/max: independent Clang encoding and four-lane runtime oracle.
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 #[path = "common/native_oracle.rs"]
 mod native_oracle;
+use codegen::{Case, EMPTY};
 use native_oracle::PreparedOracle;
 
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
-    regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
+    SelectionTier,
+    regalloc::{Allocation, AllocationInput, AllocationTier, Loc, RegisterAllocator},
 };
 use keel_ir::EntityRef;
-use std::{fs, path::PathBuf, process::Command};
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
+use std::{fs, process::Command};
 struct Controlled;
 impl RegisterAllocator for Controlled {
     fn name(&self) -> &'static str {
@@ -71,10 +69,8 @@ impl RegisterAllocator for Controlled {
         a
     }
 }
-fn dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("keel-arm-minmax-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    dir
+fn dir() -> keel_test_support::TempDir {
+    keel_test_support::TempDir::new("arm-minmax")
 }
 fn command(c: &mut Command) {
     let o = c.output().unwrap();
@@ -86,21 +82,18 @@ fn compile(
     a: &dyn RegisterAllocator,
     spill: bool,
 ) -> (String, keel_asm_ir::Program, Vec<u8>) {
-    let p = CodegenPipeline {
-        selector: s,
-        allocator: a,
-    };
     let pools = if spill {
         &EMPTY
     } else {
         &keel_codegen::aarch64::REGISTERS
     };
-    let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &p).unwrap();
-    let program = keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &p).unwrap();
-    assert_eq!(program.stats().text_bytes, 0);
-    let obj = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
-    assert_eq!(obj, keel_asm::assemble_object(&text).unwrap());
-    (text, program, obj)
+    let out = Case::aarch64(m)
+        .selector(s)
+        .allocator(a)
+        .pools(pools)
+        .no_text_fallback()
+        .compile();
+    (out.text, out.program, out.object)
 }
 fn module(s: &str) -> keel_ir::Module {
     let m = keel_ir::parse(s).unwrap();

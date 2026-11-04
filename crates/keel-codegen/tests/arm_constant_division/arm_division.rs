@@ -1,16 +1,10 @@
 //! Division by a variable divisor keeps its zero and overflow traps, and a
 //! quotient and remainder of the same operands share one division.
 //! `arm_constant_division` covers constant divisors.
+use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
-};
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
 };
 
 fn compile(
@@ -20,16 +14,12 @@ fn compile(
     pools: &Pools,
 ) -> (String, Vec<u8>) {
     keel_ir::verify_module(m).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &selection,
-        allocator: &allocation,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
-    assert_eq!(object, keel_asm::assemble_object(&text).unwrap());
-    (text, object)
+    let out = Case::aarch64(m)
+        .selector(&selection)
+        .allocator(&allocation)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 fn function(name: &str, width: u32, op: &str) -> String {
@@ -114,8 +104,7 @@ fn native_variable_and_reused_quotients_match_oracle_and_trap_edges() {
     c += "}return 3;}\n";
     c += &checks;
     c += "return 0;}\n";
-    let dir = std::env::temp_dir().join(format!("keel-arm-div-{}", std::process::id()));
-    fs::create_dir(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-div");
     fs::write(dir.join("oracle.c"), c).unwrap();
     let oracle = dir.join("oracle.o");
     let out = Command::new("clang")
@@ -169,5 +158,4 @@ fn native_variable_and_reused_quotients_match_oracle_and_trap_edges() {
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }

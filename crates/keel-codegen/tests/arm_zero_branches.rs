@@ -1,14 +1,12 @@
 //! Ordinary integer truth tests, deliberately separate from compare fusion.
-use keel_codegen::{
-    CodegenPipeline, SelectionTier,
-    regalloc::{AllocationTier, Pools},
-};
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
+use codegen::{Case, EMPTY as SPILLED};
+use keel_codegen::{
+    SelectionTier,
+    regalloc::{AllocationTier, Pools},
 };
 
 fn source(bits: u32, reverse: bool, edges: bool) -> String {
@@ -50,23 +48,18 @@ fn compile_module(
     pools: &Pools,
 ) -> (String, Vec<u8>) {
     keel_ir::verify_module(module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &tier,
-        allocator: &allocation,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
+    let mut case = Case::aarch64(module)
+        .selector(&tier)
+        .allocator(&allocation)
+        .pools(pools);
     if !module.functions.iter().any(|func| {
         func.layout_insts()
             .any(|(_, i)| matches!(func.inst_data(i), keel_ir::InstData::InlineAsm { .. }))
     }) {
-        assert_eq!(program.stats().text_bytes, 0, "no opaque text fallback");
+        case = case.no_text_fallback();
     }
-    let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-        .unwrap_or_else(|e| panic!("{e}\n{text}"));
-    assert_eq!(object, keel_asm::assemble_object(&text).unwrap(), "{text}");
-    (text, object)
+    let out = case.compile();
+    (out.text, out.object)
 }
 
 fn compile(
@@ -83,40 +76,38 @@ fn full_width_truth_edges_and_spills_use_register_branches_in_all_tiers() {
     for bits in [32, 64] {
         for reverse in [false, true] {
             for edges in [false, true] {
-                for tier in [
-                    SelectionTier::Baseline,
-                    SelectionTier::Trees,
-                    SelectionTier::Full,
-                ] {
-                    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                        for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
-                            let (text, _) =
-                                compile(&source(bits, reverse, edges), tier, allocation, pools);
-                            let width = if bits == 32 { 'w' } else { 'x' };
-                            assert!(
-                                text.contains(&format!(
-                                    "\t{}\t{width}",
-                                    if edges { "cbz" } else { "cbnz" }
-                                )),
-                                "{text}"
-                            );
-                            assert!(!text.contains("\tcmp\t"), "{text}");
-                            assert!(!text.contains("\tb.eq\t"), "{text}");
-                            if edges {
-                                assert!(text.contains("_else:"), "false-edge landing pad: {text}");
-                            } else {
-                                let target = if reverse { "block2" } else { "block1" };
-                                assert!(
-                                    text.lines()
-                                        .any(|l| { l.contains("\tcbnz\t") && l.ends_with(target) }),
-                                    "{text}"
-                                );
-                                assert!(
-                                    !text.contains("\tb\t"),
-                                    "redundant fallthrough jump: {text}"
-                                );
-                            }
-                        }
+                for (tier, allocation, pools) in codegen::matrix(
+                    &[
+                        SelectionTier::Baseline,
+                        SelectionTier::Trees,
+                        SelectionTier::Full,
+                    ],
+                    &[&SPILLED, &keel_codegen::aarch64::REGISTERS],
+                ) {
+                    let (text, _) = compile(&source(bits, reverse, edges), tier, allocation, pools);
+                    let width = if bits == 32 { 'w' } else { 'x' };
+                    assert!(
+                        text.contains(&format!(
+                            "\t{}\t{width}",
+                            if edges { "cbz" } else { "cbnz" }
+                        )),
+                        "{text}"
+                    );
+                    assert!(!text.contains("\tcmp\t"), "{text}");
+                    assert!(!text.contains("\tb.eq\t"), "{text}");
+                    if edges {
+                        assert!(text.contains("_else:"), "false-edge landing pad: {text}");
+                    } else {
+                        let target = if reverse { "block2" } else { "block1" };
+                        assert!(
+                            text.lines()
+                                .any(|l| { l.contains("\tcbnz\t") && l.ends_with(target) }),
+                            "{text}"
+                        );
+                        assert!(
+                            !text.contains("\tb\t"),
+                            "redundant fallthrough jump: {text}"
+                        );
                     }
                 }
             }
@@ -223,8 +214,7 @@ fn native_truth_values_match_independent_clang_oracle() {
             }
         }
     }
-    let dir = std::env::temp_dir().join(format!("keel-arm-zero-{}", std::process::id()));
-    fs::create_dir(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-zero");
     fs::write(
         dir.join("oracle.c"),
         include_str!("fixtures/arm_zero_branches.c"),
@@ -248,7 +238,6 @@ fn native_truth_values_match_independent_clang_oracle() {
             assert!(Command::new(dir.join("test")).status().unwrap().success());
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

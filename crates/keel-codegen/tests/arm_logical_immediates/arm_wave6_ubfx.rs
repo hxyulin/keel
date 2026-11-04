@@ -1,6 +1,7 @@
 //! UBFX covers must publish their only leaf before allocation.
+use crate::codegen::{Case, EMPTY};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 
@@ -8,12 +9,6 @@ use keel_codegen::{
 use crate::native_oracle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use native_oracle::PreparedOracle;
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 
 fn source(bits: u32, shift: i64, mask: i64, left: bool, shared: bool) -> String {
     let args = if left { "v3, v2" } else { "v2, v3" };
@@ -35,23 +30,13 @@ fn compile(
     allocation: AllocationTier,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let module = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &tier,
-        allocator: &allocation,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-    let object =
-        keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default()).unwrap();
-    assert_eq!(
-        object,
-        keel_asm::assemble_object(&text).unwrap_or_else(|e| panic!("{e}\n{text}")),
-        "{text}"
-    );
-    (text, object)
+    let module = crate::codegen::parse(src);
+    let out = Case::aarch64(&module)
+        .selector(&tier)
+        .allocator(&allocation)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 #[test]
@@ -62,20 +47,19 @@ fn modulo_shift_fields_and_spills_have_native_text_parity() {
             let width = 8u64.min(u64::from(bits) - lsb);
             for left in [false, true] {
                 let src = source(bits, shift, ((1u64 << width) - 1) as i64, left, false);
-                for tier in [SelectionTier::Baseline, SelectionTier::Full] {
-                    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-                        for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
-                            let (text, _) = compile(&src, tier, allocation, pools);
-                            assert_eq!(
-                                text.contains("\tubfx\t"),
-                                matches!(tier, SelectionTier::Full),
-                                "{text}"
-                            );
-                            if matches!(tier, SelectionTier::Full) {
-                                assert!(text.contains(&format!("#{lsb}, #{width}")), "{text}");
-                                assert!(!text.contains("\tlsr\t"), "{text}");
-                            }
-                        }
+                for (tier, allocation, pools) in crate::codegen::matrix(
+                    &[SelectionTier::Baseline, SelectionTier::Full],
+                    &[&EMPTY, &keel_codegen::aarch64::REGISTERS],
+                ) {
+                    let (text, _) = compile(&src, tier, allocation, pools);
+                    assert_eq!(
+                        text.contains("\tubfx\t"),
+                        matches!(tier, SelectionTier::Full),
+                        "{text}"
+                    );
+                    if matches!(tier, SelectionTier::Full) {
+                        assert!(text.contains(&format!("#{lsb}, #{width}")), "{text}");
+                        assert!(!text.contains("\tlsr\t"), "{text}");
                     }
                 }
             }

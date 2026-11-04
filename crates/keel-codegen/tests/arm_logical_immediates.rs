@@ -5,9 +5,13 @@ mod arm_wave6_immediates;
 #[path = "arm_logical_immediates/arm_wave6_ubfx.rs"]
 mod arm_wave6_ubfx;
 #[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
+#[allow(dead_code)]
 #[path = "common/native_oracle.rs"]
 mod native_oracle;
 
+use codegen::Case;
 use keel_codegen::{
     CodegenPipeline, OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools},
@@ -47,23 +51,13 @@ fn compile(
     allocation: AllocationTier,
 ) -> String {
     keel_ir::verify_module(module).unwrap();
-    let selector = OptionsSelector(option);
-    let pipeline = CodegenPipeline {
-        selector: &selector,
-        allocator: &allocation,
-    };
     // Both paths run the production allocation validator, also with spills.
-    let text = keel_codegen::aarch64::compile_with_pipeline(module, &TINY, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(module, &TINY, &pipeline).unwrap();
-    let native =
-        keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default()).unwrap();
-    let parsed = keel_asm::assemble_object(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
-    assert_eq!(
-        native, parsed,
-        "native fields differ from independent text parser\n{text}"
-    );
-    text
+    Case::aarch64(module)
+        .selector(&OptionsSelector(option))
+        .allocator(&allocation)
+        .pools(&TINY)
+        .compile()
+        .text
 }
 
 fn logical<'a>(text: &'a str, mnemonic: &str) -> Vec<&'a str> {

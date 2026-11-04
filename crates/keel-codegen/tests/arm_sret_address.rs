@@ -1,14 +1,13 @@
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
+
+use codegen::{Case, EMPTY};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools},
 };
 
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 const SOURCE: &str = include_str!("fixtures/sret_address.keel");
 
 fn compile(
@@ -18,16 +17,12 @@ fn compile(
     pools: &Pools,
 ) -> (String, Vec<u8>) {
     keel_ir::verify_module(m).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &sel,
-        allocator: &alloc,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-    let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
-    assert_eq!(object, keel_asm::assemble_object(&text).unwrap(), "{text}");
-    (text, object)
+    let out = Case::aarch64(m)
+        .selector(&sel)
+        .allocator(&alloc)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 fn after_call<'a>(text: &'a str, function: &str, callee: &str) -> &'a str {
@@ -41,28 +36,27 @@ fn after_call<'a>(text: &'a str, function: &str, callee: &str) -> &'a str {
 #[test]
 fn fixed_destinations_recompute_addresses_and_dynamic_destinations_keep_the_save() {
     let m = keel_ir::parse(SOURCE).unwrap();
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
-                let (text, _) = compile(&m, sel, alloc, pools);
-                for (f, callee, base) in [
-                    ("fixed_pair", "make_pair", "sp"),
-                    ("fixed_hfa", "make_hfa", "sp"),
-                    ("fixed_nine", "make_nine", "sp"),
-                    ("dynamic", "make_pair", "x19"),
-                    ("overlap", "increment", "sp"),
-                ] {
-                    assert!(
-                        after_call(&text, f, callee).starts_with(&format!("add\tx16, {base},")),
-                        "{text}"
-                    );
-                }
-                assert!(
-                    after_call(&text, "external", "make_pair").starts_with("ldr\tx16,"),
-                    "{text}"
-                );
-            }
+    for (sel, alloc, pools) in codegen::matrix(
+        &[SelectionTier::Baseline, SelectionTier::Full],
+        &[&EMPTY, &keel_codegen::aarch64::REGISTERS],
+    ) {
+        let (text, _) = compile(&m, sel, alloc, pools);
+        for (f, callee, base) in [
+            ("fixed_pair", "make_pair", "sp"),
+            ("fixed_hfa", "make_hfa", "sp"),
+            ("fixed_nine", "make_nine", "sp"),
+            ("dynamic", "make_pair", "x19"),
+            ("overlap", "increment", "sp"),
+        ] {
+            assert!(
+                after_call(&text, f, callee).starts_with(&format!("add\tx16, {base},")),
+                "{text}"
+            );
         }
+        assert!(
+            after_call(&text, "external", "make_pair").starts_with("ldr\tx16,"),
+            "{text}"
+        );
     }
 }
 
@@ -116,35 +110,32 @@ fn inline_assembly_and_replaced_stack_definitions_retain_the_save() {
 fn native_register_results_dynamic_frames_overlap_and_indirect_calls() {
     use std::{fs, process::Command};
     let m = keel_ir::parse(SOURCE).unwrap();
-    let dir = std::env::temp_dir().join(format!("keel-sret-address-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("sret-address");
     fs::write(
         dir.join("oracle.c"),
         include_str!("fixtures/sret_address.c"),
     )
     .unwrap();
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
-        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
-            for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
-                let (_, obj) = compile(&m, sel, alloc, pools);
-                fs::write(dir.join("test.o"), obj).unwrap();
-                let status = Command::new("/usr/bin/clang")
-                    .arg("-O2")
-                    .arg(dir.join("oracle.c"))
-                    .arg(dir.join("test.o"))
-                    .arg("-o")
-                    .arg(dir.join("run"))
-                    .status()
-                    .unwrap();
-                assert!(status.success());
-                let result = Command::new(dir.join("run")).output().unwrap();
-                assert!(
-                    result.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&result.stderr)
-                );
-            }
-        }
+    for (sel, alloc, pools) in codegen::matrix(
+        &[SelectionTier::Baseline, SelectionTier::Full],
+        &[&EMPTY, &keel_codegen::aarch64::REGISTERS],
+    ) {
+        let (_, obj) = compile(&m, sel, alloc, pools);
+        fs::write(dir.join("test.o"), obj).unwrap();
+        let status = Command::new("/usr/bin/clang")
+            .arg("-O2")
+            .arg(dir.join("oracle.c"))
+            .arg(dir.join("test.o"))
+            .arg("-o")
+            .arg(dir.join("run"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let result = Command::new(dir.join("run")).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
-    fs::remove_dir_all(dir).unwrap();
 }

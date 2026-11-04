@@ -3,23 +3,16 @@
 mod arm_packed_low_load;
 #[path = "arm_replicate_load/arm_vector_fusion_boundaries.rs"]
 mod arm_vector_fusion_boundaries;
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "common/native_oracle.rs"]
 mod native_oracle;
 
-use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
-use keel_codegen::{
-    CodegenPipeline, SelectionTier,
-    regalloc::{AllocationTier, Pools},
-};
-
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
+use codegen::{Case, EMPTY};
+use keel_codegen::{SelectionTier, regalloc::AllocationTier};
 
 fn source() -> String {
     let mut src = String::new();
@@ -99,21 +92,17 @@ fn compile_module(
     allocation: AllocationTier,
     spilled: bool,
 ) -> (String, Vec<u8>) {
-    let pipeline = CodegenPipeline {
-        selector: &selection,
-        allocator: &allocation,
-    };
     let pools = if spilled {
         &EMPTY
     } else {
         &keel_codegen::aarch64::REGISTERS
     };
-    let text = keel_codegen::aarch64::compile_with_pipeline(module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
-    let object = assemble_program_object(&program, TargetFeatures::default()).unwrap();
-    assert_eq!(assemble_object(&text).unwrap(), object);
-    (text, object)
+    let out = Case::aarch64(module)
+        .selector(&selection)
+        .allocator(&allocation)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 #[test]

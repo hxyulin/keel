@@ -2,19 +2,16 @@
 //! before allocation, including when every leaf needs a scratch reload.
 #[path = "arm_indexed_memory/arm_extended_address.rs"]
 mod arm_extended_address;
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 
+use codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, OptionsSelector, SelectionOptions,
+    OptionsSelector, SelectionOptions,
     regalloc::{AllocationTier, Pools},
 };
 use keel_ir::EntityRef;
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 
 #[test]
 fn vector_constant_offsets_keep_effects_and_have_typed_object_parity() {
@@ -84,18 +81,13 @@ fn compile(
     alloc: AllocationTier,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let m = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &OptionsSelector(options),
-        allocator: &alloc,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&m, pools, &pipeline).unwrap();
-    let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
-    assert_eq!(object, keel_asm::assemble_object(&text).unwrap(), "{text}");
-    (text, object)
+    let m = codegen::parse(src);
+    let out = Case::aarch64(&m)
+        .selector(&OptionsSelector(options))
+        .allocator(&alloc)
+        .pools(pools)
+        .compile();
+    (out.text, out.object)
 }
 
 #[test]

@@ -1,18 +1,15 @@
 //! Exact-width ARM move-wide planning, including the structured/text boundary.
 //! Runtime checks deliberately require a native Apple ARM host.
-use keel_asm::{TargetFeatures, assemble_object, assemble_program_object};
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
+
+use codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{AllocationTier, Pools, RegisterAllocator},
 };
 use keel_ir::{EntityRef, InstData};
-
-const SPILLED: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 
 fn compile(
     source: &str,
@@ -20,24 +17,14 @@ fn compile(
     allocator: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
-    let module = keel_ir::parse(source).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &selection,
-        allocator,
-    };
-    let text = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
-    let program =
-        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
-    assert_eq!(program.stats().text_bytes, 0);
-    let object = assemble_program_object(&program, TargetFeatures::default())
-        .unwrap_or_else(|e| panic!("{e}\n{text}"));
-    assert_eq!(
-        object,
-        assemble_object(&text).unwrap_or_else(|e| panic!("{e}\n{text}")),
-        "typed/text object mismatch: {text}"
-    );
-    (text, object)
+    let module = codegen::parse(source);
+    let out = Case::aarch64(&module)
+        .selector(&selection)
+        .allocator(allocator)
+        .pools(pools)
+        .no_text_fallback()
+        .compile();
+    (out.text, out.object)
 }
 
 fn values() -> Vec<u64> {
@@ -236,8 +223,7 @@ fn constants_transfers_spills_debug_and_native_text_encodings_agree() {
 #[test]
 fn native_constants_abi_payloads_spills_cycles_and_nzcv_execute() {
     use std::{fs, process::Command};
-    let dir = std::env::temp_dir().join(format!("keel-arm-constants-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-constants");
     let (source, harness) = fixture();
     let c = dir.join("test.c");
     fs::write(&c, harness).unwrap();
@@ -340,7 +326,7 @@ uint64_t expected(uint64_t a, uint64_t b) {\n\
     }
     flags_c += &(String::from("int main(void) {\n") + &checks + "return 0;\n}\n");
     let flags_obj = dir.join("flags.o");
-    fs::write(&flags_obj, assemble_object(&assembly).unwrap()).unwrap();
+    fs::write(&flags_obj, keel_asm::assemble_object(&assembly).unwrap()).unwrap();
     fs::write(&c, flags_c).unwrap();
     let exe = dir.join("flags");
     run(Command::new("clang")
@@ -349,7 +335,6 @@ uint64_t expected(uint64_t a, uint64_t b) {\n\
         .arg("-o")
         .arg(&exe));
     run(&mut Command::new(exe));
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// Float constants at the edges of the 8-bit `fmov` immediate, which holds
@@ -404,8 +389,7 @@ fn encodable_float_constants_use_the_fmov_immediate() {
 #[test]
 fn float_constants_execute_with_exact_bits() {
     use std::{fs, process::Command};
-    let dir = std::env::temp_dir().join(format!("keel-arm-fconst-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-fconst");
     let (mut source, mut checks) = (String::new(), String::new());
     let mut declarations = String::from("#include <stdint.h>\n#include <string.h>\n");
     for (index, (ty, bits, _)) in float_constants().into_iter().enumerate() {
@@ -446,5 +430,4 @@ fn float_constants_execute_with_exact_bits() {
         .unwrap();
     assert!(status.success());
     assert!(Command::new(&exe).status().unwrap().success());
-    fs::remove_dir_all(dir).unwrap();
 }
