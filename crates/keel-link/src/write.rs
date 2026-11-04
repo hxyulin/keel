@@ -1,5 +1,5 @@
 use crate::*;
-use read::{Reader, Reloc};
+use read::{Fixup, Reader, Reloc};
 
 // Most object relocation lists run monotonically through the section (often
 // backwards). Keep those disjoint ranges in a compact vector. Arbitrary input
@@ -832,24 +832,12 @@ impl Linker {
         } else {
             Self::reloc_target
         };
-        let mut i = 0;
         let mut patched = RelocationRanges::default();
-        while i < s.relocs.len() {
-            let mut r = s.relocs[i].clone();
-            i += 1;
-            let mut extra = 0i64;
-            if r.kind == 10 {
-                if r.external || r.pc || r.width != 4 {
-                    return fail("invalid ARM64_RELOC_ADDEND");
-                }
-                extra = ((r.symbol as i32) << 8 >> 8) as i64;
-                let next = s.relocs.get(i).ok_or("unpaired ADDEND")?;
-                if next.offset != r.offset || !matches!(next.kind, 2..=4) {
-                    return fail("ADDEND must precede matching branch/page relocation");
-                }
-                r = next.clone();
-                i += 1;
-            }
+        for fixup in read::fixups(&s.relocs, 0..usize::MAX) {
+            let (mut r, extra, plus) = match fixup? {
+                Fixup::Single { reloc, addend } => (reloc.clone(), addend, None),
+                Fixup::Difference { minus, plus } => (minus.clone(), 0, Some(plus)),
+            };
             let location = if metadata {
                 0
             } else {
@@ -859,17 +847,7 @@ impl Linker {
             };
             let (target, mut value) = target_of(self, oi, &r)?;
             let mut difference = false;
-            if r.kind == 1 {
-                let unsigned = s.relocs.get(i).ok_or("unpaired SUBTRACTOR")?;
-                if !r.external
-                    || r.pc
-                    || unsigned.kind != 0
-                    || unsigned.offset != r.offset
-                    || unsigned.width != r.width
-                    || unsigned.pc
-                {
-                    return fail("invalid SUBTRACTOR/UNSIGNED pair");
-                }
+            if let Some(unsigned) = plus {
                 let (positive_target, positive) = target_of(self, oi, unsigned)?;
                 if matches!(positive_target, Some(Target::Import(_))) {
                     return fail("cannot form a static difference with an imported symbol");
@@ -878,8 +856,7 @@ impl Linker {
                     return fail("cannot subtract an imported symbol");
                 }
                 value = positive.wrapping_sub(value);
-                r.kind = 0;
-                i += 1;
+                r.kind = read::UNSIGNED;
                 difference = true;
             }
             if !patched.insert(r.offset, r.offset + r.width) {
@@ -1313,6 +1290,18 @@ mod tests {
         check(
             vec![pointer.clone(), subtractor.clone(), pointer.clone()],
             "overlapping relocation locations",
+        );
+        // dead_strip and relocation share one pair decoder, so both reject
+        // a difference narrower than 4 bytes as a malformed pair.
+        let mut narrow_subtractor = subtractor.clone();
+        narrow_subtractor.offset = 8;
+        narrow_subtractor.width = 2;
+        let mut narrow_unsigned = pointer.clone();
+        narrow_unsigned.offset = 8;
+        narrow_unsigned.width = 2;
+        check(
+            vec![pointer.clone(), narrow_subtractor, narrow_unsigned],
+            "invalid SUBTRACTOR/UNSIGNED pair",
         );
         let mut bad_unsigned = pointer.clone();
         bad_unsigned.pc = true;

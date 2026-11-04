@@ -44,6 +44,84 @@ impl Reloc {
         })
     }
 }
+pub(crate) const UNSIGNED: u32 = object::macho::ARM64_RELOC_UNSIGNED as u32;
+pub(crate) const SUBTRACTOR: u32 = object::macho::ARM64_RELOC_SUBTRACTOR as u32;
+pub(crate) const ADDEND: u32 = object::macho::ARM64_RELOC_ADDEND as u32;
+
+/// One relocation after ARM64_RELOC_ADDEND prefixes and
+/// SUBTRACTOR/UNSIGNED pairs are decoded and validated.
+pub(crate) enum Fixup<'a> {
+    /// `addend` is the signed 24-bit value of a preceding ADDEND, or 0.
+    Single { reloc: &'a Reloc, addend: i64 },
+    /// SUBTRACTOR (`minus`) followed by UNSIGNED (`plus`) at the same field.
+    Difference { minus: &'a Reloc, plus: &'a Reloc },
+}
+
+/// Decode the fixups whose first record lies in `range`. Records outside it
+/// are skipped one at a time without validation.
+pub(crate) fn fixups(relocs: &[Reloc], range: std::ops::Range<usize>) -> Fixups<'_> {
+    Fixups {
+        relocs,
+        at: 0,
+        range,
+    }
+}
+pub(crate) struct Fixups<'a> {
+    relocs: &'a [Reloc],
+    at: usize,
+    range: std::ops::Range<usize>,
+}
+impl<'a> Fixups<'a> {
+    fn decode(&mut self, r: &'a Reloc) -> Result<Fixup<'a>> {
+        match r.kind {
+            ADDEND => {
+                if r.external || r.pc || r.width != 4 {
+                    return fail("invalid ARM64_RELOC_ADDEND");
+                }
+                let next = self.relocs.get(self.at).ok_or("unpaired ADDEND")?;
+                if next.offset != r.offset || !matches!(next.kind, 2..=4) {
+                    return fail("ADDEND must precede matching branch/page relocation");
+                }
+                self.at += 1;
+                Ok(Fixup::Single {
+                    reloc: next,
+                    addend: ((r.symbol as i32) << 8 >> 8) as i64,
+                })
+            }
+            SUBTRACTOR => {
+                let plus = self.relocs.get(self.at).ok_or("unpaired SUBTRACTOR")?;
+                if !r.external
+                    || r.pc
+                    || plus.kind != UNSIGNED
+                    || plus.offset != r.offset
+                    || plus.width != r.width
+                    || plus.pc
+                    || !matches!(r.width, 4 | 8)
+                {
+                    return fail("invalid SUBTRACTOR/UNSIGNED pair");
+                }
+                self.at += 1;
+                Ok(Fixup::Difference { minus: r, plus })
+            }
+            _ => Ok(Fixup::Single {
+                reloc: r,
+                addend: 0,
+            }),
+        }
+    }
+}
+impl<'a> Iterator for Fixups<'a> {
+    type Item = Result<Fixup<'a>>;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let r = self.relocs.get(self.at)?;
+            self.at += 1;
+            if self.range.contains(&r.offset) {
+                return Some(self.decode(r));
+            }
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) struct Section {
     pub segment: String,

@@ -1,6 +1,6 @@
 //! Collection over original contribution IDs, before output sections exist.
 use crate::{
-    read::{Reader, Reloc},
+    read::{self, Fixup, Reader, Reloc},
     *,
 };
 
@@ -128,63 +128,39 @@ impl Graph<'_> {
     fn edges(&mut self, oi: usize, si: usize, begin: usize, end: usize) -> Result<Vec<Node>> {
         let s = &self.linker.objects[oi].sections[si];
         let mut edges = Vec::new();
-        let mut i = 0;
-        while i < s.relocs.len() {
-            let mut r = &s.relocs[i];
-            i += 1;
-            if r.offset < begin || r.offset >= end {
-                continue;
-            }
-            if r.kind == 10 {
-                if r.external || r.pc || r.width != 4 {
-                    return fail("invalid ARM64_RELOC_ADDEND");
+        for fixup in read::fixups(&s.relocs, begin..end) {
+            match fixup? {
+                Fixup::Difference { minus, plus } => {
+                    // Native FDE differences use a local metadata anchor. It is
+                    // arithmetic, not a liveness dependency on the anchor's record.
+                    let anchor = self.linker.objects[oi]
+                        .symbols
+                        .get(minus.symbol)
+                        .ok_or("invalid subtractor symbol")?;
+                    if !(self.records.contains_key(&(oi, si))
+                        && anchor.kind & 0xe == 0xe
+                        && anchor.kind & 1 == 0
+                        && anchor.section == si + 1)
+                        && let Some(n) = self.edge(oi, si, minus, &s.data, false)?
+                    {
+                        edges.push(n);
+                    }
+                    if let Some(n) = self.edge(oi, si, plus, &s.data, false)? {
+                        edges.push(n);
+                    }
                 }
-                let next = s.relocs.get(i).ok_or("unpaired ADDEND")?;
-                if next.offset != r.offset || !matches!(next.kind, 2..=4) {
-                    return fail("ADDEND must precede matching branch/page relocation");
-                }
-                r = next;
-                i += 1;
-            }
-            if r.kind == 1 {
-                let positive = s.relocs.get(i).ok_or("unpaired SUBTRACTOR")?;
-                if !r.external
-                    || r.pc
-                    || positive.kind != 0
-                    || positive.offset != r.offset
-                    || positive.width != r.width
-                    || positive.pc
-                    || !matches!(r.width, 4 | 8)
-                {
-                    return fail("invalid SUBTRACTOR/UNSIGNED pair");
-                }
-                // Native FDE differences use a local metadata anchor. It is
-                // arithmetic, not a liveness dependency on the anchor's record.
-                let anchor = self.linker.objects[oi]
-                    .symbols
-                    .get(r.symbol)
-                    .ok_or("invalid subtractor symbol")?;
-                if !(self.records.contains_key(&(oi, si))
-                    && anchor.kind & 0xe == 0xe
-                    && anchor.kind & 1 == 0
-                    && anchor.section == si + 1)
-                    && let Some(n) = self.edge(oi, si, r, &s.data, false)?
-                {
-                    edges.push(n);
-                }
-                if let Some(n) = self.edge(oi, si, positive, &s.data, false)? {
-                    edges.push(n);
-                }
-                i += 1;
-            } else {
-                if r.kind > 9 {
-                    return fail(format!(
-                        "dead_strip: unsupported ARM64 relocation {}",
-                        r.kind
-                    ));
-                }
-                if let Some(n) = self.edge(oi, si, r, &s.data, r.kind == 0 && r.width == 8)? {
-                    edges.push(n);
+                Fixup::Single { reloc: r, .. } => {
+                    if r.kind > 9 {
+                        return fail(format!(
+                            "dead_strip: unsupported ARM64 relocation {}",
+                            r.kind
+                        ));
+                    }
+                    if let Some(n) =
+                        self.edge(oi, si, r, &s.data, r.kind == read::UNSIGNED && r.width == 8)?
+                    {
+                        edges.push(n);
+                    }
                 }
             }
         }
