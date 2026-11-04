@@ -127,7 +127,7 @@ class IntrinsicRegistryTests(unittest.TestCase):
         source = intrinsic_registry.generate(self.schema, self.families)
         table = source.split('static FACTS:', 1)[1]
         self.assertEqual(len(re.findall(r'^    f\(', table, re.M)), len(self.schema['intrinsics']))
-        self.assertIn('f(M::None, true, true, Some(F::SignBlend)), // X86Sse41Blendvps128', table)
+        self.assertIn('f(M::None, false, true, Some(F::SignBlend)), // X86Sse41Blendvps128', table)
         self.assertIn('f(M::Barrier, true, false, Some(F::System)), // X86Lgdt', table)
         self.assertIn('f(M::ReadWrite, true, true, None), // Memcpy', table)
 

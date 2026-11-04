@@ -22,6 +22,7 @@ fn every_intrinsic_has_consistent_facts() {
                 MemoryEffects::None,
                 "{id:?}: pure has no effects"
             );
+            assert!(!id.may_trap(), "{id:?}: pure cannot trap");
         }
         // Frame observers stay with the inliner, which owns both frames.
         if id.memory_effects() == MemoryEffects::None
