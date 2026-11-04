@@ -453,10 +453,12 @@ def skip_entries(log: str) -> list[dict[str, str]]:
 
 
 def skip_summary(log: str) -> list[str]:
-    """Skipped tests grouped by reason, largest group first."""
-    reasons: dict[str, list[str]] = {}
+    """Skipped tests grouped by reason, largest group first.
+
+    A test that records the same reason several times counts once."""
+    reasons: dict[str, set[str]] = {}
     for entry in skip_entries(log):
-        reasons.setdefault(entry["reason"], []).append(entry["test"])
+        reasons.setdefault(entry["reason"], set()).add(entry["test"])
     if not reasons:
         return ["Skipped tests: none recorded"]
     lines = [f"Skipped tests: {sum(map(len, reasons.values()))}"]

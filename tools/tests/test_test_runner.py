@@ -494,6 +494,7 @@ class EnvironmentAndSkipTests(unittest.TestCase):
         log = ("keel-asm::x86::gnu_matches\tGNU as not found\n"
                "keel-llvm::import::flags\tKEEL_TEST_LIBLLVM is not set\n"
                "keel-asm::x86::gnu_relocations\tGNU as not found\n"
+               "keel-asm::x86::gnu_matches\tGNU as not found\n"
                "keel-c::odd_line\n")
         self.assertEqual(runner.skip_summary(log), [
             "Skipped tests: 4",
