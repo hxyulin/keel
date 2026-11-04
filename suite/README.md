@@ -101,7 +101,7 @@ Commonly used configurations:
 | `keel-select`, `keel-O-select` | Explicit `--isel all` |
 | `keel-g` | Keel with debug info |
 | `keel-basic`, `keel-fast`, `keel-full` | Explicit IR tiers (`keel-fast`: Fast IR with Full selection and allocation; `keel-full`: Full for all three) |
-| `keel-O-trees`, `keel-O-folds`, `keel-O-hints` | One selection pass at a time, for ablations |
+| `keel-O-trees`, `keel-O-folds`, `keel-O-hints`, `keel-O-covers` | One selection pass at a time, for ablations |
 | `keel-O-memory`, `keel-O-cleanup`, `keel-O-bits-*`, ... | Opt-in pass recipes for experiments; not defaults |
 | `keel-m5`, `keel-m5-fast` | Explicit Apple M5 tuning (experimental) |
 | `keel-basic-fast-alloc` | Historical Basic IR with Fast allocation, kept so allocation experiments do not stand in for the Fast IR profile |
@@ -111,7 +111,10 @@ Selection flags interact as follows. Ordinary `keel` keeps baseline selection;
 `-O` enables all selection passes. To compare optimized IR with baseline
 selection, use `-O --isel none` (either order). Explicit selection selectors
 override the preset, and the last explicit selector wins. `--opt-tier` and
-`-p` control IR independently and do not reset selection.
+`-p` control IR independently and do not reset selection. Baseline selection
+runs no [cover](../docs/compiler/design.md); a config with
+`-O --isel all,-<cover>` drops one cover, so one binary can compare a cover
+against `keel-O`.
 
 Full IR runs three bounded rounds of inlining, scalar/memory cleanup, code
 motion and loop optimization. Private aggregate transport and its conditional

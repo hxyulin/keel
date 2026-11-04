@@ -663,9 +663,9 @@ and blocks are laid out in reverse postorder only.
 **Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
 binary root/child patterns and register affinities; `build.rs` generates
 the rule table and affinity matcher. The CLI `-O` preset enables all of these
-target codegen passes, as does `--isel all`. `--isel trees,folds,hints` chooses
-passes independently; explicit selectors override `-O` in either order, with
-the last selector winning. Without `-O`, and in the library API, selection
+target codegen passes, as does `--isel all`. `--isel trees,folds,hints,covers`
+chooses passes independently; explicit selectors override `-O` in either order,
+with the last selector winning. Without `-O`, and in the library API, selection
 defaults to baseline (`--isel none`). They run after any IR
 optimization and before allocation,
 visiting consumers first. A rule consumes a pure, single-use child in the
@@ -679,6 +679,38 @@ implicitly fused because that changes rounding.
 
 Target selection prepares instruction-kind and operand-use facts once per
 function.
+
+**Covers.** A cover is a hand-written fused pattern: it claims one root
+instruction, consumes adjacent instructions, and lowers the root with one
+target sequence. `crates/keel-codegen/src/cover.rs` is the registry: one
+`Cover` variant per pattern with a stable name, such as `x86-mask-test` or
+`compare-branch`. Selection-stage covers (the address modes, `zero-test`,
+`x86-division-remainder`, `x86-lea-mul3`, the x86 memory operands and the
+AArch64 `ubfx` and multiply tuning) run inside `Selection::compute_with_uses`
+and also need tree selection. Backend-stage covers run afterwards in a fixed order in
+each target's `Covers::select`.
+
+`Selection` records the owner of each claimed root in a per-instruction
+`Vec<Option<Cover>>`. `Selection::claim` is the only writer, and a root has
+one owner. The cover covers the instructions it consumes and publishes the
+root's allocation operands. `Selection::is_free` is the shared eligibility
+check: the instruction is not covered, has no owner or tree match, and has no
+constraint. `compare-branch` and the select covers may consume a compare
+that another cover claimed, so they check coverage, constraints and the owners
+they exclude. Use counts and debug locations are still checked by each cover:
+scalar covers use the machine use counts of `FunctionFacts`, vector covers its
+raw counts, and source locations must match by file and line, or exactly,
+depending on the cover. Each backend's `cover()` lowers a claimed root with one
+exhaustive `match` on the owner.
+
+`SelectionOptions::covers` lists the covers that may run. Baseline selection
+runs none, so it is the reference for every cover; Trees and Full run all of
+them. `--isel all,-x86-mask-test` drops one cover, and `--isel covers` or a
+cover name adds them. `--codegen-report` counts the roots each cover claimed
+per function. To add a cover: add a variant to the registry, write a claim
+function that checks `enabled` and `is_free` and calls `claim`, call it from
+`Covers::select` (or `Selection::compute_with_uses`), add its arm to the backend's
+`cover()` match, and test it at a tier that enables it.
 
 Each backend's `FunctionCompiler::new` (`new_for_target` on aarch64) runs
 the per-function phases in a fixed order: preflight checks, the call area

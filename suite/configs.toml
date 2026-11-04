@@ -71,6 +71,11 @@ name = "keel-O-hints"
 compiler = "keel"
 flags = ["--link-intent", "executable", "-O", "--isel", "hints"]
 
+[[config]]
+name = "keel-O-covers"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O", "--isel", "covers"]
+
 # Independently selectable effort presets; opt-in for benchmark comparisons.
 [[config]]
 name = "keel-basic"

@@ -212,7 +212,11 @@ the load's byte width and its position in the IR effect order. None assumes
 alignment, `notrap` or dereferenceability, and none crosses another
 instruction with effects. Volatile and atomic accesses, shared results,
 cross-block pairs and functions with source locations or debug variables keep
-the separate load. Baseline selection and AArch64 are unchanged.
+the separate load. Baseline selection and AArch64 are unchanged. Each fold is
+a named [cover](../../compiler/design.md) that `--isel all,-<name>` turns off:
+`x86-compare-memory`, `x86-binary-memory`, `indexed-address`,
+`offset-address`, `x86-packed-wide-load`, `x86-mask-test`,
+`x86-signed-byte-load` and `x86-packed-low-load`, in the order listed below.
 
 - **Integer compare RHS.** An adjacent single-use i8, i16, i32 or i64 load that
   is the right operand of an integer comparison becomes
