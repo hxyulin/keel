@@ -1,6 +1,3 @@
-#[path = "stack_promote/stack_promote_large.rs"]
-mod stack_promote_large;
-
 mod support;
 use keel_ir::{Function, InstData as D, Type};
 

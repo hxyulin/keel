@@ -306,11 +306,6 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "convert a private scalar absolute-value triangle without moving memory",
         run: adjacent_abs::run,
     },
-    BuiltinPass {
-        name: "stack-promote-large",
-        description: "bounded private field promotion with pruned SSA for large functions (opt-in)",
-        run: stack_promote::run_large,
-    },
 ];
 
 impl Pass for BuiltinPass {
@@ -386,7 +381,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::InlineNoninterposable,
     &BUILTINS[17],
     &inline::InlineCheapReserve,
-    &BUILTINS[18],
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
     &tail_calls::TailCalls,

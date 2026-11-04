@@ -9,33 +9,28 @@ use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, T
 
 type Field = (StackSlot, usize, Type);
 
+const BLOCK_LIMIT: usize = 256;
+const INST_LIMIT: usize = 8192;
+
 pub fn run(f: &mut Function) -> bool {
-    let changed = run_impl(f, false);
+    let changed = promote_private(f);
     crate::stack_cache::promote(f) || changed
 }
 
-/// Explicit opt-in for bounded promotion in large functions. The default pass
-/// retains its original admission limits and SSA construction.
-pub fn run_large(f: &mut Function) -> bool {
-    run_impl(f, true)
-}
-
-fn run_impl(f: &mut Function, large: bool) -> bool {
+fn promote_private(f: &mut Function) -> bool {
     if f.stack_slots().next().is_none() {
         return false;
     }
-    let block_limit = if large { 4096 } else { 256 };
-    let blocks: Vec<_> = f.blocks().take(block_limit + 1).collect();
-    if blocks.is_empty() || blocks.len() > block_limit {
+    let blocks: Vec<_> = f.blocks().take(BLOCK_LIMIT + 1).collect();
+    if blocks.is_empty() || blocks.len() > BLOCK_LIMIT {
         return false;
     }
-    let inst_limit = if large { 65536 } else { 8192 };
     let insts: Vec<_> = f
         .layout_insts()
-        .take(inst_limit + 1)
+        .take(INST_LIMIT + 1)
         .map(|(_, i)| i)
         .collect();
-    if insts.len() > inst_limit {
+    if insts.len() > INST_LIMIT {
         return false;
     }
     if insts.iter().any(|&i| match f.inst_data(i) {
@@ -50,28 +45,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         ),
         _ => false,
     }) {
-        return false;
-    }
-    // Bound allocated block-index vectors and syntactic edges as well as
-    // layout size. Switch duplicates also consume edge argument growth.
-    let edge_count: usize = insts
-        .iter()
-        .map(|&i| f.inst_data(i).branch_dests().len())
-        .sum();
-    if large && (f.num_blocks() > 8192 || edge_count > 16384) {
-        return false;
-    }
-    // CFG construction deduplicates successors with a linear membership test.
-    // The total edge cap alone allows quadratic work in a single wide switch.
-    if large
-        && blocks.iter().any(|&b| {
-            f.block_insts(b)
-                .iter()
-                .map(|&i| f.inst_data(i).branch_dests().len())
-                .sum::<usize>()
-                > 1024
-        })
-    {
         return false;
     }
     let analysis = crate::analysis::get(f);
@@ -92,13 +65,7 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             }
         }
     }
-    crate::stack_address::propagate(
-        f,
-        insts.iter().copied(),
-        &sizes,
-        &mut addresses,
-        large.then_some(8),
-    );
+    crate::stack_address::propagate(f, insts.iter().copied(), &sizes, &mut addresses, None);
     let mut escaped: FxHashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
     // The ABI instruction writes this home without a StackAddr SSA operand.
     escaped.extend(f.layout_insts().filter_map(|(_, i)| match f.inst_data(i) {
@@ -154,7 +121,7 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             }
         });
     }
-    if !large && fields.len() > 64 {
+    if fields.len() > 64 {
         return false;
     }
     // A repeated byte has the same representation at every offset on either
@@ -176,7 +143,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     for (&i, &field) in &accesses {
         by_slot.entry(field.0).or_default().push((i, field));
     }
-    let mut selection_work = 0usize;
     let eligible: Vec<_> = fields
         .iter()
         .copied()
@@ -185,11 +151,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
                 return false;
             }
             let peers = &by_slot[&slot];
-            // A pathological aggregate cannot starve later small objects.
-            if large && (peers.len() > 1024 || selection_work + peers.len() > 262144) {
-                return false;
-            }
-            selection_work += peers.len();
             !peers.iter().any(|&(i, (_, o, t))| {
                 (o, t) != (offset, ty)
                     && offset < o + width(t)
@@ -201,17 +162,9 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             })
         })
         .collect();
-    // All large-mode proof, liveness, and edge construction work shares a
-    // function-wide budget. No mutation occurs until a field's proofs finish.
-    let mut work_left = 2_000_000usize;
-    let mut promoted = 0;
-    let mut params_left = 8192usize;
     let mut changed = false;
     let mut retained_initializers = FxHashSet::default();
     for field in eligible {
-        if large && promoted == 32 {
-            break;
-        }
         let covers = |i: &_| {
             let &(s, o, t) = accesses.get(i)?;
             (field.2.is_int()
@@ -225,10 +178,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         let mut relevant_insts = vec![Vec::new(); f.num_blocks()];
         let mut stores = vec![false; f.num_blocks()];
         let mut has_load = false;
-        if large && work_left < insts.len() {
-            break;
-        }
-        work_left = work_left.saturating_sub(insts.len());
         for &b in &blocks {
             for &i in f.block_insts(b) {
                 if relevant(&i) && !f.is_removed(i) {
@@ -245,16 +194,9 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         // Starting false everywhere would lose initialized loop recurrences.
         let mut initialized = vec![true; f.num_blocks()];
         initialized[entry.index()] = false;
-        let mut exhausted = false;
         loop {
             let mut progress = false;
             for &b in &rpo[1..] {
-                let cost = 1 + cfg.preds(b).len();
-                if large && work_left < cost {
-                    exhausted = true;
-                    break;
-                }
-                work_left = work_left.saturating_sub(cost);
                 let value = cfg
                     .preds(b)
                     .iter()
@@ -264,12 +206,9 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
                     progress = true;
                 }
             }
-            if !progress || exhausted {
+            if !progress {
                 break;
             }
-        }
-        if exhausted {
-            break;
         }
         let valid = blocks.iter().all(|&b| {
             let mut defined = initialized[b.index()];
@@ -285,56 +224,9 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         if !valid {
             continue;
         }
-        // Prune parameters to values actually needed before a local store.
-        // Propagate backwards from loads; a defining store kills live-in.
-        let mut live = vec![false; f.num_blocks()];
-        if large {
-            for &b in &blocks {
-                live[b.index()] = relevant_insts[b.index()]
-                    .first()
-                    .is_some_and(|&i| matches!(f.inst_data(i), InstData::Load { .. }));
-            }
-            let mut queue: std::collections::VecDeque<_> =
-                blocks.iter().copied().filter(|b| live[b.index()]).collect();
-            while let Some(b) = queue.pop_front() {
-                for &p in cfg.preds(b) {
-                    if work_left == 0 {
-                        exhausted = true;
-                        break;
-                    }
-                    work_left -= 1;
-                    if !stores[p.index()] && !live[p.index()] {
-                        live[p.index()] = true;
-                        queue.push_back(p);
-                    }
-                }
-                if exhausted {
-                    break;
-                }
-            }
-            if exhausted {
-                break;
-            }
-            let params = blocks
-                .iter()
-                .filter(|b| initialized[b.index()] && live[b.index()])
-                .count();
-            if params > params_left {
-                continue;
-            }
-            params_left -= params;
-        }
-        if large {
-            let construction =
-                blocks.len() * 3 + edge_count + relevant_insts.iter().map(Vec::len).sum::<usize>();
-            if work_left < construction {
-                break;
-            }
-            work_left -= construction;
-        }
         let mut incoming = vec![None; f.num_blocks()];
         for &b in &blocks {
-            if initialized[b.index()] && (!large || live[b.index()]) {
+            if initialized[b.index()] {
                 incoming[b.index()] = Some(f.append_block_param(b, field.2));
             }
         }
@@ -375,7 +267,6 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             }
         }
         changed = true;
-        promoted += 1;
     }
     // Once all overlapping reads have moved to SSA, the covering initializer
     // is dead too. Otherwise keep its complete original byte footprint.
