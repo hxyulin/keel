@@ -6,6 +6,8 @@
 
 #[path = "golden/differential.rs"]
 mod differential;
+#[path = "golden/emitted_c.rs"]
+mod emitted_c;
 #[path = "golden/random_ir.rs"]
 mod random_ir;
 

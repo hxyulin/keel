@@ -227,6 +227,10 @@ module comments in `crates/keel-opt/tests/golden/` give the input rules.
 
 - `differential.rs` runs the exported functions of every parsable fixture
   under `tests/golden/` and `tests/fixtures/` on fixed inputs.
+- `emitted_c.rs` lowers six C test programs with `keel cc --emit-ir` and runs
+  their exported functions before and after every tier. It needs the
+  `KEEL_TEST_KEEL` binary. With `KEEL_FUZZ_ITERS` set, it lowers every program
+  under `crates/keel-c/tests/programs/` and `crates/keel-codegen/tests/programs/`.
 - `random_ir.rs` generates seeded functions over integer arithmetic,
   conversions, selects, diamonds, switches and counted loops. The normal run
   checks 24 seeds. Set `KEEL_FUZZ_ITERS` for a qualification lane and
