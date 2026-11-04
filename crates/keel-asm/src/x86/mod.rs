@@ -1106,6 +1106,13 @@ fn symbol_free(a: &Address) -> bool {
     a.expression.add.is_none() && a.expression.subtract.is_none()
 }
 
+/// Parse a nonnegative integer directive operand.
+fn num(s: &str) -> Result<u64, String> {
+    u64::try_from(x86::integer(s)?).map_err(|_| "expected nonnegative integer".into())
+}
+fn unsupported_directive(op: &str) -> String {
+    format!("unsupported ELF directive `{op}`")
+}
 /// Recognize only single literals whose address parsing and width check would
 /// succeed. Every other spelling stays on the text path, including errors:
 /// collection must not change parse/feature/layout diagnostic precedence.
@@ -2219,17 +2226,49 @@ impl Assembler {
             .unwrap_or((s.trim(), ""));
         let args = args.trim();
         let parts = x86::split_inline(args, ',');
-        let num = |s: &str| -> Result<u64, String> {
-            u64::try_from(x86::integer(s)?).map_err(|_| "expected nonnegative integer".into())
-        };
         match op {
             "" => Ok(()),
             ".intel_syntax" if args == "noprefix" => Ok(()),
-            ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
             ".code64" if args.is_empty() && self.arm.is_none() => Ok(()),
             ".code16" | ".code32" | ".code16gcc" => Err(format!(
                 "{op} is unsupported; only 64-bit x86 assembly is supported"
             )),
+            ".text" | ".data" | ".bss" | ".popsection" | ".previous" | ".section"
+            | ".pushsection" => self.section_directive(op, args, &parts),
+            ".globl" | ".global" | ".local" | ".weak" | ".hidden" | ".type" | ".size" | ".set"
+            | ".equ" | ".comm" | ".lcomm" => self.symbol_directive(op, &parts),
+            ".p2align" | ".align" | ".balign" | ".prefalign" => {
+                self.alignment_directive(op, &parts, line)
+            }
+            ".octa" | ".byte" | ".short" | ".word" | ".value" | ".2byte" | ".long" | ".int"
+            | ".4byte" | ".quad" | ".8byte" | ".org" | ".fill" | ".zero" | ".space" | ".skip"
+            | ".ascii" | ".asciz" | ".string" | ".uleb128" | ".sleb128" => {
+                self.data_directive(op, &parts, line)
+            }
+            ".file"
+            | ".loc"
+            | ".ident"
+            | ".addrsig"
+            | ".addrsig_sym"
+            | ".cfi_startproc"
+            | ".cfi_endproc"
+            | ".cfi_def_cfa_offset"
+            | ".cfi_def_cfa_register"
+            | ".cfi_def_cfa"
+            | ".cfi_offset"
+            | ".cfi_restore"
+            | ".cfi_remember_state"
+            | ".cfi_restore_state"
+            | ".cfi_adjust_cfa_offset"
+            | ".cfi_personality"
+            | ".cfi_lsda" => self.metadata_directive(op, args),
+            _ => Err(unsupported_directive(op)),
+        }
+    }
+    /// `.text`, `.data`, `.bss`, `.section` and the section stack.
+    fn section_directive(&mut self, op: &str, args: &str, parts: &[&str]) -> Result<(), String> {
+        match op {
+            ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
             ".popsection" if args.is_empty() => {
                 let section = self
                     .section_stack
@@ -2251,9 +2290,15 @@ impl Assembler {
                 if op == ".pushsection" {
                     self.section_stack.push(self.current);
                 }
-                let section = sections::parse(&parts)?;
+                let section = sections::parse(parts)?;
                 self.section_full(section)
             }
+            _ => Err(unsupported_directive(op)),
+        }
+    }
+    /// Symbol binding, type, size, value and common definitions.
+    fn symbol_directive(&mut self, op: &str, parts: &[&str]) -> Result<(), String> {
+        match op {
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {
                     let id = self.symbols.intern(&x86::symbol(name)?);
@@ -2282,7 +2327,7 @@ impl Assembler {
                 Ok(())
             }
             ".type" => {
-                let (name, kind) = match parts.as_slice() {
+                let (name, kind) = match parts {
                     [name, kind] => Some((*name, *kind)),
                     [args] => args.rsplit_once(char::is_whitespace),
                     _ => None,
@@ -2353,6 +2398,12 @@ impl Assembler {
                 }
                 Ok(())
             }
+            _ => Err(unsupported_directive(op)),
+        }
+    }
+    /// `.p2align`, `.align`, `.balign` and `.prefalign`.
+    fn alignment_directive(&mut self, op: &str, parts: &[&str], line: usize) -> Result<(), String> {
+        match op {
             ".p2align" | ".align" | ".balign" => {
                 if parts.len() > 3 {
                     return Err("too many alignment operands".into());
@@ -2374,6 +2425,38 @@ impl Assembler {
                     .transpose()?;
                 self.align_fill(power, max, fill.map_or(AlignFill::Default, AlignFill::Byte))
             }
+            ".prefalign" if parts.len() == 3 => {
+                let preferred = u32::try_from(num(parts[0])?).map_err(|_| "alignment too large")?;
+                if preferred > 30 {
+                    return Err("alignment exceeds 2^30".into());
+                }
+                let end = self.symbols.intern(&x86::symbol(parts[1])?);
+                let fill = if parts[2] == "nop" {
+                    AlignFill::Nop
+                } else {
+                    AlignFill::Byte(
+                        u8::try_from(num(parts[2])?).map_err(|_| "fill exceeds a byte")?,
+                    )
+                };
+                let power = self.pref_powers.get(self.prefs.len()).copied().unwrap_or(0);
+                let start = self.offset();
+                self.align_fill(power, None, fill)?;
+                self.prefs.push((
+                    self.current,
+                    start,
+                    self.offset() - start,
+                    preferred,
+                    end,
+                    line,
+                ));
+                Ok(())
+            }
+            _ => Err(unsupported_directive(op)),
+        }
+    }
+    /// Data emission: integers, strings, LEB128, fills and `.org`.
+    fn data_directive(&mut self, op: &str, parts: &[&str], line: usize) -> Result<(), String> {
+        match op {
             ".octa" => {
                 for part in parts {
                     self.data_bytes(&octa_value(part)?.to_le_bytes())?;
@@ -2540,6 +2623,12 @@ impl Assembler {
                 }
                 Ok(())
             }
+            _ => Err(unsupported_directive(op)),
+        }
+    }
+    /// Source files, line rows, `.ident`, address significance and CFI.
+    fn metadata_directive(&mut self, op: &str, args: &str) -> Result<(), String> {
+        match op {
             ".file" if args.starts_with('"') => {
                 let file = x86::unquote(args)?;
                 if file.contains(&0) {
@@ -2573,32 +2662,6 @@ impl Assembler {
                 self.addrsig.get_or_insert_with(Vec::new).push(name);
                 Ok(())
             }
-            ".prefalign" if parts.len() == 3 => {
-                let preferred = u32::try_from(num(parts[0])?).map_err(|_| "alignment too large")?;
-                if preferred > 30 {
-                    return Err("alignment exceeds 2^30".into());
-                }
-                let end = self.symbols.intern(&x86::symbol(parts[1])?);
-                let fill = if parts[2] == "nop" {
-                    AlignFill::Nop
-                } else {
-                    AlignFill::Byte(
-                        u8::try_from(num(parts[2])?).map_err(|_| "fill exceeds a byte")?,
-                    )
-                };
-                let power = self.pref_powers.get(self.prefs.len()).copied().unwrap_or(0);
-                let start = self.offset();
-                self.align_fill(power, None, fill)?;
-                self.prefs.push((
-                    self.current,
-                    start,
-                    self.offset() - start,
-                    preferred,
-                    end,
-                    line,
-                ));
-                Ok(())
-            }
             ".cfi_startproc"
             | ".cfi_endproc"
             | ".cfi_def_cfa_offset"
@@ -2611,7 +2674,7 @@ impl Assembler {
             | ".cfi_adjust_cfa_offset"
             | ".cfi_personality"
             | ".cfi_lsda" => metadata::cfi(self, op, args),
-            _ => Err(format!("unsupported ELF directive `{op}`")),
+            _ => Err(unsupported_directive(op)),
         }
     }
     /// [`Self::eval_symbol`] for callers that discard why it fails, without
