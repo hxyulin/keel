@@ -367,6 +367,16 @@ sides, so the deltas measure the assembly text alone.
 | `--expect-identical` | Exit non-zero if any object changed |
 | `--json FILE` | Write the full report, including every changed function |
 | `--show N` | Changed functions to print per object (default 10) |
+| `--candidate-isel LIST` | Also pass `--isel LIST` to the candidate |
+| `--covers` | Count each cover's firings with `--codegen-report` and print them per target and configuration |
+
+With `--candidate-isel`, one binary can be both sides, which compares one
+[cover](../docs/compiler/design.md) against the rest:
+
+```sh
+cargo suite codegen-diff --baseline target/release/keel --candidate target/release/keel \
+    -c keel-O --candidate-isel all,-x86-mask-test --covers
+```
 
 Use `--expect-identical` as the gate for refactors that must not change
 generated code. Objects that both binaries fail to compile are reported and not
@@ -477,6 +487,7 @@ message. The plan, raw runs and report go to `target/keel-suite/ab/runs/<time>/`
 | `--cpu N`, `--controller-cpu N` | Benchmark and controller CPUs on Linux |
 | `--no-lock` | Do not lock executable pages on Linux |
 | `--seed N` | Seed of the run order |
+| `--candidate-isel LIST` | Also pass `--isel LIST` to the candidate, so one binary can time one cover; the trailer records it |
 
 ## Checking runtime slowdowns
 

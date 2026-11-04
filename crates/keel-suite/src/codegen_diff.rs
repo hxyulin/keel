@@ -9,7 +9,7 @@ use crate::style::{Cell, Paint, bar, fail_mark, ok_mark, paint, print_table};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,6 +52,13 @@ pub struct Options {
     /// Changed functions to list per object.
     #[arg(long, default_value_t = 10)]
     show: usize,
+    /// Also pass `--isel LIST` to the candidate, so one binary can compare
+    /// selection choices, for example `all,-x86-mask-test`.
+    #[arg(long, value_name = "LIST")]
+    candidate_isel: Option<String>,
+    /// Count each cover's firings with `--codegen-report` and list them.
+    #[arg(long)]
+    covers: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -114,6 +121,9 @@ struct Summary {
     /// Compiler retired instructions summed over objects, with `--icount`.
     baseline_retired: Option<u64>,
     candidate_retired: Option<u64>,
+    /// Baseline and candidate firings of each cover, with `--covers`.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    covers: BTreeMap<String, [u64; 2]>,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -153,6 +163,9 @@ struct Side {
     text_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     instructions: Option<u64>,
+    /// Roots each cover claimed, with `--covers`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    covers: Option<BTreeMap<String, u64>>,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -303,6 +316,8 @@ struct Tools {
     out: PathBuf,
     icount: bool,
     sysroots: Vec<(Target, PathBuf)>,
+    candidate_isel: Option<String>,
+    covers: bool,
 }
 
 pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) -> Result<bool> {
@@ -327,6 +342,8 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
             .unwrap_or_else(|| root.join("target/keel-suite/codegen-diff")),
         icount: options.icount,
         sysroots,
+        candidate_isel: options.candidate_isel.clone(),
+        covers: options.covers,
     };
     let configs = Configs::load(root)?;
     let selected = configs.select(&options.config, &[])?;
@@ -427,8 +444,14 @@ fn compare(root: &Path, tools: &Tools, job: &Job) -> Result<Object> {
             .join(&name)
     };
     let (base_path, cand_path) = (path("baseline"), path("candidate"));
-    let base = compile(tools, &tools.baseline, job, &base_path)?;
-    let cand = compile(tools, &tools.candidate, job, &cand_path)?;
+    let base = compile(tools, &tools.baseline, job, &base_path, None)?;
+    let cand = compile(
+        tools,
+        &tools.candidate,
+        job,
+        &cand_path,
+        tools.candidate_isel.as_deref(),
+    )?;
     let mut object = Object {
         suite: job.suite.name.clone(),
         source: job.relative(root),
@@ -439,12 +462,14 @@ fn compare(root: &Path, tools: &Tools, job: &Job) -> Result<Object> {
             asm: base_path.display().to_string(),
             error: base.error,
             retired: base.retired,
+            covers: base.covers,
             ..Side::default()
         },
         candidate: Side {
             asm: cand_path.display().to_string(),
             error: cand.error,
             retired: cand.retired,
+            covers: cand.covers,
             ..Side::default()
         },
         functions_identical: 0,
@@ -507,9 +532,16 @@ struct Compiled {
     text: Option<Vec<u8>>,
     error: Option<String>,
     retired: Option<u64>,
+    covers: Option<BTreeMap<String, u64>>,
 }
 
-fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled> {
+fn compile(
+    tools: &Tools,
+    keel: &Path,
+    job: &Job,
+    out: &Path,
+    isel: Option<&str>,
+) -> Result<Compiled> {
     fs::create_dir_all(out.parent().unwrap())?;
     let mut argv: Vec<String> = Vec::new();
     if tools.icount {
@@ -523,6 +555,15 @@ fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled
     }
     let sysroot = tools.sysroots.iter().find(|(t, _)| *t == job.target);
     argv.extend(job.cc(keel, sysroot.map(|(_, dir)| dir.as_path()), out));
+    if let Some(list) = isel {
+        argv.extend(["--isel".into(), list.into()]);
+    }
+    // keel never overwrites a report.
+    let report = out.with_extension("covers.json");
+    if tools.covers {
+        let _ = fs::remove_file(&report);
+        argv.extend(["--codegen-report".into(), report.display().to_string()]);
+    }
     let output = build::run(&argv, &job.work.join(&job.suite.manifest.build.dir), None)?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     let retired = tools
@@ -534,13 +575,31 @@ fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled
             text: None,
             error: Some(build::tail(&output, 5).trim().to_string()),
             retired,
+            covers: None,
         });
     }
+    let covers = if tools.covers {
+        let text = fs::read(&report).with_context(|| report.display().to_string())?;
+        Some(parse_covers(&text).with_context(|| report.display().to_string())?)
+    } else {
+        None
+    };
     Ok(Compiled {
         text: Some(fs::read(out).with_context(|| out.display().to_string())?),
         error: None,
         retired,
+        covers,
     })
+}
+
+/// The module's cover firings from a `--codegen-report` file.
+fn parse_covers(json: &[u8]) -> Result<BTreeMap<String, u64>> {
+    #[derive(Deserialize)]
+    struct Report {
+        #[serde(default)]
+        covers: BTreeMap<String, u64>,
+    }
+    Ok(serde_json::from_slice::<Report>(json)?.covers)
 }
 
 /// The instructions of one assembly file, as `keel asm-metrics` reports them.
@@ -817,6 +876,14 @@ fn summarize(objects: &[Object]) -> Vec<Summary> {
         };
         add(&mut s.baseline_retired, o.baseline.retired);
         add(&mut s.candidate_retired, o.candidate.retired);
+        for (side, covers) in [&o.baseline.covers, &o.candidate.covers]
+            .into_iter()
+            .enumerate()
+        {
+            for (name, &n) in covers.iter().flatten() {
+                s.covers.entry(name.clone()).or_default()[side] += n;
+            }
+        }
     }
     summary
 }
@@ -893,6 +960,27 @@ fn print_report(root: &Path, report: &Report, out: &Path, show: usize) {
         })
         .collect();
     print_table(header, rows);
+    if report.summary.iter().any(|s| !s.covers.is_empty()) {
+        println!();
+        let header = ["", "config", "cover", "baseline", "candidate", "delta"]
+            .map(|h| Cell::new(h, Paint::Bold))
+            .to_vec();
+        let mut rows = Vec::new();
+        for s in &report.summary {
+            for (name, &[b, c]) in &s.covers {
+                let paint = if b == c { Paint::Plain } else { Paint::Yellow };
+                rows.push(vec![
+                    Cell::plain(s.target),
+                    Cell::plain(&s.config),
+                    Cell::plain(name),
+                    Cell::plain(b.to_string()),
+                    Cell::plain(c.to_string()),
+                    Cell::new(signed(c as i64 - b as i64), paint),
+                ]);
+            }
+        }
+        print_table(header, rows);
+    }
 
     for o in &report.objects {
         match o.status {
@@ -1113,6 +1201,17 @@ _g:
                 bytes: 12
             })
         );
+    }
+
+    #[test]
+    fn reads_cover_firings_from_a_codegen_report() {
+        let report = br#"{"schema_version":1,"covers":{"compare-branch":3,"x86-mask-test":1},"functions":[]}"#;
+        assert_eq!(
+            parse_covers(report).unwrap(),
+            BTreeMap::from([("compare-branch".into(), 3), ("x86-mask-test".into(), 1)])
+        );
+        // Reports from a keel without covers have no such field.
+        assert!(parse_covers(br#"{"functions":[]}"#).unwrap().is_empty());
     }
 
     #[test]

@@ -52,6 +52,10 @@ pub struct Options {
     /// The keel configuration both compilers build with.
     #[arg(short, long, default_value = "keel-O")]
     config: String,
+    /// Also pass `--isel LIST` to the candidate, so one binary can compare
+    /// selection choices, for example `all,-x86-mask-test`.
+    #[arg(long, value_name = "LIST")]
+    candidate_isel: Option<String>,
     /// Code placements; each moves the suite code 16 bytes further.
     #[arg(long, default_value_t = 4)]
     placements: usize,
@@ -513,10 +517,18 @@ fn prepare(
     // Equal-length names keep the two build directories' paths the same length.
     let mut bins = Vec::new();
     for (keel, prefix) in keels.iter().zip(["ab-base", "ab-cand"]) {
+        let mut flags = config.flags.clone();
+        if let Some(list) = options
+            .candidate_isel
+            .as_ref()
+            .filter(|_| prefix == "ab-cand")
+        {
+            flags.extend(["--isel".into(), list.clone()]);
+        }
         let config = Config {
             name: format!("{prefix}-{}", config.name),
             compiler: Compiler::Keel,
-            flags: config.flags.clone(),
+            flags,
         };
         let built = build::build(&env(keel), suite, &sources, &config)?;
         println!(
@@ -885,7 +897,10 @@ fn trailer(
         .unwrap_or_default();
     [
         format!("AB-Baseline: {}", keels[0].label),
-        format!("AB-Candidate: {}", keels[1].label),
+        match &options.candidate_isel {
+            Some(list) => format!("AB-Candidate: {} --isel {list}", keels[1].label),
+            None => format!("AB-Candidate: {}", keels[1].label),
+        },
         format!("AB-Host: {host}"),
         format!(
             "AB-Protocol: {config}, {} workloads, {} placements x {} rounds, ABBA with an identical-image control, {metric}",
