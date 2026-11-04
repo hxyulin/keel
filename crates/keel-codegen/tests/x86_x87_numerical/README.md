@@ -1,6 +1,8 @@
-# Raw architectural x87 numerical packet
+# Raw architectural x87 numerical programs
 
-Run `python3 run.py` on native Linux x86_64 with distinct genuine GCC and Clang.
+`f80::x86_x87_numerical::independent_oracle_and_packet` builds each object
+with GCC and with Clang as a `native_program!`. It runs on x86-64 Linux, and
+`KEEL_TEST_EXPORT_DIR` exports it for `suite/integration/x86-exports/run.py`.
 No libm and no C long double expressions occur in the oracle. probe.S executes
 independent native instructions with an identical FNINIT/FLDCW prestate.
 Every run compares ten-byte payloads within defined numerical domains, the
@@ -49,8 +51,8 @@ The exact finite roster has 32 objects: v1, the Baseline and Full selectors,
 Fast/Full with normal/tiny/spill pools plus two custom sparse allocation plans
 sharing the F80 result with either dying input, raw/optimized. V2, V3 and the
 Trees selector emit the same text as these configurations. The typed and text
-emission routes produce identical objects, so the packet ships the typed one.
-Each genuine compiler runs every object: 64 native runs with these exact counters per run:
+emission routes produce identical objects, so each program links the typed one.
+Each compiler runs every object: 64 native runs with these exact counters per run:
 
 - 1,503,936 safety/status invocations (185,688 prior cases × eight TOPs, plus 18,432 restricted-domain probes).
 - 654,720 mandatory defined-domain payload comparisons.
@@ -61,9 +63,7 @@ Payload diagnostics divide into 9,984 F2XM1 and 86,400 FYL2XP1 cases. No
 numerical bits inside an undefined ten-byte output range are compared as part
 of surrounding memory guards: every byte outside that range is still checked,
 including output/input aliases. Unused outputs still require no memory write.
-The runner separately records bounded mismatch counters for undefined outputs
+The harness separately prints bounded mismatch counters for undefined outputs
 and raw status; either counter may be nonzero without weakening defined-bit
-acceptance.
-Compiler identities, hashes, exact success output and encoding bytes are
-required; missing dependencies or unsupported host are errors, never passes.
-`--check` validates the sealed packet locally without claiming native execution.
+acceptance. Any defined-bit mismatch exits with a nonzero status. The test also
+checks the encoding bytes against Clang and Keel's assembler.

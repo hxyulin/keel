@@ -68,10 +68,6 @@ fn values_matrix_and_export() {
         ..EMPTY
     };
     let source = include_str!("f80/values.keel");
-    let export = std::env::var_os("KEEL_F80_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-    }
     for (cpu, level) in [
         ("v1", CpuLevel::V1),
         ("v2", CpuLevel::V2),
@@ -126,16 +122,6 @@ fn values_matrix_and_export() {
                             keel_asm::x86::assemble_object_with_features(&text, features).unwrap(),
                             "{name}"
                         );
-                        if let Some(dir) = &export {
-                            std::fs::write(dir.join(format!("{name}.typed.o")), &object).unwrap();
-                            std::fs::write(
-                                dir.join(format!("{name}.text.o")),
-                                keel_asm::x86::assemble_object_with_features(&text, features)
-                                    .unwrap(),
-                            )
-                            .unwrap();
-                            std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                        }
                     }
                 }
             }

@@ -168,33 +168,28 @@ use crate::common;
 fn independent_oracle_and_packet() {
     use keel_codegen::regalloc::RegisterAllocator;
     use keel_codegen::x86_features::FeatureSelector;
+    use keel_test_support::native_program;
     use object::{Object, ObjectSection};
-    use std::{fs, path::PathBuf, process::Command};
-    let export = std::env::var_os("KEEL_X87_NUMERICAL_EXPORT_DIR").map(PathBuf::from);
-    let d = export
-        .clone()
-        .unwrap_or_else(|| common::temp("x87-numerical"));
-    fs::create_dir_all(&d).unwrap();
+    use std::{fs, process::Command};
+    let d = keel_test_support::TempDir::new("x87-numerical");
+    let test_c = include_str!("../x86_x87_numerical/test.c");
+    let probe_s = include_str!("../x86_x87_numerical/probe.S");
     for (name, data) in [
-        ("test.c", include_str!("../x86_x87_numerical/test.c")),
-        ("probe.S", include_str!("../x86_x87_numerical/probe.S")),
+        ("test.c", test_c),
+        ("probe.S", probe_s),
         (
             "encoding.S",
             include_str!("../x86_x87_numerical/encoding.S"),
         ),
-        ("run.py", include_str!("../x86_x87_numerical/run.py")),
-        ("README.md", include_str!("../x86_x87_numerical/README.md")),
     ] {
         fs::write(d.join(name), data).unwrap();
     }
     let src = source();
-    fs::write(d.join("test.ir"), &src).unwrap();
     let tiny = Pools {
         callee_saved: &[3],
         float_caller_saved: &[0],
         ..EMPTY
     };
-    let mut names = String::new();
     let raw = keel_ir::parse(&src).unwrap();
     keel_ir::verify_module(&raw).unwrap();
     let mut optimized = raw.clone();
@@ -240,13 +235,29 @@ fn independent_oracle_and_packet() {
                 // The text route assembles to the same bytes, so ship one image.
                 let parsed = keel_asm::x86::assemble_object_with_features(&text, features).unwrap();
                 assert_eq!(typed, parsed);
-                fs::write(d.join(format!("{name}.s")), text).unwrap();
-                names += &format!("{name}\n");
-                fs::write(d.join(format!("{name}.o")), typed).unwrap();
+                // test.c exits nonzero on the first wrong result, so status 0
+                // means every one of its fixed 1,503,936 checks ran and passed.
+                for (compiler, flags) in [
+                    ("cc", &["-fno-vectorize", "-fno-slp-vectorize"][..]),
+                    ("gcc", &["-fno-tree-vectorize"]),
+                ] {
+                    native_program!(format!("{name}-{compiler}"))
+                        .file("test.c", test_c)
+                        .file("probe.S", probe_s)
+                        .file("keel.s", &text)
+                        .file("keel.o", &typed)
+                        .step(
+                            [compiler, "-O2"]
+                                .into_iter()
+                                .chain(flags.iter().copied())
+                                .chain(["-mno-red-zone", "test.c", "probe.S", "keel.o"])
+                                .chain(["-o", "program"]),
+                        )
+                        .check();
+                }
             }
         }
     }
-    fs::write(d.join("objects.txt"), names).unwrap();
     for name in ["probe.S", "test.c", "encoding.S"] {
         common::command(
             Command::new("clang")
@@ -283,35 +294,4 @@ fn independent_oracle_and_packet() {
         ),
         expected
     );
-    common::command(Command::new("python3").arg(d.join("run.py")).arg("--seal"));
-    common::command(Command::new("python3").arg(d.join("run.py")).arg("--check"));
-    let victim = d.join("v1-Baseline-Fast-normal-raw.o");
-    let original = fs::read(&victim).unwrap();
-    fs::write(&victim, b"tamper").unwrap();
-    assert!(
-        !Command::new("python3")
-            .arg(d.join("run.py"))
-            .arg("--check")
-            .output()
-            .unwrap()
-            .status
-            .success()
-    );
-    fs::write(victim, original).unwrap();
-    for flag in ["-O", "-OO"] {
-        fs::write(d.join("results.json"), b"stale").unwrap();
-        assert!(
-            !Command::new("python3")
-                .arg(flag)
-                .arg(d.join("run.py"))
-                .output()
-                .unwrap()
-                .status
-                .success()
-        );
-        assert!(!d.join("results.json").exists());
-    }
-    if export.is_none() {
-        fs::remove_dir_all(d).unwrap();
-    }
 }

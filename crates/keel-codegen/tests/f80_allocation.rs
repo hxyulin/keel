@@ -202,10 +202,6 @@ fn redundant_sparse_param_preserves_the_initialized_home() {
 }
 #[test]
 fn stack_only_sparse_bindings_and_transfers_preserve_full_payloads() {
-    let export = std::env::var_os("KEEL_F80_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-    }
     for (selection, tier) in [
         ("baseline", SelectionTier::Baseline),
         ("full", SelectionTier::Full),
@@ -221,7 +217,7 @@ fn stack_only_sparse_bindings_and_transfers_preserve_full_payloads() {
             Plan::Mixed,
         ] {
             let name = format!("custom-{selection}-{}", plan.name());
-            let (text, object) = compile(plan, tier).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let (text, _) = compile(plan, tier).unwrap_or_else(|e| panic!("{name}: {e}"));
             if matches!(
                 plan,
                 Plan::Before | Plan::After | Plan::Edge | Plan::Transit
@@ -234,15 +230,6 @@ fn stack_only_sparse_bindings_and_transfers_preserve_full_payloads() {
                     text.contains("xmmword ptr"),
                     "128-bit home metadata missing: {name}\n{text}"
                 );
-            }
-            if let Some(dir) = &export {
-                std::fs::write(dir.join(format!("{name}.typed.o")), &object).unwrap();
-                std::fs::write(
-                    dir.join(format!("{name}.text.o")),
-                    keel_asm::x86::assemble_object(&text).unwrap(),
-                )
-                .unwrap();
-                std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
             }
         }
     }

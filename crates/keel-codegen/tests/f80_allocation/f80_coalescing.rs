@@ -169,10 +169,6 @@ impl RegisterAllocator for Coalesced {
 fn coalesced_binary_and_temporal_homes_export_both_transports() {
     use keel_asm_ir::x86::{CpuLevel, Features};
     use keel_codegen::x86_features::FeatureSelector;
-    let export = std::env::var_os("KEEL_F80_EXPORT_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &export {
-        std::fs::create_dir_all(dir).unwrap();
-    }
     let module = keel_ir::parse(include_str!("../f80/coalescing.keel")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     for (cpu, level) in [("v1", CpuLevel::V1), ("v3", CpuLevel::V3)] {
@@ -209,11 +205,6 @@ fn coalesced_binary_and_temporal_homes_export_both_transports() {
                 let parsed = keel_asm::x86::assemble_object_with_features(&text, features)
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
                 assert_eq!(typed, parsed, "{name}");
-                if let Some(dir) = &export {
-                    std::fs::write(dir.join(format!("{name}.typed.o")), typed).unwrap();
-                    std::fs::write(dir.join(format!("{name}.text.o")), parsed).unwrap();
-                    std::fs::write(dir.join(format!("{name}.s")), text).unwrap();
-                }
             }
         }
     }
