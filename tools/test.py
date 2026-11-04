@@ -22,7 +22,7 @@ SCOPES = {
     "assembler": {"keel-asm-ir", "keel-asm"},
     "decoder": {"keel-disasm"},
     "linker": {"keel-link"},
-    "ir": {"keel-ir"},
+    "ir": {"keel-ir", "keel-ir-interp"},
     "cli": {"keel"},
     "wasm": {"keel-wasm"},
     "llvm": {"keel-llvm"},

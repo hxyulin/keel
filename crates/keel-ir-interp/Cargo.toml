@@ -1,0 +1,13 @@
+[package]
+name = "keel-ir-interp"
+description = "Reference interpreter for Keel IR, used as a test oracle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
+
+[lints]
+workspace = true

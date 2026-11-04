@@ -80,7 +80,7 @@ This can select much of the workspace for shared IR or assembler changes.
 | `assembler` | `keel-asm-ir`, `keel-asm` |
 | `decoder` | `keel-disasm` |
 | `linker` | `keel-link` |
-| `ir` | `keel-ir` |
+| `ir` | `keel-ir`, `keel-ir-interp` |
 | `frontend` | `keel-c`, `keel-frontend` |
 | `optimizer` | `keel-opt` |
 | `codegen` | `keel-codegen` |
@@ -321,6 +321,7 @@ tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
 | Tests | Location | Format |
 | --- | --- | --- |
 | IR golden | `crates/keel-ir/tests/golden/` | `BLESS=1 cargo test` rewrites `.out` files |
+| IR interpreter | `crates/keel-ir-interp/tests/interp/` | textual IR, one module per instruction family |
 | Optimizer passes | `crates/keel-opt/tests/golden/` | first line `; passes: a, b` |
 | Codegen programs | `crates/keel-codegen/tests/programs/` | `; expect: exit N` or `; expect: trap`; optional same-named `.c` driver; built in 8 allocator/selection configurations |
 | C programs | `crates/keel-c/tests/programs/` | output must match Clang, with and without `-O` |
