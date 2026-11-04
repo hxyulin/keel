@@ -1,4 +1,6 @@
 //! Public presets must preserve behavior across native targets and stage overrides.
+#[path = "optimization_levels/loop_unroll.rs"]
+mod loop_unroll;
 #[path = "optimization_levels/opt_controls.rs"]
 mod opt_controls;
 #[path = "optimization_levels/verification_policy.rs"]
