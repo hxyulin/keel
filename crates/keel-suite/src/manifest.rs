@@ -130,24 +130,29 @@ pub struct When {
 }
 
 impl When {
-    fn applies(&self) -> bool {
-        self.os
-            .as_deref()
-            .is_none_or(|os| os == std::env::consts::OS)
-            && self
-                .arch
-                .as_deref()
-                .is_none_or(|arch| arch == std::env::consts::ARCH)
+    fn applies(&self, os: &str, arch: &str) -> bool {
+        self.os.as_deref().is_none_or(|o| o == os) && self.arch.as_deref().is_none_or(|a| a == arch)
     }
 }
 
 impl Build {
     fn when(&self) -> impl Iterator<Item = &When> {
-        self.when.iter().filter(|w| w.applies())
+        self.when
+            .iter()
+            .filter(|w| w.applies(std::env::consts::OS, std::env::consts::ARCH))
     }
 
     pub fn define_flags(&self) -> Vec<String> {
-        let extra = self.when().flat_map(|w| &w.defines);
+        self.define_flags_for(std::env::consts::OS, std::env::consts::ARCH)
+    }
+
+    /// The defines for a build on `os` and `arch`, which need not be the host's.
+    pub fn define_flags_for(&self, os: &str, arch: &str) -> Vec<String> {
+        let extra = self
+            .when
+            .iter()
+            .filter(|w| w.applies(os, arch))
+            .flat_map(|w| &w.defines);
         self.defines
             .iter()
             .chain(extra)
@@ -365,6 +370,37 @@ mod tests {
                 vars.expand(&bench.run).unwrap();
             }
         }
+    }
+
+    /// `[[build.when]]` entries follow the requested target, not the host.
+    #[test]
+    fn defines_for_another_target() {
+        let suites = load_suites(&root()).unwrap();
+        let build = |name: &str| {
+            &suites
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap()
+                .manifest
+                .build
+        };
+        let lua = build("lua");
+        assert!(
+            lua.define_flags_for("linux", "x86_64")
+                .contains(&"-DLUA_USE_LINUX".into())
+        );
+        assert!(
+            !lua.define_flags_for("linux", "x86_64")
+                .contains(&"-DLUA_USE_MACOSX".into())
+        );
+        assert!(
+            lua.define_flags_for("macos", "aarch64")
+                .contains(&"-DLUA_USE_MACOSX".into())
+        );
+        let sqlite = build("sqlite");
+        let flag = "-DLONGDOUBLE_TYPE=double".to_string();
+        assert!(sqlite.define_flags_for("linux", "x86_64").contains(&flag));
+        assert!(!sqlite.define_flags_for("macos", "aarch64").contains(&flag));
     }
 
     #[test]
