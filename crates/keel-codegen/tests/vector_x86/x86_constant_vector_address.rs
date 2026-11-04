@@ -6,7 +6,7 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::EntityRef;
-use std::{fs, path::PathBuf};
+use keel_test_support::native_program;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -47,16 +47,6 @@ fn source(offset: i64, wide: bool, mode: usize) -> String {
     format!(
         "func @f(ptr,ptr) {{\nblock0(v0:ptr,v1:ptr):\n v2 = iconst.i64 {offset}\n v3 = ptradd v0,v2\n{before_load} v4 = load.i32x4 align 1 v3\n{convert}{call} store align 1 {value},v1\n{extra} return\n}}\n"
     )
-}
-fn dir() -> PathBuf {
-    std::env::var_os("KEEL_ADDRESS_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!(
-                "keel-constant-vector-address-{}",
-                std::process::id()
-            ))
-        })
 }
 fn compile(
     module: &keel_ir::Module,
@@ -214,7 +204,6 @@ fn resolved_address_aliases_count_shared_uses() {
 
 #[test]
 fn exact_loads_features_parity_and_native_exports() {
-    fs::create_dir_all(dir()).unwrap();
     for (profile, features, wide) in [
         ("v1", Features::for_level(CpuLevel::V1), false),
         ("v2", Features::for_level(CpuLevel::V2), false),
@@ -260,10 +249,13 @@ fn exact_loads_features_parity_and_native_exports() {
                     if !features.avx2 {
                         assert!(!text.contains("vpmovsxdq"));
                     }
-                    let name = format!("{profile}-{s:?}-{a:?}-{spilled}");
-                    fs::write(dir().join(format!("{name}.s")), text).unwrap();
-                    fs::write(dir().join(format!("{name}.o")), object).unwrap();
-                    fs::write(dir().join(format!("{name}.c")), &c).unwrap();
+                    native_program!(format!("{profile}-{s:?}-{a:?}-{spilled}"))
+                        .requires(&crate::vector_common::cpu_features(features))
+                        .file("test.s", text)
+                        .file("test.o", object)
+                        .file("test.c", &c)
+                        .link(["-O2", "-march=x86-64", "-mno-avx", "test.c", "test.o"])
+                        .check();
                 }
             }
         }
@@ -324,9 +316,9 @@ fn selection_options_and_symbolic_base_keep_exact_accesses() {
     assert!(!plan.covered(insts[1]));
 }
 
+/// The controls still compile at every selection option set.
 #[test]
 fn export_unchanged_controls() {
-    fs::create_dir_all(dir()).unwrap();
     for (name, src) in [
         ("arm", source(16, false, 0)),
         ("scalar", source(16, false, 0).replace("i32x4", "i64")),
@@ -356,8 +348,8 @@ fn export_unchanged_controls() {
             } else {
                 keel_codegen::Target::X86_64LinuxGnu
             };
-            let text = keel_codegen::compile_with_options(&module, target, options).unwrap();
-            fs::write(dir().join(format!("{name}-{tier}.control.s")), text).unwrap();
+            keel_codegen::compile_with_options(&module, target, options)
+                .unwrap_or_else(|error| panic!("{name}-{tier}: {error:?}"));
         }
     }
 }

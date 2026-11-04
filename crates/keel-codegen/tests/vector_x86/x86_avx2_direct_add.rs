@@ -6,6 +6,7 @@ use keel_codegen::{
     x86_features::FeatureSelector,
 };
 use keel_ir::EntityRef;
+use keel_test_support::native_program;
 use std::{fs, path::PathBuf, process::Command};
 
 const EMPTY: Pools = Pools {
@@ -159,11 +160,7 @@ int main(void) {
 }
 
 fn directory(test: &str) -> PathBuf {
-    std::env::var_os("KEEL_AVX2_ADD_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-avx2-add-{}-{test}", std::process::id()))
-        })
+    std::env::temp_dir().join(format!("keel-avx2-add-{}-{test}", std::process::id()))
 }
 fn command(c: &mut Command) {
     let output = c.output().unwrap();
@@ -210,25 +207,20 @@ fn avx2_add_encodings_and_semantic_oracles() {
                     fs::write(dir.join(format!("{stem}.o")), object).unwrap();
                     fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                     fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
-                    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-                    if std::is_x86_feature_detected!("avx2") {
-                        command(
-                            Command::new("clang")
-                                .args(["-O2", "-march=x86-64", "-mno-avx"])
-                                .arg(dir.join(format!("{stem}.c")))
-                                .arg(dir.join(format!("{stem}.o")))
-                                .arg("-o")
-                                .arg(dir.join(&stem)),
-                        );
-                        command(&mut Command::new(dir.join(&stem)));
+                    {
+                        let (c_file, object_file) = (format!("{stem}.c"), format!("{stem}.o"));
+                        native_program!(&*stem)
+                            .requires(&["avx2"])
+                            .file(&*c_file, fs::read(dir.join(&c_file)).unwrap())
+                            .file(&*object_file, fs::read(dir.join(&object_file)).unwrap())
+                            .link(["-O2", "-march=x86-64", "-mno-avx", &c_file, &object_file])
+                            .check();
                     }
                 }
             }
         }
     }
-    if std::env::var_os("KEEL_AVX2_ADD_EVIDENCE").is_none() {
-        fs::remove_dir_all(dir).unwrap();
-    }
+    fs::remove_dir_all(dir).unwrap();
 }
 
 struct Controlled(u8);
@@ -356,17 +348,14 @@ fn add_controlled_register_aliases_and_spills() {
             fs::write(dir.join(format!("{stem}.o")), object).unwrap();
             fs::write(dir.join(format!("{stem}.s")), text).unwrap();
             fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
-            #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-            if std::is_x86_feature_detected!("avx2") {
-                command(
-                    Command::new("clang")
-                        .args(["-O2", "-march=x86-64", "-mno-avx"])
-                        .arg(dir.join(format!("{stem}.c")))
-                        .arg(dir.join(format!("{stem}.o")))
-                        .arg("-o")
-                        .arg(dir.join(&stem)),
-                );
-                command(&mut Command::new(dir.join(&stem)));
+            {
+                let (c_file, object_file) = (format!("{stem}.c"), format!("{stem}.o"));
+                native_program!(&*stem)
+                    .requires(&["avx2"])
+                    .file(&*c_file, fs::read(dir.join(&c_file)).unwrap())
+                    .file(&*object_file, fs::read(dir.join(&object_file)).unwrap())
+                    .link(["-O2", "-march=x86-64", "-mno-avx", &c_file, &object_file])
+                    .check();
             }
         }
     }

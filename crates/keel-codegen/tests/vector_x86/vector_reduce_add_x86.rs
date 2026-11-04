@@ -5,7 +5,8 @@ use keel_codegen::{
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
     x86_features::FeatureSelector,
 };
-use std::{fs, path::PathBuf};
+use keel_test_support::native_program;
+use std::fs;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -77,11 +78,7 @@ fn wrapping_add_paths_and_oracles() {
     let (ir, c) = fixture();
     let m = keel_ir::parse(&ir).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    let dir = std::env::var_os("KEEL_REDUCE_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-reduce-{}", std::process::id()))
-        });
+    let dir = std::env::temp_dir().join(format!("keel-reduce-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("oracle.c"), &c).unwrap();
     fs::write(dir.join("input.keel"), &ir).unwrap();
@@ -163,22 +160,12 @@ fn wrapping_add_paths_and_oracles() {
                                 .unwrap()
                         );
                     }
-                    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-                    {
-                        let exe = dir.join("native");
-                        assert!(
-                            std::process::Command::new("clang")
-                                .args(["-O2", "-msse2", "-mno-avx"])
-                                .arg(dir.join("oracle.c"))
-                                .arg(dir.join(format!("{stem}.o")))
-                                .arg("-o")
-                                .arg(&exe)
-                                .status()
-                                .unwrap()
-                                .success()
-                        );
-                        assert!(std::process::Command::new(exe).status().unwrap().success());
-                    }
+                    let object_file = format!("{stem}.o");
+                    native_program!(&*stem)
+                        .file("oracle.c", &c)
+                        .file(&*object_file, fs::read(dir.join(&object_file)).unwrap())
+                        .link(["-O2", "-msse2", "-mno-avx", "oracle.c", &object_file])
+                        .check();
                 }
             }
         }
@@ -200,9 +187,7 @@ fn wrapping_add_paths_and_oracles() {
         keel_asm::assemble_object(&arm).unwrap(),
         keel_asm::assemble_program_object(&ap, Default::default()).unwrap()
     );
-    if std::env::var_os("KEEL_REDUCE_EVIDENCE").is_none() {
-        fs::remove_dir_all(dir).unwrap();
-    }
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -266,18 +251,6 @@ fn effective_features_and_excluded_reductions() {
         );
         // No excluded shape/op may accidentally reach the new SSE add recipe.
         assert!(!text.contains("\tpshufd\t"));
-        if let Some(dir) = std::env::var_os("KEEL_REDUCE_EVIDENCE") {
-            let dir = PathBuf::from(dir);
-            fs::create_dir_all(&dir).unwrap();
-            fs::write(
-                dir.join(format!(
-                    "excluded-avx{}-popcnt{}.s",
-                    features.avx, features.popcnt
-                )),
-                &text,
-            )
-            .unwrap();
-        }
     }
     let eligible = keel_ir::parse(
         "func @sum(i32x4) -> i32 {\nblock0(v0: i32x4):\n v1 = vreduce_add v0\n return v1\n}\n",

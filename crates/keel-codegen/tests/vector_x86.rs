@@ -28,6 +28,7 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
     x86_features::FeatureSelector,
 };
+use keel_test_support::{native, native_program};
 use std::{fs, process::Command};
 #[path = "common/vector.rs"]
 pub mod vector_common;
@@ -560,38 +561,19 @@ mod x86_packed;
 #[test]
 fn packed_integer_compare_oracle_emits_both_object_routes() {
     let (source, harness) = x86_packed::fixture();
-    let evidence = std::env::var_os("KEEL_X86_PACKED_EVIDENCE").map(std::path::PathBuf::from);
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("oracle.c"), &harness).unwrap();
-        fs::write(dir.join("oracle.keel"), &source).unwrap();
-    }
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for tiny in [false, true] {
-            let (text, program) = compile(
+            compile(
                 &source,
                 SelectionTier::Baseline,
                 allocation,
                 tiny,
                 Features::default(),
             );
-            if let Some(dir) = &evidence {
-                let stem = format!("{allocation:?}-tiny-{tiny}");
-                fs::write(dir.join(format!("{stem}.s")), &text).unwrap();
-                fs::write(
-                    dir.join(format!("{stem}.o")),
-                    keel_asm::x86::assemble_program_object_with_features(
-                        &program,
-                        Features::default(),
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-            }
         }
     }
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-        let (text, program) = compile_with_pools(
+        let (text, _) = compile_with_pools(
             &source,
             SelectionTier::Baseline,
             allocation,
@@ -599,16 +581,6 @@ fn packed_integer_compare_oracle_emits_both_object_routes() {
             Features::default(),
         );
         assert!(text.contains("xmmword ptr [rbp"));
-        if let Some(dir) = &evidence {
-            let stem = format!("{allocation:?}-spilled");
-            fs::write(dir.join(format!("{stem}.s")), text).unwrap();
-            fs::write(
-                dir.join(format!("{stem}.o")),
-                keel_asm::x86::assemble_program_object_with_features(&program, Features::default())
-                    .unwrap(),
-            )
-            .unwrap();
-        }
     }
     let dir = temp("packed-compare-syntax");
     let c = dir.join("oracle.c");
@@ -626,13 +598,12 @@ fn packed_integer_compare_oracle_emits_both_object_routes() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn packed_integer_compare_boundaries_aliases_live_inputs_and_spills_execute() {
+    if !native::active() {
+        keel_test_support::skip!(native::NOT_X86_LINUX);
+    }
     let (source, harness) = x86_packed::fixture();
-    let dir = temp("packed-compare-runtime");
-    let c = dir.join("oracle.c");
-    fs::write(&c, harness).unwrap();
     for selection in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -644,33 +615,21 @@ fn packed_integer_compare_boundaries_aliases_live_inputs_and_spills_execute() {
                 ("tiny", &TINY),
                 ("spilled", &SPILLED),
             ] {
-                println!("packed compare: {selection:?} {allocation:?} pool={pool_name}");
                 let (_, program) =
                     compile_with_pools(&source, selection, allocation, pools, Features::default());
-                let object = dir.join("oracle.o");
-                fs::write(
-                    &object,
-                    keel_asm::x86::assemble_program_object_with_features(
-                        &program,
-                        Features::default(),
-                    )
-                    .unwrap(),
+                let object = keel_asm::x86::assemble_program_object_with_features(
+                    &program,
+                    Features::default(),
                 )
                 .unwrap();
-                let exe = dir.join("oracle");
-                command(
-                    Command::new("clang")
-                        .args(["-O2", "-msse2", "-mno-avx"])
-                        .arg(&c)
-                        .arg(&object)
-                        .arg("-o")
-                        .arg(&exe),
-                );
-                command(&mut Command::new(exe));
+                native_program!(format!("{selection:?}-{allocation:?}-{pool_name}"))
+                    .file("oracle.c", &harness)
+                    .file("oracle.o", object)
+                    .link(["-O2", "-msse2", "-mno-avx", "oracle.c", "oracle.o"])
+                    .check();
             }
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -726,13 +685,6 @@ fn packed_compare_and_splat_recipe_encodings_match_clang_sse2() {
             .to_vec()
     };
     assert_eq!(text_bytes(&ours), text_bytes(&clang));
-    if let Some(evidence) = std::env::var_os("KEEL_X86_PACKED_EVIDENCE") {
-        let evidence = std::path::PathBuf::from(evidence);
-        fs::create_dir_all(&evidence).unwrap();
-        fs::write(evidence.join("recipes.s"), assembly).unwrap();
-        fs::write(evidence.join("recipes-keel.o"), ours).unwrap();
-        fs::write(evidence.join("recipes-clang.o"), clang).unwrap();
-    }
     fs::remove_dir_all(dir).unwrap();
 }
 
