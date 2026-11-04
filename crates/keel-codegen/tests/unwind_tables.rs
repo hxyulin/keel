@@ -13,16 +13,7 @@ fn options(policy: UnwindTables) -> EmissionOptions {
 }
 
 fn assemble(program: &keel_asm_ir::Program, target: Target) -> Vec<u8> {
-    match target {
-        Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(program).unwrap(),
-        Target::Aarch64LinuxGnu => {
-            keel_asm::assemble_elf_program_object(program, Default::default()).unwrap()
-        }
-        Target::Aarch64AppleDarwin => {
-            keel_asm::assemble_program_object(program, Default::default()).unwrap()
-        }
-        _ => unreachable!(),
-    }
+    keel_asm::assemble_program_for(target, program).unwrap()
 }
 
 #[test]
@@ -76,11 +67,7 @@ fn text_typed_and_chunks_agree_and_only_optional_frame_metadata_disappears() {
                     )
                     .unwrap();
                     let bytes = assemble(&program, target);
-                    let source_bytes = match target {
-                        Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&text).unwrap(),
-                        Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&text).unwrap(),
-                        _ => keel_asm::assemble_object(&text).unwrap(),
-                    };
+                    let source_bytes = keel_asm::assemble_source_for(target, &text).unwrap();
                     assert_eq!(bytes, source_bytes, "{target:?}/{policy:?}");
                     let mut chunks = keel_asm_ir::Program::new();
                     keel_codegen::compile_program_chunks_with_pipeline_and_emission(

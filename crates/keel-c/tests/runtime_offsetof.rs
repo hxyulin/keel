@@ -49,21 +49,10 @@ fn compile(source: &str, target: Target) -> Result<Module, keel_c::Diagnostic> {
 fn object(module: &Module, target: Target) -> Vec<u8> {
     let text = keel_codegen::compile(module, target).unwrap();
     let program = keel_codegen::compile_program(module, target).unwrap();
-    let (typed, textual) = match target {
-        Target::Aarch64AppleDarwin => (
-            keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
-            keel_asm::assemble_object(&text).unwrap(),
-        ),
-        Target::Aarch64LinuxGnu => (
-            keel_asm::assemble_elf_program_object(&program, Default::default()).unwrap(),
-            keel_asm::assemble_elf_object(&text).unwrap(),
-        ),
-        Target::X86_64LinuxGnu => (
-            keel_asm::x86::assemble_program_object(&program).unwrap(),
-            keel_asm::x86::assemble_object(&text).unwrap(),
-        ),
-        _ => unreachable!(),
-    };
+    let (typed, textual) = (
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+        keel_asm::assemble_source_for(target, &text).unwrap(),
+    );
     assert_eq!(typed, textual, "{target:?}");
     typed
 }

@@ -172,11 +172,7 @@ int init(void) { return first + table[0] + zeros[0]; }
         .unwrap();
         keel_ir::verify_module(&m).unwrap();
         let text = keel_codegen::compile(&m, target).unwrap();
-        let bytes = if target == Target::X86_64LinuxGnu {
-            keel_asm::x86::assemble_object(&text).unwrap()
-        } else {
-            keel_asm::assemble_elf_object(&text).unwrap()
-        };
+        let bytes = keel_asm::assemble_source_for(target, &text).unwrap();
         let file = object::File::parse(bytes.as_slice()).unwrap();
         for (name, flags) in [(".init.data", 3), (".init.text", 6), (".init.rodata", 2)] {
             let s = file.section_by_name(name).unwrap();

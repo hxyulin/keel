@@ -103,16 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let codegen = start.elapsed().as_secs_f64() * 1000.;
             let start = Instant::now();
             let output = match &program {
-                Some(p) => Some(match target {
-                    keel_ir::Target::Aarch64AppleDarwin => {
-                        keel_asm::assemble_program_object(p, Default::default())?
-                    }
-                    keel_ir::Target::Aarch64LinuxGnu => {
-                        keel_asm::assemble_elf_program_object(p, Default::default())?
-                    }
-                    keel_ir::Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(p)?,
-                    _ => unreachable!("validated native target"),
-                }),
+                Some(p) => Some(keel_asm::assemble_program_for(target, p)?),
                 None => None,
             };
             let assemble = start.elapsed().as_secs_f64() * 1000.;

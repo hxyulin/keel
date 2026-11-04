@@ -1154,55 +1154,32 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             .ok_or("`--emit-object` requires `-o <output.o>`")?;
         // Assemble each function's program as codegen produces it, so the
         // whole module's structured program is never resident at once.
-        let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
         let encoding_features = if target == Target::X86_64LinuxGnu {
             keel_codegen::x86_features::module_features(&module, opts.x86_features)
                 .map_err(|e| e.to_string())?
         } else {
             opts.x86_features
         };
-        let mut x86 = keel_asm::x86::ProgramAssembler::new(encoding_features);
-        let mut arm_elf = keel_asm::ElfProgramAssembler::new(keel_asm::TargetFeatures::default());
-        let mut arm_elf_sink = |program| {
+        let mut assembler = keel_asm::ObjectAssembler::with_features(
+            target,
+            keel_asm::TargetFeatures::default(),
+            encoding_features,
+        )
+        .map_err(|e| e.to_string())?;
+        let mut sink = |program| {
             profiling::scope!("integrated-assembly");
-            arm_elf.push(program)
-        };
-        let mut aarch64_sink = |program| {
-            profiling::scope!("integrated-assembly");
-            aarch64.push(program)
-        };
-        let mut x86_sink = |program| {
-            profiling::scope!("integrated-assembly");
-            x86.push_with_binary_inputs(program, &mut input::binary_input)
-        };
-        let sink: &mut dyn FnMut(_) = match target {
-            Target::Wasm32UnknownUnknown => return Err(
-                "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
-                    .into(),
-            ),
-            Target::Aarch64LinuxGnu => &mut arm_elf_sink,
-            Target::Aarch64AppleDarwin => &mut aarch64_sink,
-            Target::X86_64LinuxGnu => &mut x86_sink,
+            assembler.push_with_binary_inputs(program, &mut input::binary_input)
         };
         let emission = opts.emission_options();
         with_codegen_report(opts, target, || {
             keel_codegen::compile_program_chunks_with_pipeline_and_emission(
-                &module, target, &pipeline, emission, sink,
+                &module, target, &pipeline, emission, &mut sink,
             )
         })?;
         drop(module);
         let object = {
             profiling::scope!("object-finalization");
-            match target {
-            Target::Wasm32UnknownUnknown => return Err(
-                "unsupported target wasm32-unknown-unknown: native object emission is unavailable"
-                    .into(),
-            ),
-            Target::Aarch64LinuxGnu => arm_elf.finish(),
-            Target::Aarch64AppleDarwin => aarch64.finish(),
-            Target::X86_64LinuxGnu => x86.finish(),
-        }
-        .map_err(|e| e.to_string())?
+            assembler.finish().map_err(|e| e.to_string())?
         };
         profiling::scope!("object-write");
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))

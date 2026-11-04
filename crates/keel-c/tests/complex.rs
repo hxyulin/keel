@@ -391,20 +391,7 @@ fn clang_differential_and_bidirectional_abi() {
             };
             let program =
                 keel_codegen::compile_program_with_pipeline(&module, target, &pipeline).unwrap();
-            let object = match target {
-                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-                Target::Aarch64AppleDarwin => {
-                    keel_asm::assemble_program_object(&program, Default::default())
-                }
-                Target::Aarch64LinuxGnu => {
-                    keel_asm::assemble_elf_program_object(&program, Default::default())
-                }
-                Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object_with_features(
-                    &program,
-                    Default::default(),
-                ),
-            }
-            .unwrap();
+            let object = keel_asm::assemble_program_for(target, &program).unwrap();
             // Both actual object formats must expose the explicit runtime ABI;
             // neither code generation nor optimization may silently drop it.
             use object::{Object, ObjectSymbol};
@@ -945,20 +932,7 @@ fn raw_platform_complex_header() {
                 },
             )
             .unwrap();
-            let object = match target {
-                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-                Target::Aarch64AppleDarwin => {
-                    keel_asm::assemble_program_object(&program, Default::default())
-                }
-                Target::Aarch64LinuxGnu => {
-                    keel_asm::assemble_elf_program_object(&program, Default::default())
-                }
-                Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object_with_features(
-                    &program,
-                    Default::default(),
-                ),
-            }
-            .unwrap();
+            let object = keel_asm::assemble_program_for(target, &program).unwrap();
             fs::write(dir.join("raw.o"), object).unwrap();
             command(
                 Command::new("clang")

@@ -954,3 +954,121 @@ pub fn assemble_elf_program_object(
     assembler.push(program.clone());
     assembler.finish()
 }
+
+pub use keel_asm_ir::Target;
+
+fn unsupported_target(target: Target) -> Error {
+    Error::new(
+        0,
+        format!(
+            "unsupported target {}: native object emission is unavailable",
+            target.triple()
+        ),
+    )
+}
+
+/// Incremental assembly into the native object format of one [`Target`]:
+/// Mach-O for `aarch64-apple-darwin` and ELF for the Linux targets.
+/// Programs pushed in order assemble exactly like their concatenation.
+#[derive(Debug)]
+pub struct ObjectAssembler(ObjectBackend);
+
+#[derive(Debug)]
+enum ObjectBackend {
+    MachO(ProgramAssembler),
+    Aarch64Elf(ElfProgramAssembler),
+    X86Elf(x86::ProgramAssembler),
+}
+
+impl ObjectAssembler {
+    /// An assembler with default ISA features.
+    ///
+    /// # Errors
+    /// Returns an error for a target without a native object format (wasm32).
+    pub fn for_target(target: Target) -> Result<Self, Error> {
+        Self::with_features(target, TargetFeatures::default(), x86::Features::default())
+    }
+
+    /// An assembler with explicit ISA features. Each target uses the features
+    /// of its own architecture and ignores the other set.
+    ///
+    /// # Errors
+    /// Returns an error for a target without a native object format (wasm32).
+    pub fn with_features(
+        target: Target,
+        aarch64: TargetFeatures,
+        x86: x86::Features,
+    ) -> Result<Self, Error> {
+        Ok(Self(match target {
+            Target::Aarch64AppleDarwin => ObjectBackend::MachO(ProgramAssembler::new(aarch64)),
+            Target::Aarch64LinuxGnu => ObjectBackend::Aarch64Elf(ElfProgramAssembler::new(aarch64)),
+            Target::X86_64LinuxGnu => ObjectBackend::X86Elf(x86::ProgramAssembler::new(x86)),
+            Target::Wasm32UnknownUnknown => return Err(unsupported_target(target)),
+        }))
+    }
+
+    pub fn push(&mut self, program: keel_asm_ir::Program) {
+        match &mut self.0 {
+            ObjectBackend::MachO(assembler) => assembler.push(program),
+            ObjectBackend::Aarch64Elf(assembler) => assembler.push(program),
+            ObjectBackend::X86Elf(assembler) => assembler.push(program),
+        }
+    }
+
+    /// Push a chunk whose `.incbin` names `resolver` resolves. Only x86-64
+    /// assembly consults the resolver; AArch64 pushes as [`Self::push`].
+    pub fn push_with_binary_inputs(
+        &mut self,
+        program: keel_asm_ir::Program,
+        resolver: &mut x86::BinaryInputResolver<'_>,
+    ) {
+        match &mut self.0 {
+            ObjectBackend::X86Elf(assembler) => {
+                assembler.push_with_binary_inputs(program, resolver)
+            }
+            _ => self.push(program),
+        }
+    }
+
+    /// # Errors
+    /// Returns the first assembly, layout or object-writing error.
+    pub fn finish(self) -> Result<Vec<u8>, Error> {
+        match self.0 {
+            ObjectBackend::MachO(assembler) => assembler.finish(),
+            ObjectBackend::Aarch64Elf(assembler) => assembler.finish(),
+            ObjectBackend::X86Elf(assembler) => assembler.finish(),
+        }
+    }
+}
+
+/// Assemble source for `target` with default ISA features: Apple or GNU
+/// AArch64 syntax, or Intel syntax for x86-64.
+///
+/// # Errors
+/// Returns an assembly error, or an error for a target without a native
+/// object format (wasm32).
+pub fn assemble_source_for(target: Target, source: &str) -> Result<Vec<u8>, Error> {
+    match target {
+        Target::Aarch64AppleDarwin => assemble_object(source),
+        Target::Aarch64LinuxGnu => assemble_elf_object(source),
+        Target::X86_64LinuxGnu => x86::assemble_object(source),
+        Target::Wasm32UnknownUnknown => Err(unsupported_target(target)),
+    }
+}
+
+/// Assemble one structured program for `target` with default ISA features.
+///
+/// # Errors
+/// Returns an assembly error, or an error for a target without a native
+/// object format (wasm32).
+pub fn assemble_program_for(
+    target: Target,
+    program: &keel_asm_ir::Program,
+) -> Result<Vec<u8>, Error> {
+    match target {
+        Target::Aarch64AppleDarwin => assemble_program_object(program, TargetFeatures::default()),
+        Target::Aarch64LinuxGnu => assemble_elf_program_object(program, TargetFeatures::default()),
+        Target::X86_64LinuxGnu => x86::assemble_program_object(program),
+        Target::Wasm32UnknownUnknown => Err(unsupported_target(target)),
+    }
+}

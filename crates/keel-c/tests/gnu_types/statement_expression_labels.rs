@@ -49,18 +49,7 @@ fn labeled_expressions_keep_their_types_and_goto_side_effects() {
                 }
                 keel_ir::verify_module(&module).unwrap();
                 let program = keel_codegen::compile_program(&module, target).unwrap();
-                let object = match target {
-                    Target::Aarch64AppleDarwin => {
-                        keel_asm::assemble_program_object(&program, Default::default()).unwrap()
-                    }
-                    Target::Aarch64LinuxGnu => {
-                        keel_asm::assemble_elf_program_object(&program, Default::default()).unwrap()
-                    }
-                    Target::X86_64LinuxGnu => {
-                        keel_asm::x86::assemble_program_object(&program).unwrap()
-                    }
-                    Target::Wasm32UnknownUnknown => unreachable!("native-only test"),
-                };
+                let object = keel_asm::assemble_program_for(target, &program).unwrap();
                 if Target::host() == Some(target) {
                     let dir = keel_test_support::TempDir::new(&format!(
                         "statement-expression-labels-debug{debug_info}-opt{optimize}"

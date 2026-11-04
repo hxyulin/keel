@@ -37,24 +37,10 @@ fn module(src: &str, target: Target, debug_info: bool, optimize: bool) -> Module
 fn object(m: &Module, target: Target, text: bool) -> Vec<u8> {
     if text {
         let asm = keel_codegen::compile(m, target).unwrap();
-        match target {
-            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-            Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
-            Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
-            Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),
-        }
+        keel_asm::assemble_source_for(target, &asm).unwrap()
     } else {
         let p = keel_codegen::compile_program(m, target).unwrap();
-        match target {
-            keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-            Target::Aarch64AppleDarwin => {
-                keel_asm::assemble_program_object(&p, Default::default()).unwrap()
-            }
-            Target::Aarch64LinuxGnu => {
-                keel_asm::assemble_elf_program_object(&p, Default::default()).unwrap()
-            }
-            Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(&p).unwrap(),
-        }
+        keel_asm::assemble_program_for(target, &p).unwrap()
     }
 }
 /// Keel's text and direct routes must give the same object, so tests that

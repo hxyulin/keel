@@ -28,21 +28,10 @@ fn compile(source: &str, target: Target, optimize: bool) -> Module {
 fn assemble(m: &Module, target: Target) -> Vec<u8> {
     let text = keel_codegen::compile(m, target).unwrap();
     let program = keel_codegen::compile_program(m, target).unwrap();
-    let (text, typed) = match target {
-        Target::X86_64LinuxGnu => (
-            keel_asm::x86::assemble_object(&text).unwrap(),
-            keel_asm::x86::assemble_program_object(&program).unwrap(),
-        ),
-        Target::Aarch64LinuxGnu => (
-            keel_asm::assemble_elf_object(&text).unwrap(),
-            keel_asm::assemble_elf_program_object(&program, Default::default()).unwrap(),
-        ),
-        Target::Aarch64AppleDarwin => (
-            keel_asm::assemble_object(&text).unwrap(),
-            keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
-        ),
-        Target::Wasm32UnknownUnknown => unreachable!(),
-    };
+    let (text, typed) = (
+        keel_asm::assemble_source_for(target, &text).unwrap(),
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+    );
     assert_eq!(text, typed, "text/typed {target:?}");
     let selector = keel_codegen::OptionsSelector(Default::default());
     let pipeline = keel_codegen::CodegenPipeline {

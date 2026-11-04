@@ -109,20 +109,7 @@ fn declarations_layout_and_pointer_transport_remain_usable() {
             keel_ir::verify_module(&module).unwrap();
             assert!(!module.decls.iter().any(|d| d.name == "get"));
             let program = keel_codegen::compile_program(&module, target).unwrap();
-            match target {
-                keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-                Target::Aarch64AppleDarwin => {
-                    keel_asm::assemble_program_object(&program, Default::default())
-                }
-                Target::Aarch64LinuxGnu => {
-                    keel_asm::assemble_elf_program_object(&program, Default::default())
-                }
-                Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object_with_features(
-                    &program,
-                    Default::default(),
-                ),
-            }
-            .unwrap();
+            keel_asm::assemble_program_for(target, &program).unwrap();
         }
     }
 }

@@ -102,8 +102,8 @@ fn exact_x86_metrics_need_no_external_tools_and_keep_a64_schema() {
             "none",
             input
         ])
-            .status
-            .success()
+        .status
+        .success()
     );
     fs::remove_dir_all(dir).unwrap();
 }

@@ -197,14 +197,16 @@ keel archive -o libfoo.a foo.o bar.o
 Each stage is a crate that can be used directly:
 
 ```rust,ignore
-let program = keel_codegen::compile_program(&module, keel_codegen::Target::Aarch64AppleDarwin)?;
-let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())?;
+let target = keel_codegen::Target::Aarch64AppleDarwin;
+let program = keel_codegen::compile_program(&module, target)?;
+let object = keel_asm::assemble_program_for(target, &program)?;
 ```
 
 - `keel_c::preprocess` / `keel_c::compile`: C to IR.
 - `keel_opt::Pass` and `run_pipeline`: custom optimizer pipelines.
 - `CodegenPipeline`: plug in an `InstructionSelector` or `RegisterAllocator`.
-- `keel_asm::x86::assemble_program_object`: x86-64 ELF objects.
+- `keel_asm::ObjectAssembler::for_target`: incremental objects for any native
+  target; `assemble_program_for` and `assemble_source_for` assemble one input.
 
 ## Profiling
 

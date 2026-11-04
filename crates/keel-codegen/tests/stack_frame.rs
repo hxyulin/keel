@@ -27,12 +27,7 @@ fn sparse_escaping_slots_assemble_on_both_targets() {
                     },
                 )
                 .unwrap();
-                let object = match target {
-                    keel_ir::Target::Wasm32UnknownUnknown => panic!("native-only test target"),
-                    Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm).unwrap(),
-                    Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(&asm).unwrap(),
-                    Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(&asm).unwrap(),
-                };
+                let object = keel_asm::assemble_source_for(target, &asm).unwrap();
                 assert!(!object.is_empty());
             }
         }
@@ -157,11 +152,8 @@ fn large_aarch64_arguments_assemble_and_match_native_c() {
     fs::create_dir_all(&dir).unwrap();
     for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
         let asm = keel_codegen::compile(&module, target).unwrap();
-        let object = match target {
-            Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm),
-            _ => keel_asm::assemble_elf_object(&asm),
-        }
-        .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
+        let object = keel_asm::assemble_source_for(target, &asm)
+            .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
         if Target::host() == Some(target) {
             let obj = dir.join("large.o");
             let driver = dir.join("driver.c");
@@ -221,11 +213,8 @@ block0({params}):
     keel_ir::verify_module(&module).unwrap();
     for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
         let asm = keel_codegen::compile(&module, target).unwrap();
-        let object = match target {
-            Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm),
-            _ => keel_asm::assemble_elf_object(&asm),
-        }
-        .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
+        let object = keel_asm::assemble_source_for(target, &asm)
+            .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
         assert!(!object.is_empty());
     }
 }
@@ -256,11 +245,8 @@ fn assemble_aarch64(source: &str) {
     keel_ir::verify_module(&module).unwrap();
     for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
         let asm = keel_codegen::compile(&module, target).unwrap();
-        let object = match target {
-            Target::Aarch64AppleDarwin => keel_asm::assemble_object(&asm),
-            _ => keel_asm::assemble_elf_object(&asm),
-        }
-        .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
+        let object = keel_asm::assemble_source_for(target, &asm)
+            .unwrap_or_else(|error| panic!("{target:?}: {error}\n{asm}"));
         assert!(!object.is_empty());
     }
 }

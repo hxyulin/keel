@@ -59,16 +59,7 @@ fn nonstring_queries_track_declarations_without_evaluating_operands() {
                 keel_opt::optimize(&mut module).unwrap();
             }
             let program = keel_codegen::compile_program(&module, target).unwrap();
-            let object = match target {
-                Target::Aarch64AppleDarwin => {
-                    keel_asm::assemble_program_object(&program, Default::default()).unwrap()
-                }
-                Target::Aarch64LinuxGnu => {
-                    keel_asm::assemble_elf_program_object(&program, Default::default()).unwrap()
-                }
-                Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(&program).unwrap(),
-                _ => unreachable!(),
-            };
+            let object = keel_asm::assemble_program_for(target, &program).unwrap();
             if Target::host() == Some(target) {
                 let dir = keel_test_support::TempDir::new(&format!("nonstring-opt{optimize}"));
                 fs::write(dir.join("queries.o"), object).unwrap();
