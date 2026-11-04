@@ -3,8 +3,10 @@
 //!
 //! Pure arithmetic belongs in the instruction set, where the optimizer sees
 //! it directly. Intrinsics are for call-like operations (memory functions)
-//! and target-specific ones. Everything a pass needs to know about one lives
-//! in its [`IntrinsicInfo`]. Reviewed x86 system declarations come from
+//! and target-specific ones. A signature lives in its [`IntrinsicInfo`]. Memory
+//! effects, trap possibility, inlining and the x86 lowering family come from
+//! `tools/x86-isa/intrinsic-registry.json`, or from the metadata family that
+//! owns the declaration. Reviewed x86 system declarations come from
 //! `tools/x86-isa/system-intrinsics.json`; their lowering stays in the backends.
 
 use crate::{Type, VectorType};
@@ -20,7 +22,7 @@ mod generated_query;
 
 #[path = "generated/intrinsic_registry.rs"]
 mod generated_registry;
-pub use generated_registry::Intrinsic;
+pub use generated_registry::{Intrinsic, X86Family};
 #[path = "intrinsic/avx512_vl_lane.rs"]
 mod avx512_vl_lane;
 pub use avx512_vl_lane::{X86Avx512VlLane, X86Avx512VlLaneKind};
@@ -15002,120 +15004,7 @@ impl Intrinsic {
     }
 
     pub fn is_x86_target(self) -> bool {
-        if matches!(self, x86_system_intrinsics!(x86_64)) {
-            return true;
-        }
-        matches!(
-            self,
-            Self::X86RflagsRead
-                | Self::X86RflagsSwap
-                | Self::X86X87Region
-                | Self::X86Xrstor64
-                | Self::X86Xsave64
-                | Self::X86Lahf
-                | Self::X86SahfExchange
-                | Self::X86Fxsave64
-                | Self::X86Fxrstor64
-                | Self::X86X87ReadCwNowait
-                | Self::X86X87ReadSwNowait
-                | Self::X86X87ReadCwWait
-                | Self::X86X87ReadSwWait
-                | Self::X86X87ExchangeCw
-                | Self::X86X87ClexNowait
-                | Self::X86X87ClexWait
-                | Self::X86X87InitNowait
-                | Self::X86X87InitWait
-                | Self::X86X87Wait
-                | Self::X86MmxEmms
-                | Self::X86CpuXcr0
-                | Self::X86Xgetbv0
-                | Self::X86Cpuid
-                | Self::X86Rdtsc
-                | Self::X86Rdpmc
-                | Self::X86Lfence
-                | Self::X86Sfence
-                | Self::X86Mfence
-                | Self::X86Pause
-        ) || self.x86_system_register().is_some()
-            || self.x86_system_write().is_some()
-            || self.x86_descriptor_query().is_some()
-            || self.x86_selector_query().is_some()
-            || self.x86_port_io().is_some()
-            || self.x86_string_port_io().is_some()
-            || self.x86_raw_div().is_some()
-            || self.x86_legacy_x87_image().is_some()
-            || self.x86_owned_x87_stack().is_some()
-            || self.is_x86_x87_numerical()
-            || self.x86_packed_search().is_some()
-            || self.x86_sign_blend().is_some()
-            || self.x86_packed_pair().is_some()
-            || self.x86_packed_shift().is_some()
-            || self.x86_byte_shift().is_some()
-            || self.is_x86_byte_shuffle()
-            || self.is_x86_cache_stream()
-            || self == Self::X86AvxVzeroall
-            || matches!(self, Self::X86SseReadMxcsr | Self::X86SseSwapMxcsr)
-            || self.is_x86_mmx_value_convert()
-            || self.is_x86_raw_fma()
-            || self == Self::X86Cx16Cmpxchg16b
-            || self.is_x86_f16c()
-            || self.is_x86_bmi()
-            || self.is_x86_gather()
-            || self.is_x86_masked_mem()
-            || self.is_x86_raw_fp_convert()
-            || self.is_x86_fp_compare()
-            || self.is_x86_sha256()
-            || self.x86_avx512_bw_core().is_some()
-            || self.x86_avx512_bw_mask().is_some()
-            || self.x86_avx512_vl_shift().is_some()
-            || self.x86_avx512_bw_permute().is_some()
-            || self.x86_avx512_vl_widen().is_some()
-            || self.x86_avx512_vl_lane().is_some()
-            || self.x86_avx512_vl_integer().is_some()
-            || self.x86_avx512_bw_shift().is_some()
-            || self.x86_avx512_bw_pack().is_some()
-            || self.x86_avx512_vl_narrow().is_some()
-            || self.x86_avx512_bw_convert().is_some()
-            || self.x86_avx512_bw_mul().is_some()
-            || self.is_x86_avx512_mask()
-            || self.is_x86_avx512_indexed()
-            || self.x86_avx512_special().is_some()
-            || self.x86_avx512_bw_misc().is_some()
-            || self.x86_avx512_bw_mask_alu().is_some()
-            || self.x86_avx512_dq_mask_alu().is_some()
-            || self.x86_avx512_dq_special().is_some()
-            || self.x86_avx512_dq_lane().is_some()
-            || self.x86_avx512_dq_bridge().is_some()
-            || self.x86_avx512_dq_convert().is_some()
-            || self.x86_avx512_vl_convert().is_some()
-            || self.is_x86_avx512_convert()
-            || self.is_x86_avx512_scalar_move()
-            || self.x86_avx512_packed_opcode().is_some()
-            || self.x86_avx512_scalar_convert().is_some()
-            || self.x86_avx512_scalar().is_some()
-            || self.x86_avx512_fma_opcode().is_some()
-            || self.x86_avx512_scalar_fma_opcode().is_some()
-            || self.x86_avx512_permute().is_some()
-            || self.is_x86_avx512_pack()
-            || self.is_x86_avx512_integer()
-            || self.is_x86_avx512_mask_alu()
-            || self.is_x86_avx512_integer_convert()
-            || self.is_x86_avx512_lane()
-            || self.x86_aes_opcode().is_some()
-            || self.is_x86_pure_bits()
-            || self.is_x86_fp_misc()
-            || self == Self::X86AvxVmaskmovdqu
-            || self.is_x86_legacy_raw_fp_convert()
-            || self.is_x86_legacy_fp_misc()
-            || self.is_x86_legacy_fp_compare()
-            || self.is_x86_legacy_sign_mask()
-            || self == Self::X86SseMaskmovdqu
-            || self.is_x86_legacy_fp_v2()
-            || self.is_x86_pclmul()
-            || self.is_x86_crc32()
-            || self.is_x86_legacy_ptest()
-            || self.is_x86_string()
-            || self.is_x86_fp_horizontal_dot()
+        self.x86_family().is_some()
     }
 
     /// Inactive sign-mask lanes do not access memory. Active lanes read exactly

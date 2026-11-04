@@ -79,14 +79,7 @@ def metadata(rows, family):
                   f'                params: {ty(row["params"])},',
                   f'                returns: {ty(row["returns"])},',
                   f'                pure: {str(row["pure"]).lower()},', '            },']
-    lines += ['            _ => return None,', '        })', '    }', '',
-              f'    pub(crate) fn generated_{family}_memory_effects(self) -> crate::MemoryEffects {{',
-              '        match self {']
-    for effect in sorted(MEMORY):
-        if groups[effect]:
-            lines += [f'            x86_{family}_intrinsics!({effect}) => crate::MemoryEffects::{effect},']
-    lines += [f'            _ => unreachable!("not a declared x86 {family} intrinsic"),',
-              '        }', '    }', '']
+    lines += ['            _ => return None,', '        })', '    }', '']
     return lines
 
 

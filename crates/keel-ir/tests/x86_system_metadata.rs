@@ -1,4 +1,6 @@
 //! Frozen intrinsic IDs and signatures; no privileged instructions execute.
+#[path = "x86_system_metadata/intrinsic_facts.rs"]
+mod intrinsic_facts;
 #[path = "x86_system_metadata/x86_query_metadata.rs"]
 mod x86_query_metadata;
 

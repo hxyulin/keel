@@ -566,88 +566,12 @@ fn eligibility_reason_with_frames(
     body_eligibility_reason(f, frames)
 }
 
-// These operations refer only to SSA operands and architectural state. Cloning
-// their arguments preserves their existing pinning/effects. Frame observers,
-// nonlocal control flow and owned regions keep their separate restrictions.
+// The intrinsic registry marks the operations that refer only to SSA operands
+// and architectural state. Cloning their arguments preserves their existing
+// pinning/effects. Frame observers, nonlocal control flow and owned regions
+// keep their separate restrictions.
 fn inlineable_target_intrinsic(id: Intrinsic) -> bool {
-    id.x86_packed_search().is_some()
-        || id.x86_sign_blend().is_some()
-        || id.x86_packed_pair().is_some()
-        || id.x86_packed_shift().is_some()
-        || id.x86_byte_shift().is_some()
-        || id.is_x86_byte_shuffle()
-        || id.is_x86_cache_stream()
-        || id.is_x86_raw_fma()
-        || id.is_x86_f16c()
-        || id.is_x86_bmi()
-        || id.is_x86_gather()
-        || id.is_x86_masked_mem()
-        || id.is_x86_raw_fp_convert()
-        || id.is_x86_fp_compare()
-        || id.is_x86_sha256()
-        || id.is_x86_pclmul()
-        || id.x86_avx512_bw_core().is_some()
-        || id.x86_avx512_bw_mask().is_some()
-        || id.x86_avx512_vl_widen().is_some()
-        || id.x86_avx512_vl_lane().is_some()
-        || id.x86_avx512_vl_integer().is_some()
-        || id.x86_avx512_vl_shift().is_some()
-        || id.x86_avx512_bw_permute().is_some()
-        || id.x86_avx512_bw_shift().is_some()
-        || id.x86_avx512_bw_pack().is_some()
-        || id.x86_avx512_vl_narrow().is_some()
-        || id.x86_avx512_bw_convert().is_some()
-        || id.x86_avx512_bw_mul().is_some()
-        || id.is_x86_avx512_mask()
-        || id.is_x86_avx512_indexed()
-        || id.x86_avx512_special().is_some()
-        || id.x86_avx512_bw_misc().is_some()
-        || id.x86_avx512_bw_mask_alu().is_some()
-        || id.x86_avx512_dq_mask_alu().is_some()
-        || id.x86_avx512_dq_special().is_some()
-        || id.x86_avx512_dq_lane().is_some()
-        || id.x86_avx512_dq_bridge().is_some()
-        || id.x86_avx512_dq_convert().is_some()
-        || id.x86_avx512_vl_convert().is_some()
-        || id.is_x86_avx512_convert()
-        || id.is_x86_avx512_scalar_move()
-        || id.x86_avx512_packed_opcode().is_some()
-        || id.x86_avx512_scalar_convert().is_some()
-        || id.x86_avx512_scalar().is_some()
-        || id.x86_avx512_fma_opcode().is_some()
-        || id.x86_avx512_scalar_fma_opcode().is_some()
-        || id.x86_avx512_permute().is_some()
-        || id.is_x86_avx512_pack()
-        || id.is_x86_avx512_integer()
-        || id.is_x86_avx512_mask_alu()
-        || id.is_x86_avx512_integer_convert()
-        || id.is_x86_avx512_lane()
-        || id.x86_aes_opcode().is_some()
-        || id.is_x86_pure_bits()
-        || id.is_x86_fp_misc()
-        || id.is_x86_legacy_raw_fp_convert()
-        || id.is_x86_legacy_fp_misc()
-        || id.is_x86_legacy_fp_compare()
-        || id.is_x86_legacy_sign_mask()
-        || id.is_x86_legacy_fp_v2()
-        || id.is_x86_crc32()
-        || id.is_x86_legacy_ptest()
-        || id.is_x86_string()
-        || id.is_x86_fp_horizontal_dot()
-        || matches!(
-            id,
-            Intrinsic::X86AvxVzeroall
-                | Intrinsic::X86AvxVmaskmovdqu
-                | Intrinsic::X86SseMaskmovdqu
-                | Intrinsic::X86SseReadMxcsr
-                | Intrinsic::X86SseSwapMxcsr
-                | Intrinsic::X86CpuXcr0
-                | Intrinsic::X86Cpuid
-                | Intrinsic::X86Lfence
-                | Intrinsic::X86Sfence
-                | Intrinsic::X86Mfence
-                | Intrinsic::X86Pause
-        )
+    id.inlineable()
 }
 
 fn body_eligibility_reason(f: &Function, frames: FrameSemantics) -> Option<&'static str> {

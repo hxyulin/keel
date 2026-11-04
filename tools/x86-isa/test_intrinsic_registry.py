@@ -35,7 +35,7 @@ class IntrinsicRegistryTests(unittest.TestCase):
 
     def test_x86_pattern_matches_frozen_inventory_and_excludes_portable_entries(self):
         source = intrinsic_registry.generate(self.schema, self.families)
-        pattern = source.split('macro_rules! x86_intrinsics {', 1)[1]
+        pattern = source.split('macro_rules! x86_intrinsics {', 1)[1].split('\n}\n', 1)[0]
         fixture = ROOT.parents[1] / 'crates/keel-ir/tests/fixtures/intrinsic-inventory.txt'
         expected = [line.split('|')[0] for line in fixture.read_text().splitlines()
                     if not line.startswith('#') and line.startswith('X86')]
@@ -81,7 +81,7 @@ class IntrinsicRegistryTests(unittest.TestCase):
         schema['intrinsics'][774]['metadata'] = 'x86_query'
         with self.assertRaisesRegex(ValueError, 'owner'):
             intrinsic_registry.generate(schema, self.families)
-        schema['intrinsics'][774]['metadata'] = 'handwritten'
+        schema['intrinsics'][774].update(metadata='handwritten', effects='Barrier')
         with self.assertRaisesRegex(ValueError, 'membership'):
             intrinsic_registry.generate(schema, self.families)
 
@@ -105,7 +105,11 @@ class IntrinsicRegistryTests(unittest.TestCase):
                                           (3, 'x86_system', self.families['x86_system'][-1])]:
             id_ = start + offset
             variant = f'X86Example{id_}'
-            schema['intrinsics'].append(dict(id=id_, variant=variant, inventory=id_, metadata=family))
+            row = dict(id=id_, variant=variant, inventory=id_, metadata=family, trap=True, inline=False,
+                       family=intrinsic_registry.owned_family(family, template) if template else 'example')
+            if not template:
+                row['effects'] = 'Barrier'
+            schema['intrinsics'].append(row)
             if template:
                 families[family].append(dict(template, id=id_, variant=variant, name=f'x86_example{id_}'))
         system_intrinsics.validate({'intrinsics': families['x86_system']})
@@ -116,6 +120,33 @@ class IntrinsicRegistryTests(unittest.TestCase):
             self.assertIn(f'X86Example{id_} = {id_},', source)
         self.assertIn(f'Self::X86Example{start + 3} => IntrinsicInfo',
                       system_intrinsics.generate({'intrinsics': families['x86_system']}))
+
+        self.assertIn('Example,', source)
+
+    def test_fact_table_follows_registry_and_owner_metadata(self):
+        source = intrinsic_registry.generate(self.schema, self.families)
+        table = source.split('static FACTS:', 1)[1]
+        self.assertEqual(len(re.findall(r'^    f\(', table, re.M)), len(self.schema['intrinsics']))
+        self.assertIn('f(M::None, true, true, Some(F::SignBlend)), // X86Sse41Blendvps128', table)
+        self.assertIn('f(M::Barrier, true, false, Some(F::System)), // X86Lgdt', table)
+        self.assertIn('f(M::ReadWrite, true, true, None), // Memcpy', table)
+
+    def test_invalid_facts_fail(self):
+        lgdt, memcpy = 774, next(i for i, r in enumerate(self.schema['intrinsics']) if r['variant'] == 'Memcpy')
+        for index, change, message in [
+                (0, lambda r: r.pop('trap'), 'fields'),
+                (0, lambda r: r.update(inline=1), 'booleans'),
+                (0, lambda r: r.pop('family'), 'family'),
+                (0, lambda r: r.update(family='Bad-Name'), 'family'),
+                (memcpy, lambda r: r.update(family='example'), 'family'),
+                (0, lambda r: r.pop('effects'), 'effects'),
+                (0, lambda r: r.update(effects='Relaxed'), 'effects'),
+                (lgdt, lambda r: r.update(effects='Barrier'), 'effects'),
+                (lgdt, lambda r: r.update(family='port_io'), 'lowering family')]:
+            schema = copy.deepcopy(self.schema)
+            change(schema['intrinsics'][index])
+            with self.subTest(index=index, message=message), self.assertRaisesRegex(ValueError, message):
+                intrinsic_registry.generate(schema, self.families)
 
 
 if __name__ == '__main__':

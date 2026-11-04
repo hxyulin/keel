@@ -92,8 +92,9 @@ format, so there is no reason to hide them behind calls, as LLVM does for
 `ctpop`/`bswap` because its instructions are expensive to add. Intrinsics are for
 call-like or target-specific operations, written `intrinsic memcpy(v0, v1, v2)`
 (no `@`: they are not symbols). They share one `Intrinsic { id, args }` format;
-everything passes need (signature, purity, memory effects) comes from the
-registry in `intrinsic.rs`, generated from `tools/x86-isa/intrinsic-registry.json`.
+everything passes need (signature, purity, memory effects, trap possibility,
+inlining) comes from the registry in `intrinsic.rs`, generated from
+`tools/x86-isa/intrinsic-registry.json`.
 
 `trap` is a terminator instruction, not an intrinsic: nothing after it runs,
 and as an ordinary instruction every block using it would need a dummy

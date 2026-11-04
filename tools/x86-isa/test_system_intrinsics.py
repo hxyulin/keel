@@ -3,7 +3,10 @@ import json
 import unittest
 from pathlib import Path
 
+import intrinsic_registry
 import system_intrinsics
+
+ROOT = Path(__file__).resolve().parent
 
 
 class SystemIntrinsicTests(unittest.TestCase):
@@ -61,11 +64,11 @@ class SystemIntrinsicTests(unittest.TestCase):
         schema['intrinsics'][0]['memory'] = 'Read'
         source = system_intrinsics.generate(schema)
         self.assertIn('(Read) => {\n        $crate::Intrinsic::X86Lgdt\n', source)
-        self.assertIn('x86_system_intrinsics!(Read) => crate::MemoryEffects::Read', source)
-        schema['intrinsics'][0]['memory'] = 'None'
-        schema['intrinsics'][0]['pure'] = True
-        source = system_intrinsics.generate(schema)
-        self.assertIn('x86_system_intrinsics!(None) => crate::MemoryEffects::None', source)
+        registry = json.loads((ROOT / 'intrinsic-registry.json').read_text())
+        families = {'x86_system': schema['intrinsics'],
+                    'x86_query': json.loads((ROOT / 'query-bindings.json').read_text())['intrinsics']}
+        effects = {variant: effect for variant, effect, *_ in intrinsic_registry.facts(registry, families)}
+        self.assertEqual(effects['X86Lgdt'], 'Read')
 
     def test_missing_unknown_and_empty_schema_fields(self):
         for level in ['root', 'row']:

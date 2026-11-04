@@ -277,8 +277,8 @@ See `LICENSE-ZYDIS` for production ISA data and `LICENSE-XED` for the pilot.
 
 ## Intrinsic registry and family declarations
 
-`intrinsic-registry.json` owns all 821 intrinsic variants, explicit numeric IDs,
-`ALL` positions and metadata ownership. It includes target-neutral intrinsics,
+`intrinsic-registry.json` owns every intrinsic variant, explicit numeric IDs,
+`ALL` positions, metadata ownership and the facts passes query. It includes target-neutral intrinsics,
 not only x86 intrinsics. `intrinsic_registry.py` generates the public enum and
 inventory in `crates/keel-ir/src/generated/intrinsic_registry.rs`. The public
 `Intrinsic` paths, derives and inventory type remain unchanged.
@@ -294,6 +294,17 @@ an identical registry ID/variant/owner, and every registry member of that family
 needs a declaration. It rejects duplicate identities, duplicate family names,
 missing members and unknown owners. Global IDs remain contiguous from zero;
 family IDs need only be ordered and unique, so families can interleave.
+
+Each row also records `trap` (the intrinsic may fault or trap), `inline` (the
+inliner may copy it into another function) and, for x86 rows only, `family`:
+the backend module group that validates and lowers it. Handwritten rows record
+`effects` (`None`, `Read`, `Write`, `ReadWrite` or `Barrier`). Family-owned rows
+take effects from the family's `memory` field, and their `family` must match the
+family's own classification: `system`, or the query binding kind. The generator
+emits the `X86Family` enum and one fact table indexed by ID, read through
+`Intrinsic::memory_effects`, `may_trap`, `inlineable` and `x86_family`.
+`crates/keel-ir/tests/x86_system_metadata/intrinsic_facts.rs` checks that the
+facts agree with each other and with the owning family.
 
 `system-intrinsics.json` owns signatures, names, docs, effects, target policy and
 reviewed lowering recipes for 45 existing system intrinsics at IDs 774..818.
@@ -325,7 +336,8 @@ To add an intrinsic:
    next `ALL` position, a unique variant and its metadata owner. Do not reorder
    existing IDs or inventory positions.
 2. Add the declaration to the owner's schema with the same ID and variant.
-   For `handwritten`, implement the metadata/classification matches in Rust.
+   For `handwritten`, implement the signature and descriptor matches in Rust,
+   and set `effects`, `trap`, `inline` and, for x86, `family` on the row.
    Family membership does not require neighbouring IDs or a generator edit.
 3. Select an existing lowering recipe or implement the new behavior. Review
    permission, state, clobber and continuation contracts explicitly.

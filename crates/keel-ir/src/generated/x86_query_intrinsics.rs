@@ -445,13 +445,6 @@ impl Intrinsic {
         })
     }
 
-    pub(crate) fn generated_query_memory_effects(self) -> crate::MemoryEffects {
-        match self {
-            x86_query_intrinsics!(Barrier) => crate::MemoryEffects::Barrier,
-            _ => unreachable!("not a declared x86 query intrinsic"),
-        }
-    }
-
     /// Opcode, operand bits, exact write bytes; zero means register.
     /// Long mode only, CPL0 or CR4.UMIP clear; no feature-bit implication.
     /// See query-bindings.json for contracts.

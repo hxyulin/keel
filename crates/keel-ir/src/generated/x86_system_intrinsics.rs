@@ -427,13 +427,6 @@ impl Intrinsic {
         })
     }
 
-    pub(crate) fn generated_system_memory_effects(self) -> crate::MemoryEffects {
-        match self {
-            x86_system_intrinsics!(Barrier) => crate::MemoryEffects::Barrier,
-            _ => unreachable!("not a declared x86 system intrinsic"),
-        }
-    }
-
     /// Raw system register access: (register, write); caller owns privilege and state.
     pub fn x86_system_register(self) -> Option<(&'static str, bool)> {
         Some(match self {
