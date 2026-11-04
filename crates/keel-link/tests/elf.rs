@@ -255,8 +255,19 @@ fn relocation_encoding_preserves_signed_wraps_boundaries_and_adjacent_bytes() {
     for delta in [i64::MIN, -1, i64::MAX] {
         cases.push((24, p, delta, Some(delta.to_le_bytes().to_vec())));
     }
-    cases.push((24, p + 1, i64::MAX, None));
-    cases.push((24, p - 1, i64::MIN, None));
+    // ELF64 address arithmetic wraps before a PC-relative field is narrowed.
+    cases.push((24, p + 1, i64::MAX, Some(i64::MIN.to_le_bytes().to_vec())));
+    cases.push((24, p - 1, i64::MIN, Some(i64::MAX.to_le_bytes().to_vec())));
+    // Low text reaching the top of the address space, and across the
+    // canonical-address gap, uses the wrapped distance.
+    let top = u64::MAX - 0xfff;
+    let gap = 0xffff_8000_0000_0000u64;
+    for (kind, target) in [(2u32, top), (4, top), (24, top), (24, gap)] {
+        let distance = target.wrapping_sub(p).to_le_bytes();
+        let width = if kind == 24 { 8 } else { 4 };
+        cases.push((kind, target, 0, Some(distance[..width].to_vec())));
+    }
+    cases.push((2, gap, 0, None));
     for (kind, target, addend, expected) in cases {
         let mut input = template.clone();
         input[rela + 8..rela + 12].copy_from_slice(&kind.to_le_bytes());

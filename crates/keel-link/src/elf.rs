@@ -8,6 +8,7 @@ mod groups;
 mod input;
 mod lifecycle;
 mod notes;
+mod reloc;
 pub mod relocatable;
 mod script;
 mod selected;
@@ -591,12 +592,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                     let width = if arm {
                         aarch64::width(kind)?
                     } else {
-                        match kind {
-                            15 => 1, // R_X86_64_PC8, used by LOOP/J*CXZ.
-                            1 | 24 => 8,
-                            2 | 4 | 9 | 10 | 11 | 41 | 42 => 4,
-                            _ => return Err(format!("unsupported x86-64 relocation {kind}")),
-                        }
+                        reloc::x86_64::width(kind)?
                     };
                     if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                         return Err("relocation field is outside file-backed section data".into());
@@ -609,11 +605,12 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                             .relocation(
                                 offset,
                                 if arm {
+                                    use object::elf::*;
                                     match kind {
-                                        257 => 1,
-                                        258 => 10,
-                                        260 => 24,
-                                        261 => 2,
+                                        R_AARCH64_ABS64 => R_X86_64_64,
+                                        R_AARCH64_ABS32 => R_X86_64_32,
+                                        R_AARCH64_PREL64 => R_X86_64_PC64,
+                                        R_AARCH64_PREL32 => R_X86_64_PC32,
                                         _ => kind,
                                     }
                                 } else {
@@ -1123,11 +1120,15 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             let selection = selected.get(ui, r.symbol)?;
             let import = selection.import;
             if let (Some(name), Some(d)) = (import, dynamic.as_mut())
-                && r.kind == 1
+                && r.kind == object::elf::R_X86_64_64
             {
                 let offset = sections[r.section].offset + r.offset;
-                d.relocations
-                    .push((BASE + offset, d.imports[name].index, 1, r.addend));
+                d.relocations.push((
+                    BASE + offset,
+                    d.imports[name].index,
+                    object::elf::R_X86_64_64,
+                    r.addend,
+                ));
                 bytes[offset as usize..offset as usize + 8].fill(0);
                 continue;
             }
@@ -1135,7 +1136,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                 let offset = sections[r.section].offset + r.offset;
                 let p = i128::from(BASE + offset);
                 let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
-                    if matches!(r.kind, 9 | 41 | 42) {
+                    if reloc::x86_64::uses_got(r.kind) {
                         i128::from(d.slot(name, &sections))
                     } else {
                         i128::from(d.stub(name, &sections)?)
@@ -1143,7 +1144,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                 } else if if arm {
                     aarch64::got(r.kind)
                 } else {
-                    matches!(r.kind, 9 | 41 | 42)
+                    reloc::x86_64::uses_got(r.kind)
                 } {
                     i128::from(BASE + sections[got_section].offset + got[&selection.key])
                 } else {
@@ -1161,25 +1162,17 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
                     data[..width].copy_from_slice(&encoded);
                     return Ok((offset as usize, data, width));
                 }
-                // Preserve the allocation-free x86 relocation path.
-
-                let data = match r.kind {
-                    15 => i8::try_from(value - p).map(|v| (v as u64, 1)).ok(),
-                    1 => Some((value as u64, 8)),
-                    10 => u32::try_from(value).map(|v| (u64::from(v), 4)).ok(),
-                    11 => i32::try_from(value as u64 as i64)
-                        .map(|v| (v as u64, 4))
-                        .ok(),
-                    24 => i64::try_from(value - p).map(|v| (v as u64, 8)).ok(),
-                    _ => i32::try_from(value - p).map(|v| (v as u64, 4)).ok(),
-                }
-                .ok_or_else(|| {
-                    format!(
-                        "relocation {} overflow for `{}`",
-                        r.kind, u.symbols[&r.symbol].name
-                    )
-                })?;
-                Ok((offset as usize, data.0.to_le_bytes(), data.1))
+                let field =
+                    reloc::x86_64::encode(r.kind, value, BASE + offset).map_err(|e| match e {
+                        reloc::x86_64::Error::Unsupported => {
+                            format!("unsupported x86-64 relocation {}", r.kind)
+                        }
+                        reloc::x86_64::Error::Overflow => format!(
+                            "relocation {} overflow for `{}`",
+                            r.kind, u.symbols[&r.symbol].name
+                        ),
+                    })?;
+                Ok((offset as usize, field.bytes, field.width))
             };
             let (offset, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
             bytes[offset..offset + width].copy_from_slice(&data[..width]);

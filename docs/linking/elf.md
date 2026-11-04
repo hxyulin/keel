@@ -86,8 +86,12 @@ For bounded GNU script final linking through the library API, see
 - RELA relocations: `R_X86_64_NONE`, `64`, `PC32`, `PLT32`, `GOTPCREL`, `32`,
   `32S`, `PC8`, `PC64`, `GOTPCRELX` and `REX_GOTPCRELX`. Static calls bind directly;
   GOT loads keep their original instructions and use resolved read-only GOT
-  slots. Narrow relocations are overflow-checked; 64-bit absolute arithmetic
-  wraps.
+  slots. S + A and S + A - P use ELF64 address arithmetic, which wraps modulo
+  2^64. The wrapped result is then overflow-checked against the field: `32`
+  as unsigned, `32S` and the PC-relative fields as signed. A PC-relative
+  reference across the top of the address space, or across the
+  canonical-address gap with `PC64`, uses the short wrapped distance. The
+  default and script layouts share this encoder.
 - The default layout uses base `0x400000`, 4 KiB segment alignment, separate R/RX/RW LOAD
   segments, zero-filled BSS and a non-executable `GNU_STACK` header. Output is
   not PIE. Static output has no interpreter or dynamic relocations.

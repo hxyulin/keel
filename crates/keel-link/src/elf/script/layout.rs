@@ -4,8 +4,8 @@ use super::{Assignment, Command, Expr, Output, Phdr, Script};
 use crate::{
     Result,
     elf::{
-        Executable, Options, PAGE, Section, Symbol, Unit, align, end, put16, put32, put64, shdr,
-        string,
+        Executable, Options, PAGE, Section, Symbol, Unit, align, end, put16, put32, put64,
+        reloc::x86_64, shdr, string,
     },
 };
 use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
@@ -879,36 +879,25 @@ fn emit(
                 .checked_add(place.offset)
                 .and_then(|v| v.checked_add(r.offset))
                 .ok_or("relocation place overflow")?;
-            let value = i128::from(s) + i128::from(r.addend);
-            // ELF64 address arithmetic wraps before a signed PC-relative field
-            // is narrowed, including references across the canonical-address gap.
-            let displacement = (value as u64).wrapping_sub(p) as i64;
-            let encoded = match r.kind {
-                1 => u64::try_from(value.rem_euclid(1i128 << 64))
-                    .ok()
-                    .map(|v| (v, 8)),
-                2 | 4 => i32::try_from(displacement).ok().map(|v| (v as u64, 4)),
-                10 => u32::try_from(value).ok().map(|v| (u64::from(v), 4)),
-                11 => i32::try_from(value as u64 as i64)
-                    .ok()
-                    .map(|v| (v as u64, 4)),
-                15 => i8::try_from(displacement).ok().map(|v| (v as u64, 1)),
-                24 => Some((displacement as u64, 8)),
-                _ => {
-                    return Err(format!(
-                        "{}: relocation {} requires unsupported script GOT/dynamic layout",
-                        unit.name, r.kind
-                    ));
-                }
+            if x86_64::uses_got(r.kind) {
+                return Err(format!(
+                    "{}: relocation {} requires unsupported script GOT/dynamic layout",
+                    unit.name, r.kind
+                ));
             }
-            .ok_or_else(|| {
-                format!(
-                    "{}: relocation {} overflow for `{}`",
-                    unit.name, r.kind, symbol.name
-                )
-            })?;
+            let field = x86_64::encode(r.kind, i128::from(s) + i128::from(r.addend), p).map_err(
+                |e| match e {
+                    x86_64::Error::Unsupported => {
+                        format!("{}: unsupported x86-64 relocation {}", unit.name, r.kind)
+                    }
+                    x86_64::Error::Overflow => format!(
+                        "{}: relocation {} overflow for `{}`",
+                        unit.name, r.kind, symbol.name
+                    ),
+                },
+            )?;
             let at = (out.offset + place.offset + r.offset) as usize;
-            bytes[at..at + encoded.1].copy_from_slice(&encoded.0.to_le_bytes()[..encoded.1]);
+            bytes[at..at + field.width].copy_from_slice(&field.bytes[..field.width]);
         }
     }
     if layout.outputs.iter().filter(|o| o.size != 0).count() + 4 >= 0xff00 {
