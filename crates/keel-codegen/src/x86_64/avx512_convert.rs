@@ -1,5 +1,28 @@
 //! Raw masked conversions expose hardware rounding, indefinite results and SAE.
 use super::*;
+
+fn mnemonic(id: Intrinsic) -> EvexMnemonic {
+    use Intrinsic::*;
+    match id {
+        X86Avx512Vcvtdq2ps => EvexMnemonic::Vcvtdq2ps,
+        X86Avx512Vcvtudq2ps => EvexMnemonic::Vcvtudq2ps,
+        X86Avx512Vcvtdq2pd => EvexMnemonic::Vcvtdq2pd,
+        X86Avx512Vcvtudq2pd => EvexMnemonic::Vcvtudq2pd,
+        X86Avx512Vcvtps2dq => EvexMnemonic::Vcvtps2dq,
+        X86Avx512Vcvtps2udq => EvexMnemonic::Vcvtps2udq,
+        X86Avx512Vcvttps2dq => EvexMnemonic::Vcvttps2dq,
+        X86Avx512Vcvttps2udq => EvexMnemonic::Vcvttps2udq,
+        X86Avx512Vcvtpd2dq => EvexMnemonic::Vcvtpd2dq,
+        X86Avx512Vcvtpd2udq => EvexMnemonic::Vcvtpd2udq,
+        X86Avx512Vcvttpd2dq => EvexMnemonic::Vcvttpd2dq,
+        X86Avx512Vcvttpd2udq => EvexMnemonic::Vcvttpd2udq,
+        X86Avx512Vcvtps2pd => EvexMnemonic::Vcvtps2pd,
+        X86Avx512Vcvtpd2ps => EvexMnemonic::Vcvtpd2ps,
+        X86Avx512Vcvtph2ps => EvexMnemonic::Vcvtph2ps,
+        X86Avx512Vcvtps2ph => EvexMnemonic::Vcvtps2ph,
+        _ => unreachable!("AVX512F conversion intrinsic"),
+    }
+}
 use keel_asm_ir::x86::evex::{EvexOpcode, Rounding};
 
 pub(super) fn validate(
@@ -44,12 +67,7 @@ impl FunctionCompiler<'_> {
         }
         self.avx512_stage_mask(args[1]);
         let control = iconst(self.func, args[3]).expect("validated conversion control");
-        let name = id
-            .info()
-            .name
-            .strip_prefix("x86_avx512_")
-            .expect("raw conversion name");
-        let mut opcode = EvexOpcode::parse(name).expect("AVX512F conversion opcode");
+        let mut opcode = EvexOpcode::new(mnemonic(id));
         opcode.options.mask = Some(1);
         if control & 8 != 0 {
             opcode.options.rounding = Some(

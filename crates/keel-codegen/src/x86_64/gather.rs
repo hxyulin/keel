@@ -1,6 +1,44 @@
 //! Destructive hardware destination/mask are reserved scratch views; the IR
 //! passthrough, indices and mask remain normal immutable SSA inputs.
 use super::*;
+
+fn opcode(id: Intrinsic) -> Opcode {
+    use Intrinsic::*;
+    match id {
+        X86Avx2Vgatherdps128 | X86Avx2Vgatherdps256 => op::VGATHERDPS,
+        X86Avx2Vgatherdpd128 | X86Avx2Vgatherdpd256 => op::VGATHERDPD,
+        X86Avx2Vgatherqps128 | X86Avx2Vgatherqps256 => op::VGATHERQPS,
+        X86Avx2Vgatherqpd128 | X86Avx2Vgatherqpd256 => op::VGATHERQPD,
+        X86Avx2Vpgatherdd128 | X86Avx2Vpgatherdd256 => op::VPGATHERDD,
+        X86Avx2Vpgatherdq128 | X86Avx2Vpgatherdq256 => op::VPGATHERDQ,
+        X86Avx2Vpgatherqd128 | X86Avx2Vpgatherqd256 => op::VPGATHERQD,
+        X86Avx2Vpgatherqq128 | X86Avx2Vpgatherqq256 => op::VPGATHERQQ,
+        _ => unreachable!("AVX2 gather intrinsic"),
+    }
+}
+
+fn masked_opcode(id: Intrinsic) -> Opcode {
+    use Intrinsic::*;
+    match id {
+        X86AvxVmaskmovpsLoad128
+        | X86AvxVmaskmovpsStore128
+        | X86AvxVmaskmovpsLoad256
+        | X86AvxVmaskmovpsStore256 => op::VMASKMOVPS,
+        X86AvxVmaskmovpdLoad128
+        | X86AvxVmaskmovpdStore128
+        | X86AvxVmaskmovpdLoad256
+        | X86AvxVmaskmovpdStore256 => op::VMASKMOVPD,
+        X86Avx2VpmaskmovdLoad128
+        | X86Avx2VpmaskmovdStore128
+        | X86Avx2VpmaskmovdLoad256
+        | X86Avx2VpmaskmovdStore256 => op::VPMASKMOVD,
+        X86Avx2VpmaskmovqLoad128
+        | X86Avx2VpmaskmovqStore128
+        | X86Avx2VpmaskmovqLoad256
+        | X86Avx2VpmaskmovqStore256 => op::VPMASKMOVQ,
+        _ => unreachable!("AVX masked memory intrinsic"),
+    }
+}
 impl FunctionCompiler<'_> {
     pub(super) fn native_gather(&mut self, id: Intrinsic, args: &[Value], result: Option<Value>) {
         for (arg, scratch) in [args[1], args[2], args[3]].into_iter().zip([FS1, FS0, FS2]) {
@@ -16,13 +54,8 @@ impl FunctionCompiler<'_> {
         at.scale = iconst(self.func, args[4]).unwrap() as u8;
         let ty = self.ty(args[2]);
         let bits = (ty.vector().unwrap().lane_type().bytes().unwrap() * 8) as u16;
-        let name = id.info().name.strip_prefix("x86_avx2_").unwrap();
-        let name = name
-            .strip_suffix("128")
-            .or_else(|| name.strip_suffix("256"))
-            .unwrap();
         self.emit(
-            Opcode::parse(name).unwrap(),
+            opcode(id),
             [
                 asm_arg(simd(FS0, ty)),
                 asm_arg(sized(at, bits)),
@@ -60,15 +93,7 @@ impl FunctionCompiler<'_> {
         }
         let base = self.use_reg(args[0], S1);
         let at = sized(memory(r64(base), 0), ptr(ty));
-        let name = id.info().name;
-        let op_name = name
-            .strip_prefix("x86_avx_")
-            .or_else(|| name.strip_prefix("x86_avx2_"))
-            .unwrap()
-            .split('_')
-            .next()
-            .unwrap();
-        let opcode = Opcode::parse(op_name).unwrap();
+        let opcode = masked_opcode(id);
         if store {
             self.emit(
                 opcode,

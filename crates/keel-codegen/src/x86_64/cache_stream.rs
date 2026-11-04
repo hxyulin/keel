@@ -19,6 +19,27 @@
 //! including MOVNTDQA's memory-type-dependent behavior; these are not MMIO APIs.
 use super::*;
 
+fn opcode(id: Intrinsic) -> Opcode {
+    use Intrinsic::*;
+    match id {
+        X86Prefetchnta => Opcode::Prefetchnta,
+        X86Prefetcht0 => Opcode::Prefetcht0,
+        X86Prefetcht1 => Opcode::Prefetcht1,
+        X86Prefetcht2 => Opcode::Prefetcht2,
+        X86SseMovntps128 => Opcode::Movntps,
+        X86SseMovntpd128 => Opcode::Movntpd,
+        X86SseMovntdq128 => Opcode::Movntdq,
+        X86AvxVmovntps128 | X86AvxVmovntps256 => op::VMOVNTPS,
+        X86AvxVmovntpd128 | X86AvxVmovntpd256 => op::VMOVNTPD,
+        X86AvxVmovntdq128 | X86AvxVmovntdq256 => op::VMOVNTDQ,
+        X86Movnti32 | X86Movnti64 => Opcode::Movnti,
+        X86Sse41Movntdqa128 => op::MOVNTDQA,
+        X86Avx2Vmovntdqa256 => op::VMOVNTDQA,
+        X86Clflush => op::CLFLUSH,
+        _ => unreachable!("cache or stream intrinsic"),
+    }
+}
+
 impl FunctionCompiler<'_> {
     pub(super) fn native_cache_stream(
         &mut self,
@@ -29,17 +50,7 @@ impl FunctionCompiler<'_> {
         let name = id.info().name;
         let address_only = name.starts_with("x86_prefetch") || id == Intrinsic::X86Clflush;
         let load = name.contains("movntdqa");
-        let opcode = if address_only {
-            &name[4..]
-        } else if name.starts_with("x86_movnti") {
-            "movnti"
-        } else {
-            name.rsplit('_')
-                .next()
-                .unwrap()
-                .trim_end_matches(|c: char| c.is_ascii_digit())
-        };
-        let opcode = Opcode::parse(opcode).expect("audited cache/stream opcode");
+        let opcode = opcode(id);
         // Reserved SIMD/GPR fallbacks are independent of the address scratch.
         // Capture the stored value before obtaining the address, then publish a
         // load result only after its address has been consumed.
