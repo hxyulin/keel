@@ -350,17 +350,18 @@ fn avx_matrix_matches_clang_and_gnu() {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("matrix.s");
     std::fs::write(&input, &source).unwrap();
-    let mut tools = vec![(
-        "clang".to_string(),
-        vec!["-target", "x86_64-unknown-linux-gnu", "-c"],
-    )];
-    // Linux requires GNU as. Other hosts may supply a cross-assembler explicitly.
-    if let Some(gnu) = std::env::var_os("KEEL_TEST_GNU_AS") {
-        tools.push((gnu.to_str().unwrap().to_owned(), vec!["--64"]));
-    } else if cfg!(target_os = "linux") {
-        tools.push(("as".into(), vec!["--64"]));
+    let mut clang = Command::new("clang");
+    clang.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+    let mut tools = vec![("clang".to_string(), clang)];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => {
+            let mut command = gnu.command();
+            command.arg("--64");
+            tools.push((gnu.path().display().to_string(), command));
+        }
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
     }
-    for (tool, flags) in tools {
+    for (tool, mut command) in tools {
         // GNU as retains the written bitwise order and uses load-direction moves
         // by default; LLVM and keel choose VEX2 where possible. Request the same
         // equivalent encoding explicitly, without changing FP arithmetic order.
@@ -416,13 +417,7 @@ fn avx_matrix_matches_clang_and_gnu() {
             .unwrap();
         }
         let output = temp.join("reference.o");
-        let result = Command::new(&tool)
-            .args(flags)
-            .arg(&input)
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .unwrap();
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
             result.status.success(),
             "{tool}: {}",

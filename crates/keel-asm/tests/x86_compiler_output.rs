@@ -56,26 +56,19 @@ fn relocations(bytes: &[u8]) -> Vec<(u64, object::RelocationFlags, i64, String)>
         })
         .collect()
 }
-fn gnu() -> Option<String> {
-    let candidates = if let Ok(tool) = std::env::var("KEEL_GNU_AS") {
-        vec![tool]
-    } else if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
-        vec!["as".into()]
-    } else {
-        vec!["x86_64-elf-as".into(), "x86_64-linux-gnu-as".into()]
-    };
-    candidates.into_iter().find(|tool| {
-        Command::new(tool).arg("--version").output().is_ok_and(|p| {
-            p.status.success() && String::from_utf8_lossy(&p.stdout).contains("GNU assembler")
-        })
-    })
+fn gnu() -> Option<&'static keel_test_support::Tool> {
+    let tool = keel_test_support::gnu_as();
+    if tool.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    tool
 }
-fn reference(source: &str, gnu: Option<&str>) -> Vec<u8> {
+fn reference(source: &str, gnu: Option<&keel_test_support::Tool>) -> Vec<u8> {
     let scratch = Scratch::new();
     let input = scratch.0.join("input.s");
     let output = scratch.0.join("reference.o");
     std::fs::write(&input, source).unwrap();
-    let mut cmd = Command::new(gnu.unwrap_or("clang"));
+    let mut cmd = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
     if gnu.is_some() {
         cmd.arg("--64");
     } else {
@@ -112,7 +105,7 @@ fn differential(intel: &str, att: &str) {
         }
         let mut references = vec![reference(source, None)];
         if let Some(tool) = gnu() {
-            references.push(reference(source, Some(&tool)));
+            references.push(reference(source, Some(tool)));
         }
         for expected in references {
             assert_eq!(text(&ours), text(&expected), "{source}");
@@ -402,9 +395,10 @@ fn clang_also_rejects_invalid_x87_register_and_width_forms() {
         // must report every line. GNU rewrites `fldl %st` to `fld %st` with a
         // warning; it must still never accept one of these forms silently.
         std::fs::write(&input, format!("{directive}\n{}\n", cases.join("\n"))).unwrap();
-        for tool in std::iter::once("clang".to_string()).chain(gnu()) {
-            let clang = tool == "clang";
-            let mut command = Command::new(&tool);
+        for gnu in std::iter::once(None).chain(gnu().map(Some)) {
+            let clang = gnu.is_none();
+            let tool = gnu.map_or("clang".into(), |gnu| gnu.path().display().to_string());
+            let mut command = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
             if clang {
                 command.args(["-c", "-target", "x86_64-unknown-linux-gnu"]);
             } else {

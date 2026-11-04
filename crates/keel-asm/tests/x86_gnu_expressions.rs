@@ -79,22 +79,26 @@ fn compare_tools(source: &str, clang: bool) {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("input.s");
     std::fs::write(&input, &source).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-    for (tool, args) in [
-        ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-        (gnu.as_str(), vec!["--64"]),
-    ] {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    let clang_reference = {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        ("clang".to_owned(), c)
+    };
+    let gnu_reference = gnu.map(|gnu| {
+        let mut c = gnu.command();
+        c.args(["--64"]);
+        (gnu.path().display().to_string(), c)
+    });
+    for (tool, mut command) in std::iter::once(clang_reference).chain(gnu_reference) {
         if tool == "clang" && !clang {
             continue;
         }
         let output = temp.join("reference.o");
-        let result = Command::new(tool)
-            .args(args)
-            .arg(&input)
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .unwrap();
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
             result.status.success(),
             "{tool}: {}\n{source}",
@@ -412,7 +416,10 @@ fn unknown_symbols_cross_section_differences_and_alias_cycles_fail_oracles() {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("invalid.s");
     let output = temp.join("invalid.o");
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
     for source in [
         ".if missing\n.endif",
         ".skip missing",
@@ -421,17 +428,18 @@ fn unknown_symbols_cross_section_differences_and_alias_cycles_fail_oracles() {
     ] {
         assert!(assemble_object(source).is_err());
         std::fs::write(&input, source).unwrap();
-        for (tool, args) in [
-            ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-            (gnu.as_str(), vec!["--64"]),
-        ] {
-            let result = Command::new(tool)
-                .args(args)
-                .arg(&input)
-                .arg("-o")
-                .arg(&output)
-                .output()
-                .unwrap();
+        let clang_reference = {
+            let mut c = Command::new("clang");
+            c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+            ("clang".to_owned(), c)
+        };
+        let gnu_reference = gnu.map(|gnu| {
+            let mut c = gnu.command();
+            c.args(["--64"]);
+            (gnu.path().display().to_string(), c)
+        });
+        for (tool, mut command) in std::iter::once(clang_reference).chain(gnu_reference) {
+            let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
             assert!(
                 !result.status.success(),
                 "{tool} unexpectedly accepted {source}"

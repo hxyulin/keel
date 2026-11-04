@@ -146,12 +146,16 @@ fn kernel_operand_matrix_matches_clang_and_gnu() {
         ("gnu", vec!["--64"]),
     ] {
         let output = dir.join(format!("{name}.o"));
-        let command = if name == "clang" {
-            "clang".into()
+        let mut command = if name == "clang" {
+            Command::new("clang")
         } else {
-            std::env::var_os("KEEL_GNU_AS").unwrap_or_else(|| "as".into())
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            gnu.command()
         };
-        let result = Command::new(command)
+        let result = command
             .args(args)
             .arg(&input)
             .arg("-o")

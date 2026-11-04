@@ -210,7 +210,7 @@ fn advertised(features: &[&str]) -> bool {
         let name = format!("hw.optional.arm.{feature}");
         let out = Command::new("sysctl").args(["-n", &name]).output().unwrap();
         if !out.status.success() || out.stdout != b"1\n" {
-            eprintln!("skipping native numeric test: {name} is not advertised");
+            keel_test_support::skip_part!("{name} is not advertised");
             return false;
         }
     }

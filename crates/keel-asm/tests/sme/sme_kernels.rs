@@ -27,8 +27,7 @@ fn matrix_kernels_match_scalar_references_for_irregular_dimensions() {
         .output()
         .unwrap();
     if !flag.status.success() || flag.stdout != b"1\n" {
-        eprintln!("skipping matrix execution: SME not advertised");
-        return;
+        keel_test_support::skip!("FEAT_SME not advertised");
     }
     let probe = ".text\n.globl _streaming_lanes\n_streaming_lanes:\nsub sp,sp,#64\nstp d8,d9,[sp]\nstp d10,d11,[sp,#16]\nstp d12,d13,[sp,#32]\nstp d14,d15,[sp,#48]\nsmstart sm\ncntw x0\nsmstop sm\nldp d8,d9,[sp]\nldp d10,d11,[sp,#16]\nldp d12,d13,[sp,#32]\nldp d14,d15,[sp,#48]\nadd sp,sp,#64\nret\n";
     let source = SOURCES

@@ -121,19 +121,23 @@ fn gnu_language_objects_match_clang_and_gnu() {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("input.s");
     std::fs::write(&input, SOURCE).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-    for (tool, args) in [
-        ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-        (gnu.as_str(), vec!["--64"]),
-    ] {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    let clang_reference = {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        ("clang".to_owned(), c)
+    };
+    let gnu_reference = gnu.map(|gnu| {
+        let mut c = gnu.command();
+        c.args(["--64"]);
+        (gnu.path().display().to_string(), c)
+    });
+    for (tool, mut command) in std::iter::once(clang_reference).chain(gnu_reference) {
         let output = temp.join("reference.o");
-        let result = Command::new(tool)
-            .args(args)
-            .arg(&input)
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .unwrap();
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
             result.status.success(),
             "{tool}: {}",
@@ -147,7 +151,10 @@ fn gnu_language_objects_match_clang_and_gnu() {
         // Both assemblers ignore explicit fill in a NOBITS origin.
         let source = ".bss\n.org 17, 0x55\n";
         std::fs::write(&input, source).unwrap();
-        let mut command = Command::new(tool);
+        let mut command = match gnu {
+            Some(gnu) if tool != "clang" => gnu.command(),
+            _ => Command::new("clang"),
+        };
         if tool == "clang" {
             command.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
         } else {
@@ -285,7 +292,7 @@ fn invalid_constructs_also_fail_independent_assemblers() {
         std::env::temp_dir().join(format!("keel-gnu-language-negative-{}", std::process::id()));
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("input.s");
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
+    let gnu = keel_test_support::gnu_as();
     for source in [
         ".byte 1\n.org 0\n",
         "jmp 1f\n",
@@ -294,12 +301,18 @@ fn invalid_constructs_also_fail_independent_assemblers() {
     ] {
         assert!(assemble_object(source).is_err());
         std::fs::write(&input, source).unwrap();
-        for (tool, args) in [
-            ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-            (gnu.as_str(), vec!["--64"]),
-        ] {
-            let result = Command::new(tool)
-                .args(args)
+        let clang_reference = {
+            let mut c = Command::new("clang");
+            c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+            ("clang".to_owned(), c)
+        };
+        let gnu_reference = gnu.map(|gnu| {
+            let mut c = gnu.command();
+            c.args(["--64"]);
+            (gnu.path().display().to_string(), c)
+        });
+        for (tool, mut command) in std::iter::once(clang_reference).chain(gnu_reference) {
+            let result = command
                 .arg(&input)
                 .arg("-o")
                 .arg(temp.join("out.o"))
@@ -318,8 +331,12 @@ fn invalid_constructs_also_fail_independent_assemblers() {
             .message
             .contains("current section")
     );
+    let Some(gnu) = gnu else {
+        let _ = std::fs::remove_dir_all(&temp);
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    };
     assert!(
-        !Command::new(&gnu)
+        !gnu.command()
             .arg("--64")
             .arg(&input)
             .arg("-o")
@@ -334,7 +351,8 @@ fn invalid_constructs_also_fail_independent_assemblers() {
     let source = ".data\n.byte 1\n.text\n.lcomm local_buffer,3\n.previous\n.byte 2\n";
     std::fs::write(&input, source).unwrap();
     let output = temp.join("common.o");
-    let result = Command::new(&gnu)
+    let result = gnu
+        .command()
         .arg("--64")
         .arg(&input)
         .arg("-o")

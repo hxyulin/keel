@@ -96,9 +96,9 @@ fn packed_sse2_register_memory_matrix_matches_clang_and_gnu() {
         relocations(&expected),
         relocations(&std::fs::read(&output).unwrap())
     );
-    if cfg!(target_os = "linux") || std::env::var_os("KEEL_GNU_AS").is_some() {
-        let assembler = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-        let r = Command::new(assembler)
+    if let Some(gnu) = keel_test_support::gnu_as() {
+        let r = gnu
+            .command()
             .arg("--64")
             .arg(&input)
             .arg("-o")
@@ -111,6 +111,8 @@ fn packed_sse2_register_memory_matrix_matches_clang_and_gnu() {
             relocations(&expected),
             relocations(&std::fs::read(&output).unwrap())
         );
+    } else {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
     }
     std::fs::remove_dir_all(dir).unwrap();
 }

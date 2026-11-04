@@ -192,8 +192,9 @@ fn system_register_matrix_matches_clang_and_gnu() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(text(&fs::read(&obj).unwrap()), expected);
-        if let Some(assembler) = std::env::var_os("KEEL_GNU_AS") {
-            let output = Command::new(assembler)
+        if let Some(assembler) = keel_test_support::gnu_as() {
+            let output = assembler
+                .command()
                 .args(["--64", "-o"])
                 .arg(&obj)
                 .arg(&asm)
@@ -205,6 +206,8 @@ fn system_register_matrix_matches_clang_and_gnu() {
                 String::from_utf8_lossy(&output.stderr)
             );
             assert_eq!(text(&fs::read(&obj).unwrap()), expected);
+        } else {
+            keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
         }
     }
     fs::remove_dir_all(dir).unwrap();

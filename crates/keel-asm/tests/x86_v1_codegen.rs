@@ -164,11 +164,13 @@ fn strict_v1_tier_matrix_matches_llvm_and_gnu() {
                 .arg("-o")
                 .arg(&reference));
             assert_eq!(section(&ours), section(&std::fs::read(&reference).unwrap()));
-            let gnu = std::env::var("KEEL_TEST_GNU_AS")
-                .or_else(|_| std::env::var("KEEL_GNU_AS"))
-                .unwrap_or_else(|_| "as".into());
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
             let reference = dir.join("gnu.o");
-            run(Command::new(gnu)
+            run(gnu
+                .command()
                 .arg("--64")
                 .arg(&source)
                 .arg("-o")
@@ -344,8 +346,7 @@ fn strict_v1_executes_against_independent_oracle() {
                 .status()
                 .is_ok_and(|s| s.success()))
     {
-        eprintln!("SKIP: no local x86-64 runner; Linux execution remains a parent gate");
-        return;
+        keel_test_support::skip!("no local x86-64 Linux or Darwin runner");
     }
     let dir = std::env::temp_dir().join(format!("keel-v1-runtime-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

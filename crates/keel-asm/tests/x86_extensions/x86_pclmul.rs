@@ -96,13 +96,15 @@ fn pclmul_legacy_encoding_oracles_and_feature_contract() {
     .unwrap();
     let input = dir.join("oracle.s");
     fs::write(&input, format!(".intel_syntax noprefix\n.text\n{source}\n")).unwrap();
-    for tool in [Some("clang".to_owned()), std::env::var("KEEL_GNU_AS").ok()]
-        .into_iter()
-        .flatten()
-    {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    for gnu in std::iter::once(None).chain(gnu.map(Some)) {
+        let tool = gnu.map_or("clang".into(), |gnu| gnu.path().display().to_string());
         let out = dir.join("oracle.o");
-        let mut cmd = Command::new(&tool);
-        if tool == "clang" {
+        let mut cmd = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
+        if gnu.is_none() {
             cmd.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
         } else {
             cmd.arg("--64");

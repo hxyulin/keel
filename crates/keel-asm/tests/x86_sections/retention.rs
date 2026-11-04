@@ -1,7 +1,7 @@
 use crate::common::run;
 use keel_asm_ir::{Directive as D, Program};
 use object::{Object, ObjectSection};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 #[test]
 fn elf_retain_section_flag_and_osabi_match_gnu_as() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("asm-retain-elf");
@@ -10,14 +10,11 @@ fn elf_retain_section_flag_and_osabi_match_gnu_as() {
     let input = dir.join("oracle.s");
     let output = dir.join("oracle.o");
     fs::write(&input, source).unwrap();
-    let assembler = std::env::var("KEEL_TEST_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/opt/homebrew/bin/x86_64-elf-as".into()
-        } else {
-            "as".into()
-        }
-    });
-    run(Command::new(assembler)
+    let Some(assembler) = keel_test_support::gnu_as() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    };
+    run(assembler
+        .command()
         .arg("--64")
         .arg(&input)
         .arg("-o")

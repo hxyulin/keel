@@ -81,13 +81,10 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
         .unwrap();
     assert!(p.status.success(), "{}", String::from_utf8_lossy(&p.stderr));
     assert_eq!(text(&std::fs::read(clang).unwrap()), expected);
-    let assembler = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "linux") {
-            "as".into()
-        } else {
-            "x86_64-elf-as".into()
-        }
-    });
+    let Some(assembler) = keel_test_support::gnu_as() else {
+        let _ = std::fs::remove_dir_all(&dir);
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    };
     // LLVM Intel syntax uses bare SYSRET for the 32-bit form. GNU Intel syntax
     // requires SYSRETD; its bare spelling is ambiguous. Both select 0F 07.
     let gnu_input = dir.join("gnu.s");
@@ -100,7 +97,8 @@ fn baseline_fixed_forms_match_clang_gnu_and_typed_transport() {
     )
     .unwrap();
     let gnu = dir.join("gnu.o");
-    let p = Command::new(assembler)
+    let p = assembler
+        .command()
         .arg("--64")
         .arg(&gnu_input)
         .arg("-o")
@@ -146,31 +144,26 @@ fn system_exit_widths_aliases_and_att_oracles() {
     )
     .unwrap();
     let expected = [0x0f, 0x35, 0x48, 0x0f, 0x35, 0x0f, 0xaa];
-    let assembler = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "linux") {
-            "as".into()
-        } else {
-            "x86_64-elf-as".into()
-        }
-    });
-    for (name, mut command) in [
-        ("clang", {
-            let mut c = Command::new("clang");
-            c.args([
-                "-target",
-                "x86_64-unknown-linux-gnu",
-                "-c",
-                "-x",
-                "assembler",
-            ]);
-            c
-        }),
-        ("gnu", {
-            let mut c = Command::new(assembler);
+    let mut tools = vec![("clang", {
+        let mut c = Command::new("clang");
+        c.args([
+            "-target",
+            "x86_64-unknown-linux-gnu",
+            "-c",
+            "-x",
+            "assembler",
+        ]);
+        c
+    })];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => tools.push(("gnu", {
+            let mut c = gnu.command();
             c.arg("--64");
             c
-        }),
-    ] {
+        })),
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for (name, mut command) in tools {
         let output = dir.join(format!("{name}.o"));
         let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(

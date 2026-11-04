@@ -133,8 +133,11 @@ fn matrix(rows: Vec<String>, tag: &str) {
                 ]);
                 c
             } else {
-                let mut c =
-                    Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+                let Some(gnu) = keel_test_support::gnu_as() else {
+                    keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                    continue;
+                };
+                let mut c = gnu.command();
                 c.arg("--64");
                 c
             };
@@ -558,10 +561,11 @@ fn far_control_long_mode_encodings_and_syntaxes() {
             c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
             c
         } else {
-            Command::new(
-                std::env::var("KEEL_GNU_AS")
-                    .unwrap_or_else(|_| "/opt/homebrew/bin/x86_64-elf-as".into()),
-            )
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            gnu.command()
         };
         let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
@@ -1109,13 +1113,17 @@ fn primary_core_address32_symbol_uses_unsigned_relocation() {
         relocs(&own),
         vec![(5, "Elf { r_type: 10 }".into(), 0, "external".into())]
     );
+    let Some(gnu) = keel_test_support::gnu_as() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    };
     let dir =
         std::env::temp_dir().join(format!("keel-core-address32-reloc-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("input.s");
     let output = dir.join("gnu.o");
     std::fs::write(&input, format!(".intel_syntax noprefix\n.text\n{source}\n")).unwrap();
-    let result = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()))
+    let result = gnu
+        .command()
         .arg("--64")
         .arg(&input)
         .arg("-o")

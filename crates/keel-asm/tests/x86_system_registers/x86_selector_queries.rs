@@ -106,8 +106,11 @@ fn selector_register_views_match_literal_bytes_and_external_assemblers() {
         for gnu in [false, true] {
             fs::write(&input, if gnu { &gnu_source } else { &source }).unwrap();
             let mut command = if gnu {
-                let mut cmd =
-                    Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+                let Some(gnu) = keel_test_support::gnu_as() else {
+                    keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                    continue;
+                };
+                let mut cmd = gnu.command();
                 cmd.arg("--64");
                 cmd
             } else {

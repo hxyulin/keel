@@ -287,7 +287,7 @@ fn native_outer_products_verify_matrix_results_and_memory_round_trips() {
         ),
     ] {
         if !advertised(&features) {
-            eprintln!("skipping {features:?}");
+            keel_test_support::skip_part!("{features:?} not advertised");
             continue;
         }
         let load = if src == "s" { "w" } else { src };

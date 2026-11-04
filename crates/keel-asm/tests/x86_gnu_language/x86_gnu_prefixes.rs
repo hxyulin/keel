@@ -2,7 +2,6 @@
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_asm_ir::x86::{SourceParser, Syntax};
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn text(object: &[u8]) -> Vec<u8> {
@@ -26,8 +25,9 @@ fn gnu(source: &str) -> Vec<u8> {
     let input = dir.join("input.s");
     let output = dir.join("output.o");
     std::fs::write(&input, source).unwrap();
-    let tool = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-    let run = Command::new(tool)
+    let run = keel_test_support::gnu_as()
+        .expect("callers check for GNU as")
+        .command()
         .arg("--64")
         .arg(&input)
         .arg("-o")
@@ -46,6 +46,9 @@ fn gnu(source: &str) -> Vec<u8> {
 
 #[test]
 fn standalone_prefix_bytes_match_gnu_in_both_dialects() {
+    if keel_test_support::gnu_as().is_none() {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    }
     let prefixes = [
         ("rep", 0xf3),
         ("repe", 0xf3),
@@ -82,6 +85,9 @@ fn standalone_prefix_bytes_match_gnu_in_both_dialects() {
 
 #[test]
 fn prefixes_remain_separate_from_labels_sections_and_alignment() {
+    if keel_test_support::gnu_as().is_none() {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    }
     let source = r#"
 .att_syntax prefix
 .text
@@ -143,6 +149,9 @@ call external
 
 #[test]
 fn whitespace_symbol_types_match_gnu_and_keep_existing_spellings() {
+    if keel_test_support::gnu_as().is_none() {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    }
     let source = r#"
 .text
 .globl entry, object, tls, plain

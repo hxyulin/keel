@@ -220,8 +220,7 @@ fn baseline_vector_kernels_execute_against_intrinsics_when_x86_runner_is_availab
             .status()
             .is_ok_and(|s| s.success());
     if !native && !darwin {
-        eprintln!("SKIP runtime: no local x86-64 Linux or Darwin runner");
-        return;
+        keel_test_support::skip!("no local x86-64 Linux or Darwin runner");
     }
     let root = std::env::var_os("KEEL_X86_FEATURE_ARTIFACTS").map(std::path::PathBuf::from);
     let dir = root.as_ref().map_or_else(

@@ -229,18 +229,20 @@ fn exposed_forms_match_clang_and_gnu_and_format_roundtrip() {
     fs::create_dir_all(&dir).unwrap();
     let input = dir.join("input.s");
     fs::write(&input, format!(".intel_syntax noprefix\n.text\n{source}\n")).unwrap();
-    for (name, mut command) in [
-        ("clang", {
-            let mut c = Command::new("clang");
-            c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
-            c
-        }),
-        ("gnu", {
-            let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+    let mut tools = vec![("clang", {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        c
+    })];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => tools.push(("gnu", {
+            let mut c = gnu.command();
             c.arg("--64");
             c
-        }),
-    ] {
+        })),
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for (name, mut command) in tools {
         let output = dir.join(format!("{name}.o"));
         let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(

@@ -187,8 +187,7 @@ fn streaming_sme_executes_only_when_advertised_by_os() {
         .output()
         .unwrap();
     if !supported.status.success() || supported.stdout != b"1\n" {
-        eprintln!("skipping SME execution: OS does not advertise FEAT_SME");
-        return;
+        keel_test_support::skip!("FEAT_SME not advertised");
     }
     // Ordinary PCS leaf: preserve D8-D15 across mode transitions, enter with
     // inactive ZA, make no calls while streaming, leave with SM/ZA cleared.

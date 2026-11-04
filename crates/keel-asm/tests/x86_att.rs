@@ -541,8 +541,7 @@ fn local_x86_runtime_abi_and_operand_order() {
             .status()
             .is_ok_and(|s| s.success());
     if !native && !darwin {
-        eprintln!("SKIP runtime: no local x86-64 Linux or Darwin runner");
-        return;
+        keel_test_support::skip!("no local x86-64 Linux or Darwin runner");
     }
     let kernels = [
         (

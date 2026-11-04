@@ -23,7 +23,11 @@ fn flags_aliases_match_literal_bytes_clang_and_gnu() {
     fs::write(&input, source).unwrap();
     for gnu in [false, true] {
         let mut command = if gnu {
-            let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut c = gnu.command();
             c.arg("--64");
             c
         } else {

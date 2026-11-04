@@ -53,24 +53,26 @@ fn matrix(rows: Vec<String>, tag: &str) {
     std::fs::create_dir_all(&dir).unwrap();
     let input = dir.join("input.s");
     std::fs::write(&input, &source).unwrap();
-    for (name, mut c) in [
-        ("clang", {
-            let mut c = Command::new("clang");
-            c.args([
-                "-target",
-                "x86_64-unknown-linux-gnu",
-                "-c",
-                "-x",
-                "assembler",
-            ]);
-            c
-        }),
-        ("gnu", {
-            let mut c = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+    let mut tools = vec![("clang", {
+        let mut c = Command::new("clang");
+        c.args([
+            "-target",
+            "x86_64-unknown-linux-gnu",
+            "-c",
+            "-x",
+            "assembler",
+        ]);
+        c
+    })];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => tools.push(("gnu", {
+            let mut c = gnu.command();
             c.arg("--64");
             c
-        }),
-    ] {
+        })),
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for (name, mut c) in tools {
         let out = dir.join(format!("{name}.o"));
         let r = c.arg(&input).arg("-o").arg(&out).output().unwrap();
         assert!(

@@ -2,7 +2,7 @@ use crate::common;
 use keel_asm::x86::{self, Features, ProgramAssembler, Syntax};
 use keel_asm_ir::x86::SourceParser;
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::{collections::BTreeMap, fs, process::Command};
+use std::{collections::BTreeMap, fs};
 
 fn section(bytes: &[u8], name: &str) -> Vec<u8> {
     object::File::parse(bytes)
@@ -62,9 +62,12 @@ fn binary_inputs_match_gnu_and_are_snapshotted_across_layout_and_chunks() {
     assert_eq!(ours, assembler.finish().unwrap());
     assert_eq!(calls, 1, "chunks share one snapshot per name");
     assert_eq!(section(&ours, ".rodata"), [1, 2, 2, 3, 254, 255, 0]);
+    let Some(gnu) = keel_test_support::gnu_as() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    };
     fs::write(temp.0.join("input.s"), source).unwrap();
     common::run(
-        Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()))
+        gnu.command()
             .current_dir(&temp.0)
             .args(["--64", "input.s", "-o", "gnu.o"]),
     );

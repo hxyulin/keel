@@ -30,10 +30,6 @@ impl Drop for Scratch {
     }
 }
 
-fn gnu() -> String {
-    std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into())
-}
-
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot {
     text: Vec<u8>,
@@ -81,7 +77,13 @@ fn reference(source: &str, clang: bool) -> Vec<u8> {
     let input = dir.0.join("source.s");
     let output = dir.0.join("source.o");
     std::fs::write(&input, source).unwrap();
-    let mut command = Command::new(if clang { "clang".into() } else { gnu() });
+    let mut command = if clang {
+        Command::new("clang")
+    } else {
+        keel_test_support::gnu_as()
+            .expect("callers check for GNU as")
+            .command()
+    };
     if clang {
         command.args(["--target=x86_64-linux-gnu", "-c"]);
     } else {
@@ -98,6 +100,10 @@ fn reference(source: &str, clang: bool) -> Vec<u8> {
 fn assert_oracles(source: &str) {
     let actual = snapshot(&assemble_object(source).unwrap_or_else(|e| panic!("{source}\n{e}")));
     for clang in [false, true] {
+        if !clang && keel_test_support::gnu_as().is_none() {
+            keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+            continue;
+        }
         assert_eq!(
             actual,
             snapshot(&reference(source, clang)),
@@ -231,13 +237,12 @@ fn exact_signed_form_does_not_widen_on_overflow_or_invalid_relocations() {
 
 #[test]
 fn independent_linker_enforces_signed_range_and_accepts_high_kernel_addresses() {
-    let assembler = PathBuf::from(gnu());
-    let linker = std::env::var_os("KEEL_GNU_LD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let name = assembler.file_name().unwrap().to_string_lossy();
-            assembler.with_file_name(format!("{}ld", name.strip_suffix("as").unwrap()))
-        });
+    if keel_test_support::gnu_as().is_none() {
+        keel_test_support::skip!(keel_test_support::NO_GNU_AS);
+    }
+    let Some(linker) = keel_test_support::gnu_ld() else {
+        keel_test_support::skip!(keel_test_support::NO_GNU_LD);
+    };
     let dir = Scratch::new();
     let source = ".att_syntax\n.text\n.globl entry\nentry: movq $external,%rax\nret\n";
     let objects = [
@@ -255,7 +260,8 @@ fn independent_linker_enforces_signed_range_and_accepts_high_kernel_addresses() 
             ("0x80000000", false),
             ("0xffffffff7fffffff", false),
         ] {
-            let run = Command::new(&linker)
+            let run = linker
+                .command()
                 .args(["-e", "entry", "-Ttext=0x100000"])
                 .arg(format!("--defsym=external={value}"))
                 .arg(&object)

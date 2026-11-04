@@ -27,17 +27,26 @@ fn compare(source: &str, clang: bool) {
     ));
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("input.s"), &source).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-    for (tool, args) in [
-        (gnu.as_str(), vec!["--64"]),
-        ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-    ] {
+    let gnu = keel_test_support::gnu_as();
+    if gnu.is_none() {
+        keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+    }
+    let clang_reference = {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        ("clang".to_owned(), c)
+    };
+    let gnu_reference = gnu.map(|gnu| {
+        let mut c = gnu.command();
+        c.args(["--64"]);
+        (gnu.path().display().to_string(), c)
+    });
+    for (tool, mut command) in gnu_reference.into_iter().chain([clang_reference]) {
         if tool == "clang" && !clang {
             continue;
         }
         let output = dir.join("reference.o");
-        let run = Command::new(tool)
-            .args(args)
+        let run = command
             .arg(dir.join("input.s"))
             .arg("-o")
             .arg(&output)

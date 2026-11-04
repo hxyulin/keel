@@ -81,11 +81,11 @@ fn mxcsr_v1_address_matrix_and_relocations() {
     for gnu in [false, true] {
         let output = dir.join("test.o");
         let mut c = if gnu {
-            Command::new(
-                std::env::var("KEEL_TEST_GNU_AS")
-                    .or_else(|_| std::env::var("KEEL_GNU_AS"))
-                    .unwrap_or_else(|_| "as".into()),
-            )
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            gnu.command()
         } else {
             let mut c = Command::new("clang");
             c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);

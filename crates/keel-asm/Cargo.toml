@@ -22,6 +22,7 @@ keel-codegen = { path = "../keel-codegen" }
 keel-ir = { path = "../keel-ir" }
 keel-opt = { path = "../keel-opt" }
 keel-c = { path = "../keel-c" }
+keel-test-support = { path = "../keel-test-support" }
 
 [features]
 experimental-regalloc = ["keel-codegen/experimental-regalloc"]

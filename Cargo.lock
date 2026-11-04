@@ -419,6 +419,7 @@ dependencies = [
  "keel-codegen",
  "keel-ir",
  "keel-opt",
+ "keel-test-support",
  "memchr",
  "object",
  "serde_json",

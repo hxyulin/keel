@@ -85,8 +85,11 @@ fn table_loads_match_external_assemblers() {
     fs::write(&input, source).unwrap();
     for gnu in [false, true] {
         let mut cmd = if gnu {
-            let mut cmd =
-                Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
+            let Some(gnu) = keel_test_support::gnu_as() else {
+                keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                continue;
+            };
+            let mut cmd = gnu.command();
             cmd.arg("--64");
             cmd
         } else {

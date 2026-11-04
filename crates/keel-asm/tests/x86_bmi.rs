@@ -105,21 +105,27 @@ fn bmi_clang_gnu_and_typed_differential_matrix() {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("input.s");
     std::fs::write(&input, source).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "linux") {
-            "as"
-        } else {
-            "x86_64-elf-as"
-        }
-        .into()
-    });
-    for (tool, args) in [
-        ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-        (gnu.as_str(), vec!["--64"]),
-    ] {
+    let mut tools = vec![("clang".to_owned(), {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        c
+    })];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => tools.push((gnu.path().display().to_string(), {
+            let mut c = gnu.command();
+            c.arg("--64");
+            c
+        })),
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for (tool, mut command) in tools {
         let output = temp.join("reference.o");
-        let result = Command::new(tool).args(args).arg(&input).arg("-o").arg(&output).output()
-            .unwrap_or_else(|e| panic!("{tool} required for BMI differential matrix (set KEEL_GNU_AS for GNU cross assembler): {e}"));
+        let result = command
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap_or_else(|e| panic!("{tool} required for BMI differential matrix: {e}"));
         assert!(
             result.status.success(),
             "{tool}: {}",
@@ -244,13 +250,6 @@ fn bmi_rip_relocations_include_trailing_immediate() {
     std::fs::create_dir_all(&temp).unwrap();
     let input = temp.join("input.s");
     std::fs::write(&input, source).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| {
-        if cfg!(target_os = "linux") {
-            "as".into()
-        } else {
-            "x86_64-elf-as".into()
-        }
-    });
     let section = |bytes: &[u8]| {
         let object = object::File::parse(bytes).unwrap();
         let text = object.section_by_name(".text").unwrap();
@@ -261,18 +260,22 @@ fn bmi_rip_relocations_include_trailing_immediate() {
                 .collect::<Vec<_>>(),
         )
     };
-    for (tool, args) in [
-        ("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"]),
-        (gnu.as_str(), vec!["--64"]),
-    ] {
+    let mut tools = vec![("clang".to_owned(), {
+        let mut c = Command::new("clang");
+        c.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+        c
+    })];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => tools.push((gnu.path().display().to_string(), {
+            let mut c = gnu.command();
+            c.arg("--64");
+            c
+        })),
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for (tool, mut command) in tools {
         let output = temp.join("reference.o");
-        let result = Command::new(tool)
-            .args(args)
-            .arg(&input)
-            .arg("-o")
-            .arg(&output)
-            .output()
-            .unwrap();
+        let result = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(
             result.status.success(),
             "{}",

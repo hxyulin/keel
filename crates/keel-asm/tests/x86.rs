@@ -195,15 +195,21 @@ fn reference_sections(name: &str, cases: &[String]) -> Vec<(String, Vec<Vec<u8>>
         .map(|(n, case)| format!(".section .case{n},\"ax\",@progbits\n{case}\n"))
         .collect::<String>();
     std::fs::write(&input, format!(".intel_syntax noprefix\n{source}")).unwrap();
-    let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
+    let mut clang = Command::new("clang");
+    clang.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
+    let mut tools = vec![("clang".to_owned(), clang)];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => {
+            let mut command = gnu.command();
+            command.arg("--64");
+            tools.push((gnu.path().display().to_string(), command));
+        }
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
     let mut references = Vec::new();
-    for (tool, args) in [
-        ("clang", &["-target", "x86_64-unknown-linux-gnu", "-c"][..]),
-        (gnu.as_str(), &["--64"][..]),
-    ] {
+    for (tool, mut command) in tools {
         let output = temp.join("reference.o");
-        let result = Command::new(tool)
-            .args(args)
+        let result = command
             .arg(&input)
             .arg("-o")
             .arg(&output)
@@ -222,7 +228,7 @@ fn reference_sections(name: &str, cases: &[String]) -> Vec<(String, Vec<Vec<u8>>
                 section.data().unwrap().to_vec()
             })
             .collect();
-        references.push((tool.to_string(), sections));
+        references.push((tool, sections));
     }
     std::fs::remove_dir_all(temp).unwrap();
     references

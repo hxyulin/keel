@@ -253,6 +253,11 @@ fn oracle(label: &str, groups: &[(&str, Vec<String>)]) {
         ("clang", Syntax::Att),
         ("gnu", Syntax::Att),
     ] {
+        let gnu = keel_test_support::gnu_as();
+        if assembler == "gnu" && gnu.is_none() {
+            keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+            continue;
+        }
         let mut reference = String::from(if dialect == Syntax::Att {
             ".att_syntax prefix\n"
         } else {
@@ -307,8 +312,9 @@ fn oracle(label: &str, groups: &[(&str, Vec<String>)]) {
                 .arg("-o")
                 .arg(&output));
         } else {
-            let gnu = std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into());
-            run(Command::new(gnu)
+            run(gnu
+                .expect("checked above")
+                .command()
                 .arg("--64")
                 .arg(&input)
                 .arg("-o")
@@ -842,9 +848,16 @@ fn ssse3_mmx_malformed_operands_match_independent_assemblers() {
         "-x",
         "assembler",
     ]);
-    let mut gnu = Command::new(std::env::var("KEEL_GNU_AS").unwrap_or_else(|_| "as".into()));
-    gnu.arg("--64");
-    for mut command in [clang, gnu] {
+    let mut commands = vec![clang];
+    match keel_test_support::gnu_as() {
+        Some(gnu) => {
+            let mut gnu = gnu.command();
+            gnu.arg("--64");
+            commands.push(gnu);
+        }
+        None => keel_test_support::skip_part!(keel_test_support::NO_GNU_AS),
+    }
+    for mut command in commands {
         let r = command.arg(&input).arg("-o").arg(&output).output().unwrap();
         assert!(!r.status.success(), "{command:?}");
         let stderr = String::from_utf8_lossy(&r.stderr);

@@ -164,19 +164,17 @@ fn x87_architectural_register_memory_and_state_forms_match_both_references() {
     std::fs::create_dir_all(&dir).unwrap();
     for (dialect, source) in [("intel", intel), ("att", att)] {
         let input = dir.join(format!("{dialect}.s"));
-        for tool in [
-            "clang",
-            if cfg!(target_os = "linux") {
-                "as"
+        for gnu in [false, true] {
+            let gnu = if gnu {
+                let Some(tool) = keel_test_support::gnu_as() else {
+                    keel_test_support::skip_part!(keel_test_support::NO_GNU_AS);
+                    continue;
+                };
+                Some(tool)
             } else {
-                "x86_64-elf-as"
-            },
-        ] {
-            let tool = if tool == "clang" {
-                tool.to_string()
-            } else {
-                std::env::var("KEEL_GNU_AS").unwrap_or(tool.into())
+                None
             };
+            let tool = gnu.map_or("clang".into(), |gnu| gnu.path().display().to_string());
             // LLVM puts 66 before the separate FWAIT instruction for these
             // spellings. Native x86 then writes the 28-byte, not 14-byte,
             // layout. GAS and the native oracle cover these fourteen cases.
@@ -193,8 +191,8 @@ fn x87_architectural_register_memory_and_state_forms_match_both_references() {
             std::fs::write(&input, &selected).unwrap();
             let expected = keel_asm::x86::assemble_object(&selected).unwrap();
             let output = dir.join("reference.o");
-            let mut command = Command::new(&tool);
-            if tool == "clang" {
+            let mut command = gnu.map_or_else(|| Command::new("clang"), |gnu| gnu.command());
+            if gnu.is_none() {
                 command.args(["-target", "x86_64-unknown-linux-gnu", "-c"]);
             } else {
                 command.arg("--64");
