@@ -277,11 +277,6 @@ const BUILTINS: &[BuiltinPass] = &[
         run: stack_forward::run,
     },
     BuiltinPass {
-        name: "stack-forward-cfg",
-        description: "forward private stack bytes and clean CFG when a conditional becomes constant (opt-in)",
-        run: stack_forward::run_with_cfg,
-    },
-    BuiltinPass {
         name: "branch-ranges",
         description: "fold integer comparisons using ranges from dominating conditional edges",
         run: branch_ranges::run,
@@ -321,12 +316,10 @@ impl Pass for BuiltinPass {
     fn run_for_target(&self, func: &mut Function, target: VectorTarget) -> bool {
         // These two native targets have eight-byte integral pointers. Portable
         // vector policy does not establish a pointer layout (including Wasm).
-        if matches!(target, VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon) {
-            match self.name {
-                "stack-forward" => return stack_forward::run_native64(func),
-                "stack-forward-cfg" => return stack_forward::run_with_cfg_native64(func),
-                _ => {}
-            }
+        if matches!(target, VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon)
+            && self.name == "stack-forward"
+        {
+            return stack_forward::run_native64(func);
         }
         self.run(func)
     }
@@ -368,7 +361,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[13],
     &BUILTINS[14],
     &BUILTINS[15],
-    &BUILTINS[16],
     &load_reuse::LoadReuse,
     &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,
@@ -379,7 +371,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,
     &inline::InlineNoninterposable,
-    &BUILTINS[17],
+    &BUILTINS[16],
     &inline::InlineCheapReserve,
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,

@@ -32,32 +32,31 @@ block0:
 #[test]
 fn exact_pointer_forwarding_preserves_null_and_all_address_bits() {
     for target in [VectorTarget::X86Sse2, VectorTarget::Aarch64Neon] {
-        for pass in ["stack-forward", "stack-forward-cfg"] {
-            for bits in [0, i64::MIN, -1] {
-                let module = optimize(&local_source(bits, ""), target, pass);
-                assert_eq!(loads(&module), 0, "{target:?} {bits}: {module}");
-                let f = &module.functions[0];
-                let arg = f
-                    .layout_insts()
-                    .find_map(|(_, i)| match *f.inst_data(i) {
-                        InstData::Convert {
-                            op: ConvertOp::IntToPtr,
-                            ty: Type::Ptr,
-                            arg,
-                        } => Some(arg),
-                        _ => None,
-                    })
-                    .expect("forwarding needs an explicit integral address conversion");
-                let ValueDef::Result(i, _) = f.value_def(f.resolve(arg)) else {
-                    panic!("stored constant disappeared: {module}")
-                };
-                assert!(matches!(f.inst_data(i), InstData::Iconst { imm, .. } if *imm == bits));
-                assert!(
-                    !f.layout_insts()
-                        .any(|(_, i)| matches!(f.inst_data(i), InstData::Store { .. })),
-                    "private storage should disappear: {module}"
-                );
-            }
+        let pass = "stack-forward";
+        for bits in [0, i64::MIN, -1] {
+            let module = optimize(&local_source(bits, ""), target, pass);
+            assert_eq!(loads(&module), 0, "{target:?} {bits}: {module}");
+            let f = &module.functions[0];
+            let arg = f
+                .layout_insts()
+                .find_map(|(_, i)| match *f.inst_data(i) {
+                    InstData::Convert {
+                        op: ConvertOp::IntToPtr,
+                        ty: Type::Ptr,
+                        arg,
+                    } => Some(arg),
+                    _ => None,
+                })
+                .expect("forwarding needs an explicit integral address conversion");
+            let ValueDef::Result(i, _) = f.value_def(f.resolve(arg)) else {
+                panic!("stored constant disappeared: {module}")
+            };
+            assert!(matches!(f.inst_data(i), InstData::Iconst { imm, .. } if *imm == bits));
+            assert!(
+                !f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), InstData::Store { .. })),
+                "private storage should disappear: {module}"
+            );
         }
     }
 }
@@ -100,18 +99,17 @@ block2:
 #[test]
 fn target_free_portable_and_wasm_keep_pointer_memory_interpretation() {
     let source = local_source(i64::MIN, "");
-    for pass in ["stack-forward", "stack-forward-cfg"] {
-        let portable = optimize(&source, VectorTarget::Portable, pass);
-        assert_eq!(loads(&portable), 1, "{portable}");
-        let mut legacy = keel_ir::parse(&source).unwrap();
-        keel_opt::run_passes(&mut legacy, &[pass]).unwrap();
-        assert_eq!(loads(&legacy), 1, "{legacy}");
-        let mut direct = keel_ir::parse(&source).unwrap();
-        keel_opt::find_pass(pass)
-            .unwrap()
-            .run(&mut direct.functions[0]);
-        assert_eq!(loads(&direct), 1, "{direct}");
-    }
+    let pass = "stack-forward";
+    let portable = optimize(&source, VectorTarget::Portable, pass);
+    assert_eq!(loads(&portable), 1, "{portable}");
+    let mut legacy = keel_ir::parse(&source).unwrap();
+    keel_opt::run_passes(&mut legacy, &[pass]).unwrap();
+    assert_eq!(loads(&legacy), 1, "{legacy}");
+    let mut direct = keel_ir::parse(&source).unwrap();
+    keel_opt::find_pass(pass)
+        .unwrap()
+        .run(&mut direct.functions[0]);
+    assert_eq!(loads(&direct), 1, "{direct}");
     let mut wasm = keel_ir::parse(&source).unwrap();
     keel_opt::optimize_wasm32_basic(&mut wasm).unwrap();
     keel_ir::verify_module_with_layout(&wasm, keel_ir::DataLayout::WASM32).unwrap();

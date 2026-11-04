@@ -259,7 +259,7 @@ block2:
         VectorTarget::Aarch64Neon,
     ] {
         for names in [
-            &["stack-forward-cfg", "stack-forward-cfg"][..],
+            &["stack-forward", "stack-forward"][..],
             keel_opt::OptimizationTier::Full.pipeline(),
         ] {
             let mut plain = keel_ir::parse(source).unwrap();
@@ -285,19 +285,12 @@ block2:
             let mut sf = report
                 .invocations
                 .iter()
-                .filter(|p| p.pass == "stack-forward-cfg" || p.pass == "stack-forward");
+                .filter(|p| p.pass == "stack-forward");
             let first = sf.next().unwrap();
             assert_eq!(first.function.as_deref(), Some("f"));
             assert!(first.changed);
             assert_eq!(first.before.blocks, 3);
-            assert_eq!(
-                first.after.blocks,
-                if names[0] == "stack-forward-cfg" {
-                    1
-                } else {
-                    3
-                }
-            );
+            assert_eq!(first.after.blocks, 3);
             assert!(first.after.instructions < first.before.instructions);
             assert_eq!(first.restoration_changed, None);
             for later in sf {

@@ -94,7 +94,7 @@ keel cc -O --tune apple-m5 hello.c -o hello.s
 keel opt -p sccp,instcombine,dce input.keel
 ```
 
-Opt-in passes include `sccp`, `if-convert` and `stack-forward-cfg`.
+Opt-in passes include `sccp` and `if-convert`.
 `--verify-each` / `--no-verify-each` control IR verification after every pass
 (on by default in debug builds); `--opt-report file.json` writes an
 optimization report.

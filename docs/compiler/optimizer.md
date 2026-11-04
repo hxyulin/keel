@@ -65,7 +65,6 @@ it; use `run_pipeline` or `run_passes`.
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
-| `stack-forward-cfg` | Opt-in `stack-forward` followed by CFG cleanup when forwarding made a branch operand constant |
 | `canonicalize` | Establish the [canonical form](#canonical-form) |
 | `simplify-cfg` | Fold constant `brif` and `switch`, compose arguments through jump-only blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | Evaluate instructions on constants with the machine's semantics; trapping divisions stay |

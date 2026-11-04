@@ -466,7 +466,7 @@ fn full_and_standalone_consume_only_the_taken_call_or_trap_arm() {
             if full {
                 keel_opt::optimize_with_tier(&mut m, OptimizationTier::Full).unwrap();
             } else {
-                keel_opt::run_passes(&mut m, &["stack-forward-cfg"]).unwrap();
+                keel_opt::run_passes(&mut m, &["stack-forward", "simplify-cfg"]).unwrap();
             }
             keel_ir::verify_module(&m).unwrap();
             assert_eq!(
@@ -545,14 +545,14 @@ block3:
     f.set_inst_loc(call, Some(loc));
     keel_ir::verify_module(&m).unwrap();
     let expected = call_trace(&m);
-    keel_opt::run_passes(&mut m, &["stack-forward-cfg"]).unwrap();
+    keel_opt::run_passes(&mut m, &["stack-forward", "simplify-cfg"]).unwrap();
     keel_ir::verify_module(&m).unwrap();
     assert_eq!(call_trace(&m), expected);
     assert_eq!(m.functions[0].blocks().count(), 1);
     assert_eq!(m.functions[0].inst_loc(call), Some(loc));
     let before = m.to_string();
     assert!(
-        !keel_opt::find_pass("stack-forward-cfg")
+        !keel_opt::find_pass("stack-forward")
             .unwrap()
             .run(&mut m.functions[0])
     );
@@ -594,7 +594,7 @@ fn excluded_memory_cannot_request_conditional_cleanup() {
         keel_ir::verify_module(&m).unwrap();
         let before = m.to_string();
         assert!(
-            !keel_opt::find_pass("stack-forward-cfg")
+            !keel_opt::find_pass("stack-forward")
                 .unwrap()
                 .run(&mut m.functions[0]),
             "{src}"
@@ -602,76 +602,6 @@ fn excluded_memory_cannot_request_conditional_cleanup() {
         keel_ir::verify_module(&m).unwrap();
         assert_eq!(m.to_string(), before);
     }
-}
-
-#[test]
-fn unrelated_constants_nonconstant_forwarding_and_later_folds_do_not_trigger() {
-    for (store, cond) in [("v0", "v3"), ("v2", "v0"), ("v2", "v4")] {
-        let src = format!(
-            "func @f(i8) -> i8 {{
- ss0 = stack_slot 1, align 1
-block0(v0: i8):
- v1 = stack_addr ss0
- v2 = iconst.i8 1
- store {store}, v1
- v3 = load.i8 v1
- v4 = xor v3, v2
- brif {cond}, block1, block2
-block1:
- brif v2, block3, block4
-block2:
- return v3
-block3:
- return v2
-block4:
- trap
-}}"
-        );
-        let mut m = keel_ir::parse(&src).unwrap();
-        keel_ir::verify_module(&m).unwrap();
-        assert!(
-            keel_opt::find_pass("stack-forward-cfg")
-                .unwrap()
-                .run(&mut m.functions[0])
-        );
-        keel_ir::verify_module(&m).unwrap();
-        assert_eq!(loads(&m), 0);
-        assert_eq!(m.functions[0].blocks().count(), 5, "{m}");
-        assert_eq!(
-            m.functions[0]
-                .layout_insts()
-                .filter(|(_, i)| matches!(m.functions[0].inst_data(*i), InstData::Brif { .. }))
-                .count(),
-            2
-        );
-    }
-}
-
-#[test]
-fn preexisting_constant_and_store_removal_alone_do_not_trigger() {
-    let mut m = keel_ir::parse(
-        "func @f() {
- ss0 = stack_slot 1, align 1
-block0:
- v0 = stack_addr ss0
- v1 = iconst.i8 1
- store v1, v0
- brif v1, block1, block2
-block1:
- return
-block2:
- trap
-}",
-    )
-    .unwrap();
-    keel_ir::verify_module(&m).unwrap();
-    let pass = keel_opt::find_pass("stack-forward-cfg").unwrap();
-    assert!(pass.run(&mut m.functions[0]));
-    keel_ir::verify_module(&m).unwrap();
-    assert_eq!(m.functions[0].blocks().count(), 3);
-    let before = m.to_string();
-    assert!(!pass.run(&mut m.functions[0]));
-    assert_eq!(m.to_string(), before);
 }
 
 #[test]
@@ -708,7 +638,7 @@ fn debug_home_and_returns_twice_keep_conditional_memory_live() {
         keel_ir::verify_module(&m).unwrap();
         let before = m.to_string();
         assert!(
-            !keel_opt::find_pass("stack-forward-cfg")
+            !keel_opt::find_pass("stack-forward")
                 .unwrap()
                 .run(&mut m.functions[0])
         );
@@ -745,7 +675,7 @@ block2:
         );
         let mut m = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        keel_opt::run_passes(&mut m, &["stack-forward-cfg"]).unwrap();
+        keel_opt::run_passes(&mut m, &["stack-forward", "simplify-cfg"]).unwrap();
         keel_ir::verify_module(&m).unwrap();
         let f = &m.functions[0];
         assert!(
@@ -785,34 +715,10 @@ fn cross_block_forwarding_now_exposes_constant_control_flow() {
     let mut module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let expected = call_trace(&module);
-    keel_opt::run_passes(&mut module, &["stack-forward-cfg"]).unwrap();
+    keel_opt::run_passes(&mut module, &["stack-forward", "simplify-cfg"]).unwrap();
     keel_ir::verify_module(&module).unwrap();
     assert_eq!(call_trace(&module), expected);
     assert_eq!(module.functions[0].blocks().count(), 1);
-}
-
-#[test]
-fn cfg_cleanup_is_explicit_and_defaults_keep_the_existing_schedule() {
-    use keel_opt::OptimizationTier;
-    for tier in [
-        OptimizationTier::None,
-        OptimizationTier::Fast,
-        OptimizationTier::Basic,
-        OptimizationTier::Full,
-    ] {
-        assert!(!tier.pipeline().contains(&"stack-forward-cfg"));
-    }
-    let source = conditional_fixture(1, "brif v2, block1, block3");
-    let mut ordinary = keel_ir::parse(&source).unwrap();
-    keel_opt::run_passes(&mut ordinary, &["stack-forward"]).unwrap();
-    keel_ir::verify_module(&ordinary).unwrap();
-    assert_eq!(loads(&ordinary), 0);
-    assert_eq!(ordinary.functions[0].blocks().count(), 4);
-    let expected = call_trace(&ordinary);
-    let mut opt_in = keel_ir::parse(&source).unwrap();
-    keel_opt::run_passes(&mut opt_in, &["stack-forward-cfg"]).unwrap();
-    assert_eq!(opt_in.functions[0].blocks().count(), 1);
-    assert_eq!(call_trace(&opt_in), expected);
 }
 
 #[test]
@@ -822,7 +728,7 @@ fn taken_trap_keeps_prior_call_trace() {
     let expected = (None, vec!["no".to_string()]);
     assert_eq!(call_trace(&original), expected);
     for pipeline in [
-        &["stack-forward-cfg"][..],
+        &["stack-forward", "simplify-cfg"][..],
         keel_opt::OptimizationTier::Full.pipeline(),
     ] {
         let mut module = original.clone();

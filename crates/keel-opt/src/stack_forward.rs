@@ -19,44 +19,6 @@ pub(crate) fn run_native64(func: &mut Function) -> bool {
     run_with_layout(func, Some(DataLayout::NATIVE64))
 }
 
-pub(crate) fn run_with_cfg_native64(func: &mut Function) -> bool {
-    run_with_cfg_layout(func, Some(DataLayout::NATIVE64))
-}
-
-/// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
-/// only when it directly exposes a previously nonconstant branch operand.
-/// Existing constants and expressions needing another folding pass do not
-/// request cleanup. The ordinary `run` path does not collect this snapshot.
-pub fn run_with_cfg(func: &mut Function) -> bool {
-    run_with_cfg_layout(func, None)
-}
-
-fn run_with_cfg_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
-    let conditional_inputs: Vec<_> = func
-        .blocks()
-        .filter_map(|block| {
-            let &term = func.block_insts(block).last()?;
-            let value = match *func.inst_data(term) {
-                InstData::Brif { cond, .. } => cond,
-                InstData::Switch { arg, .. } => arg,
-                _ => return None,
-            };
-            crate::const_fold::constant(func, value)
-                .is_none()
-                .then_some(value)
-        })
-        .collect();
-    let changed = run_with_layout(func, layout);
-    if changed
-        && conditional_inputs
-            .iter()
-            .any(|&value| crate::const_fold::constant(func, value).is_some())
-    {
-        crate::simplify_cfg::run(func);
-    }
-    changed
-}
-
 pub fn run(func: &mut Function) -> bool {
     run_with_layout(func, None)
 }
