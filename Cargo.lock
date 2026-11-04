@@ -533,6 +533,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel-test-support"
+version = "0.1.0"
+
+[[package]]
 name = "keel-wasm"
 version = "0.1.0"
 dependencies = [
