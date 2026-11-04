@@ -1,11 +1,12 @@
 //! Width-aware comparisons, possible-bit masks and shifts, constant offsets,
-//! and selects: each rule is checked against an independent evaluator after
+//! and selects: each rule is checked against the reference interpreter after
 //! instcombine, the Fast tier and the Full tier.
 
-use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, InstData, IntCC, Module, Type, UnaryOp, Value,
-};
+mod support;
+
+use keel_ir::{Module, Type};
 use keel_opt::OptimizationTier;
+use support::execute_wide as execute;
 
 fn mask(ty: Type) -> u128 {
     u128::MAX >> (128 - 8 * ty.bytes().unwrap_or(8))
@@ -14,85 +15,6 @@ fn mask(ty: Type) -> u128 {
 fn signed(value: u128, ty: Type) -> i128 {
     let shift = 128 - 8 * ty.bytes().unwrap_or(8);
     ((value << shift) as i128) >> shift
-}
-
-/// Straight-line evaluator with u128 storage, independent of optimizer helpers.
-/// Pointers are 64-bit addresses. Division by zero panics as a trap would.
-fn execute(func: &Function, inputs: &[u128]) -> u128 {
-    let mut values = vec![0u128; func.num_values()];
-    let block = func.entry_block().unwrap();
-    for (&param, &input) in func.block_params(block).iter().zip(inputs) {
-        values[param.index()] = input & mask(func.value_type(param));
-    }
-    for &inst in func.block_insts(block) {
-        let read = |v: Value| values[func.resolve(v).index()];
-        let ty_of = |v: Value| func.value_type(func.resolve(v));
-        let result = match func.inst_data(inst) {
-            InstData::Iconst { imm, .. } => *imm as i128 as u128,
-            InstData::Unary { op, arg } => {
-                let (x, ty) = (read(*arg), ty_of(*arg));
-                let width = 8 * ty.bytes().unwrap();
-                match op {
-                    UnaryOp::Ineg => x.wrapping_neg(),
-                    UnaryOp::Bnot => !x,
-                    UnaryOp::Popcnt => u128::from(x.count_ones()),
-                    UnaryOp::Clz => u128::from(x.leading_zeros() - (128 - width)),
-                    UnaryOp::Ctz => u128::from(x.trailing_zeros().min(width)),
-                    _ => panic!("unsupported {op:?}"),
-                }
-            }
-            InstData::Binary { op, args } => {
-                let (a, b) = (read(args[0]), read(args[1]));
-                let ty = ty_of(args[0]);
-                let width = 8 * ty.bytes().unwrap_or(8);
-                let n = (b % u128::from(width)) as u32;
-                match op {
-                    BinaryOp::Iadd | BinaryOp::Ptradd => a.wrapping_add(b),
-                    BinaryOp::Isub => a.wrapping_sub(b),
-                    BinaryOp::Imul => a.wrapping_mul(b),
-                    BinaryOp::And => a & b,
-                    BinaryOp::Or => a | b,
-                    BinaryOp::Xor => a ^ b,
-                    BinaryOp::Shl => a << n,
-                    BinaryOp::Ushr => a >> n,
-                    BinaryOp::Sshr => (signed(a, ty) >> n) as u128,
-                    BinaryOp::Udiv => a / b,
-                    BinaryOp::Urem => a % b,
-                    _ => panic!("unsupported {op:?}"),
-                }
-            }
-            InstData::Convert { op, arg, .. } => match op {
-                ConvertOp::Uext | ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
-                    read(*arg)
-                }
-                ConvertOp::Sext => signed(read(*arg), ty_of(*arg)) as u128,
-                _ => panic!("unsupported {op:?}"),
-            },
-            InstData::Icmp { cond, args } => {
-                let (a, b) = (read(args[0]), read(args[1]));
-                let ty = ty_of(args[0]);
-                let (sa, sb) = (signed(a, ty), signed(b, ty));
-                u128::from(match cond {
-                    IntCC::Eq => a == b,
-                    IntCC::Ne => a != b,
-                    IntCC::Ult => a < b,
-                    IntCC::Ule => a <= b,
-                    IntCC::Ugt => a > b,
-                    IntCC::Uge => a >= b,
-                    IntCC::Slt => sa < sb,
-                    IntCC::Sle => sa <= sb,
-                    IntCC::Sgt => sa > sb,
-                    IntCC::Sge => sa >= sb,
-                })
-            }
-            InstData::Select { args } => read(args[if read(args[0]) != 0 { 1 } else { 2 }]),
-            InstData::Return { args } => return read(args[0]),
-            data => panic!("unsupported {data:?}"),
-        };
-        let value = func.first_result(inst);
-        values[value.index()] = result & mask(func.value_type(value));
-    }
-    panic!("missing return")
 }
 
 #[derive(Clone, Copy, Debug)]

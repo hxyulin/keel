@@ -104,9 +104,7 @@ fn body_division_stays_guarded_on_zero_trip_and_traps_on_taken_path() {
     let after = optimize(&s);
     for m in [&before, &after] {
         assert_eq!(support::execute(&m.functions[0], &[0, 9, 3, 17]), 17);
-        assert!(
-            std::panic::catch_unwind(|| support::execute(&m.functions[0], &[1, 9, 3, 17])).is_err()
-        );
+        assert!(support::traps(&m.functions[0], &[1, 9, 3, 17]));
     }
 }
 
@@ -228,10 +226,7 @@ fn offset_translation_preserves_zero_trip_and_guarded_traps() {
     assert_ne!(before.to_string(), after.to_string());
     for module in [&before, &after] {
         assert_eq!(support::execute(&module.functions[0], &[0, 1, 0, 1]), 0);
-        assert!(
-            std::panic::catch_unwind(|| support::execute(&module.functions[0], &[1, 1, 0, 1]))
-                .is_err()
-        );
+        assert!(support::traps(&module.functions[0], &[1, 1, 0, 1]));
     }
 }
 

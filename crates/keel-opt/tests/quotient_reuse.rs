@@ -64,10 +64,7 @@ fn earlier_quotients_preserve_arithmetic_and_traps_in_each_tier() {
                     if b != 0 && !signed {
                         continue;
                     }
-                    assert!(
-                        std::panic::catch_unwind(|| support::execute(&m.functions[0], &[a, b]))
-                            .is_err()
-                    );
+                    assert!(support::traps(&m.functions[0], &[a, b]));
                 }
             }
         }

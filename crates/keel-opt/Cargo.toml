@@ -15,6 +15,7 @@ profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
 
 [dev-dependencies]
+keel-ir-interp = { path = "../keel-ir-interp" }
 keel-test-support = { path = "../keel-test-support" }
 
 [lints]

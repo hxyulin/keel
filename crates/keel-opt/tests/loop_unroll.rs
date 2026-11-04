@@ -1,4 +1,7 @@
-use keel_ir::{BinaryOp as B, Block, EntityRef, Function, InstData as D, IntCC, Type, Value};
+mod support;
+
+use keel_ir::{BinaryOp as B, Block, Function, InsertPoint, InstData as D, Type, Value};
+use keel_ir_interp::Interpreter;
 use std::collections::HashMap;
 
 fn kernel(ty: Type) -> String {
@@ -54,111 +57,83 @@ fn mask(ty: Type) -> u64 {
     }
 }
 
-// A bounded independent integer/CFG model with a checked byte-addressed memory.
-// Load trace comparison verifies both exact trip count and per-iteration order.
+/// Runs `f` on the reference interpreter with `memory` (address to a
+/// little-endian value, at most 8 bytes apart) mapped at its addresses
+/// relative to the pointer inputs. Returns the result and the addresses of the
+/// executed loads, so callers can compare trip counts and load order.
+/// `resume` starts at a loop header with the given parameters instead.
 fn execute(
     f: &Function,
     inputs: &[u64],
     memory: &HashMap<u64, u64>,
     resume: Option<(Block, Vec<u64>)>,
 ) -> (u64, Vec<u64>) {
-    let mut values = vec![0; f.num_values()];
-    for (&p, &v) in f.block_params(f.entry_block().unwrap()).iter().zip(inputs) {
-        values[p.index()] = v & mask(f.value_type(p));
-    }
-    let mut block = f.entry_block().unwrap();
-    if let Some((b, args)) = resume {
-        block = b;
-        for (&p, v) in f.block_params(b).iter().zip(args) {
-            values[p.index()] = v;
+    let resumed;
+    let f = match resume {
+        Some((header, args)) => {
+            resumed = resume_at(f, header, &args);
+            &resumed
         }
-    }
-    let mut trace = vec![];
-    for _ in 0..10000 {
-        let mut next = None;
-        for &i in f.block_insts(block) {
-            let read = |v: Value| values[f.resolve(v).index()];
-            let result = match f.inst_data(i) {
-                D::Iconst { imm, .. } => Some(*imm as u64),
-                D::Binary { op, args } => Some(match op {
-                    B::Iadd | B::Ptradd => read(args[0]).wrapping_add(read(args[1])),
-                    B::Isub => read(args[0]).wrapping_sub(read(args[1])),
-                    B::Imul => read(args[0]).wrapping_mul(read(args[1])),
-                    B::Xor => read(args[0]) ^ read(args[1]),
-                    B::And => read(args[0]) & read(args[1]),
-                    B::Or => read(args[0]) | read(args[1]),
-                    B::Shl | B::Ushr | B::Sshr => {
-                        let width = f.value_type(args[0]).bytes().unwrap() * 8;
-                        let shift = read(args[1]) % u64::from(width);
-                        match op {
-                            B::Shl => read(args[0]) << shift,
-                            B::Ushr => read(args[0]) >> shift,
-                            B::Sshr => {
-                                (((read(args[0]) << (64 - width)) as i64 >> (64 - width)) >> shift)
-                                    as u64
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    _ => panic!("unmodeled {op:?}"),
-                }),
-                D::Convert {
-                    op: keel_ir::ConvertOp::Sext,
-                    arg,
-                    ..
-                } => {
-                    let width = f.value_type(*arg).bytes().unwrap() * 8;
-                    Some((((read(*arg) << (64 - width)) as i64) >> (64 - width)) as u64)
-                }
-                D::Convert { arg, .. } => Some(read(*arg)),
-                D::Load { addr, .. } => {
-                    let address = read(*addr);
-                    trace.push(address);
-                    Some(*memory.get(&address).expect("load outside exact input"))
-                }
-                D::Icmp { cond, args } => Some(u64::from(match cond {
-                    IntCC::Ult => read(args[0]) < read(args[1]),
-                    IntCC::Ugt => read(args[0]) > read(args[1]),
-                    IntCC::Uge => read(args[0]) >= read(args[1]),
-                    IntCC::Slt | IntCC::Sgt | IntCC::Sge => {
-                        let width = f.value_type(args[0]).bytes().unwrap() * 8;
-                        let signed = |v| ((read(v) << (64 - width)) as i64) >> (64 - width);
-                        match cond {
-                            IntCC::Slt => signed(args[0]) < signed(args[1]),
-                            IntCC::Sgt => signed(args[0]) > signed(args[1]),
-                            _ => signed(args[0]) >= signed(args[1]),
-                        }
-                    }
-                    _ => panic!("unmodeled {cond:?}"),
-                })),
-                D::Return { args } => return (read(args[0]), trace),
-                D::Jump { dest } => {
-                    next = Some(dest);
-                    None
-                }
-                D::Brif { cond, dests } => {
-                    next = Some(&dests[usize::from(read(*cond) == 0)]);
-                    None
-                }
-                d => panic!("unmodeled {d:?}"),
-            };
-            if let Some(v) = result {
-                let p = f.first_result(i);
-                values[p.index()] = v & mask(f.value_type(p));
-            }
+        None => f,
+    };
+    let mut interp = Interpreter::for_function(f).with_load_trace();
+    let mut addrs: Vec<u64> = memory.keys().copied().collect();
+    addrs.sort_unstable();
+    let mut offset = 0;
+    if let (Some(&low), Some(&high)) = (addrs.first(), addrs.last()) {
+        // In address order, so each value keeps the bytes up to the next one.
+        let mut bytes = vec![0; (high - low + 8) as usize];
+        for addr in addrs {
+            let at = (addr - low) as usize;
+            bytes[at..at + 8].copy_from_slice(&memory[&addr].to_le_bytes());
         }
-        let dest = next.unwrap();
-        let args: Vec<_> = dest
-            .args
-            .iter()
-            .map(|v| values[f.resolve(*v).index()])
-            .collect();
-        block = dest.block;
-        for (&p, v) in f.block_params(block).iter().zip(args) {
-            values[p.index()] = v;
-        }
+        offset = interp.memory_mut().alloc_bytes(&bytes, 8).wrapping_sub(low);
     }
-    panic!("bounded execution limit")
+    let entry = f.block_params(f.entry_block().unwrap());
+    let inputs: Vec<u128> = inputs
+        .iter()
+        .zip(entry)
+        .map(|(&x, &p)| match f.value_type(p) {
+            Type::Ptr => u128::from(x.wrapping_add(offset)),
+            _ => u128::from(x),
+        })
+        .collect();
+    let result = support::first_result(interp.call(&f.name, &support::args(f, &inputs)), f);
+    let trace = interp
+        .load_trace()
+        .iter()
+        .map(|a| a.wrapping_sub(offset))
+        .collect();
+    (result as u64, trace)
+}
+
+/// A copy of `f` whose entry jumps to `header` with `args` as constants.
+/// Equivalent to resuming at `header` because the entry only defines
+/// constants and jumps there.
+fn resume_at(f: &Function, header: Block, args: &[u64]) -> Function {
+    let mut f = f.clone();
+    let entry = f.entry_block().unwrap();
+    let (&jump, body) = f.block_insts(entry).split_last().unwrap();
+    assert!(
+        body.iter()
+            .all(|&i| matches!(f.inst_data(i), D::Iconst { .. }))
+    );
+    assert!(matches!(f.inst_data(jump), D::Jump { dest } if dest.block == header));
+    let params = f.block_params(header).to_vec();
+    let values: Vec<Value> = params
+        .iter()
+        .zip(args)
+        .map(|(&p, &x)| {
+            let ty = f.value_type(p);
+            let inst = f.insert_inst(InsertPoint::Before(jump), D::Iconst { ty, imm: x as i64 });
+            f.first_result(inst)
+        })
+        .collect();
+    let D::Jump { dest } = f.inst_data_mut(jump) else {
+        unreachable!()
+    };
+    dest.args = values;
+    f
 }
 
 #[test]
