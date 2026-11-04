@@ -22,6 +22,7 @@ mod call_load_reuse;
 mod canonicalize;
 mod const_fold;
 mod constant_args;
+mod counted_loop;
 mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
 mod dce;

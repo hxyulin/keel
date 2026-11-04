@@ -6,12 +6,12 @@
 //! up to two extra same-width additive recurrences are forwarded sequentially.
 //! Whole iterations are cloned in order, including both loads, before beginning
 //! the next iteration; only the non-observable wrapping sum is reassociated.
-use crate::ir_match::int_const;
-use keel_ir::dominators::DominatorTree;
+use crate::counted_loop::{CountedLoop, TwoBlockLoop, invariant};
+use crate::ir_match::{def, int_const};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
-    Type, Value, ValueDef,
+    Type, Value,
 };
 
 pub(crate) struct LoopUnroll;
@@ -47,84 +47,43 @@ struct Candidate {
     signed: bool,
     extras: Vec<(Value, Value, Value)>,
 }
-fn def(f: &Function, v: Value) -> Option<Inst> {
-    match f.value_def(f.resolve(v)) {
-        ValueDef::Result(i, _) => Some(i),
-        _ => None,
-    }
-}
-fn invariant(f: &Function, dom: &DominatorTree, pre: Block, v: Value) -> bool {
-    let b = match f.value_def(f.resolve(v)) {
-        ValueDef::Result(i, _) => f.inst_block(i),
-        ValueDef::Param(b, _) => b,
-        _ => return false,
-    };
-    dom.dominates(b, pre)
-}
 fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let params = f.block_params(header);
-    if !(2..=4).contains(&params.len()) {
+    if !(2..=4).contains(&params.len()) || f.block_insts(header).len() != 2 {
         return None;
     }
     let (iv, sum) = (params[0], params[1]);
-    if f.resolve(iv) != iv
-        || f.resolve(sum) != sum
-        || !matches!(f.value_type(iv), Type::I32 | Type::I64)
-        || !matches!(f.value_type(sum), Type::I32 | Type::I64)
-    {
+    if f.resolve(sum) != sum || !matches!(f.value_type(sum), Type::I32 | Type::I64) {
         return None;
     }
-    let [compare, branch] = *f.block_insts(header) else {
+    let mut analysis = None;
+    let CountedLoop {
+        shape:
+            TwoBlockLoop {
+                body,
+                pre,
+                body_edge: 0,
+                back,
+                entry: pre_jump,
+                ..
+            },
+        bound,
+        signed,
+        ..
+    } = CountedLoop::find(f, &mut analysis, header)?
+    else {
         return None;
     };
-    let D::Icmp { cond, args } = *f.inst_data(compare) else {
-        return None;
-    };
-    let signed = matches!(cond, IntCC::Slt | IntCC::Sgt);
-    let bound = match (cond, f.resolve(args[0]) == iv, f.resolve(args[1]) == iv) {
-        (IntCC::Ult | IntCC::Slt, true, false) => f.resolve(args[1]),
-        (IntCC::Ugt | IntCC::Sgt, false, true) => f.resolve(args[0]),
-        _ => return None,
-    };
-    let D::Brif { cond, dests } = f.inst_data(branch) else {
-        return None;
-    };
-    if f.resolve(*cond) != f.first_result(compare) {
+    let analysis = analysis.expect("CountedLoop::find computed the analyses");
+    let dom = &analysis.dom;
+    let bound = f.resolve(bound);
+    if !invariant(f, dom, pre, bound) {
         return None;
     }
-    let body = dests[0].block;
-    let analysis = crate::analysis::get(f);
-    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
-    let depth = analysis.loops(f);
-    if body == header
-        || dests[1].block == header
-        || dests[1].block == body
-        || cfg.preds(body) != [header]
-        || !f.block_params(body).is_empty()
-        || !dests[0].args.is_empty()
-        || depth.depth(header) == 0
-        || depth.depth(body) != depth.depth(header)
-        || !dom.dominates(header, body)
-    {
-        return None;
-    }
-    let preds = cfg.preds(header);
-    if preds.len() != 2 {
-        return None;
-    }
-    let pre = *preds.iter().find(|&&b| b != body)?;
-    if pre == header || depth.depth(pre) >= depth.depth(header) || !invariant(f, dom, pre, bound) {
-        return None;
-    }
-    let pre_jump = *f.block_insts(pre).last()?;
     let D::Jump { dest } = f.inst_data(pre_jump) else {
-        return None;
+        unreachable!()
     };
-    if dest.block != header
-        || dest.args.len() != params.len()
-        || int_const(f, dest.args[0]) != Some(0)
-        || !invariant(f, dom, pre, dest.args[1])
-    {
+    if int_const(f, dest.args[0]) != Some(0) || !invariant(f, dom, pre, dest.args[1]) {
         return None;
     }
     let (start, seed) = (f.resolve(dest.args[0]), f.resolve(dest.args[1]));
@@ -135,13 +94,9 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     if insts.len() > 20 {
         return None;
     }
-    let back = *insts.last()?;
     let D::Jump { dest } = f.inst_data(back) else {
-        return None;
+        unreachable!()
     };
-    if dest.block != header || dest.args.len() != params.len() {
-        return None;
-    }
     let (next_iv, next_sum) = (f.resolve(dest.args[0]), f.resolve(dest.args[1]));
     let mut extras = Vec::new();
     for (index, &param) in params.iter().enumerate().skip(2) {
@@ -167,16 +122,6 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             return None;
         }
         extras.push((param, seed, next));
-    }
-    let step = def(f, next_iv)?;
-    let D::Binary { op: B::Iadd, args } = *f.inst_data(step) else {
-        return None;
-    };
-    if f.inst_block(step) != body
-        || !((f.resolve(args[0]) == iv && int_const(f, args[1]) == Some(1))
-            || (f.resolve(args[1]) == iv && int_const(f, args[0]) == Some(1)))
-    {
-        return None;
     }
     let reduction = def(f, next_sum)?;
     let D::Binary { op: B::Iadd, args } = *f.inst_data(reduction) else {

@@ -1,6 +1,14 @@
 //! Matchers over IR values shared by the passes.
 
-use keel_ir::{Function, InstData, Value, ValueDef};
+use keel_ir::{Function, Inst, InstData, Value, ValueDef};
+
+/// The instruction defining `v`, looking through aliases.
+pub(crate) fn def(f: &Function, v: Value) -> Option<Inst> {
+    match f.value_def(f.resolve(v)) {
+        ValueDef::Result(inst, _) => Some(inst),
+        _ => None,
+    }
+}
 
 /// The immediate of the `iconst` defining `v`, looking through aliases.
 /// It is the canonical form the verifier enforces: sign-extended from the
