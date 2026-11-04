@@ -62,7 +62,8 @@ analysis and scratch caches.
 
 A thread-local cache reuses CFG, dominator and loop-depth analyses while the
 function's CFG stamp is unchanged, or when block count, layout and ordered
-successors still match. Debug builds check the cached CFG inputs on every hit.
+successors still match. Debug builds check, after each pass run, that a cached
+entry carrying the function's stamp still matches its CFG.
 The `keel-opt/audit-analysis` feature also recomputes and compares the
 analyses on each hit; use `cargo test -p keel-opt --features audit-analysis`
 when changing CFG mutation or analysis code.

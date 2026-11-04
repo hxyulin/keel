@@ -81,13 +81,16 @@ Each stage has its own effort setting:
   then memory reuse, [stack promotion](compiler/optimizer.md#stack-promote) and bounded loop
   transforms.
 - **Instruction selection.** `baseline` runs no optional pass and no
-  [cover](compiler/design.md); `trees` enables generated tree patterns and the
+  [cover](compiler/design.md#covers); `trees` enables generated tree patterns and the
   covers; `full` adds folded operands and register hints. `--isel` takes `all`,
   `none`, or a list of `trees`, `folds`, `hints`, `covers` and cover names, and
   `-<term>` turns one off: `--isel all,-x86-mask-test`. The last explicit
   selector wins over `-O`.
 - **Register allocation.** Both allocators are linear scan. `full` keeps
   lifetime holes and register affinities; `fast` uses contiguous intervals.
+  A build with the `experimental-regalloc` feature also accepts `local`,
+  `split` and `--remat`; see the
+  [allocator tiers](compiler/design.md#register-allocation).
 - **CPU.** `--tune apple-m5` enables Apple M5 scheduling choices (with tree
   selection) without enabling ISA features. On x86-64, `--cpu-level
   v1|v2|v3` sets the ISA level (default `v1`) and `--target-features`
@@ -114,7 +117,7 @@ static backend counts for each function, in compilation order: `spill_stores`,
 count emitted instructions, not executions. On x86-64, an instruction that
 reads or writes a spilled value in place as a memory operand is not counted.
 The `covers` object counts, per function and for the module, the roots that
-each [cover](compiler/design.md) claimed, listing only covers that fired.
+each [cover](compiler/design.md#covers) claimed, listing only covers that fired.
 Neither report flag overwrites an existing file, and they need different paths.
 
 ```sh

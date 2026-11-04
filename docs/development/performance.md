@@ -38,7 +38,10 @@ lists the functions whose code changed, and
 [`cargo suite stats`](../../suite/README.md#pass-and-backend-statistics) shows
 which optimizer passes change which functions, and the backend's spill,
 reload and move counts. A change that touches no hot
-function will measure as neutral. Batch changes that are each expected to
+function will measure as neutral. To measure one
+[cover](../compiler/design.md#covers), use the same binary on both sides:
+`--candidate-isel all,-<cover>` on `codegen-diff` and `ab` drops that cover
+from the candidate, and the `ab` trailer records it. Batch changes that are each expected to
 stay inside the control spread and measure them together.
 
 ## Acceptance rule

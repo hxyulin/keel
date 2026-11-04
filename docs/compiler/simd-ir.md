@@ -32,7 +32,7 @@ block0(v0: ptr, v1: i32):
 }
 ```
 
-Vector loads and stores access exactly the value's 8, 16, or 32 bytes using the
+Vector loads and stores access exactly the value's 8, 16, 32 or 64 bytes using the
 existing memory flags. Unaligned accesses retain their existing trapping and
 volatile behavior. Vectors may be block arguments and function arguments/results
 within the target's supported ABI. Scalar conditions and scalar arithmetic keep

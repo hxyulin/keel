@@ -112,7 +112,7 @@ Selection flags interact as follows. Ordinary `keel` keeps baseline selection;
 selection, use `-O --isel none` (either order). Explicit selection selectors
 override the preset, and the last explicit selector wins. `--opt-tier` and
 `-p` control IR independently and do not reset selection. Baseline selection
-runs no [cover](../docs/compiler/design.md); a config with
+runs no [cover](../docs/compiler/design.md#covers); a config with
 `-O --isel all,-<cover>` drops one cover, so one binary can compare a cover
 against `keel-O`.
 
@@ -372,7 +372,7 @@ sides, so the deltas measure the assembly text alone.
 | `--covers` | Count each cover's firings with `--codegen-report` and print them per target and configuration |
 
 With `--candidate-isel`, one binary can be both sides, which compares one
-[cover](../docs/compiler/design.md) against the rest:
+[cover](../docs/compiler/design.md#covers) against the rest:
 
 ```sh
 cargo suite codegen-diff --baseline target/release/keel --candidate target/release/keel \
