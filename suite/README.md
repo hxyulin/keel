@@ -102,7 +102,7 @@ Commonly used configurations:
 | `keel-g` | Keel with debug info |
 | `keel-basic`, `keel-fast`, `keel-full` | Explicit IR tiers (`keel-fast`: Fast IR with Full selection and allocation; `keel-full`: Full for all three) |
 | `keel-O-trees`, `keel-O-folds`, `keel-O-hints` | One selection pass at a time, for ablations |
-| `keel-O-memory`, `keel-O-cleanup`, `keel-O-bits-*`, `keel-O-sccp`, ... | Opt-in pass recipes for experiments; not defaults |
+| `keel-O-memory`, `keel-O-cleanup`, `keel-O-bits-*`, ... | Opt-in pass recipes for experiments; not defaults |
 | `keel-m5`, `keel-m5-fast` | Explicit Apple M5 tuning (experimental) |
 | `keel-basic-fast-alloc` | Historical Basic IR with Fast allocation, kept so allocation experiments do not stand in for the Fast IR profile |
 | `clang-O0` ... `clang-O3` | Clang references |

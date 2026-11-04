@@ -4,6 +4,8 @@ mod algebra;
 mod boolean;
 #[path = "instcombine/canonical_constants.rs"]
 mod canonical_constants;
+#[path = "instcombine/overflow_fold.rs"]
+mod overflow_fold;
 
 mod support;
 use support::execute;
@@ -175,7 +177,14 @@ block0(v0: i8):
     )
     .unwrap();
     for subset in 0..64 {
-        let other = ["const-fold", "sccp", "simplify-cfg", "gvn", "dce", "gcm"];
+        let other = [
+            "const-fold",
+            "phi-simplify",
+            "simplify-cfg",
+            "gvn",
+            "dce",
+            "gcm",
+        ];
         let mut names = vec!["instcombine"];
         names.extend(
             other

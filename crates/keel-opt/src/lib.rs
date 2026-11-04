@@ -69,7 +69,6 @@ mod memory_alias;
 mod memory_forward;
 mod module_cleanup;
 mod phi_simplify;
-mod sccp;
 mod scratch;
 mod simplify_cfg;
 mod small_memory;
@@ -241,11 +240,6 @@ const BUILTINS: &[BuiltinPass] = &[
         run: gcm::run,
     },
     BuiltinPass {
-        name: "sccp",
-        description: "propagate constants through executable edges and block parameters, then evaluate instructions",
-        run: sccp::run,
-    },
-    BuiltinPass {
         name: "instcombine",
         description: "combine integer identities, fold constants, and reduce power-of-two arithmetic",
         run: instcombine::run,
@@ -353,7 +347,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[11],
     &BUILTINS[12],
     &BUILTINS[13],
-    &BUILTINS[14],
     &load_reuse::LoadReuse,
     &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,
@@ -364,7 +357,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,
     &inline::InlineNoninterposable,
-    &BUILTINS[15],
+    &BUILTINS[14],
     &inline::InlineCheapReserve,
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,

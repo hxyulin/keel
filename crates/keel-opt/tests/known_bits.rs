@@ -131,7 +131,7 @@ block1(v3: i8):
 }
 
 #[test]
-fn sccp_aliases_layout_order_and_i128_immediates_are_safe() {
+fn aliases_layout_order_and_i128_immediates_are_safe() {
     let source = "func @f(i8) -> i8 {
 block0(v0: i8):
  v1 = iconst.i8 15
@@ -145,7 +145,14 @@ block2(v2: i8):
 }";
     let (original, module) = apply(
         source,
-        &["sccp", "known-bits", "instcombine", "simplify-cfg", "dce"],
+        &[
+            "phi-simplify",
+            "const-fold",
+            "known-bits",
+            "instcombine",
+            "simplify-cfg",
+            "dce",
+        ],
     );
     for x in 0..256 {
         check(&original, &module, &[x]);
@@ -274,7 +281,7 @@ block3(v10: i8):
             "simplify-cfg",
             "gvn",
             "phi-simplify",
-            "sccp",
+            "const-fold",
             "dce",
         ];
         let mut sequence = vec!["known-bits"];

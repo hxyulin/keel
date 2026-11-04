@@ -1,8 +1,9 @@
 ; expect: exit 0
-; opt-passes: simplify-cfg, sccp, simplify-cfg, gvn, dce, gcm
+; opt-passes: simplify-cfg, phi-simplify, const-fold, simplify-cfg, gvn, dce, gcm
 ; An invariant parameter is initialized on entry and passed unchanged on
-; the backedge. SCCP proves it constant while retaining the induction and
-; accumulator parameters. The C driver can also time a larger iteration count.
+; the backedge. phi-simplify replaces it with the constant while retaining the
+; induction and accumulator parameters. The C driver can also time a larger
+; iteration count.
 func @constant_loop(i64) -> i64 {
 block0(v0: i64):
     v1 = iconst.i64 0

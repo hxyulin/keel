@@ -7,7 +7,7 @@
 //! alone, so it still traps at run time.
 //!
 //! The direct pass visits definitions before uses in reverse postorder.
-//! `sccp` also uses this numerical kernel with a data-flow constant lookup.
+//! `instcombine`, `memory-forward` and other passes reuse this numerical kernel.
 //!
 //! Floats fold with the host's IEEE 754 arithmetic, which rounds like the
 //! target's. Which NaN an operation produces is unspecified in the IR, so

@@ -75,7 +75,6 @@ it; use `run_pipeline` or `run_passes`.
 | `call-load-reuse` (opt-in) | Load reuse across calls with explicit scoped call contracts |
 | `known-bits` | Fold masks and comparisons from known-zero and known-one bits |
 | `phi-simplify` | Replace uniform block arguments with a dominating value |
-| `sccp` (opt-in) | Sparse conditional constant propagation |
 | `gvn` | Scoped hash table over the dominator tree; loads are never merged |
 | `dce` | Mark from pinned instructions; dead block parameters die with their arguments |
 | `gcm` | Global code motion, the scheduler for floating instructions |
@@ -102,7 +101,7 @@ identities need a known nonzero divisor, and floating-point identities are
 excluded. Effectful and trapping producers stay pinned even when a consumer
 becomes constant. Rules include:
 
-- constant evaluation, shared with `const-fold` and SCCP, including both
+- constant evaluation, shared with `const-fold`, including both
   results of checked add, subtract and multiply through i64;
 - power-of-two unsigned division, remainder and multiplication as shifts and
   masks;
@@ -136,17 +135,6 @@ pass removes masks that the operands already establish and proves comparisons
 from the resulting bounds, including signed ordering. Values are materialized
 only when the immediate can represent them. It does not remove loads, stores or
 trapping operations. Balanced, Size and Full run it late.
-
-## SCCP
-
-`sccp` uses the
-[Wegman and Zadeck](https://cs.brown.edu/research/pubs/techreports/reports/CS-89-36.html)
-lattice: unknown, a bit-exact constant, or overdefined. Block parameters meet
-arguments from executable edges, and two arms from one predecessor stay
-distinct. Values left unknown in executable code become overdefined. Analysis
-converges before rewriting, and parameter constants are materialized in their
-own block. Checked arithmetic tracks the wrapped value and the overflow flag
-separately. `simplify-cfg` and `dce` clean up afterwards. No tier runs it.
 
 ## Phi cleanup
 

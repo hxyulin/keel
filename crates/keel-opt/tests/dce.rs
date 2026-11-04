@@ -144,7 +144,7 @@ block2(v9: i64):
 }";
     let original = keel_ir::parse(source).unwrap();
     for subset in 0..32 {
-        let other = ["const-fold", "sccp", "simplify-cfg", "gvn", "gcm"];
+        let other = ["const-fold", "phi-simplify", "simplify-cfg", "gvn", "gcm"];
         let mut names = vec!["dce"];
         names.extend(
             other

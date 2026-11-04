@@ -88,7 +88,7 @@ block2(v2: i64):
 }
 
 #[test]
-fn existing_sccp_aliases_and_multiple_parameter_removals_stay_resolved() {
+fn multiple_parameter_removals_stay_resolved() {
     let mut module = parse(
         "func @f(i8, i64) -> i64 {
 block0(v0: i8, v1: i64):
@@ -100,7 +100,7 @@ block1(v3: i64, v4: i64, v5: i64):
     return v7
 }",
     );
-    keel_opt::run_passes(&mut module, &["sccp", "phi-simplify", "instcombine", "dce"]).unwrap();
+    keel_opt::run_passes(&mut module, &["phi-simplify", "instcombine", "dce"]).unwrap();
     for condition in [0, 1] {
         assert_eq!(execute(&module.functions[0], &[condition, 100]), 184);
     }
@@ -109,10 +109,9 @@ block1(v3: i64, v4: i64, v5: i64):
 #[test]
 fn every_existing_pass_subset_preserves_loop_semantics() {
     let original = parse(LOOP);
-    for subset in 0..128 {
+    for subset in 0..64 {
         let other = [
             "const-fold",
-            "sccp",
             "instcombine",
             "simplify-cfg",
             "gvn",

@@ -1,5 +1,5 @@
 ; expect: exit 0
-; opt-passes: sccp, instcombine, simplify-cfg, gvn, dce, gcm
+; opt-passes: const-fold, instcombine, simplify-cfg, gvn, dce, gcm
 func @checked_fold() -> i64 {
 block0:
     v0 = iconst.i64 9223372036854775807

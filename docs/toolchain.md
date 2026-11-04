@@ -91,10 +91,10 @@ Each stage has its own effort setting:
 ```sh
 keel compile --opt-tier basic --isel-tier trees --regalloc fast input.keel -o out.s
 keel cc -O --tune apple-m5 hello.c -o hello.s
-keel opt -p sccp,instcombine,dce input.keel
+keel opt -p instcombine,dce input.keel
 ```
 
-Opt-in passes include `sccp` and `if-convert`.
+Opt-in passes include `if-convert`.
 `--verify-each` / `--no-verify-each` control IR verification after every pass
 (on by default in debug builds); `--opt-report file.json` writes an
 optimization report.
