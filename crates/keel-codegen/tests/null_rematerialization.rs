@@ -1,20 +1,19 @@
 //! Cross-target null recipe object, flag, and parallel-copy correctness tests.
+
 #![cfg(feature = "experimental-regalloc")]
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
+
+use codegen::{Arch, Case, EMPTY};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{
         Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator,
         RematerializingAllocator,
     },
 };
 use keel_ir::{EntityRef, Value};
-
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 
 fn compile(
     src: &str,
@@ -23,38 +22,14 @@ fn compile(
     allocator: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> String {
-    let module = keel_ir::parse(src).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &selector,
-        allocator,
-    };
-    let (text, program) = if arm {
-        (
-            keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap(),
-            keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline)
-                .unwrap(),
-        )
-    } else {
-        (
-            keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap(),
-            keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap(),
-        )
-    };
-    let (typed, parsed) = if arm {
-        (
-            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-                .unwrap(),
-            keel_asm::assemble_object(&text).unwrap(),
-        )
-    } else {
-        (
-            keel_asm::x86::assemble_program_object(&program).unwrap(),
-            keel_asm::x86::assemble_object(&text).unwrap(),
-        )
-    };
-    assert_eq!(typed, parsed, "{text}");
-    text
+    let module = codegen::parse(src);
+    let arch = if arm { Arch::Aarch64 } else { Arch::X86_64 };
+    Case::new(arch, &module)
+        .selector(&selector)
+        .allocator(allocator)
+        .pools(pools)
+        .compile()
+        .text
 }
 
 #[test]

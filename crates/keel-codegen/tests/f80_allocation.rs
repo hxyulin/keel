@@ -1,8 +1,12 @@
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 #[path = "f80_allocation/f80_coalescing.rs"]
 mod f80_coalescing;
 
+use codegen::Case;
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
+    SelectionTier,
     regalloc::{Allocation, AllocationInput, AllocationTier, Loc, RegisterAllocator, ValuePart},
 };
 use keel_ir::{EntityRef, Value};
@@ -166,25 +170,12 @@ fn compile(
     plan: Plan,
     selector: SelectionTier,
 ) -> Result<(String, Vec<u8>), keel_codegen::CodegenError> {
-    let module = keel_ir::parse(plan.source()).unwrap();
-    keel_ir::verify_module(&module).unwrap();
-    let pipeline = CodegenPipeline {
-        selector: &selector,
-        allocator: &Custom(plan),
-    };
-    let text = keel_codegen::x86_64::compile_with_pipeline(
-        &module,
-        &keel_codegen::x86_64::REGISTERS,
-        &pipeline,
-    )?;
-    let program = keel_codegen::x86_64::compile_program_with_pipeline(
-        &module,
-        &keel_codegen::x86_64::REGISTERS,
-        &pipeline,
-    )?;
-    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
-    assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
-    Ok((text, object))
+    let module = codegen::parse(plan.source());
+    let out = Case::x86(&module)
+        .selector(&selector)
+        .allocator(&Custom(plan))
+        .try_compile()?;
+    Ok((out.text, out.object))
 }
 #[test]
 fn redundant_sparse_param_preserves_the_initialized_home() {

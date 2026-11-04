@@ -1,10 +1,14 @@
 //! Narrow [prior.high64, current.low64] selection; arbitrary bits, no FP math.
 #[path = "vector_shuffle_window/arm_narrow_extract.rs"]
 mod arm_narrow_extract;
+#[allow(dead_code)]
+#[path = "common/codegen.rs"]
+mod codegen;
 
+use codegen::{Arch, Case, EMPTY};
 use keel_codegen::{
-    CodegenPipeline, SelectionTier,
-    regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
+    SelectionTier,
+    regalloc::{Allocation, AllocationInput, AllocationTier, Loc, RegisterAllocator},
 };
 use keel_test_support::native_program;
 use std::{
@@ -15,12 +19,6 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-const EMPTY: Pools = Pools {
-    caller_saved: &[],
-    callee_saved: &[],
-    float_caller_saved: &[],
-    float_callee_saved: &[],
-};
 const LAYOUTS: [&str; 9] = [
     "aliasa",
     "aliasb",
@@ -120,35 +118,16 @@ fn compile_module(
     alloc: &dyn RegisterAllocator,
     spill: bool,
 ) -> (String, Vec<u8>) {
-    let pipeline = CodegenPipeline {
-        selector,
-        allocator: alloc,
-    };
-    if arm {
-        let pools = if spill {
-            &EMPTY
-        } else {
-            &keel_codegen::aarch64::REGISTERS
-        };
-        let text = keel_codegen::aarch64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-        let p = keel_codegen::aarch64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-        assert_eq!(p.stats().text_bytes, 0);
-        let obj = keel_asm::assemble_program_object(&p, Default::default()).unwrap();
-        assert_eq!(obj, keel_asm::assemble_object(&text).unwrap());
-        (text, obj)
-    } else {
-        let pools = if spill {
-            &EMPTY
-        } else {
-            &keel_codegen::x86_64::REGISTERS
-        };
-        let text = keel_codegen::x86_64::compile_with_pipeline(m, pools, &pipeline).unwrap();
-        let p = keel_codegen::x86_64::compile_program_with_pipeline(m, pools, &pipeline).unwrap();
-        assert_eq!(p.stats().text_bytes, 0);
-        let obj = keel_asm::x86::assemble_program_object(&p).unwrap();
-        assert_eq!(obj, keel_asm::x86::assemble_object(&text).unwrap());
-        (text, obj)
+    let arch = if arm { Arch::Aarch64 } else { Arch::X86_64 };
+    let mut case = Case::new(arch, m)
+        .selector(selector)
+        .allocator(alloc)
+        .no_text_fallback();
+    if spill {
+        case = case.pools(&EMPTY);
     }
+    let out = case.compile();
+    (out.text, out.object)
 }
 fn command(c: &mut Command) {
     let out = c.output().unwrap();
