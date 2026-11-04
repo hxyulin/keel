@@ -194,6 +194,26 @@ all of its targets, so it gets no extra command. A warm
 `tools/test.py optimizer --quick` took 33 to 36 seconds on an Apple M5 Max.
 keel-codegen's `run` target took 18 seconds of that, and keel-c's `run` target 10.
 
+### Experimental codegen features
+
+`experimental-regalloc` (the Local and Split allocator tiers and
+rematerialization) and `experimental-dispatch` (AArch64 dispatch tails) are off
+in default builds. `--features` passes a Cargo feature list to every test
+command. Run this lane when changing allocation, selection or AArch64 emission:
+
+```sh
+cargo clippy -p keel-codegen --all-targets \
+  --features experimental-regalloc,experimental-dispatch -- -D warnings
+python3 tools/test.py codegen --unit --features experimental-regalloc,experimental-dispatch
+python3 tools/test.py codegen --features experimental-regalloc,experimental-dispatch \
+  --test arm_compare_select --test arm_dispatch_tail --test commutative_two_address \
+  --test narrow_extensions --test null_rematerialization --test private_leaf_calls \
+  --test run --test stack_frame --test x86_scalar_selection
+```
+
+These are the targets with feature-gated tests. A tier that cannot keep this
+lane passing is deleted rather than left uncompiled.
+
 ## Differential optimizer tests
 
 The keel-opt `golden` target runs the reference interpreter in

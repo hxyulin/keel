@@ -83,6 +83,15 @@ class SelectionTests(unittest.TestCase):
                 self.assertNotIn("arm_constant_division", targets)
                 self.assertNotIn("run", targets)
 
+    def test_features_reach_every_command(self):
+        for backend in ["cargo", "nextest"]:
+            plan = runner.commands("cargo", backend, "test-fast", ["keel-codegen"], False,
+                                   features="experimental-regalloc")
+            for command in plan:
+                index = command.index("--features")
+                self.assertEqual(command[index + 1], "experimental-regalloc")
+                self.assertNotIn("--", command[:index])
+
     def test_codegen_quick_does_not_narrow_an_explicit_target(self):
         for backend in ["cargo", "nextest"]:
             command = runner.commands("cargo", backend, "test-fast", ["keel-codegen"], True,

@@ -363,7 +363,9 @@ def check_commands(scopes: list[str], cargo: str, python: str,
 
 def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: bool,
              unit: bool = False, targets: list[str] | None = None,
-             doctest_packages: list[str] | None = None) -> list[list[str]]:
+             doctest_packages: list[str] | None = None,
+             features: str | None = None) -> list[list[str]]:
+    feature_args = ["--features", features] if features else []
     target_args = ["--lib"] if unit else [arg for target in targets or [] for arg in ("--test", target)]
     batches = [(packages, target_args)]
     if quick and not unit and not targets:
@@ -382,7 +384,7 @@ def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: 
                 batches.append(([dependent], [arg for target in names for arg in ("--test", target)]))
     result = []
     for batch_packages, batch_targets in batches:
-        selection = [arg for package in batch_packages for arg in ("-p", package)]
+        selection = [arg for package in batch_packages for arg in ("-p", package)] + feature_args
         if runner == "nextest":
             tests = [cargo, "nextest", "run", "--cargo-profile", profile,
                      "--no-fail-fast", *selection, *batch_targets]
@@ -398,7 +400,7 @@ def commands(cargo: str, runner: str, profile: str, packages: list[str], quick: 
     # nextest does not run doctests. Only libraries with doctests need this phase.
     docs = packages if doctest_packages is None else doctest_packages
     if runner == "nextest" and not quick and not target_args and docs:
-        doc_selection = [arg for package in docs for arg in ("-p", package)]
+        doc_selection = [arg for package in docs for arg in ("-p", package)] + feature_args
         result.append([cargo, "test", "--profile", profile, "--doc", "--no-fail-fast", *doc_selection])
     return result
 
@@ -479,6 +481,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     targets = parser.add_mutually_exclusive_group()
     targets.add_argument("--unit", action="store_true", help="library unit tests only; no integration tests or doctests")
     targets.add_argument("--test", action="append", default=[], metavar="TARGET", help="specific integration-test target; repeat to select several")
+    parser.add_argument("--features", metavar="LIST", help="Cargo features to enable, such as experimental-regalloc")
     parser.add_argument("--quick", action="store_true", help="core codegen regressions and optimizer oracles; elsewhere exclude exhaustive_ matrices and doctests")
     parser.add_argument("--runner", choices=["auto", "cargo", "nextest"], default="auto")
     parser.add_argument("--profile", default="test-fast", help="Cargo build profile (default: test-fast)")
@@ -599,7 +602,7 @@ def main() -> int:
         doctest_packages = sorted(name for name in selected
                                   if any(target["doctest"] for target in packages[name]["targets"]))
         tests = commands(args.cargo, runner, args.profile, sorted(selected), args.quick,
-                         args.unit, args.test, doctest_packages)
+                         args.unit, args.test, doctest_packages, args.features)
         print("Packages: " + ", ".join(sorted(selected)), flush=True)
         if args.unit:
             coverage = "library unit tests"
