@@ -1,25 +1,8 @@
-use keel_link::{Input, elf};
+use super::{object, value};
+use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
-fn object(s: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(s).unwrap()
-}
 fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "comdat.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
-}
-fn value(file: &object::File<'_>, name: &str) -> u64 {
-    file.symbols()
-        .find(|s| s.name().unwrap() == name)
-        .unwrap()
-        .address()
+    super::link_with("comdat.o", objects, Default::default())
 }
 fn word(exe: &elf::Executable, name: &str) -> u64 {
     let f = object::File::parse(exe.bytes.as_slice()).unwrap();

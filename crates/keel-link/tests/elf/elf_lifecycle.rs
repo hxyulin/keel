@@ -1,30 +1,13 @@
-use keel_link::{Input, elf};
-use object::{Object, ObjectSection, ObjectSymbol};
+use super::{object as obj, value as symbol};
+use keel_link::elf;
+use object::{Object, ObjectSection};
 use std::collections::BTreeMap;
 
-fn obj(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &inputs
-            .iter()
-            .map(|bytes| Input {
-                name: "lifecycle.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("lifecycle.o", inputs, Default::default())
 }
 fn u64at(b: &[u8], n: usize) -> u64 {
     u64::from_le_bytes(b[n..n + 8].try_into().unwrap())
-}
-fn symbol(file: &object::File<'_>, n: &str) -> u64 {
-    file.symbols()
-        .find(|s| s.name().unwrap() == n)
-        .unwrap()
-        .address()
 }
 fn interface() -> Vec<u8> {
     let mut image = link(&[obj(

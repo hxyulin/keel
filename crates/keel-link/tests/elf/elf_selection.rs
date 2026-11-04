@@ -1,3 +1,4 @@
+use super::object;
 use keel_link::{
     Input,
     archive::{self, Target},
@@ -5,10 +6,6 @@ use keel_link::{
     elf_selection::{Request, Selection},
 };
 use object::{Object, ObjectSymbol};
-
-fn object(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 
 fn archive(members: &[(&str, &[u8])]) -> Vec<u8> {
     archive::build(

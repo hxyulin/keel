@@ -1,29 +1,12 @@
-use keel_link::{Input, elf};
+use super::{object as obj, value};
+use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn obj(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "crt.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("crt.o", objects, Default::default())
 }
 fn word(bytes: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap())
-}
-fn value(file: &object::File<'_>, name: &str) -> u64 {
-    file.symbols()
-        .find(|s| s.name().unwrap() == name)
-        .unwrap()
-        .address()
 }
 fn pointer(exe: &[u8], file: &object::File<'_>, name: &str) -> u64 {
     word(exe, (value(file, name) - 0x400000) as usize)

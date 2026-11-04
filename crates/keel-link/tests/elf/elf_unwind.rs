@@ -1,25 +1,14 @@
-use keel_link::{Input, elf};
+use super::{object, value as symbol};
+use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn object(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn fixture(name: &str) -> Vec<u8> {
     object(&format!(
         ".text\n.p2align 4\n.globl {name}\n.type {name},@function\n{name}:\n.cfi_startproc\npush rbp\n.cfi_def_cfa_offset 16\n.cfi_offset rbp,-16\nmov rbp,rsp\n.cfi_def_cfa_register rbp\npop rbp\n.cfi_def_cfa rsp,8\nret\n.cfi_endproc\n"
     ))
 }
 fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "unwind.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("unwind.o", objects, Default::default())
 }
 fn u32_at(data: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(data[at..at + 4].try_into().unwrap())
@@ -42,12 +31,6 @@ fn locations(data: &[u8]) -> (usize, usize, usize) {
         eh.file_range().unwrap().0 as usize,
         rela.file_range().unwrap().0 as usize,
     )
-}
-fn symbol(file: &object::File<'_>, name: &str) -> u64 {
-    file.symbols()
-        .find(|s| s.name().unwrap() == name)
-        .unwrap()
-        .address()
 }
 
 #[test]

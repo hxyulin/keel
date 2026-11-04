@@ -1,21 +1,10 @@
 //! Byte-built metadata fixtures, independent of the linker's SFrame parser.
+use super::object;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn object(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "sframe.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("sframe.o", objects, Default::default())
 }
 fn u32_at(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(b[at..at + 4].try_into().unwrap())

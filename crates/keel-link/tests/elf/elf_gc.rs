@@ -1,17 +1,10 @@
+use super::object;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
-fn object(s: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(s).unwrap()
-}
 fn link(objects: &[Vec<u8>], gc: bool) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "gc.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
+    super::link_with(
+        "gc.o",
+        objects,
         elf::Options {
             gc_sections: gc,
             ..Default::default()

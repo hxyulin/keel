@@ -1,3 +1,4 @@
+use super::value;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 
@@ -16,12 +17,6 @@ fn link_bytes(bytes: &[u8], script: &str) -> Result<elf::Executable, String> {
             ..Default::default()
         },
     )
-}
-fn value(file: &object::File<'_>, name: &str) -> u64 {
-    file.symbols()
-        .find(|s| s.name().unwrap() == name)
-        .unwrap()
-        .address()
 }
 const SOURCE: &str = ".section .text.z,\"ax\"\n.globl startup\nstartup: ret\n\
 .section .text.a,\"ax\"\n.byte 0x90\n\
@@ -114,8 +109,7 @@ fn gnu_differential() {
     let Some(ld) = keel_test_support::gnu_ld() else {
         keel_test_support::skip!(keel_test_support::NO_GNU_LD);
     };
-    let dir = std::env::temp_dir().join(format!("keel-script-differential-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("script-differential");
     let cases = [
         (
             SOURCE,
@@ -196,7 +190,6 @@ fn gnu_differential() {
             "program headers"
         );
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 #[test]
 #[ignore = "requires the pinned external kernel aggregate and script"]

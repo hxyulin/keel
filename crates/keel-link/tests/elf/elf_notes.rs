@@ -1,4 +1,5 @@
-use keel_link::{Input, elf};
+use super::object as obj;
+use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::collections::BTreeMap;
 
@@ -10,20 +11,8 @@ const START: &str = ".text\n.globl _start\n_start: ret\n";
 const ABI: &[u8] = include_bytes!("../fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
 const SPLIT: &[u8] = include_bytes!("../fixtures/gnu-notes/split.o.note.gnu.property.bin");
 
-fn obj(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &inputs
-            .iter()
-            .map(|bytes| Input {
-                name: "notes.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("notes.o", inputs, Default::default())
 }
 fn u32at(data: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(data[at..at + 4].try_into().unwrap())

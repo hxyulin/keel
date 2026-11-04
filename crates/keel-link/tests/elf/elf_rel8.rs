@@ -1,19 +1,8 @@
-use keel_link::{Input, elf};
+use super::object as obj;
+use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
-fn obj(source: &str) -> Vec<u8> {
-    keel_asm::x86::assemble_object(source).unwrap()
-}
 fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
-    elf::link(
-        &objects
-            .iter()
-            .map(|bytes| Input {
-                name: "rel8.o",
-                bytes,
-            })
-            .collect::<Vec<_>>(),
-        Default::default(),
-    )
+    super::link_with("rel8.o", objects, Default::default())
 }
 #[test]
 fn external_loop_and_count_zero_branches_relocate_exactly() {
@@ -62,8 +51,7 @@ fn external_loop_and_count_zero_branches_relocate_exactly() {
 #[test]
 fn external_rel8_branches_execute_across_objects_in_both_orders() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("keel-native-rel8-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = keel_test_support::TempDir::new("native-rel8");
     for op in ["loop", "jecxz"] {
         for taken in [false, true] {
             let count: u64 = match op {
@@ -106,5 +94,4 @@ fn external_rel8_branches_execute_across_objects_in_both_orders() {
             }
         }
     }
-    std::fs::remove_dir_all(dir).unwrap();
 }
