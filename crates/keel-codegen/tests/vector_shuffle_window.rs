@@ -154,7 +154,8 @@ fn command(c: &mut Command) {
     let out = c.output().unwrap();
     assert!(out.status.success(), "{c:?}: {out:?}");
 }
-/// A test's C oracle. AArch64 configurations link one compiled oracle object.
+/// A test's C oracle. AArch64 configurations link one compiled oracle object
+/// and run on arm64 macOS.
 /// x86 configurations share one syntax check, and each one is a
 /// `native_program!` that runs on x86-64 Linux or is exported.
 struct Oracle<'a> {
@@ -193,7 +194,9 @@ impl<'a> Oracle<'a> {
         ] {
             fs::write(dir.join(format!("{stem}.{ext}")), bytes).unwrap();
         }
-        if arm {
+        if arm && !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            keel_test_support::skip_part!("requires arm64 macOS");
+        } else if arm {
             let oracle = self.arm.get_or_init(|| {
                 let object = self.dir.join("oracle.o");
                 command(
