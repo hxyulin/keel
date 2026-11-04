@@ -17,7 +17,6 @@ use std::fmt;
 mod adjacent_abs;
 mod analysis;
 mod assembly_symbols;
-mod branch_ranges;
 mod call_contracts;
 mod call_load_reuse;
 mod canonicalize;
@@ -277,11 +276,6 @@ const BUILTINS: &[BuiltinPass] = &[
         run: stack_forward::run,
     },
     BuiltinPass {
-        name: "branch-ranges",
-        description: "fold integer comparisons using ranges from dominating conditional edges",
-        run: branch_ranges::run,
-    },
-    BuiltinPass {
         name: "call-contracts",
         description: "trim direct noreturn call continuations and lower direct nounwind invokes",
         run: call_contracts::run,
@@ -360,7 +354,6 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[12],
     &BUILTINS[13],
     &BUILTINS[14],
-    &BUILTINS[15],
     &load_reuse::LoadReuse,
     &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,
@@ -371,7 +364,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,
     &inline::InlineNoninterposable,
-    &BUILTINS[16],
+    &BUILTINS[15],
     &inline::InlineCheapReserve,
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,

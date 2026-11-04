@@ -170,17 +170,11 @@ name = "keel-O-bits-repeat"
 compiler = "keel"
 flags = ["--link-intent", "executable", "-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
 
-# Conditional-edge integer facts; opt-in while measured against Full.
-[[config]]
-name = "keel-O-ranges"
-compiler = "keel"
-flags = ["--link-intent", "executable", "-p", "canonicalize,simplify-cfg,instcombine,simplify-cfg,gvn,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
-
 # Combined scalar analyses after value numbering, with CFG canonicalization first.
 [[config]]
 name = "keel-O-facts"
 compiler = "keel"
-flags = ["--link-intent", "executable", "-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
+flags = ["--link-intent", "executable", "-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
 
 # In-process object emission; opt in to preserve existing benchmark baselines.
 [[config]]

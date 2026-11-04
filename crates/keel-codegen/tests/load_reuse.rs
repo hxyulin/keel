@@ -105,17 +105,10 @@ block3:
 }";
 
 #[test]
-fn branch_and_merge_facts_emit_on_both_targets() {
+fn merge_facts_emit_on_both_targets() {
     let mut m = keel_ir::parse(MERGE_SOURCE).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    keel_opt::run_passes(&mut m, &["branch-ranges", "load-reuse"]).unwrap();
-    assert_eq!(
-        m.functions[0]
-            .layout_insts()
-            .filter(|(_, i)| matches!(m.functions[0].inst_data(*i), InstData::Icmp { .. }))
-            .count(),
-        1
-    );
+    keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
     assert_eq!(
         m.functions[1]
             .layout_insts()
@@ -187,7 +180,7 @@ int main(void) {
     for optimized in [false, true] {
         let mut m = keel_ir::parse(MERGE_SOURCE).unwrap();
         if optimized {
-            keel_opt::run_passes(&mut m, &["branch-ranges", "load-reuse"]).unwrap();
+            keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
         }
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocator in [AllocationTier::Fast, AllocationTier::Full] {

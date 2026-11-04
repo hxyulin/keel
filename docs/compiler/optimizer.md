@@ -73,7 +73,6 @@ it; use `run_pipeline` or `run_passes`.
 | `memory-forward` (opt-in) | Block-local exact-address load reuse and store-to-load forwarding |
 | `load-reuse` | Bounded cross-block load reuse |
 | `call-load-reuse` (opt-in) | Load reuse across calls with explicit scoped call contracts |
-| `branch-ranges` (opt-in) | Fold comparisons using intervals from dominating conditional edges |
 | `known-bits` | Fold masks and comparisons from known-zero and known-one bits |
 | `phi-simplify` | Replace uniform block arguments with a dominating value |
 | `sccp` (opt-in) | Sparse conditional constant propagation |
@@ -137,13 +136,6 @@ pass removes masks that the operands already establish and proves comparisons
 from the resulting bounds, including signed ordering. Values are materialized
 only when the immediate can represent them. It does not remove loads, stores or
 trapping operations. Balanced, Size and Full run it late.
-
-`branch-ranges` derives intervals from integer comparisons against literals on
-conditional edges whose target has one predecessor and differs from the other
-target. It walks the dominator tree with scoped facts, refines signed and
-unsigned domains separately, and folds later comparisons the interval decides.
-Facts do not leak into siblings, joins or loop headers, and the pass does not
-map block arguments or relate different values.
 
 ## SCCP
 

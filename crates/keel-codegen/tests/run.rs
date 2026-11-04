@@ -472,7 +472,6 @@ const OPTIMIZED_SPILL_PROGRAMS: &[&str] = &[
     "known_bits",
     "canonical_constants",
     "scalar_simplify",
-    "branch_ranges",
 ];
 
 #[test]
