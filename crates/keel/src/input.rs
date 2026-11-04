@@ -137,6 +137,8 @@ mod tests {
         let expected = keel_asm::assemble_object(".text\nret\n").unwrap();
         super::super::run(vec![
             "asm".into(),
+            "--target".into(),
+            "aarch64-apple-darwin".into(),
             path.to_str().unwrap().into(),
             "-o".into(),
             path.to_str().unwrap().into(),

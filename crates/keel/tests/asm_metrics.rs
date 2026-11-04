@@ -83,7 +83,7 @@ fn exact_x86_metrics_need_no_external_tools_and_keep_a64_schema() {
         .success()
     );
     fs::write(input, "add x0,x0,#1\n.byte 0x90\n").unwrap();
-    let old = invoke(&["asm-metrics", input]);
+    let old = invoke(&["asm-metrics", "--target", "aarch64-apple-darwin", input]);
     assert!(
         old.status.success(),
         "{}",
@@ -94,7 +94,14 @@ fn exact_x86_metrics_need_no_external_tools_and_keep_a64_schema() {
     assert_eq!(old["instruction_bytes"], 4);
     assert_eq!(old["text_bytes"], 5);
     assert!(
-        !invoke(&["asm-metrics", "--target-features", "none", input])
+        !invoke(&[
+            "asm-metrics",
+            "--target",
+            "aarch64-apple-darwin",
+            "--target-features",
+            "none",
+            input
+        ])
             .status
             .success()
     );

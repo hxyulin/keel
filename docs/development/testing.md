@@ -404,7 +404,7 @@ python3 tools/instruction_metrics.py -o encodings.json catalog
 python3 tools/instruction_metrics.py -o apple-m5.json catalog \
   --cpu apple-m5 --llvm-mca "$(command -v llvm-mca)" --llvm-mc "$(command -v llvm-mc)"
 # Exact metrics on an assembly file, including final branch and address fixups:
-target/release/keel asm-metrics input.s -o exact.json
+target/release/keel asm-metrics --target aarch64-apple-darwin input.s -o exact.json
 # Exact x86 layout, with instruction/data/padding boundaries and no CPU tools:
 target/release/keel asm-metrics --target x86_64-unknown-linux-gnu input.s -o x86.json
 python3 tools/instruction_metrics.py -o x86-analysis.json analyze input.s \

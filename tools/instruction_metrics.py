@@ -204,9 +204,7 @@ def modeled_catalog(keel, cpu, mca, llvm_mc):
 def analyze(source, keel, cpu=None, mca="llvm-mca", iterations=100, expected_word=None,
             target=None, features=None):
     source = Path(source).resolve()
-    command = [str(keel), "asm-metrics"]
-    if target:
-        command += ["--target", target]
+    command = [str(keel), "asm-metrics", "--target", target or "aarch64-apple-darwin"]
     if features is not None:
         command += ["--target-features", features]
     if target == "x86_64-unknown-linux-gnu" and cpu:

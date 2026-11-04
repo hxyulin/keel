@@ -22,7 +22,7 @@
 //! object emission in-process for AArch64 Mach-O and AArch64/x86-64 ELF.
 //! Text output goes to stdout without `-o`; `asm` requires `-o` or `--out-dir`
 //! and supports AArch64 Mach-O, AArch64 Linux ELF and x86-64 ELF objects.
-//! `--target` picks the machine for codegen,
+//! `--target` picks the machine for every subcommand,
 //! `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu` or
 //! `x86_64-unknown-linux-gnu`; the default is
 //! the one keel runs on.
@@ -62,7 +62,8 @@ const USAGE: &str = "usage:
   Wasm: --wasm-opt basic opts into the bounded profile; no native optimization/debug flags.
   keel passes
 
-  --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF).
+  Every subcommand targets the host unless --target is given.
+  --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF) and the aliases x86_64-linux-gnu and aarch64-linux-gnu.
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
@@ -70,7 +71,7 @@ const USAGE: &str = "usage:
   --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
-  opt without a level runs the -O tier; like cc, it targets the host unless --target is given.
+  opt without a level runs the -O tier.
   --opt-bisect-limit n runs only the first n pass invocations (one per function, or one per module pass);
   --opt-bisect-verbose and --print-changed trace invocations and changed functions to stderr.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
@@ -832,19 +833,128 @@ fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, Stri
     Err(format!("{}: too many symbolic links", path.display()))
 }
 
+// The flags each subcommand that uses `parse_options` accepts.
+const ASM_METRICS_FLAGS: &[&str] = &["-o", "--target", "--cpu-level", "--target-features"];
+const COMPILE_FLAGS: &[&str] = &[
+    "-o",
+    "-O",
+    "-p",
+    "-g",
+    "-funwind-tables",
+    "-fno-unwind-tables",
+    "-fasynchronous-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "--target",
+    "--code-model",
+    "--emit-object",
+    "--emit-wasm",
+    "--wasm-opt",
+    "--export",
+    "--wasm-memory-pages",
+    "--wasm-data-floor",
+    "--wasm-stack-bottom",
+    "--wasm-stack-top",
+    "--isel",
+    "--opt-report",
+    "--codegen-report",
+    "--verify-each",
+    "--no-verify-each",
+    "--opt-disable",
+    "--opt-bisect-limit",
+    "--opt-bisect-verbose",
+    "--print-changed",
+    "--opt-function",
+    "--opt-tier",
+    "--regalloc",
+    "--remat",
+    "--isel-tier",
+    "--tune",
+    "--target-features",
+    "--cpu-level",
+];
+const CC_FLAGS: &[&str] = &[
+    "-o",
+    "-O",
+    "-p",
+    "-g",
+    "-funwind-tables",
+    "-fno-unwind-tables",
+    "-fasynchronous-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "--emit-ir",
+    "-fsemantic-interposition",
+    "-fno-semantic-interposition",
+    "-fbuiltin",
+    "-fno-builtin",
+    "-fno-builtin-function",
+    "-fhosted",
+    "-ffreestanding",
+    "--link-intent",
+    "-E",
+    "-dM",
+    "-I",
+    "-D",
+    "-U",
+    "--sysroot",
+    "-isysroot",
+    "-isystem",
+    "-mmacosx-version-min",
+    "--target",
+    "--code-model",
+    "--emit-object",
+    "--emit-wasm",
+    "--wasm-opt",
+    "--export",
+    "--wasm-memory-pages",
+    "--wasm-data-floor",
+    "--wasm-stack-bottom",
+    "--wasm-stack-top",
+    "--isel",
+    "--opt-report",
+    "--codegen-report",
+    "--verify-each",
+    "--no-verify-each",
+    "--opt-disable",
+    "--opt-bisect-limit",
+    "--opt-bisect-verbose",
+    "--print-changed",
+    "--opt-function",
+    "--opt-tier",
+    "--regalloc",
+    "--remat",
+    "--isel-tier",
+    "--tune",
+    "--target-features",
+    "--cpu-level",
+];
+const OPT_FLAGS: &[&str] = &[
+    "-o",
+    "-p",
+    "--opt-tier",
+    "-O",
+    "--target",
+    "--cpu-level",
+    "--target-features",
+    "--opt-report",
+    "--verify-each",
+    "--no-verify-each",
+    "--opt-disable",
+    "--opt-bisect-limit",
+    "--opt-bisect-verbose",
+    "--print-changed",
+    "--opt-function",
+];
+
 fn run(args: Vec<String>) -> Result<(), String> {
     let Some((cmd, rest)) = args.split_first() else {
         return Err(USAGE.into());
     };
     match cmd.as_str() {
         "asm-metrics" => {
-            let opts = parse_options(
-                rest,
-                &["-o", "--target", "--cpu-level", "--target-features"],
-            )?;
+            let opts = parse_options(rest, ASM_METRICS_FLAGS)?;
             let input = opts.input.as_ref().ok_or(USAGE)?;
             let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
-            let target = opts.target.unwrap_or(Target::Aarch64AppleDarwin);
+            let target = resolve_target(opts.target)?;
             if target == Target::X86_64LinuxGnu {
                 return write_output(
                     &opts,
@@ -896,46 +1006,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "link" => link::run(rest),
         "archive" => archive::run(rest),
         "compile" => {
-            let opts = parse_options(
-                rest,
-                &[
-                    "-o",
-                    "-O",
-                    "-p",
-                    "-g",
-                    "-funwind-tables",
-                    "-fno-unwind-tables",
-                    "-fasynchronous-unwind-tables",
-                    "-fno-asynchronous-unwind-tables",
-                    "--target",
-                    "--code-model",
-                    "--emit-object",
-                    "--emit-wasm",
-                    "--wasm-opt",
-                    "--export",
-                    "--wasm-memory-pages",
-                    "--wasm-data-floor",
-                    "--wasm-stack-bottom",
-                    "--wasm-stack-top",
-                    "--isel",
-                    "--opt-report",
-                    "--codegen-report",
-                    "--verify-each",
-                    "--no-verify-each",
-                    "--opt-disable",
-                    "--opt-bisect-limit",
-                    "--opt-bisect-verbose",
-                    "--print-changed",
-                    "--opt-function",
-                    "--opt-tier",
-                    "--regalloc",
-                    "--remat",
-                    "--isel-tier",
-                    "--tune",
-                    "--target-features",
-                    "--cpu-level",
-                ],
-            )?;
+            let opts = parse_options(rest, COMPILE_FLAGS)?;
             if opts.emit_wasm {
                 return wasm::compile_ir(&opts);
             }
@@ -945,64 +1016,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "cc" => {
-            let opts = parse_options(
-                rest,
-                &[
-                    "-o",
-                    "-O",
-                    "-p",
-                    "-g",
-                    "-funwind-tables",
-                    "-fno-unwind-tables",
-                    "-fasynchronous-unwind-tables",
-                    "-fno-asynchronous-unwind-tables",
-                    "--emit-ir",
-                    "-fsemantic-interposition",
-                    "-fno-semantic-interposition",
-                    "-fbuiltin",
-                    "-fno-builtin",
-                    "-fno-builtin-function",
-                    "-fhosted",
-                    "-ffreestanding",
-                    "--link-intent",
-                    "-E",
-                    "-dM",
-                    "-I",
-                    "-D",
-                    "-U",
-                    "--sysroot",
-                    "-isysroot",
-                    "-isystem",
-                    "-mmacosx-version-min",
-                    "--target",
-                    "--code-model",
-                    "--emit-object",
-                    "--emit-wasm",
-                    "--wasm-opt",
-                    "--export",
-                    "--wasm-memory-pages",
-                    "--wasm-data-floor",
-                    "--wasm-stack-bottom",
-                    "--wasm-stack-top",
-                    "--isel",
-                    "--opt-report",
-                    "--codegen-report",
-                    "--verify-each",
-                    "--no-verify-each",
-                    "--opt-disable",
-                    "--opt-bisect-limit",
-                    "--opt-bisect-verbose",
-                    "--print-changed",
-                    "--opt-function",
-                    "--opt-tier",
-                    "--regalloc",
-                    "--remat",
-                    "--isel-tier",
-                    "--tune",
-                    "--target-features",
-                    "--cpu-level",
-                ],
-            )?;
+            let opts = parse_options(rest, CC_FLAGS)?;
             if (opts.function_binding.is_some() || opts.link_intent.is_some())
                 && (opts.emit_wasm || opts.target == Some(Target::Wasm32UnknownUnknown))
             {
@@ -1080,26 +1094,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
-            let mut opts = parse_options(
-                rest,
-                &[
-                    "-o",
-                    "-p",
-                    "--opt-tier",
-                    "-O",
-                    "--target",
-                    "--cpu-level",
-                    "--target-features",
-                    "--opt-report",
-                    "--verify-each",
-                    "--no-verify-each",
-                    "--opt-disable",
-                    "--opt-bisect-limit",
-                    "--opt-bisect-verbose",
-                    "--print-changed",
-                    "--opt-function",
-                ],
-            )?;
+            let mut opts = parse_options(rest, OPT_FLAGS)?;
             // With no level or tier, `opt` runs the tier `cc -O` runs. The
             // target, its vector context and `-p` resolve as for `cc`.
             if opts.optimization_level.is_none() && !rest.iter().any(|arg| arg == "--opt-tier") {
@@ -1391,6 +1386,8 @@ mod tests {
         let invoke = |flags: &[&str]| {
             let mut args = vec![
                 "asm".to_owned(),
+                "--target".into(),
+                "aarch64-apple-darwin".into(),
                 input.display().to_string(),
                 "-o".into(),
                 output.display().to_string(),

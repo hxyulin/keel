@@ -1,7 +1,7 @@
 //! One process can assemble several independent inputs without retaining their
 //! mappings or assembly state. Batch output names are validated before writing.
 use crate::input::Source;
-use crate::target::parse_target;
+use crate::target::{parse_target, resolve_target};
 use keel_asm::TargetFeatures;
 use keel_codegen::Target;
 use std::{
@@ -10,19 +10,19 @@ use std::{
 };
 
 #[derive(Default)]
-struct Options {
+pub(crate) struct Options {
     inputs: Vec<PathBuf>,
     output: Option<PathBuf>,
     out_dir: Option<PathBuf>,
     features: TargetFeatures,
     x86_features: keel_asm::x86::Features,
     x86_options: crate::x86_options::X86Options,
-    target: Target,
+    pub(crate) target: Target,
     x86_syntax: Option<keel_asm::x86::Syntax>,
 }
 
 impl Options {
-    fn parse(args: &[String]) -> Result<Self, String> {
+    pub(crate) fn parse(args: &[String]) -> Result<Self, String> {
         let mut opts = Self::default();
         let mut target = None;
         let mut args = args.iter();
@@ -89,12 +89,7 @@ impl Options {
                 _ => opts.inputs.push(arg.into()),
             }
         }
-        opts.target =
-            target.unwrap_or(if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-                Target::Aarch64LinuxGnu
-            } else {
-                Target::Aarch64AppleDarwin
-            });
+        opts.target = resolve_target(target)?;
         let x86 = opts.target == Target::X86_64LinuxGnu;
         opts.x86_features = opts.x86_options.resolve()?;
         if x86 && opts.features != TargetFeatures::default() {
@@ -311,8 +306,11 @@ mod tests {
         let second = ".text\n.globl _same\n_same:\nmov x0,#42\nret\n";
         std::fs::write(temp.0.join("first.s"), first).unwrap();
         std::fs::write(temp.0.join("second.s"), second).unwrap();
-        temp.invoke(&["first.s", "second.s"], &["--cpu", "apple-m5"])
-            .unwrap();
+        temp.invoke(
+            &["first.s", "second.s"],
+            &["--target", "aarch64-apple-darwin", "--cpu", "apple-m5"],
+        )
+        .unwrap();
         for (name, source) in [("first", first), ("second", second)] {
             assert_eq!(
                 std::fs::read(temp.0.join(format!("objects/{name}.o"))).unwrap(),
@@ -345,7 +343,7 @@ mod tests {
                 .is_err()
         );
         for flags in [
-            vec!["--x86-syntax", "att"],
+            vec!["--target", "aarch64-apple-darwin", "--x86-syntax", "att"],
             vec!["--target", "x86_64-linux-gnu", "--x86-syntax", "unknown"],
             vec!["--target", "x86_64-linux-gnu", "--x86-syntax"],
         ] {
@@ -477,7 +475,8 @@ mod tests {
         let mut source = b".data\n.byte 228 ; ".to_vec();
         source.extend([0xe4, b'\n']);
         std::fs::write(&input, &source).unwrap();
-        temp.invoke(&["raw.s"], &[]).unwrap();
+        temp.invoke(&["raw.s"], &["--target", "aarch64-apple-darwin"])
+            .unwrap();
         let object = std::fs::read(temp.0.join("objects/raw.o")).unwrap();
         assert_eq!(
             object,
@@ -490,7 +489,11 @@ mod tests {
         source.extend(b".ascii \"");
         source.extend([0xe4, b'"', b'\n']);
         std::fs::write(&input, &source).unwrap();
-        assert!(temp.invoke(&["raw.s"], &[]).unwrap_err().contains("UTF-8"));
+        assert!(
+            temp.invoke(&["raw.s"], &["--target", "aarch64-apple-darwin"])
+                .unwrap_err()
+                .contains("UTF-8")
+        );
         temp.invoke(&["raw.s"], &["--target", "x86_64-unknown-linux-gnu"])
             .unwrap_err();
     }

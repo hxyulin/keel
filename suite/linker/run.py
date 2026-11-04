@@ -79,7 +79,7 @@ def main():
         for name in ('kernels', 'driver'):
             src, obj = out / (name + '.s'), out / (name + '-' + mode + '.o')
             if mode == 'keel':
-                cmd = [keel, 'asm', '--cpu', 'baseline', src, '-o', obj]
+                cmd = [keel, 'asm', '--target', 'aarch64-apple-darwin', '--cpu', 'baseline', src, '-o', obj]
             elif mode == 'clang-cc1as':
                 cmd = [clang, '-cc1as', '-triple', triple, '-target-cpu', 'apple-m1', '-filetype', 'obj', src, '-o', obj]
             else:

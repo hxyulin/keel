@@ -2,7 +2,8 @@ use crate::target::{parse_target, resolve_target};
 use keel_link::archive::{Target, write};
 use std::path::PathBuf;
 
-pub fn run(args: &[String]) -> Result<(), String> {
+/// The archive target, output and member paths, validated before any I/O.
+pub(crate) fn parse(args: &[String]) -> Result<(Target, PathBuf, Vec<String>), String> {
     let mut target = None;
     let mut output = None;
     let mut members = Vec::new();
@@ -35,7 +36,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if members.is_empty() {
         return Err("archive requires at least one member object".into());
     }
-    let target = resolve_target(target)?;
+    Ok((resolve_target(target)?, output, members))
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    let (target, output, members) = parse(args)?;
     let owned = members
         .iter()
         .map(|name| {

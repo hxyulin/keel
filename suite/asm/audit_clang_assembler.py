@@ -85,7 +85,7 @@ def main():
             commands = [
                 ['clang', '-S', '-O2', '-target', 'arm64-apple-macosx11.0.0', '-mcpu=apple-m5', str(source), '-o', str(assembly)],
                 ['clang', '-c', '-target', 'arm64-apple-macosx11.0.0', '-mcpu=apple-m5', str(assembly), '-o', str(ref)],
-                [str(args.compiler), 'asm', '--cpu', 'apple-m5', str(assembly), '-o', str(actual)],
+                [str(args.compiler), 'asm', '--target', 'aarch64-apple-darwin', '--cpu', 'apple-m5', str(assembly), '-o', str(actual)],
             ]
             row = {'input': str(source), 'input_sha256': sha(source), 'commands': commands}
             rows.append(row)

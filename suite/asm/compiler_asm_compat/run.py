@@ -156,7 +156,7 @@ def generate(case, d, log):
 
 def keel_cmd(keel, case, asm, out, cpu='apple-m5'):
     if case['target'] == 'a64':
-        return [keel, 'asm', '--cpu', cpu, str(asm), '-o', str(out)]
+        return [keel, 'asm', '--target', 'aarch64-apple-darwin', '--cpu', cpu, str(asm), '-o', str(out)]
     return [keel, 'asm', '--target', X86, '--x86-syntax', case['dialect'], str(asm), '-o', str(out)]
 
 

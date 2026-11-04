@@ -1,5 +1,5 @@
 use crate::input::Source;
-use crate::target::parse_target;
+use crate::target::{parse_target, resolve_target};
 use keel_codegen::Target;
 use std::path::{Path, PathBuf};
 
@@ -76,31 +76,8 @@ fn system_selector(args: &[String]) -> Option<usize> {
     None
 }
 
-pub fn run(args: &[String]) -> Result<(), String> {
-    // Only the Keel prefix selects the route. Once selected, Clang owns the
-    // opaque argument surface (including response/config files and environment).
-    if let Some(system) = system_selector(args) {
-        let mut command = std::process::Command::new("clang");
-        for (i, arg) in args.iter().enumerate() {
-            if i == system {
-                continue;
-            }
-            command.arg(if matches!(arg.as_str(), "--sysroot" | "-syslibroot") {
-                "-isysroot"
-            } else {
-                arg
-            });
-        }
-        let status = command
-            .status()
-            .map_err(|e| format!("system linker: {e}"))?;
-        return if status.success() {
-            Ok(())
-        } else {
-            Err(format!("system linker exited with {status}"))
-        };
-    }
-
+/// The link target, defaulting to the host, and the arguments without it.
+pub(crate) fn split_target(args: &[String]) -> Result<(Target, Vec<String>), String> {
     let mut target_args = args.iter();
     while let Some(arg) = target_args.next() {
         if arg == "--" {
@@ -149,15 +126,35 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    let target = target.unwrap_or(if cfg!(target_os = "linux") {
-        if cfg!(target_arch = "aarch64") {
-            Target::Aarch64LinuxGnu
-        } else {
-            Target::X86_64LinuxGnu
+    Ok((resolve_target(target)?, native_args))
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    // Only the Keel prefix selects the route. Once selected, Clang owns the
+    // opaque argument surface (including response/config files and environment).
+    if let Some(system) = system_selector(args) {
+        let mut command = std::process::Command::new("clang");
+        for (i, arg) in args.iter().enumerate() {
+            if i == system {
+                continue;
+            }
+            command.arg(if matches!(arg.as_str(), "--sysroot" | "-syslibroot") {
+                "-isysroot"
+            } else {
+                arg
+            });
         }
-    } else {
-        Target::Aarch64AppleDarwin
-    });
+        let status = command
+            .status()
+            .map_err(|e| format!("system linker: {e}"))?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(format!("system linker exited with {status}"))
+        };
+    }
+
+    let (target, native_args) = split_target(args)?;
     if let Some(machine) = keel_link::elf::Machine::for_target(target) {
         return run_elf(&native_args, machine);
     }

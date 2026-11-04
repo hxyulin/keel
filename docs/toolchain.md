@@ -30,7 +30,9 @@ too.
 | `keel link` | `.o`, `.a`, `.so` | executable |
 | `keel asm-metrics` | `.s` | instruction metrics JSON |
 
-Run `keel` with no arguments for full usage.
+Every subcommand that takes `--target` defaults to the host target, like `cc`.
+`x86_64-linux-gnu` and `aarch64-linux-gnu` are accepted as aliases. Run `keel`
+with no arguments for full usage.
 
 ## Compiling C
 
@@ -140,8 +142,8 @@ clang hello.o -o hello          # or: keel link --system hello.o -o hello
 ## Assembler
 
 ```sh
-keel asm crates/keel-asm/examples/return42.s -o return42.o
-keel asm --cpu apple-m5 one.s two.s --out-dir build/   # batch: one.o, two.o
+keel asm --target aarch64-apple-darwin crates/keel-asm/examples/return42.s -o return42.o
+keel asm --target aarch64-apple-darwin --cpu apple-m5 one.s two.s --out-dir build/   # batch
 keel asm --target x86_64-unknown-linux-gnu input.s -o input.o
 keel asm --target x86_64-unknown-linux-gnu --x86-syntax att input.s -o input.o
 ```
@@ -211,8 +213,8 @@ let object = keel_asm::assemble_program_object(&program, keel_asm::TargetFeature
   allocation and lowering. Instrumentation is compiled out otherwise.
 - `keel asm-metrics input.s` and
   [`tools/instruction_metrics.py`](../tools/instruction_metrics.py) report
-  exact instruction sizes and layout. Add `--target x86_64-unknown-linux-gnu`
-  for x86 encoding reports without LLVM tools. Optional modeled costs remain
+  exact instruction sizes and layout for `aarch64-apple-darwin` or
+  `x86_64-unknown-linux-gnu`. The x86 report needs no LLVM tools. Optional modeled costs remain
   AArch64-only; see [instruction metrics](development/testing.md#instruction-metrics).
 
 ## Language support
