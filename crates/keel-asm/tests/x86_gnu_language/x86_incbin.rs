@@ -31,13 +31,11 @@ fn binary_inputs_match_gnu_and_are_snapshotted_across_layout_and_chunks() {
         assert_eq!(name, "payload.bin");
         Ok(payload.clone())
     };
-    let ours = x86::assemble_object_with_binary_inputs(
-        &source,
-        Syntax::Att,
-        Features::NONE,
-        &mut resolver,
-    )
-    .unwrap();
+    let ours = x86::Request::new(Features::NONE)
+        .syntax(Syntax::Att)
+        .binary_inputs(&mut resolver)
+        .assemble(&source)
+        .unwrap();
     assert_eq!(
         calls, 1,
         "repeated inputs and layout passes reuse the snapshot"
@@ -46,7 +44,9 @@ fn binary_inputs_match_gnu_and_are_snapshotted_across_layout_and_chunks() {
     let mut resolver = |_: &str| Ok(payload.clone());
     assert_eq!(
         ours,
-        x86::assemble_program_object_with_binary_inputs(&program, Features::NONE, &mut resolver)
+        x86::Request::new(Features::NONE)
+            .binary_inputs(&mut resolver)
+            .assemble_program(&program)
             .unwrap()
     );
     let mut assembler = ProgramAssembler::new(Features::NONE);
@@ -113,24 +113,20 @@ fn input_access_and_ranges_are_explicit() {
     ] {
         let mut resolver = |_: &str| Ok(vec![1, 2, 3, 4]);
         assert!(
-            x86::assemble_object_with_binary_inputs(
-                directive,
-                Syntax::Att,
-                Features::NONE,
-                &mut resolver
-            )
-            .is_err(),
+            x86::Request::new(Features::NONE)
+                .syntax(Syntax::Att)
+                .binary_inputs(&mut resolver)
+                .assemble(directive)
+                .is_err(),
             "{directive}"
         );
     }
     let mut resolver = |_: &str| Err("missing input".into());
-    let error = x86::assemble_object_with_binary_inputs(
-        ".incbin \"missing\",0,0",
-        Syntax::Att,
-        Features::NONE,
-        &mut resolver,
-    )
-    .unwrap_err()
-    .to_string();
+    let error = x86::Request::new(Features::NONE)
+        .syntax(Syntax::Att)
+        .binary_inputs(&mut resolver)
+        .assemble(".incbin \"missing\",0,0")
+        .unwrap_err()
+        .to_string();
     assert!(error.contains("missing input"), "{error}");
 }

@@ -2,7 +2,9 @@ use keel_asm::x86::{self, Features, RegionKind, RelocKind};
 use object::{Object, ObjectSection, ObjectSymbol};
 
 fn check(source: &str, features: Features) -> x86::EncodingReport {
-    let (bytes, report) = x86::assemble_object_with_metrics(source, features).unwrap();
+    let (bytes, report) = x86::Request::new(features)
+        .assemble_with_metrics(source)
+        .unwrap();
     assert_eq!(
         bytes,
         x86::assemble_object_with_features(source, features).unwrap()
@@ -79,8 +81,9 @@ fn final_metrics_preserve_objects_and_separate_jump_tables_padding_and_relocatio
             .any(|s| s.name == ".bss" && s.nobits && s.size == 32)
     );
     let program = keel_asm_ir::x86::parse_program(source).unwrap();
-    let (typed, typed_metrics) =
-        x86::assemble_program_object_with_metrics(&program, Features::default()).unwrap();
+    let (typed, typed_metrics) = x86::Request::new(Features::default())
+        .assemble_program_with_metrics(&program)
+        .unwrap();
     assert_eq!(typed, bytes);
     assert_eq!(
         typed_metrics
@@ -113,7 +116,11 @@ fn prefixes_are_taken_from_final_vex_evex_rex2_and_legacy_encodings() {
         assert_eq!(r.prefixes[0], first);
         assert_eq!(r.prefixes.len(), length);
     }
-    assert!(x86::assemble_object_with_metrics(source, Features::default()).is_err());
+    assert!(
+        x86::Request::new(Features::default())
+            .assemble_with_metrics(source)
+            .is_err()
+    );
 }
 
 #[test]
@@ -163,25 +170,21 @@ fn explicit_dialect_and_binary_resolver_preserve_bytes_and_resolve_once() {
     let source = "addl $1,%eax\n.incbin \"blob\",1,2\n.incbin \"blob\",0,1\n";
     let payload = [0x90, 0xeb, 0xfe];
     let mut reads = 0;
-    let (bytes, report) = x86::assemble_object_with_metrics_and_binary_inputs(
-        source,
-        x86::Syntax::Att,
-        Features::default(),
-        &mut |name| {
+    let (bytes, report) = x86::Request::new(Features::default())
+        .syntax(x86::Syntax::Att)
+        .binary_inputs(&mut |name| {
             assert_eq!(name, "blob");
             reads += 1;
             Ok(payload.to_vec())
-        },
-    )
-    .unwrap();
+        })
+        .assemble_with_metrics(source)
+        .unwrap();
     assert_eq!(reads, 1);
-    let ordinary = x86::assemble_object_with_binary_inputs(
-        source,
-        x86::Syntax::Att,
-        Features::default(),
-        &mut |_| Ok(payload.to_vec()),
-    )
-    .unwrap();
+    let ordinary = x86::Request::new(Features::default())
+        .syntax(x86::Syntax::Att)
+        .binary_inputs(&mut |_| Ok(payload.to_vec()))
+        .assemble(source)
+        .unwrap();
     assert_eq!(bytes, ordinary);
     assert_eq!(report.regions[0].kind, RegionKind::Instruction);
     assert_eq!(report.regions[0].bytes, [0x83, 0xc0, 1]);

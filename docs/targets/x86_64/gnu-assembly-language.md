@@ -116,11 +116,9 @@ register-symbol oracle because Clang rejects that GNU spelling.
 ## Binary inputs
 
 `.incbin "name"[, skip[, count]]` inserts binary bytes without alignment.
-Library assembly remains free of filesystem access. Call
-`x86::assemble_object_with_binary_inputs`,
-`x86::assemble_program_object_with_binary_inputs` or
-`ProgramAssembler::push_with_binary_inputs` with a resolver callback that returns
-bytes for a name. Each name is resolved once and retained across layout passes
+Library assembly remains free of filesystem access. Pass a resolver callback
+that returns bytes for a name to `x86::Request::binary_inputs` or
+`ProgramAssembler::push_with_binary_inputs`. Each name is resolved once and retained across layout passes
 and chunks. Existing assembly APIs report that an explicit resolver is needed.
 Inactive conditional blocks do not request input.
 

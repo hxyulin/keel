@@ -3,13 +3,10 @@ use keel_asm::x86::{Features, RegionKind};
 use serde_json::json;
 
 pub fn x86(source: &str, features: Features) -> Result<String, String> {
-    let (_, report) = keel_asm::x86::assemble_object_with_metrics_and_binary_inputs(
-        source,
-        keel_asm::x86::Syntax::Intel,
-        features,
-        &mut crate::input::binary_input,
-    )
-    .map_err(|e| e.to_string())?;
+    let (_, report) = keel_asm::x86::Request::new(features)
+        .binary_inputs(&mut crate::input::binary_input)
+        .assemble_with_metrics(source)
+        .map_err(|e| e.to_string())?;
     let sections: Vec<_> = report.sections.iter().enumerate().map(|(index,s)| json!({
         "index":index,"name":s.name,"size":s.size,"executable":s.executable,"nobits":s.nobits,
     })).collect();

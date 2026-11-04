@@ -102,13 +102,13 @@ do not imply a zero-distance branch. `text_bytes` sums executable section sizes,
 including their data and padding. Other byte totals count regions across all
 assembler-owned sections, including logical NOBITS sizes.
 
-Library callers use `assemble_object_with_metrics(source, features)` or
-`assemble_program_object_with_metrics(program, features)`. Both return the
-ordinary object bytes and an `EncodingReport`. Capture is opt-in; normal
+Library callers use `x86::Request::new(features)` with `assemble_with_metrics`
+or `assemble_program_with_metrics`. Both return the ordinary object bytes and
+an `EncodingReport`. Capture is opt-in; normal
 assembly retains its merged instruction runs. The default AArch64 metrics
 command keeps its existing version 1 schema.
 The CLI resolves `.incbin` paths as `keel asm` does. Library callers provide
-an explicit resolver through `assemble_object_with_metrics_and_binary_inputs`.
+an explicit resolver through `Request::binary_inputs`.
 
 ## AMX assembly
 

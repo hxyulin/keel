@@ -403,6 +403,125 @@ fn check_instruction_features(
     Ok(())
 }
 
+/// One x86-64 ELF assembly: the initial source dialect, the permitted
+/// features and `.incbin` resolution. The `assemble_*` functions are
+/// shorthands for common requests.
+pub struct Request<'r, 'a> {
+    syntax: Syntax,
+    features: Features,
+    resolver: Option<&'r mut BinaryInputResolver<'a>>,
+}
+
+impl fmt::Debug for Request<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Request")
+            .field("syntax", &self.syntax)
+            .field("features", &self.features)
+            .field("binary_inputs", &self.resolver.is_some())
+            .finish()
+    }
+}
+
+impl<'r, 'a> Request<'r, 'a> {
+    /// Intel syntax, and `.incbin` reports a missing resolver.
+    pub fn new(features: Features) -> Self {
+        Self {
+            syntax: Syntax::Intel,
+            features,
+            resolver: None,
+        }
+    }
+
+    /// The initial dialect of source text. In-source syntax directives
+    /// override it.
+    pub fn syntax(mut self, syntax: Syntax) -> Self {
+        self.syntax = syntax;
+        self
+    }
+
+    /// Resolve `.incbin` names. The resolver owns path lookup and I/O;
+    /// resolved bytes are retained before layout begins.
+    pub fn binary_inputs(mut self, resolver: &'r mut BinaryInputResolver<'a>) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+
+    fn items(
+        self,
+        metrics: bool,
+        fill: impl FnOnce(&mut Items, &mut BinaryInputResolver<'_>) -> Result<(), Error>,
+    ) -> Result<Items, Error> {
+        let mut items = Items::new(self.features);
+        items.parser = x86::SourceParser::new(self.syntax);
+        items.register_aliases = source::RegisterAliases::new(self.syntax == Syntax::Att);
+        items.metrics = metrics.then(Vec::new);
+        let mut unavailable = inputs::unavailable;
+        fill(&mut items, self.resolver.unwrap_or(&mut unavailable))?;
+        items.finish()
+    }
+
+    fn source_items(self, source: &str, metrics: bool) -> Result<Items, Error> {
+        self.items(metrics, |items, resolver| items.parse(source, 1, resolver))
+    }
+
+    fn program_items(self, program: &Program, metrics: bool) -> Result<Items, Error> {
+        self.items(metrics, |items, resolver| {
+            items.entries.reserve(program.items.len());
+            for (index, item) in program.items.iter().enumerate() {
+                match item {
+                    Item::Text(source) => items.parse(source, index + 1, resolver)?,
+                    Item::X86Source(source) => items.scoped_source(source, index + 1, resolver)?,
+                    Item::X86Instruction(i) => items.x86_instruction(i, index + 1),
+                    item => items.item(item.clone(), index + 1),
+                }
+            }
+            Ok(())
+        })
+    }
+
+    /// Assemble source as a Linux relocatable ELF64 object.
+    ///
+    /// # Errors
+    /// Returns an error for unresolved inputs, invalid ranges, or invalid assembly.
+    pub fn assemble(self, source: &str) -> Result<Vec<u8>, Error> {
+        assemble_items(self.source_items(source, false)?)
+    }
+
+    /// Consume x86 instructions and shared directives. Diagnostic positions
+    /// refer to program items; positions inside explicit text refer to its
+    /// source lines.
+    ///
+    /// # Errors
+    /// Returns an error for unresolved inputs, invalid ranges, or an invalid program.
+    pub fn assemble_program(self, program: &Program) -> Result<Vec<u8>, Error> {
+        assemble_items(self.program_items(program, false)?)
+    }
+
+    /// [`Self::assemble`], also reporting the final encoding layout.
+    ///
+    /// The returned object is byte-identical to ordinary assembly. Metrics
+    /// distinguish parsed instructions from alignment and data, including data
+    /// in executable sections. Relocation fields contain object bytes, not
+    /// linked addresses.
+    ///
+    /// # Errors
+    /// Returns the same parse, feature, layout and relocation errors as object assembly.
+    pub fn assemble_with_metrics(self, source: &str) -> Result<(Vec<u8>, EncodingReport), Error> {
+        assemble_metrics(self.source_items(source, true)?)
+    }
+
+    /// [`Self::assemble_program`], also reporting the final encoding layout.
+    ///
+    /// # Errors
+    /// Returns an error for invalid instructions, directives, features or layout.
+    pub fn assemble_program_with_metrics(
+        self,
+        program: &Program,
+    ) -> Result<(Vec<u8>, EncodingReport), Error> {
+        assemble_metrics(self.program_items(program, true)?)
+    }
+}
+
 /// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
 pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
     assemble_object_with_features(source, x86::Features::default())
@@ -411,7 +530,7 @@ pub fn assemble_object_with_features(
     source: &str,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
-    assemble_object_with_syntax_and_features(source, Syntax::Intel, features)
+    Request::new(features).assemble(source)
 }
 /// Assemble source with an explicit initial dialect. In-source syntax directives
 /// override this selection. Existing APIs retain their Intel default.
@@ -420,28 +539,9 @@ pub fn assemble_object_with_syntax_and_features(
     syntax: Syntax,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
-    assemble_object_with_binary_inputs(source, syntax, features, &mut inputs::unavailable)
+    Request::new(features).syntax(syntax).assemble(source)
 }
-
-/// Assemble with caller-supplied binary inputs for `.incbin`. The resolver owns
-/// path lookup and I/O; resolved bytes are retained before layout begins.
-///
-/// # Errors
-/// Returns an error for unresolved inputs, invalid ranges, or invalid assembly.
-pub fn assemble_object_with_binary_inputs(
-    source: &str,
-    syntax: Syntax,
-    features: x86::Features,
-    resolver: &mut BinaryInputResolver<'_>,
-) -> Result<Vec<u8>, Error> {
-    let mut items = Items::new(features);
-    items.parser = x86::SourceParser::new(syntax);
-    items.register_aliases = source::RegisterAliases::new(syntax == Syntax::Att);
-    items.parse(source, 1, resolver)?;
-    assemble_items(items.finish()?)
-}
-/// Consume x86 instructions and shared directives. Diagnostic positions refer
-/// to program items; positions inside explicit text refer to its source lines.
+/// See [`Request::assemble_program`].
 pub fn assemble_program_object(program: &Program) -> Result<Vec<u8>, Error> {
     assemble_program_object_with_features(program, x86::Features::default())
 }
@@ -449,93 +549,7 @@ pub fn assemble_program_object_with_features(
     program: &Program,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
-    assemble_program_object_with_binary_inputs(program, features, &mut inputs::unavailable)
-}
-
-/// Structured-program counterpart of [`assemble_object_with_binary_inputs`].
-///
-/// # Errors
-/// Returns an error for unresolved inputs, invalid ranges, or an invalid program.
-pub fn assemble_program_object_with_binary_inputs(
-    program: &Program,
-    features: x86::Features,
-    resolver: &mut BinaryInputResolver<'_>,
-) -> Result<Vec<u8>, Error> {
-    assemble_items(program_items(program, features, resolver, false)?)
-}
-
-fn program_items(
-    program: &Program,
-    features: Features,
-    resolver: &mut BinaryInputResolver<'_>,
-    metrics: bool,
-) -> Result<Items, Error> {
-    let mut items = Items::new(features);
-    items.metrics = metrics.then(Vec::new);
-    items.entries.reserve(program.items.len());
-    for (index, item) in program.items.iter().enumerate() {
-        match item {
-            Item::Text(source) => items.parse(source, index + 1, resolver)?,
-            Item::X86Source(source) => items.scoped_source(source, index + 1, resolver)?,
-            Item::X86Instruction(i) => items.x86_instruction(i, index + 1),
-            item => items.item(item.clone(), index + 1),
-        }
-    }
-    items.finish()
-}
-
-/// Assemble Intel-initial source and report its final x86 encoding layout.
-///
-/// The returned object is byte-identical to ordinary assembly. Metrics distinguish
-/// parsed instructions from alignment and data, including data in executable
-/// sections. Relocation fields contain object bytes, not linked addresses.
-///
-/// # Errors
-/// Returns the same parse, feature, layout and relocation errors as object assembly.
-pub fn assemble_object_with_metrics(
-    source: &str,
-    features: Features,
-) -> Result<(Vec<u8>, EncodingReport), Error> {
-    assemble_object_with_metrics_and_binary_inputs(
-        source,
-        Syntax::Intel,
-        features,
-        &mut inputs::unavailable,
-    )
-}
-
-/// Report source layout with an initial dialect and explicit `.incbin` inputs.
-///
-/// # Errors
-/// Returns an error for invalid source, features, binary inputs or object layout.
-pub fn assemble_object_with_metrics_and_binary_inputs(
-    source: &str,
-    syntax: Syntax,
-    features: Features,
-    resolver: &mut BinaryInputResolver<'_>,
-) -> Result<(Vec<u8>, EncodingReport), Error> {
-    let mut items = Items::new(features);
-    items.parser = x86::SourceParser::new(syntax);
-    items.register_aliases = source::RegisterAliases::new(syntax == Syntax::Att);
-    items.metrics = Some(Vec::new());
-    items.parse(source, 1, resolver)?;
-    assemble_metrics(items.finish()?)
-}
-
-/// Structured-program counterpart of [`assemble_object_with_metrics`].
-///
-/// # Errors
-/// Returns an error for invalid instructions, directives, features or layout.
-pub fn assemble_program_object_with_metrics(
-    program: &Program,
-    features: Features,
-) -> Result<(Vec<u8>, EncodingReport), Error> {
-    assemble_metrics(program_items(
-        program,
-        features,
-        &mut inputs::unavailable,
-        true,
-    )?)
+    Request::new(features).assemble_program(program)
 }
 
 fn assemble_metrics(mut items: Items) -> Result<(Vec<u8>, EncodingReport), Error> {

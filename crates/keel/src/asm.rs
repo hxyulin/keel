@@ -206,12 +206,10 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             Err(e) => return Err(format!("{}: {e}", input.display())),
         };
         let object = match opts.target {
-            Target::X86_64LinuxGnu => keel_asm::x86::assemble_object_with_binary_inputs(
-                &text,
-                opts.x86_syntax.unwrap_or_default(),
-                opts.x86_features,
-                &mut crate::input::binary_input,
-            ),
+            Target::X86_64LinuxGnu => keel_asm::x86::Request::new(opts.x86_features)
+                .syntax(opts.x86_syntax.unwrap_or_default())
+                .binary_inputs(&mut crate::input::binary_input)
+                .assemble(&text),
             Target::Aarch64LinuxGnu => {
                 keel_asm::assemble_elf_object_with_features(&text, opts.features)
             }
