@@ -9,10 +9,10 @@ impl FunctionCompiler<'_> {
             self.f80_push(args[0]);
         }
         self.emit(
-            Opcode::parse(if load { "fbld" } else { "fbstp" }).unwrap(),
+            if load { op::FBLD } else { op::FBSTP },
             [asm_arg(sized(memory(r64(address), 0), 80))],
         );
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         if load {
             self.f80_pop_result(Some(results[0]));

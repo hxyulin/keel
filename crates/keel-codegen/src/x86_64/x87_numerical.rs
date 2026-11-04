@@ -37,15 +37,15 @@ impl FunctionCompiler<'_> {
             return;
         }
         let (name, retains_second) = match id {
-            X86X87Fsin => ("fsin", false),
-            X86X87Fcos => ("fcos", false),
-            X86X87F2xm1 => ("f2xm1", false),
-            X86X87Fpatan => ("fpatan", false),
-            X86X87Fyl2x => ("fyl2x", false),
-            X86X87Fyl2xp1 => ("fyl2xp1", false),
-            X86X87Fscale => ("fscale", true),
-            X86X87Fprem => ("fprem", true),
-            X86X87Fprem1 => ("fprem1", true),
+            X86X87Fsin => (op::FSIN, false),
+            X86X87Fcos => (op::FCOS, false),
+            X86X87F2xm1 => (op::F2XM1, false),
+            X86X87Fpatan => (op::FPATAN, false),
+            X86X87Fyl2x => (op::FYL2X, false),
+            X86X87Fyl2xp1 => (op::FYL2XP1, false),
+            X86X87Fscale => (op::FSCALE, true),
+            X86X87Fprem => (op::FPREM, true),
+            X86X87Fprem1 => (op::FPREM1, true),
             _ => unreachable!(),
         };
         // Both reads precede all writes, including scalar outputs sharing a home.
@@ -54,10 +54,10 @@ impl FunctionCompiler<'_> {
             self.f80_push(args[1]);
         }
         self.f80_push(args[0]);
-        self.emit(Opcode::parse(name).unwrap(), []);
+        self.emit(name, []);
         // AX is reserved scratch, never an allocator-owned live register. Snapshot
         // before FSTP: its rounding/exception effects are not part of this status.
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         let (value, status) = (results[0], results[1]);
         self.f80_pop_result(Some(value));
@@ -74,19 +74,19 @@ impl FunctionCompiler<'_> {
     fn native_x87_multi(&mut self, inst: Inst, id: Intrinsic, arg: Value) {
         // Record entry TOP while tags are empty. Exceptional C2 bits need not
         // describe a push; the architectural TOP change always does.
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         self.emit(Opcode::Mov, [asm_arg(r16(S1)), asm_arg(r16(S0))]);
         self.emit(Opcode::Sub, [asm_arg(r16(S1)), asm_arg(0x1000)]);
         self.emit(Opcode::And, [asm_arg(r16(S1)), asm_arg(0x3800)]);
         self.f80_push(arg);
         let name = match id {
-            Intrinsic::X86X87Fsincos => "fsincos",
-            Intrinsic::X86X87Fptan => "fptan",
-            Intrinsic::X86X87Fxtract => "fxtract",
+            Intrinsic::X86X87Fsincos => op::FSINCOS,
+            Intrinsic::X86X87Fptan => op::FPTAN,
+            Intrinsic::X86X87Fxtract => op::FXTRACT,
             _ => unreachable!(),
         };
-        self.emit(Opcode::parse(name).unwrap(), []);
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(name, []);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         let (first, second, status) = (results[0], results[1], results[2]);
         let two = format!(".L{}_{}_x87_two", self.func.name, inst);

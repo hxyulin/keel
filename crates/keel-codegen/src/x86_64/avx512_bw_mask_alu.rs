@@ -46,8 +46,7 @@ impl FunctionCompiler<'_> {
             .x86_avx512_bw_mask_alu()
             .expect("BW mask algebra descriptor");
         let wide = d.ty == Type::I64;
-        let transfer =
-            Opcode::parse(if wide { "kmovq" } else { "kmovd" }).expect("BW mask transfer");
+        let transfer = if wide { op::KMOVQ } else { op::KMOVD };
         let gp = |n| if wide { r64(n) } else { r32(n) };
         let a = self.use_reg(args[0], S0);
         self.emit(transfer, [asm_arg(k(1)), asm_arg(gp(a))]);

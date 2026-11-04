@@ -94,15 +94,12 @@ impl FunctionCompiler<'_> {
         }
         let destination = self.def_reg(result);
         let (opcode, register) = match d.mask {
-            Type::I64 => ("kmovq", r64(destination)),
-            Type::I32 => ("kmovd", r32(destination)),
-            Type::I8 | Type::I16 => ("kmovw", r32(destination)),
+            Type::I64 => (op::KMOVQ, r64(destination)),
+            Type::I32 => (op::KMOVD, r32(destination)),
+            Type::I8 | Type::I16 => (op::KMOVW, r32(destination)),
             _ => unreachable!("BW lane mask type"),
         };
-        self.emit(
-            Opcode::parse(opcode).expect("BW mask result move"),
-            [asm_arg(register), asm_arg(predicate)],
-        );
+        self.emit(opcode, [asm_arg(register), asm_arg(predicate)]);
         self.def_done(result, destination);
     }
 }

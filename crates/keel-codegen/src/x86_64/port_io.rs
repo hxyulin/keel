@@ -21,9 +21,9 @@ impl FunctionCompiler<'_> {
             if r != S0 {
                 self.emit(Opcode::Mov, [asm_arg(r64(S0)), asm_arg(r64(r))]);
             }
-            self.emit(Opcode::parse("out").expect("baseline OUT"), [port, acc]);
+            self.emit(op::OUT, [port, acc]);
         } else {
-            self.emit(Opcode::parse("in").expect("baseline IN"), [acc, port]);
+            self.emit(op::IN, [acc, port]);
             if width < 32 {
                 self.emit(
                     Opcode::Movzx,

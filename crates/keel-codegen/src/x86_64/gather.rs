@@ -110,12 +110,11 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Mov, [asm_arg(r64(S2)), asm_arg(r64(RDI))]);
         self.emit(Opcode::Mov, [asm_arg(r64(RDI)), asm_arg(r64(S0))]);
         self.emit(
-            Opcode::parse(if id == Intrinsic::X86SseMaskmovdqu {
-                "maskmovdqu"
+            if id == Intrinsic::X86SseMaskmovdqu {
+                Opcode::Maskmovdqu
             } else {
-                "vmaskmovdqu"
-            })
-            .unwrap(),
+                op::VMASKMOVDQU
+            },
             [asm_arg(xmm(FS1)), asm_arg(xmm(FS2))],
         );
         self.emit(Opcode::Sfence, []);

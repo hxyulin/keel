@@ -16,12 +16,11 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Mov, [asm_arg(r64(S2)), asm_arg(r64(S0))]);
         self.emit(Opcode::Shr, [asm_arg(r64(S2)), asm_arg(32)]);
         self.emit(
-            Opcode::parse(if id == Intrinsic::X86Xsave64 {
-                "xsave64"
+            if id == Intrinsic::X86Xsave64 {
+                op::XSAVE64
             } else {
-                "xrstor64"
-            })
-            .unwrap(),
+                op::XRSTOR64
+            },
             [asm_arg(memory(r64(S1), 0))],
         );
     }

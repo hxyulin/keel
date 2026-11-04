@@ -2,9 +2,6 @@
 //! between IR instructions. See docs/targets/x86_64/f80/README.md for the FP environment contract.
 use super::*;
 
-fn op(name: &str) -> Opcode {
-    Opcode::parse(name).expect("inventoried x87 operation")
-}
 fn st(n: u8) -> Register {
     Register {
         class: RegisterClass::X87,
@@ -313,13 +310,13 @@ impl FunctionCompiler<'_> {
                 self.f80_push(args[0]);
                 self.f80_push(args[1]);
                 let name = match operation {
-                    BinaryOp::Fadd => "faddp",
-                    BinaryOp::Fsub => "fsubp",
-                    BinaryOp::Fmul => "fmulp",
-                    BinaryOp::Fdiv => "fdivp",
+                    BinaryOp::Fadd => op::FADDP,
+                    BinaryOp::Fsub => Opcode::Fsubp,
+                    BinaryOp::Fmul => Opcode::Fmulp,
+                    BinaryOp::Fdiv => op::FDIVP,
                     _ => unreachable!("validated F80 binary"),
                 };
-                self.emit(op(name), [asm_arg(st(1)), asm_arg(st(0))]);
+                self.emit(name, [asm_arg(st(1)), asm_arg(st(0))]);
                 self.f80_pop_result(result);
             }
             InstData::Unary {
@@ -360,19 +357,19 @@ impl FunctionCompiler<'_> {
                     _ => unreachable!(),
                 };
                 let saved = self.f80_rounding(mode);
-                self.emit(op("frndint"), []);
+                self.emit(op::FRNDINT, []);
                 self.emit(Opcode::Fldcw, [asm_arg(saved)]);
                 self.f80_pop_result(result);
             }
             InstData::Unary { op: operation, arg } if self.ty(arg) == Type::F80 => {
                 self.f80_push(arg);
                 self.emit(
-                    op(match operation {
-                        UnaryOp::Fneg => "fchs",
-                        UnaryOp::Fabs => "fabs",
-                        UnaryOp::Fsqrt => "fsqrt",
+                    match operation {
+                        UnaryOp::Fneg => op::FCHS,
+                        UnaryOp::Fabs => op::FABS,
+                        UnaryOp::Fsqrt => op::FSQRT,
                         _ => unreachable!("validated F80 unary"),
-                    }),
+                    },
                     [],
                 );
                 self.f80_pop_result(result);
@@ -826,7 +823,7 @@ impl FunctionCompiler<'_> {
         self.out.label(nan);
         self.f80_push(args[0]);
         self.f80_push(args[1]);
-        self.emit(op("faddp"), [asm_arg(st(1)), asm_arg(st(0))]);
+        self.emit(op::FADDP, [asm_arg(st(1)), asm_arg(st(0))]);
         self.f80_pop_result(result);
         self.out.label(done);
     }

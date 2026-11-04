@@ -53,10 +53,7 @@ impl FunctionCompiler<'_> {
             );
         } else {
             let opcode = if id == Intrinsic::X86Vpclmulqdq512 {
-                Opcode::Evex(
-                    keel_asm_ir::x86::evex::EvexOpcode::parse("vpclmulqdq")
-                        .expect("registered EVEX VPCLMULQDQ"),
-                )
+                Opcode::Evex(EvexOpcode::new(EvexMnemonic::Vpclmulqdq))
             } else {
                 Opcode::Extension(keel_asm_ir::x86::ExtensionOpcode::Vpclmulqdq)
             };

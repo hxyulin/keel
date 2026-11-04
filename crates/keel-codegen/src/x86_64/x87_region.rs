@@ -11,14 +11,8 @@ impl FunctionCompiler<'_> {
     }
     fn region_snapshot(&mut self, phase: i32, sw: i128, image: i128) {
         self.region_phase(phase);
-        self.emit(
-            Opcode::parse("fnstsw").unwrap(),
-            [asm_arg(sized(memory(r64(S2), sw), 16))],
-        );
-        self.emit(
-            Opcode::parse("fxsave64").unwrap(),
-            [asm_arg(memory(r64(S2), image))],
-        );
+        self.emit(op::FNSTSW, [asm_arg(sized(memory(r64(S2), sw), 16))]);
+        self.emit(Opcode::Fxsave64, [asm_arg(memory(r64(S2), image))]);
     }
     fn region_address(&mut self, offset: i128) {
         self.emit(
@@ -31,7 +25,7 @@ impl FunctionCompiler<'_> {
     }
     fn region_wait(&mut self, phase: i32) {
         self.region_phase(phase);
-        self.emit(Opcode::parse("fwait").unwrap(), []);
+        self.emit(op::FWAIT, []);
     }
     pub(super) fn native_x87_region(&mut self, inst: Inst, args: &[Value]) {
         let control = iconst(self.func, args[1]).unwrap();
@@ -47,14 +41,8 @@ impl FunctionCompiler<'_> {
             Opcode::Mov,
             [asm_arg(sized(memory(r64(S2), 4), 32)), asm_arg(0)],
         );
-        self.emit(
-            Opcode::parse("fnstcw").unwrap(),
-            [asm_arg(sized(memory(r64(S2), 8), 16))],
-        );
-        self.emit(
-            Opcode::parse("fnstsw").unwrap(),
-            [asm_arg(sized(memory(r64(S2), 10), 16))],
-        );
+        self.emit(Opcode::Fnstcw, [asm_arg(sized(memory(r64(S2), 8), 16))]);
+        self.emit(op::FNSTSW, [asm_arg(sized(memory(r64(S2), 10), 16))]);
         for index in (0..op.loads).rev() {
             self.region_phase(if index == 1 { 10 } else { 11 });
             self.region_address(i128::from(index) * 8);
@@ -90,7 +78,7 @@ impl FunctionCompiler<'_> {
             }
         }
         if op.operand == Kind::Flags {
-            self.emit(Opcode::parse("pushfq").unwrap(), []);
+            self.emit(op::PUSHFQ, []);
             self.emit(Opcode::Pop, [asm_arg(r64(S0))]);
             self.emit(Opcode::And, [asm_arg(r32(S0)), asm_arg(0x45)]);
             self.emit(
@@ -101,7 +89,7 @@ impl FunctionCompiler<'_> {
         self.region_snapshot(21, 14, 576);
         self.region_wait(22);
         if op.operand == Kind::St10 {
-            self.emit(Opcode::parse("fxch").unwrap(), [asm_arg(st(1))]);
+            self.emit(Opcode::Fxch, [asm_arg(st(1))]);
         }
         for index in 0..op.results {
             let skip = format!(".L{}_{}_region_no_second", self.func.name, inst);
@@ -142,7 +130,7 @@ impl FunctionCompiler<'_> {
         // Normal completion explicitly resets exceptions/tags, then restores
         // entry CW and empty entry TOP. Terminal faults never reach this stage.
         self.region_phase(50);
-        self.emit(Opcode::parse("fninit").unwrap(), []);
+        self.emit(op::FNINIT, []);
         self.emit(Opcode::Fldcw, [asm_arg(sized(memory(r64(S2), 8), 16))]);
         self.emit(
             Opcode::Movzx,
@@ -156,7 +144,7 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Jcc(4), [asm_arg(&done)]);
         self.region_phase(51);
         self.out.label(loop_label.clone());
-        self.emit(Opcode::parse("fincstp").unwrap(), []);
+        self.emit(op::FINCSTP, []);
         self.emit(Opcode::Sub, [asm_arg(r32(S0)), asm_arg(1)]);
         self.emit(Opcode::Jcc(5), [asm_arg(&loop_label)]);
         self.out.label(done);

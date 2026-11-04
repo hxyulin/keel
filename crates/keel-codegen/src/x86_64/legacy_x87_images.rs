@@ -14,11 +14,11 @@ impl FunctionCompiler<'_> {
         // ensures every consumer applies the override to the memory instruction.
         let op = match op {
             "fstenv" => {
-                self.emit(Opcode::parse("fwait").unwrap(), []);
+                self.emit(op::FWAIT, []);
                 "fnstenv"
             }
             "fsave" => {
-                self.emit(Opcode::parse("fwait").unwrap(), []);
+                self.emit(op::FWAIT, []);
                 "fnsave"
             }
             other => other,

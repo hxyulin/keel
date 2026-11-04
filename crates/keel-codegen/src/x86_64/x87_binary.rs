@@ -5,24 +5,24 @@ impl FunctionCompiler<'_> {
     pub(super) fn native_x87_binary(&mut self, inst: Inst, id: Intrinsic, args: &[Value]) {
         use Intrinsic::*;
         let (name, second, pop) = match id {
-            X86X87FaddSt1 => ("fadd", true, false),
-            X86X87Fadd => ("fadd", false, false),
-            X86X87FmulSt1 => ("fmul", true, false),
-            X86X87Fmul => ("fmul", false, false),
-            X86X87FsubSt1 => ("fsub", true, false),
-            X86X87Fsub => ("fsub", false, false),
-            X86X87FsubrSt1 => ("fsubr", true, false),
-            X86X87Fsubr => ("fsubr", false, false),
-            X86X87FdivSt1 => ("fdiv", true, false),
-            X86X87Fdiv => ("fdiv", false, false),
-            X86X87FdivrSt1 => ("fdivr", true, false),
-            X86X87Fdivr => ("fdivr", false, false),
-            X86X87Faddp => ("faddp", true, true),
-            X86X87Fmulp => ("fmulp", true, true),
-            X86X87Fsubp => ("fsubp", true, true),
-            X86X87Fsubrp => ("fsubrp", true, true),
-            X86X87Fdivp => ("fdivp", true, true),
-            X86X87Fdivrp => ("fdivrp", true, true),
+            X86X87FaddSt1 => (Opcode::Fadd, true, false),
+            X86X87Fadd => (Opcode::Fadd, false, false),
+            X86X87FmulSt1 => (Opcode::Fmul, true, false),
+            X86X87Fmul => (Opcode::Fmul, false, false),
+            X86X87FsubSt1 => (op::FSUB, true, false),
+            X86X87Fsub => (op::FSUB, false, false),
+            X86X87FsubrSt1 => (op::FSUBR, true, false),
+            X86X87Fsubr => (op::FSUBR, false, false),
+            X86X87FdivSt1 => (op::FDIV, true, false),
+            X86X87Fdiv => (op::FDIV, false, false),
+            X86X87FdivrSt1 => (op::FDIVR, true, false),
+            X86X87Fdivr => (op::FDIVR, false, false),
+            X86X87Faddp => (op::FADDP, true, true),
+            X86X87Fmulp => (Opcode::Fmulp, true, true),
+            X86X87Fsubp => (Opcode::Fsubp, true, true),
+            X86X87Fsubrp => (Opcode::Fsubrp, true, true),
+            X86X87Fdivp => (op::FDIVP, true, true),
+            X86X87Fdivrp => (op::FDIVRP, true, true),
             _ => unreachable!(),
         };
         self.f80_push(args[1]);
@@ -36,13 +36,13 @@ impl FunctionCompiler<'_> {
         // Explicit operands select D8, DC or DE, independently of algebra. Do not
         // swap source loads to mimic algebraic equivalence: NaNs and SW matter.
         self.emit(
-            Opcode::parse(name).unwrap(),
+            name,
             [
                 asm_arg(st(if second { 1 } else { 0 })),
                 asm_arg(st(if second { 0 } else { 1 })),
             ],
         );
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         if second && !pop {
             // DC leaves the original ST(0) above its destination. Discard it

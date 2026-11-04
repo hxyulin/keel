@@ -81,10 +81,7 @@ impl FunctionCompiler<'_> {
     pub(super) fn avx512_stage_mask(&mut self, value: Value) {
         let source = self.use_reg(value, S0);
         // KMOVW belongs to AVX512F and covers every mask in this family.
-        self.emit(
-            Opcode::parse("kmovw").expect("AVX512F mask move"),
-            [asm_arg(k1()), asm_arg(r32(source))],
-        );
+        self.emit(op::KMOVW, [asm_arg(k1()), asm_arg(r32(source))]);
     }
     pub(super) fn native_avx512_mask(
         &mut self,
@@ -135,10 +132,7 @@ impl FunctionCompiler<'_> {
                 ],
             );
             let destination = self.def_reg(result);
-            self.emit(
-                Opcode::parse("kmovw").expect("AVX512F mask move"),
-                [asm_arg(r32(destination)), asm_arg(k1())],
-            );
+            self.emit(op::KMOVW, [asm_arg(r32(destination)), asm_arg(k1())]);
             self.def_done(result, destination);
             return;
         }

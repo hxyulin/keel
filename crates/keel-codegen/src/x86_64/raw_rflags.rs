@@ -9,7 +9,7 @@ impl FunctionCompiler<'_> {
         // transient eight-byte push, including the PC between PUSHFQ and POP.
         // No allocatable GPR, IR stack slot, or outgoing argument is overwritten.
         debug_assert!(!self.frameless);
-        self.emit(Opcode::parse("pushfq").unwrap(), []);
+        self.emit(op::PUSHFQ, []);
         self.emit(Opcode::Pop, [asm_arg(r64(S0))]);
         let d = self.def_reg(result);
         self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S0))]);

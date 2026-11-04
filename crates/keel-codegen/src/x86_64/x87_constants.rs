@@ -3,15 +3,15 @@ use super::*;
 impl FunctionCompiler<'_> {
     pub(super) fn native_x87_constant(&mut self, inst: Inst, id: Intrinsic) {
         let name = match id {
-            Intrinsic::X86X87Fldpi => "fldpi",
-            Intrinsic::X86X87Fldl2e => "fldl2e",
-            Intrinsic::X86X87Fldl2t => "fldl2t",
-            Intrinsic::X86X87Fldlg2 => "fldlg2",
-            Intrinsic::X86X87Fldln2 => "fldln2",
+            Intrinsic::X86X87Fldpi => op::FLDPI,
+            Intrinsic::X86X87Fldl2e => op::FLDL2E,
+            Intrinsic::X86X87Fldl2t => op::FLDL2T,
+            Intrinsic::X86X87Fldlg2 => op::FLDLG2,
+            Intrinsic::X86X87Fldln2 => op::FLDLN2,
             _ => unreachable!(),
         };
-        self.emit(Opcode::parse(name).unwrap(), []);
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(name, []);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         self.f80_pop_result(Some(results[0]));
         let d = self.def_reg(Some(results[1]));

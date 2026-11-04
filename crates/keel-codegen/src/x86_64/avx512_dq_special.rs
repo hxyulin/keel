@@ -60,10 +60,7 @@ impl FunctionCompiler<'_> {
                 ],
             );
             let dest = self.def_reg(result);
-            self.emit(
-                Opcode::parse("kmovw").expect("mask transfer"),
-                [asm_arg(r32(dest)), asm_arg(avx512_mask::k1())],
-            );
+            self.emit(op::KMOVW, [asm_arg(r32(dest)), asm_arg(avx512_mask::k1())]);
             self.def_done(result, dest);
             return;
         }

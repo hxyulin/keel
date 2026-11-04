@@ -15,13 +15,10 @@ impl FunctionCompiler<'_> {
             }
         }
         if id == Intrinsic::X86Ssse3Pshufb128 {
-            self.emit(
-                Opcode::parse("pshufb").unwrap(),
-                [asm_arg(simd(FS0, ty)), asm_arg(simd(FS1, ty))],
-            );
+            self.emit(op::PSHUFB, [asm_arg(simd(FS0, ty)), asm_arg(simd(FS1, ty))]);
         } else {
             self.emit(
-                Opcode::parse("vpshufb").unwrap(),
+                op::VPSHUFB,
                 [
                     asm_arg(simd(FS0, ty)),
                     asm_arg(simd(FS0, ty)),

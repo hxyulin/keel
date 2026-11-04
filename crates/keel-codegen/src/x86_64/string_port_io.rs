@@ -57,14 +57,14 @@ impl Recipe<'_> {
         });
     }
     fn snapshot(&mut self, home: AsmOperand) {
-        self.ins(Opcode::parse("pushfq").unwrap(), []);
+        self.ins(op::PUSHFQ, []);
         self.ins(Opcode::Pop, [asm_arg(r64(S0))]);
         self.ins(Opcode::Mov, [home, asm_arg(r64(S0))]);
     }
     fn apply(&mut self, home: AsmOperand) {
         self.ins(Opcode::Mov, [asm_arg(r64(S0)), home]);
         self.ins(Opcode::Push, [asm_arg(r64(S0))]);
-        self.ins(Opcode::parse("popfq").unwrap(), []);
+        self.ins(op::POPFQ, []);
     }
 }
 fn lower(id: Intrinsic, s: &Storage, prefix: &str) -> Program {
@@ -149,8 +149,8 @@ fn validate(id: Intrinsic, s: &Storage, prefix: &str, p: &Program) -> Result<(),
     };
     let index = asm_arg(r64(if output { 6 } else { 7 }));
     let a = asm_arg(r64(S0));
-    let pushfq = Opcode::parse("pushfq").unwrap();
-    let popfq = Opcode::parse("popfq").unwrap();
+    let pushfq = op::PUSHFQ;
+    let popfq = op::POPFQ;
     expect(Opcode::Mov, vec![s.at(INDEX_SAVE), index.clone()])?;
     if owned {
         expect(pushfq, vec![])?;
@@ -324,7 +324,7 @@ mod proof_tests {
                 m.items.insert(
                     n,
                     Item::X86Instruction(Instruction {
-                        opcode: Opcode::parse("cld").unwrap(),
+                        opcode: op::CLD,
                         operands: vec![],
                         lock: false,
                     }),

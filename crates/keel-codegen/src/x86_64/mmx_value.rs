@@ -28,7 +28,11 @@ impl FunctionCompiler<'_> {
             // MOVQ from GPR zeroes high64: extra CVTDQ2PS lanes are exact zero.
             self.emit(Opcode::Movq, [asm_arg(xmm(FS0)), asm_arg(r64(r))]);
             self.emit(
-                Opcode::parse(if to_ps { "cvtdq2ps" } else { "cvtdq2pd" }).unwrap(),
+                if to_ps {
+                    Opcode::Cvtdq2ps
+                } else {
+                    Opcode::Cvtdq2pd
+                },
                 [asm_arg(xmm(FS0)), asm_arg(xmm(FS0))],
             );
             if to_ps {
@@ -52,16 +56,13 @@ impl FunctionCompiler<'_> {
                 [asm_arg(xmm(FS0)), asm_arg(xmm(r))],
             );
             let op = match id {
-                X86SseMmxvalueCvtps2pi => "cvtps2dq",
-                X86SseMmxvalueCvttps2pi => "cvttps2dq",
-                X86SseMmxvalueCvtpd2pi => "cvtpd2dq",
-                X86SseMmxvalueCvttpd2pi => "cvttpd2dq",
+                X86SseMmxvalueCvtps2pi => Opcode::Cvtps2dq,
+                X86SseMmxvalueCvttps2pi => Opcode::Cvttps2dq,
+                X86SseMmxvalueCvtpd2pi => Opcode::Cvtpd2dq,
+                X86SseMmxvalueCvttpd2pi => Opcode::Cvttpd2dq,
                 _ => unreachable!("verified MMX-value conversion"),
             };
-            self.emit(
-                Opcode::parse(op).unwrap(),
-                [asm_arg(xmm(FS0)), asm_arg(xmm(FS0))],
-            );
+            self.emit(op, [asm_arg(xmm(FS0)), asm_arg(xmm(FS0))]);
             let d = self.def_reg(result);
             self.emit(Opcode::Movq, [asm_arg(r64(d)), asm_arg(xmm(FS0))]);
             self.def_done(result, d);

@@ -44,44 +44,29 @@ impl FunctionCompiler<'_> {
     ) {
         use Intrinsic::*;
         let a = self.use_reg(args[0], S0);
-        self.emit(
-            Opcode::parse("kmovw").expect("AVX512F mask transfer"),
-            [asm_arg(mask(1)), asm_arg(r32(a))],
-        );
+        self.emit(op::KMOVW, [asm_arg(mask(1)), asm_arg(r32(a))]);
         if args.len() == 2 && !id.has_x86_avx512_mask_shift_control() {
             let b = self.use_reg(args[1], S1);
-            self.emit(
-                Opcode::parse("kmovw").expect("AVX512F mask transfer"),
-                [asm_arg(mask(2)), asm_arg(r32(b))],
-            );
+            self.emit(op::KMOVW, [asm_arg(mask(2)), asm_arg(r32(b))]);
         }
         if matches!(id, X86Avx512Ktestw | X86Avx512Kortestw) {
             if id == X86Avx512Ktestw {
                 // KTESTW itself requires AVX512DQ. Its two zero predicates can
                 // instead use foundation word algebra and KORTESTW under F.
                 self.emit(
-                    Opcode::parse("kandw").expect("word AND"),
+                    op::KANDW,
                     [asm_arg(mask(3)), asm_arg(mask(1)), asm_arg(mask(2))],
                 );
-                self.emit(
-                    Opcode::parse("kortestw").expect("word OR test"),
-                    [asm_arg(mask(3)), asm_arg(mask(3))],
-                );
+                self.emit(op::KORTESTW, [asm_arg(mask(3)), asm_arg(mask(3))]);
                 self.emit(Opcode::Setcc(4), [asm_arg(r8(S0))]);
                 self.emit(
-                    Opcode::parse("kandnw").expect("word AND NOT"),
+                    op::KANDNW,
                     [asm_arg(mask(3)), asm_arg(mask(1)), asm_arg(mask(2))],
                 );
-                self.emit(
-                    Opcode::parse("kortestw").expect("word OR test"),
-                    [asm_arg(mask(3)), asm_arg(mask(3))],
-                );
+                self.emit(op::KORTESTW, [asm_arg(mask(3)), asm_arg(mask(3))]);
                 self.emit(Opcode::Setcc(4), [asm_arg(r8(S1))]);
             } else {
-                self.emit(
-                    Opcode::parse("kortestw").expect("word OR test"),
-                    [asm_arg(mask(1)), asm_arg(mask(2))],
-                );
+                self.emit(op::KORTESTW, [asm_arg(mask(1)), asm_arg(mask(2))]);
                 // Capture both bits before integer instructions modify FLAGS.
                 self.emit(Opcode::Setcc(4), [asm_arg(r8(S0))]);
                 self.emit(Opcode::Setcc(2), [asm_arg(r8(S1))]);
@@ -97,19 +82,18 @@ impl FunctionCompiler<'_> {
             self.def_done(result, destination);
             return;
         }
-        let name = match id {
-            X86Avx512Kandw => "kandw",
-            X86Avx512Kandnw => "kandnw",
-            X86Avx512Korw => "korw",
-            X86Avx512Kxorw => "kxorw",
-            X86Avx512Kxnorw => "kxnorw",
-            X86Avx512Knotw => "knotw",
-            X86Avx512Kshiftlw => "kshiftlw",
-            X86Avx512Kshiftrw => "kshiftrw",
-            X86Avx512Kunpckbw => "kunpckbw",
+        let opcode = match id {
+            X86Avx512Kandw => op::KANDW,
+            X86Avx512Kandnw => op::KANDNW,
+            X86Avx512Korw => op::KORW,
+            X86Avx512Kxorw => op::KXORW,
+            X86Avx512Kxnorw => op::KXNORW,
+            X86Avx512Knotw => op::KNOTW,
+            X86Avx512Kshiftlw => op::KSHIFTLW,
+            X86Avx512Kshiftrw => op::KSHIFTRW,
+            X86Avx512Kunpckbw => op::KUNPCKBW,
             _ => unreachable!("word mask operation"),
         };
-        let opcode = Opcode::parse(name).expect("foundation word mask opcode");
         if id.has_x86_avx512_mask_shift_control() {
             self.emit(
                 opcode,
@@ -128,10 +112,7 @@ impl FunctionCompiler<'_> {
             );
         }
         let destination = self.def_reg(result);
-        self.emit(
-            Opcode::parse("kmovw").expect("AVX512F mask transfer"),
-            [asm_arg(r32(destination)), asm_arg(mask(3))],
-        );
+        self.emit(op::KMOVW, [asm_arg(r32(destination)), asm_arg(mask(3))]);
         self.def_done(result, destination);
     }
 }

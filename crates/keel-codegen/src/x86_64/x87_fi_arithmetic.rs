@@ -5,18 +5,18 @@ impl FunctionCompiler<'_> {
     pub(super) fn native_x87_fi_arithmetic(&mut self, inst: Inst, id: Intrinsic, args: &[Value]) {
         use Intrinsic::*;
         let (name, width) = match id {
-            X86X87Fiadd16 => ("fiadd", 16),
-            X86X87Fiadd32 => ("fiadd", 32),
-            X86X87Fimul16 => ("fimul", 16),
-            X86X87Fimul32 => ("fimul", 32),
-            X86X87Fisub16 => ("fisub", 16),
-            X86X87Fisub32 => ("fisub", 32),
-            X86X87Fisubr16 => ("fisubr", 16),
-            X86X87Fisubr32 => ("fisubr", 32),
-            X86X87Fidiv16 => ("fidiv", 16),
-            X86X87Fidiv32 => ("fidiv", 32),
-            X86X87Fidivr16 => ("fidivr", 16),
-            X86X87Fidivr32 => ("fidivr", 32),
+            X86X87Fiadd16 => (op::FIADD, 16),
+            X86X87Fiadd32 => (op::FIADD, 32),
+            X86X87Fimul16 => (op::FIMUL, 16),
+            X86X87Fimul32 => (op::FIMUL, 32),
+            X86X87Fisub16 => (op::FISUB, 16),
+            X86X87Fisub32 => (op::FISUB, 32),
+            X86X87Fisubr16 => (op::FISUBR, 16),
+            X86X87Fisubr32 => (op::FISUBR, 32),
+            X86X87Fidiv16 => (op::FIDIV, 16),
+            X86X87Fidiv32 => (op::FIDIV, 32),
+            X86X87Fidivr16 => (op::FIDIVR, 16),
+            X86X87Fidivr32 => (op::FIDIVR, 32),
             _ => unreachable!(),
         };
         let temporary = sized(
@@ -39,8 +39,8 @@ impl FunctionCompiler<'_> {
         self.f80_push(args[0]);
         // The exact FI instruction preserves operand order, precision, rounding
         // and exceptions; FILD plus an algebraic recipe is not this contract.
-        self.emit(Opcode::parse(name).unwrap(), [asm_arg(temporary)]);
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(name, [asm_arg(temporary)]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         self.f80_pop_result(Some(results[0]));
         let d = self.def_reg(Some(results[1]));

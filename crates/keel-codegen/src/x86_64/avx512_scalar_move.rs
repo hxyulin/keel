@@ -48,8 +48,11 @@ impl FunctionCompiler<'_> {
             info.params[0]
         };
         let double = container == Type::Vector(keel_ir::VectorType::F64x2);
-        let mut opcode = EvexOpcode::parse(if double { "vmovsd" } else { "vmovss" })
-            .expect("scalar EVEX move opcode");
+        let mut opcode = if double {
+            EvexOpcode::new(EvexMnemonic::Vmovsd)
+        } else {
+            EvexOpcode::new(EvexMnemonic::Vmovss)
+        };
         opcode.options.mask = Some(1);
         if memory_form {
             self.scalar_move_stage(args[1], FS0);

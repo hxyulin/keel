@@ -17,10 +17,7 @@ impl FunctionCompiler<'_> {
         // Desired high may itself be allocated in RBX: consume it first.
         self.emit(Opcode::Mov, [asm_arg(r64(S1)), desired_hi]);
         self.emit(Opcode::Mov, [asm_arg(r64(3)), desired_lo]);
-        self.emit_locked(
-            Opcode::parse("cmpxchg16b").unwrap(),
-            [asm_arg(sized(memory(r64(S3), 0), 128))],
-        );
+        self.emit_locked(op::CMPXCHG16B, [asm_arg(sized(memory(r64(S3), 0), 128))]);
         self.emit(Opcode::Mov, [asm_arg(r64(3)), asm_arg(save)]);
         self.pair_out(result);
     }

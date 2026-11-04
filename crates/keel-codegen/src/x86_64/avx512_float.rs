@@ -35,9 +35,6 @@ pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86:
         _ => false,
     }
 }
-fn opcode(name: &str) -> Opcode {
-    Opcode::parse(name).expect("AVX512F floating opcode")
-}
 fn k1() -> Register {
     Register {
         class: RegisterClass::Mask,
@@ -47,9 +44,11 @@ fn k1() -> Register {
     }
 }
 fn masked_move(double: bool) -> Opcode {
-    let mut op =
-        keel_asm_ir::x86::evex::EvexOpcode::parse(if double { "vmovdqu64" } else { "vmovdqu32" })
-            .expect("AVX512F masked move");
+    let mut op = EvexOpcode::new(if double {
+        EvexMnemonic::Vmovdqu64
+    } else {
+        EvexMnemonic::Vmovdqu32
+    });
     op.options.mask = Some(1);
     Opcode::Evex(op)
 }
@@ -66,11 +65,9 @@ impl FunctionCompiler<'_> {
             );
         }
     }
-    fn float512_compare(&mut self, name: &str, a: u8, b: u8, predicate: i32) {
+    fn float512_compare(&mut self, mnemonic: EvexMnemonic, a: u8, b: u8, predicate: i32) {
         self.emit(
-            Opcode::Evex(
-                keel_asm_ir::x86::evex::EvexOpcode::parse(name).expect("AVX512F comparison"),
-            ),
+            Opcode::Evex(EvexOpcode::new(mnemonic)),
             [
                 asm_arg(k1()),
                 asm_arg(simd_width(a, 512)),
@@ -97,17 +94,17 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Movabs, [asm_arg(r64(S0)), asm_arg(bits)]);
         self.emit(Opcode::Movq, [asm_arg(xmm(FS2)), asm_arg(r64(S0))]);
         self.emit(
-            opcode(if double {
-                "vpbroadcastq"
+            if double {
+                op::VPBROADCASTQ
             } else {
-                "vpbroadcastd"
-            }),
+                op::VPBROADCASTD
+            },
             [asm_arg(simd_width(FS2, 512)), asm_arg(xmm(FS2))],
         );
     }
-    fn float512_bits(&mut self, name: &str, d: u8, a: u8, b: u8) {
+    fn float512_bits(&mut self, opcode: Opcode, d: u8, a: u8, b: u8) {
         self.emit(
-            opcode(name),
+            opcode,
             [
                 asm_arg(simd_width(d, 512)),
                 asm_arg(simd_width(a, 512)),
@@ -122,8 +119,17 @@ impl FunctionCompiler<'_> {
         if let InstData::VectorSelect { args } = *data {
             let double = self.ty(args[1]) == Type::Vector(VectorType::F64x8);
             self.float512_stage(args[0], FS0);
-            self.float512_bits("vpxord", FS1, FS1, FS1);
-            self.float512_compare(if double { "vpcmpq" } else { "vpcmpd" }, FS0, FS1, 4);
+            self.float512_bits(op::VPXORD, FS1, FS1, FS1);
+            self.float512_compare(
+                if double {
+                    EvexMnemonic::Vpcmpq
+                } else {
+                    EvexMnemonic::Vpcmpd
+                },
+                FS0,
+                FS1,
+                4,
+            );
             self.float512_stage(args[1], FS1);
             self.float512_stage(args[2], FS2);
             self.emit(
@@ -148,13 +154,17 @@ impl FunctionCompiler<'_> {
                 FloatCC::Uno => 3,
             };
             self.float512_compare(
-                if double { "vcmppd" } else { "vcmpps" },
+                if double {
+                    EvexMnemonic::Vcmppd
+                } else {
+                    EvexMnemonic::Vcmpps
+                },
                 FS0,
                 FS1,
                 predicate,
             );
             self.float512_constant(double, u64::MAX);
-            self.float512_bits("vpxord", FS0, FS0, FS0);
+            self.float512_bits(op::VPXORD, FS0, FS0, FS0);
             self.emit(
                 masked_move(double),
                 [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(FS2, 512))],
@@ -169,7 +179,6 @@ impl FunctionCompiler<'_> {
         };
         let ty = self.ty(a);
         let double = ty == Type::Vector(VectorType::F64x8);
-        let suffix = if double { "pd" } else { "ps" };
         for (value, scratch) in [(Some(a), FS0), (b, FS1)] {
             if let Some(value) = value {
                 let source = self.use_freg(value, scratch);
@@ -191,13 +200,23 @@ impl FunctionCompiler<'_> {
                 ..
             } => {
                 let minimum = matches!(data, InstData::VectorBinary { op: V::Fmin, .. });
-                self.float512_compare(&format!("vcmp{suffix}"), FS0, FS1, 3);
-                let name = format!("v{}{suffix}", if minimum { "min" } else { "max" });
-                self.float512_bits(&name, FS2, FS0, FS1);
-                self.float512_bits(&name, FS0, FS1, FS0);
+                let compare = if double {
+                    EvexMnemonic::Vcmppd
+                } else {
+                    EvexMnemonic::Vcmpps
+                };
+                self.float512_compare(compare, FS0, FS1, 3);
+                let opcode = match (minimum, double) {
+                    (true, false) => op::VMINPS,
+                    (true, true) => op::VMINPD,
+                    (false, false) => op::VMAXPS,
+                    (false, true) => op::VMAXPD,
+                };
+                self.float512_bits(opcode, FS2, FS0, FS1);
+                self.float512_bits(opcode, FS0, FS1, FS0);
                 // Both source orders choose opposite zero signs on ties. OR
                 // selects -0 for minimum; AND selects +0 for maximum.
-                self.float512_bits(if minimum { "vpord" } else { "vpandd" }, FS0, FS0, FS2);
+                self.float512_bits(if minimum { op::VPORD } else { op::VPANDD }, FS0, FS0, FS2);
                 self.float512_constant(
                     double,
                     if double {
@@ -215,19 +234,23 @@ impl FunctionCompiler<'_> {
                 op: V::Fcopysign, ..
             } => {
                 self.float512_constant(double, sign);
-                self.float512_bits("vpandd", FS1, FS1, FS2);
-                self.float512_bits("vpandnd", FS0, FS2, FS0);
-                self.float512_bits("vpord", FS0, FS0, FS1);
+                self.float512_bits(op::VPANDD, FS1, FS1, FS2);
+                self.float512_bits(op::VPANDND, FS0, FS2, FS0);
+                self.float512_bits(op::VPORD, FS0, FS0, FS1);
             }
             InstData::VectorBinary { op, .. } => {
-                let stem = match op {
-                    V::Fadd => "vadd",
-                    V::Fsub => "vsub",
-                    V::Fmul => "vmul",
-                    V::Fdiv => "vdiv",
+                let opcode = match (op, double) {
+                    (V::Fadd, false) => Opcode::Vaddps,
+                    (V::Fadd, true) => Opcode::Vaddpd,
+                    (V::Fsub, false) => Opcode::Vsubps,
+                    (V::Fsub, true) => Opcode::Vsubpd,
+                    (V::Fmul, false) => Opcode::Vmulps,
+                    (V::Fmul, true) => Opcode::Vmulpd,
+                    (V::Fdiv, false) => Opcode::Vdivps,
+                    (V::Fdiv, true) => Opcode::Vdivpd,
                     _ => unreachable!("retained binary"),
                 };
-                self.float512_bits(&format!("{stem}{suffix}"), FS0, FS0, FS1);
+                self.float512_bits(opcode, FS0, FS0, FS1);
             }
             InstData::VectorUnary {
                 op: UnaryOp::Fneg | UnaryOp::Fabs,
@@ -241,16 +264,16 @@ impl FunctionCompiler<'_> {
                         ..
                     }
                 ) {
-                    self.float512_bits("vpxord", FS0, FS0, FS2);
+                    self.float512_bits(op::VPXORD, FS0, FS0, FS2);
                 } else {
-                    self.float512_bits("vpandnd", FS0, FS2, FS0);
+                    self.float512_bits(op::VPANDND, FS0, FS2, FS0);
                 }
             }
             InstData::VectorUnary {
                 op: UnaryOp::Fsqrt, ..
             } => {
                 self.emit(
-                    opcode(&format!("vsqrt{suffix}")),
+                    if double { op::VSQRTPD } else { op::VSQRTPS },
                     [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(FS0, 512))],
                 );
             }
@@ -263,7 +286,11 @@ impl FunctionCompiler<'_> {
                     _ => unreachable!("retained rounding"),
                 };
                 self.emit(
-                    opcode(&format!("vrndscale{suffix}")),
+                    if double {
+                        op::VRNDSCALEPD
+                    } else {
+                        op::VRNDSCALEPS
+                    },
                     [
                         asm_arg(simd_width(FS0, 512)),
                         asm_arg(simd_width(FS0, 512)),

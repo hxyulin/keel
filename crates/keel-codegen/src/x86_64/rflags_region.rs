@@ -17,18 +17,15 @@ fn instruction<const N: usize>(p: &mut Program, opcode: Opcode, operands: [AsmOp
         lock: false,
     });
 }
-fn fixed(p: &mut Program, name: &str) {
-    instruction(p, Opcode::parse(name).unwrap(), []);
-}
 fn snapshot(p: &mut Program, home: &Memory) {
-    fixed(p, "pushfq");
+    instruction(p, op::PUSHFQ, []);
     instruction(p, Opcode::Pop, [asm_arg(r64(S0))]);
     instruction(p, Opcode::Mov, [asm_arg(home.clone()), asm_arg(r64(S0))]);
 }
 fn apply(p: &mut Program, home: &Memory) {
     instruction(p, Opcode::Mov, [asm_arg(r64(S0)), asm_arg(home.clone())]);
     instruction(p, Opcode::Push, [asm_arg(r64(S0))]);
-    fixed(p, "popfq");
+    instruction(p, op::POPFQ, []);
 }
 fn lower(plan: &Plan, storage: &Storage, prefix: &str) -> Program {
     let mut p = Program::new();
@@ -129,8 +126,8 @@ fn validate(plan: &Plan, storage: &Storage, prefix: &str, actual: &Program) -> R
     let pop = Opcode::Pop;
     let push = Opcode::Push;
     let mov = Opcode::Mov;
-    let pushfq = Opcode::parse("pushfq").unwrap();
-    let popfq = Opcode::parse("popfq").unwrap();
+    let pushfq = op::PUSHFQ;
+    let popfq = op::POPFQ;
     for (b, block) in plan.blocks.iter().enumerate() {
         take(Item::Label(format!("{prefix}_{b}")))?;
         for (position, op) in block.operations.iter().enumerate() {

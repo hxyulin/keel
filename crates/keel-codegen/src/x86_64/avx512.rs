@@ -99,16 +99,15 @@ impl FunctionCompiler<'_> {
                     );
                     self.emit(Opcode::Movd, [asm_arg(xmm(FS2)), asm_arg(r32(S0))]);
                     self.emit(
-                        Opcode::parse(if qword {
-                            "vpbroadcastq"
+                        if qword {
+                            op::VPBROADCASTQ
                         } else {
-                            "vpbroadcastd"
-                        })
-                        .expect("AVX512F broadcast"),
+                            op::VPBROADCASTD
+                        },
                         [asm_arg(simd_width(FS2, 512)), asm_arg(xmm(FS2))],
                     );
                     self.emit(
-                        Opcode::parse("vpandd").expect("AVX512F AND"),
+                        op::VPANDD,
                         [
                             asm_arg(simd_width(FS1, 512)),
                             asm_arg(simd_width(b, 512)),
@@ -118,33 +117,33 @@ impl FunctionCompiler<'_> {
                     b = FS1;
                 }
                 let name = match (op, qword) {
-                    (V::Iadd, false) => "vpaddd",
-                    (V::Iadd, true) => "vpaddq",
-                    (V::Isub, false) => "vpsubd",
-                    (V::Isub, true) => "vpsubq",
-                    (V::Imul, false) => "vpmulld",
-                    (V::Imul, true) => "vpmullq",
-                    (V::Smin, false) => "vpminsd",
-                    (V::Smin, true) => "vpminsq",
-                    (V::Smax, false) => "vpmaxsd",
-                    (V::Smax, true) => "vpmaxsq",
-                    (V::Umin, false) => "vpminud",
-                    (V::Umin, true) => "vpminuq",
-                    (V::Umax, false) => "vpmaxud",
-                    (V::Umax, true) => "vpmaxuq",
-                    (V::Shl, false) => "vpsllvd",
-                    (V::Shl, true) => "vpsllvq",
-                    (V::Ushr, false) => "vpsrlvd",
-                    (V::Ushr, true) => "vpsrlvq",
-                    (V::Sshr, false) => "vpsravd",
-                    (V::Sshr, true) => "vpsravq",
-                    (V::And, _) => "vpandd",
-                    (V::Or, _) => "vpord",
-                    (V::Xor, _) => "vpxord",
+                    (V::Iadd, false) => op::VPADDD,
+                    (V::Iadd, true) => op::VPADDQ,
+                    (V::Isub, false) => op::VPSUBD,
+                    (V::Isub, true) => op::VPSUBQ,
+                    (V::Imul, false) => op::VPMULLD,
+                    (V::Imul, true) => op::VPMULLQ,
+                    (V::Smin, false) => op::VPMINSD,
+                    (V::Smin, true) => op::VPMINSQ,
+                    (V::Smax, false) => op::VPMAXSD,
+                    (V::Smax, true) => op::VPMAXSQ,
+                    (V::Umin, false) => op::VPMINUD,
+                    (V::Umin, true) => op::VPMINUQ,
+                    (V::Umax, false) => op::VPMAXUD,
+                    (V::Umax, true) => op::VPMAXUQ,
+                    (V::Shl, false) => op::VPSLLVD,
+                    (V::Shl, true) => op::VPSLLVQ,
+                    (V::Ushr, false) => op::VPSRLVD,
+                    (V::Ushr, true) => op::VPSRLVQ,
+                    (V::Sshr, false) => op::VPSRAVD,
+                    (V::Sshr, true) => op::VPSRAVQ,
+                    (V::And, _) => op::VPANDD,
+                    (V::Or, _) => op::VPORD,
+                    (V::Xor, _) => op::VPXORD,
                     _ => unreachable!("retained AVX512F binary operation"),
                 };
                 self.emit(
-                    Opcode::parse(name).expect("AVX512F opcode"),
+                    name,
                     [
                         asm_arg(simd_width(d, 512)),
                         asm_arg(simd_width(a, 512)),
@@ -199,8 +198,11 @@ impl FunctionCompiler<'_> {
                     [asm_arg(simd_width(FS0, 512)), asm_arg(home)],
                 );
                 self.emit(
-                    Opcode::parse(if width == 4 { "vpermi2d" } else { "vpermi2q" })
-                        .expect("AVX512F permutation"),
+                    if width == 4 {
+                        op::VPERMI2D
+                    } else {
+                        op::VPERMI2Q
+                    },
                     [
                         asm_arg(simd_width(FS0, 512)),
                         asm_arg(simd_width(FS1, 512)),
@@ -221,7 +223,7 @@ impl FunctionCompiler<'_> {
                 let width = shape.lane_type().bytes().unwrap();
                 let a = self.use_freg(arg, FS0);
                 self.emit(
-                    Opcode::parse("vextracti32x4").expect("AVX512F quarter extract"),
+                    op::VEXTRACTI32X4,
                     [
                         asm_arg(xmm(FS1)),
                         asm_arg(simd_width(a, 512)),
@@ -265,7 +267,7 @@ impl FunctionCompiler<'_> {
                 let a = self.use_freg(args[0], FS0);
                 let quarter = i64::from(u32::from(lane) * width / 16);
                 self.emit(
-                    Opcode::parse("vextracti32x4").expect("AVX512F quarter extract"),
+                    op::VEXTRACTI32X4,
                     [
                         asm_arg(xmm(FS1)),
                         asm_arg(simd_width(a, 512)),
@@ -302,7 +304,7 @@ impl FunctionCompiler<'_> {
                 );
                 let d = self.def_freg(result);
                 self.emit(
-                    Opcode::parse("vinserti32x4").expect("AVX512F quarter insert"),
+                    op::VINSERTI32X4,
                     [
                         asm_arg(simd_width(d, 512)),
                         asm_arg(simd_width(a, 512)),
@@ -324,14 +326,11 @@ impl FunctionCompiler<'_> {
                     ],
                 );
                 let name = if qword {
-                    "vpbroadcastq"
+                    op::VPBROADCASTQ
                 } else {
-                    "vpbroadcastd"
+                    op::VPBROADCASTD
                 };
-                self.emit(
-                    Opcode::parse(name).expect("AVX512F broadcast"),
-                    [asm_arg(simd_width(d, 512)), asm_arg(xmm(FS1))],
-                );
+                self.emit(name, [asm_arg(simd_width(d, 512)), asm_arg(xmm(FS1))]);
                 self.def_done(result, d);
             }
             InstData::Convert {
@@ -347,7 +346,7 @@ impl FunctionCompiler<'_> {
                 let high = matches!(operation, ConvertOp::SwidenHigh | ConvertOp::UwidenHigh);
                 let source = if high && self.ty(arg).bytes() == Some(64) {
                     self.emit(
-                        Opcode::parse("vextracti64x4").expect("AVX512F half extract"),
+                        op::VEXTRACTI64X4,
                         [
                             asm_arg(simd_width(FS1, 256)),
                             asm_arg(simd_width(a, 512)),
@@ -360,12 +359,12 @@ impl FunctionCompiler<'_> {
                 };
                 let d = self.def_freg(result);
                 let opcode = if matches!(operation, ConvertOp::SwidenLow | ConvertOp::SwidenHigh) {
-                    "vpmovsxdq"
+                    op::VPMOVSXDQ
                 } else {
-                    "vpmovzxdq"
+                    op::VPMOVZXDQ
                 };
                 self.emit(
-                    Opcode::parse(opcode).expect("AVX512F dword widening"),
+                    opcode,
                     [
                         asm_arg(simd_width(d, 512)),
                         asm_arg(simd_width(source, 256)),
@@ -384,7 +383,7 @@ impl FunctionCompiler<'_> {
                 // clears all upper ZMM bits. A 512-bit result therefore has its
                 // unused eight lanes initialized to zero without AVX512VL.
                 self.emit(
-                    Opcode::parse("vpmovqd").expect("AVX512F qword narrowing"),
+                    op::VPMOVQD,
                     [asm_arg(simd_width(d, 256)), asm_arg(simd_width(a, 512))],
                 );
                 self.def_done(result, d);

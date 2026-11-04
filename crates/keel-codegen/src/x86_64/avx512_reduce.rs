@@ -1,14 +1,13 @@
 //! Wrapping integer reductions use full-width shuffle trees with AVX512F only.
 use super::*;
-use keel_asm_ir::x86::evex::EvexOpcode;
 use keel_ir::{VectorReduceOp as R, VectorType};
 
 pub(super) fn keep(func: &Function, data: &InstData, features: keel_asm_ir::x86::Features) -> bool {
     features.avx512f
         && matches!(data, InstData::VectorReduce {arg,..} if matches!(func.value_type(func.resolve(*arg)),Type::Vector(VectorType::I32x16|VectorType::I64x8)))
 }
-fn opcode(name: &str) -> Opcode {
-    Opcode::Evex(EvexOpcode::parse(name).expect("AVX512F reduction opcode"))
+fn opcode(mnemonic: EvexMnemonic) -> Opcode {
+    Opcode::Evex(EvexOpcode::new(mnemonic))
 }
 impl FunctionCompiler<'_> {
     pub(super) fn avx512_reduce(&mut self, data: &InstData, result: Option<Value>) -> bool {
@@ -20,24 +19,24 @@ impl FunctionCompiler<'_> {
         };
         let q = self.ty(arg) == Type::Vector(VectorType::I64x8);
         let name = match (op, q) {
-            (R::Add, false) => "vpaddd",
-            (R::Add, true) => "vpaddq",
-            (R::And, _) => "vpandd",
-            (R::Or, _) => "vpord",
-            (R::Xor, _) => "vpxord",
-            (R::Smin, false) => "vpminsd",
-            (R::Smin, true) => "vpminsq",
-            (R::Smax, false) => "vpmaxsd",
-            (R::Smax, true) => "vpmaxsq",
-            (R::Umin, false) => "vpminud",
-            (R::Umin, true) => "vpminuq",
-            (R::Umax, false) => "vpmaxud",
-            (R::Umax, true) => "vpmaxuq",
+            (R::Add, false) => EvexMnemonic::Vpaddd,
+            (R::Add, true) => EvexMnemonic::Vpaddq,
+            (R::And, _) => EvexMnemonic::Vpandd,
+            (R::Or, _) => EvexMnemonic::Vpord,
+            (R::Xor, _) => EvexMnemonic::Vpxord,
+            (R::Smin, false) => EvexMnemonic::Vpminsd,
+            (R::Smin, true) => EvexMnemonic::Vpminsq,
+            (R::Smax, false) => EvexMnemonic::Vpmaxsd,
+            (R::Smax, true) => EvexMnemonic::Vpmaxsq,
+            (R::Umin, false) => EvexMnemonic::Vpminud,
+            (R::Umin, true) => EvexMnemonic::Vpminuq,
+            (R::Umax, false) => EvexMnemonic::Vpmaxud,
+            (R::Umax, true) => EvexMnemonic::Vpmaxuq,
         };
         let a = self.use_freg(arg, FS0);
         if a != FS0 {
             self.emit(
-                opcode("vmovups"),
+                opcode(EvexMnemonic::Vmovups),
                 [asm_arg(simd_width(FS0, 512)), asm_arg(simd_width(a, 512))],
             );
         }
@@ -45,7 +44,7 @@ impl FunctionCompiler<'_> {
         // quarter now contains the corresponding lanes from the whole input.
         for control in [0x4e, 0xb1] {
             self.emit(
-                opcode("vshufi32x4"),
+                opcode(EvexMnemonic::Vshufi32x4),
                 [
                     asm_arg(simd_width(FS1, 512)),
                     asm_arg(simd_width(FS0, 512)),
@@ -66,7 +65,7 @@ impl FunctionCompiler<'_> {
         // addition truncates at each step, preserving the IR's wrapping sum.
         for control in [0x4e, 0xb1].into_iter().take(if q { 1 } else { 2 }) {
             self.emit(
-                opcode("vpshufd"),
+                opcode(EvexMnemonic::Vpshufd),
                 [
                     asm_arg(simd_width(FS1, 512)),
                     asm_arg(simd_width(FS0, 512)),

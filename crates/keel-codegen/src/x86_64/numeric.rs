@@ -12,20 +12,18 @@ impl FunctionCompiler<'_> {
                 self.emit(movs(ty), [asm_arg(simd(scratch, ty)), asm_arg(simd(r, ty))]);
             }
         }
-        let suffix = match ty {
-            Type::F32 => "ss",
-            Type::F64 => "sd",
-            Type::Vector(s) if s.lane_type() == Type::F32 => "ps",
-            Type::Vector(_) => "pd",
+        let evex = |mnemonic| Opcode::Evex(EvexOpcode::new(mnemonic));
+        let wide = ty.vector().is_some_and(|shape| shape.bytes() == 64);
+        let op = match ty {
+            Type::F32 => op::VFMADD213SS,
+            Type::F64 => op::VFMADD213SD,
+            Type::Vector(s) if s.lane_type() == Type::F32 && wide => {
+                evex(EvexMnemonic::Vfmadd213ps)
+            }
+            Type::Vector(s) if s.lane_type() == Type::F32 => op::VFMADD213PS,
+            Type::Vector(_) if wide => evex(EvexMnemonic::Vfmadd213pd),
+            Type::Vector(_) => op::VFMADD213PD,
             _ => unreachable!("verified FMA shape"),
-        };
-        let name = format!("vfmadd213{suffix}");
-        let op = if ty.vector().is_some_and(|shape| shape.bytes() == 64) {
-            Opcode::Evex(
-                keel_asm_ir::x86::evex::EvexOpcode::parse(&name).expect("AVX512F FMA opcode"),
-            )
-        } else {
-            Opcode::parse(&name).expect("FMA opcode")
         };
         self.emit(
             op,
@@ -46,15 +44,14 @@ impl FunctionCompiler<'_> {
 impl FunctionCompiler<'_> {
     pub(super) fn native_f16c(&mut self, id: Intrinsic, args: &[Value], result: Option<Value>) {
         // AVX512F+VL provides the same unmasked conversion when F16C is disabled.
-        let opcode = |name: &str| {
-            if self.features.f16c {
-                Opcode::parse(name).expect("F16C conversion")
-            } else {
-                avx512_mask::opcode(name, false)
-            }
+        let (from_half, to_half) = if self.features.f16c {
+            (op::VCVTPH2PS, op::VCVTPS2PH)
+        } else {
+            (
+                Opcode::Evex(EvexOpcode::new(EvexMnemonic::Vcvtph2ps)),
+                Opcode::Evex(EvexOpcode::new(EvexMnemonic::Vcvtps2ph)),
+            )
         };
-        let from_half = opcode("vcvtph2ps");
-        let to_half = opcode("vcvtps2ph");
         match id {
             Intrinsic::X86F16cPhToPs128 | Intrinsic::X86F16cPhToPs256 => {
                 if id == Intrinsic::X86F16cPhToPs128 {
@@ -112,15 +109,15 @@ impl FunctionCompiler<'_> {
             }
         }
         let name = id.info().name;
-        let name = if name.contains("bextr") {
-            "bextr"
+        let opcode = if name.contains("bextr") {
+            Opcode::Bextr
         } else if name.contains("pdep") {
-            "pdep"
+            Opcode::Pdep
         } else {
-            "pext"
+            Opcode::Pext
         };
         self.emit(
-            Opcode::parse(name).unwrap(),
+            opcode,
             [
                 asm_arg(reg(S0, ty)),
                 asm_arg(reg(S0, ty)),
@@ -528,7 +525,7 @@ impl FunctionCompiler<'_> {
             );
         }
         self.emit(
-            Opcode::parse("crc32").unwrap(),
+            op::CRC32,
             [
                 asm_arg(reg(
                     S0,

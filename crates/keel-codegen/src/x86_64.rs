@@ -120,7 +120,10 @@ use crate::parallel_copy::for_each_move;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDI, RDX, Slot};
 use crate::{CodegenError, Format, data, loc_reg, pieces};
-use keel_asm_ir::x86::{Memory, Modifier, Opcode, Operand as AsmOperand, Register, RegisterClass};
+use keel_asm_ir::x86::{
+    EvexMnemonic, EvexOpcode, Memory, Modifier, Opcode, Operand as AsmOperand, Register,
+    RegisterClass, op,
+};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DebugScope, EntityRef,
@@ -3590,7 +3593,7 @@ impl<'a> FunctionCompiler<'a> {
                 id: Intrinsic::X86AvxVzeroall,
                 ..
             } => {
-                self.emit(Opcode::parse("vzeroall").unwrap(), []);
+                self.emit(op::VZEROALL, []);
             }
             InstData::Intrinsic { id, ref args } if id.is_x86_raw_fma() => {
                 self.native_raw_fma(id, args, result)

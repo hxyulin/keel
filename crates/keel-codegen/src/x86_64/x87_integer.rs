@@ -5,17 +5,17 @@ impl FunctionCompiler<'_> {
     pub(super) fn native_x87_integer(&mut self, inst: Inst, id: Intrinsic, arg: Value) {
         use Intrinsic::*;
         let (name, width, load, pop) = match id {
-            X86X87Fist16 => ("fist", 16, false, false),
-            X86X87Fist32 => ("fist", 32, false, false),
-            X86X87Fistp16 => ("fistp", 16, false, true),
-            X86X87Fistp32 => ("fistp", 32, false, true),
-            X86X87Fistp64 => ("fistp", 64, false, true),
-            X86X87Fisttp16 => ("fisttp", 16, false, true),
-            X86X87Fisttp32 => ("fisttp", 32, false, true),
-            X86X87Fisttp64 => ("fisttp", 64, false, true),
-            X86X87Fild16 => ("fild", 16, true, false),
-            X86X87Fild32 => ("fild", 32, true, false),
-            X86X87Fild64 => ("fild", 64, true, false),
+            X86X87Fist16 => (op::FIST, 16, false, false),
+            X86X87Fist32 => (op::FIST, 32, false, false),
+            X86X87Fistp16 => (Opcode::Fistp, 16, false, true),
+            X86X87Fistp32 => (Opcode::Fistp, 32, false, true),
+            X86X87Fistp64 => (Opcode::Fistp, 64, false, true),
+            X86X87Fisttp16 => (op::FISTTP, 16, false, true),
+            X86X87Fisttp32 => (op::FISTTP, 32, false, true),
+            X86X87Fisttp64 => (op::FISTTP, 64, false, true),
+            X86X87Fild16 => (Opcode::Fild, 16, true, false),
+            X86X87Fild32 => (Opcode::Fild, 32, true, false),
+            X86X87Fild64 => (Opcode::Fild, 64, true, false),
             _ => unreachable!(),
         };
         let temporary = sized(
@@ -36,9 +36,9 @@ impl FunctionCompiler<'_> {
         } else {
             self.f80_push(arg);
         }
-        self.emit(Opcode::parse(name).unwrap(), [asm_arg(temporary.clone())]);
+        self.emit(name, [asm_arg(temporary.clone())]);
         // Snapshot before FSTP and before any result's home can overwrite an input.
-        self.emit(Opcode::parse("fnstsw").unwrap(), [asm_arg(r16(S0))]);
+        self.emit(op::FNSTSW, [asm_arg(r16(S0))]);
         self.emit(Opcode::Movzx, [asm_arg(r32(S2)), asm_arg(r16(S0))]);
         let results = self.func.inst_results(inst);
         if load {

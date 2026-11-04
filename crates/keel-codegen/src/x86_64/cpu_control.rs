@@ -19,22 +19,22 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Mov, [asm_arg(save.clone()), asm_arg(r64(3))]);
                 self.emit(Opcode::Xor, [asm_arg(r32(S0)), asm_arg(r32(S0))]);
                 self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
-                self.emit(Opcode::parse("cpuid").unwrap(), []);
+                self.emit(op::CPUID, []);
                 self.emit(Opcode::Cmp, [asm_arg(r32(S0)), asm_arg(1)]);
-                self.emit(Opcode::parse("jb").unwrap(), [asm_arg(&absent)]);
+                self.emit(op::JB, [asm_arg(&absent)]);
                 self.emit(Opcode::Mov, [asm_arg(r32(S0)), asm_arg(1)]);
                 self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
-                self.emit(Opcode::parse("cpuid").unwrap(), []);
+                self.emit(op::CPUID, []);
                 // XGETBV is legal only after both CPU and OS enable XSAVE.
                 let required = (1u32 << 26) | (1u32 << 27);
                 self.emit(Opcode::And, [asm_arg(r32(S1)), asm_arg(required)]);
                 self.emit(Opcode::Cmp, [asm_arg(r32(S1)), asm_arg(required)]);
-                self.emit(Opcode::parse("jne").unwrap(), [asm_arg(&absent)]);
+                self.emit(op::JNE, [asm_arg(&absent)]);
                 self.emit(Opcode::Xor, [asm_arg(r32(S1)), asm_arg(r32(S1))]);
                 // Only this guarded access has XSAVE encoding permission.
                 let baseline = self.features;
                 self.features.xsave = true;
-                self.emit(Opcode::parse("xgetbv").unwrap(), []);
+                self.emit(op::XGETBV, []);
                 self.features = baseline;
                 self.emit(Opcode::Shl, [asm_arg(r64(S2)), asm_arg(32)]);
                 self.emit(Opcode::Or, [asm_arg(r64(S0)), asm_arg(r64(S2))]);
@@ -59,7 +59,7 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Mov, [asm_arg(r32(S0)), asm_arg(r32(leaf))]);
                 let subleaf = self.use_reg(args[1], S1);
                 self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(r32(subleaf))]);
-                self.emit(Opcode::parse("cpuid").unwrap(), []);
+                self.emit(op::CPUID, []);
                 // CPUID zero-extends every 32-bit result in long mode. Pack
                 // EAX|EBX<<32 and ECX|EDX<<32 before restoring allocated RBX.
                 self.emit(Opcode::Shl, [asm_arg(r64(S2)), asm_arg(32)]);
@@ -81,16 +81,15 @@ impl FunctionCompiler<'_> {
                     self.emit(Opcode::Mov, [asm_arg(r32(S1)), asm_arg(r32(index))]);
                 }
                 self.emit(
-                    Opcode::parse(if id == Intrinsic::X86Rdmsr {
-                        "rdmsr"
+                    if id == Intrinsic::X86Rdmsr {
+                        op::RDMSR
                     } else if id == Intrinsic::X86Rdpmc {
-                        "rdpmc"
+                        op::RDPMC
                     } else if id == Intrinsic::X86Xgetbv0 {
-                        "xgetbv"
+                        op::XGETBV
                     } else {
-                        "rdtsc"
-                    })
-                    .unwrap(),
+                        op::RDTSC
+                    },
                     [],
                 );
                 self.emit(Opcode::Shl, [asm_arg(r64(S2)), asm_arg(32)]);
@@ -113,7 +112,7 @@ impl FunctionCompiler<'_> {
                 }
                 self.emit(Opcode::Mov, [asm_arg(r64(S2)), asm_arg(r64(S0))]);
                 self.emit(Opcode::Shr, [asm_arg(r64(S2)), asm_arg(32)]);
-                self.emit(Opcode::parse("wrmsr").unwrap(), []);
+                self.emit(op::WRMSR, []);
             }
             Intrinsic::X86Lfence => self.emit(Opcode::Lfence, []),
             Intrinsic::X86Sfence => self.emit(Opcode::Sfence, []),

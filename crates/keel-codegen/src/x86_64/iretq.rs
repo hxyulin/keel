@@ -23,7 +23,7 @@
 //! restore SIMD/x87 state, FS/GS bases, mappings, debug registers or arbitrary
 //! segment caches. It provides no entry shim, exception recovery or unwind ABI.
 
-use super::{Directive, Expression, Opcode, Output, Sink, asm_arg, memory, r64, sized};
+use super::{Directive, Expression, Opcode, Output, Sink, asm_arg, memory, op, r64, sized};
 use keel_asm_ir::Program;
 use keel_ir::{FuncDecl, FunctionAttrs, Signature, Type};
 use std::fmt::Write;
@@ -145,7 +145,7 @@ fn emit(structured: bool) -> Output {
         [asm_arg(r64(10)), asm_arg(sized(memory(r64(10), 72), 64))],
         false,
     );
-    out.instruction(Opcode::parse("iretq").unwrap(), [], false);
+    out.instruction(op::IRETQ, [], false);
     out.directive(Directive::Size {
         name: SYMBOL.into(),
         expression: Expression::difference(".", SYMBOL),

@@ -32,15 +32,12 @@ impl FunctionCompiler<'_> {
     pub(super) fn avx512_bw_stage_mask(&mut self, mask: Value) {
         let source = self.use_reg(mask, S0);
         let (name, register) = match self.ty(mask) {
-            Type::I64 => ("kmovq", r64(source)),
-            Type::I32 => ("kmovd", r32(source)),
-            Type::I8 | Type::I16 => ("kmovw", r32(source)),
+            Type::I64 => (op::KMOVQ, r64(source)),
+            Type::I32 => (op::KMOVD, r32(source)),
+            Type::I8 | Type::I16 => (op::KMOVW, r32(source)),
             _ => unreachable!("BW masks have their declared scalar lane width"),
         };
-        self.emit(
-            Opcode::parse(name).expect("BW mask move"),
-            [asm_arg(avx512_mask::k1()), asm_arg(register)],
-        );
+        self.emit(name, [asm_arg(avx512_mask::k1()), asm_arg(register)]);
     }
     pub(super) fn native_avx512_bw(
         &mut self,

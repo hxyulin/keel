@@ -79,7 +79,7 @@ impl FunctionCompiler<'_> {
             );
             let destination = self.def_reg(result);
             self.emit(
-                Opcode::parse("kmovw").expect("AVX512F mask transfer"),
+                op::KMOVW,
                 [asm_arg(r32(destination)), asm_arg(avx512_mask::k1())],
             );
             self.def_done(result, destination);

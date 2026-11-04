@@ -5,12 +5,11 @@ impl FunctionCompiler<'_> {
         // Only reserved GPR materialization; no SIMD preparation or shadow image.
         let address = self.use_reg(args[0], S0);
         self.emit(
-            Opcode::parse(if id == Intrinsic::X86Fxsave64 {
-                "fxsave64"
+            if id == Intrinsic::X86Fxsave64 {
+                Opcode::Fxsave64
             } else {
-                "fxrstor64"
-            })
-            .unwrap(),
+                Opcode::Fxrstor64
+            },
             [asm_arg(memory(r64(address), 0))],
         );
     }
@@ -27,7 +26,7 @@ impl FunctionCompiler<'_> {
             id,
             X86X87ReadCwWait | X86X87ReadSwWait | X86X87ClexWait | X86X87InitWait | X86X87Wait
         ) {
-            self.emit(Opcode::parse("fwait").unwrap(), []);
+            self.emit(op::FWAIT, []);
         }
         if matches!(
             id,
@@ -48,7 +47,7 @@ impl FunctionCompiler<'_> {
             }
             let status = matches!(id, X86X87ReadSwNowait | X86X87ReadSwWait);
             self.emit(
-                Opcode::parse(if status { "fnstsw" } else { "fnstcw" }).unwrap(),
+                if status { op::FNSTSW } else { Opcode::Fnstcw },
                 [asm_arg(sized(self.frame(slot), 16))],
             );
             if id == X86X87ExchangeCw {
@@ -61,13 +60,13 @@ impl FunctionCompiler<'_> {
             );
             self.def_done(result, d);
         } else if let Some(op) = match id {
-            X86X87ClexNowait | X86X87ClexWait => Some("fnclex"),
-            X86X87InitNowait | X86X87InitWait => Some("fninit"),
-            X86MmxEmms => Some("emms"),
+            X86X87ClexNowait | X86X87ClexWait => Some(op::FNCLEX),
+            X86X87InitNowait | X86X87InitWait => Some(op::FNINIT),
+            X86MmxEmms => Some(op::EMMS),
             X86X87Wait => None,
             _ => unreachable!(),
         } {
-            self.emit(Opcode::parse(op).unwrap(), []);
+            self.emit(op, []);
         }
     }
 }

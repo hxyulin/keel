@@ -45,7 +45,7 @@ impl FunctionCompiler<'_> {
         let d = id
             .x86_avx512_dq_mask_alu()
             .expect("DQ mask algebra descriptor");
-        let transfer = Opcode::parse("kmovw").expect("foundation mask transfer");
+        let transfer = op::KMOVW;
         let a = self.use_reg(args[0], S0);
         self.emit(transfer, [asm_arg(k(1)), asm_arg(r32(a))]);
         if matches!(d.kind, Kind::Binary | Kind::Test) {

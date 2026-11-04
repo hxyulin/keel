@@ -21,13 +21,12 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Movdqu, [asm_arg(xmm(0)), asm_arg(xmm(source))]);
             }
         }
-        let op = Opcode::parse(match id {
-            Intrinsic::X86Sha256msg1 => "sha256msg1",
-            Intrinsic::X86Sha256msg2 => "sha256msg2",
-            Intrinsic::X86Sha256rnds2 => "sha256rnds2",
+        let op = match id {
+            Intrinsic::X86Sha256msg1 => op::SHA256MSG1,
+            Intrinsic::X86Sha256msg2 => op::SHA256MSG2,
+            Intrinsic::X86Sha256rnds2 => op::SHA256RNDS2,
             _ => unreachable!("SHA lowering requires a SHA intrinsic"),
-        })
-        .expect("SHA opcode is registered");
+        };
         self.emit(op, [asm_arg(xmm(FS0)), asm_arg(xmm(FS1))]);
         if rounds {
             self.emit(Opcode::Movdqu, [asm_arg(xmm(0)), asm_arg(xmm(FS2))]);
