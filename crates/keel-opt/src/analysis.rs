@@ -1,5 +1,5 @@
-//! A per-thread cache of each function's CFG, dominator tree and loop
-//! depths, shared by the passes of one pipeline.
+//! A per-thread cache of each function's CFG, dominator tree and natural
+//! loops, shared by the passes of one pipeline.
 //!
 //! Most passes ask for these analyses, and most runs between two requests
 //! for the same function leave its CFG alone. An entry is found by the
@@ -8,14 +8,14 @@
 //! checking every input of the computation against the function: its block
 //! count, its layout, and each block's successors (read from its last
 //! instruction, as [`ControlFlowGraph::compute`] does), since rewriting a
-//! branch's arguments renews the stamp too. The dominator tree and loop
-//! depths depend on nothing else. A stale entry, or one left by another
+//! branch's arguments renews the stamp too. The dominator tree and the
+//! loops depend on nothing else. A stale entry, or one left by another
 //! function at the same address, is recomputed, so a cached result always
 //! equals a fresh one.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::loops::LoopDepth;
+use keel_ir::loops::LoopInfo;
 use keel_ir::{Block, EntityRef, Function};
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
@@ -23,7 +23,7 @@ use std::rc::Rc;
 pub(crate) struct Analysis {
     pub cfg: ControlFlowGraph,
     pub dom: DominatorTree,
-    loops: OnceCell<LoopDepth>,
+    loops: OnceCell<LoopInfo>,
     /// The latest stamp of the function known to have this CFG.
     stamp: Cell<u64>,
     num_blocks: usize,
@@ -31,10 +31,10 @@ pub(crate) struct Analysis {
 }
 
 impl Analysis {
-    /// Loop nesting depths, computed on first use.
-    pub fn loops(&self, func: &Function) -> &LoopDepth {
+    /// Natural loops and nesting depths, computed on first use.
+    pub fn loops(&self, func: &Function) -> &LoopInfo {
         self.loops
-            .get_or_init(|| LoopDepth::compute(func, &self.cfg, &self.dom))
+            .get_or_init(|| LoopInfo::compute(func, &self.cfg, &self.dom))
     }
 
     /// Whether `func` still has the CFG this was computed from.
@@ -98,12 +98,10 @@ impl Analysis {
                 && cfg.succs(b) == self.cfg.succs(b)
                 && dom.idom(b) == self.dom.idom(b)
         }) && dom.rpo() == self.dom.rpo()
-            && self.loops.get().is_none_or(|cached| {
-                let fresh = LoopDepth::compute(func, &cfg, &dom);
-                (0..func.num_blocks())
-                    .map(Block::new)
-                    .all(|block| cached.depth(block) == fresh.depth(block))
-            })
+            && self
+                .loops
+                .get()
+                .is_none_or(|cached| *cached == LoopInfo::compute(func, &cfg, &dom))
     }
 }
 

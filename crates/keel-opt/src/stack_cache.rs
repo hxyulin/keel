@@ -10,7 +10,7 @@
 //! not invent values or speculate faults.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::loops::LoopDepth;
+use keel_ir::loops::LoopInfo;
 use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData as D, MemoryFlags, StackSlot, Type, Value,
 };
@@ -189,7 +189,7 @@ pub fn promote(f: &mut Function) -> bool {
         return false;
     }
     let dom = DominatorTree::compute(f, &cfg);
-    let loops = LoopDepth::compute(f, &cfg, &dom);
+    let loops = LoopInfo::compute(f, &cfg, &dom);
     let mut captured = keel_ir::fxhash::FxHashSet::default();
     for &i in &entry_insts[..cut] {
         if matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. }) {
