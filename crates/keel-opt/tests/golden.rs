@@ -6,6 +6,8 @@
 
 #[path = "golden/differential.rs"]
 mod differential;
+#[path = "golden/random_ir.rs"]
+mod random_ir;
 
 use std::path::Path;
 

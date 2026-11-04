@@ -194,6 +194,29 @@ all of its targets, so it gets no extra command. A warm
 `tools/test.py optimizer --quick` took 33 to 36 seconds on an Apple M5 Max.
 keel-codegen's `run` target took 18 seconds of that, and keel-c's `run` target 10.
 
+## Differential optimizer tests
+
+The keel-opt `golden` target runs the reference interpreter in
+`keel-ir-interp` before and after optimization. It covers every registered
+pass on its own and every tier from Fast to Full. A run that returned must
+return the same values and leave the same bytes in its pointer arguments' buffers.
+A run that trapped must still trap. Runs that reach the step or call-depth
+limit, or use an operation the interpreter does not model, are skipped. The
+module comments in `crates/keel-opt/tests/golden/` give the input rules.
+
+- `differential.rs` runs the exported functions of every parsable fixture
+  under `tests/golden/` and `tests/fixtures/` on fixed inputs.
+- `random_ir.rs` generates seeded functions over integer arithmetic,
+  conversions, selects, diamonds, switches and counted loops. The normal run
+  checks 24 seeds. Set `KEEL_FUZZ_ITERS` for a qualification lane and
+  `KEEL_FUZZ_SEED` for the first seed. A failure names its seed, so
+  `KEEL_FUZZ_SEED=<seed> KEEL_FUZZ_ITERS=1` reruns it alone.
+
+```sh
+python3 tools/test.py optimizer --test golden --quick
+KEEL_FUZZ_ITERS=20000 cargo test --profile test-fast -p keel-opt --test golden random_ir
+```
+
 ## Test environment
 
 The runner sets these variables for its commands. It keeps a value already set
