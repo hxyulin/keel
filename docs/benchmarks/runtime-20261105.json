@@ -1,0 +1,2309 @@
+{
+  "schema": 2,
+  "date": "2026-11-05",
+  "keel_commit": "8226e95c0043b2f7066a58834047779cbb194c02",
+  "keel_configuration": "keel cc -O --link-intent executable (suite/configs.toml keel-O)",
+  "method": "cargo suite run -c clang-O2,keel-O -n 7: whole-process wall time of each benchmark executable, including startup, in rotating rounds with reversed rotations and a copied Clang executable as an identical-binary control. Outputs must match before timing.",
+  "ratio_direction": "Keel time / Clang time; above 1 means Keel-compiled code is slower",
+  "ratio_statistic": "median over rounds of the paired Keel/Clang time ratio; application geomeans are over its workloads, the overall geomean is over applications",
+  "hosts": {
+    "apple-m5-max": {
+      "machine": "Apple M5 Max, macOS 27.0.1",
+      "target": "aarch64-apple-darwin",
+      "reference": "Apple clang version 21.0.0 (clang-2100.3.34.2) -O2",
+      "timing_protocol": "rotating-reversed-rounds-v1",
+      "load_average_start": [
+        1.3,
+        1.95,
+        3.1
+      ],
+      "load_average_end": [
+        4.62,
+        2.7,
+        3.29
+      ],
+      "overall_geomean_ratio": 1.3739747375449451,
+      "apps": {
+        "lua": {
+          "workloads": 4,
+          "geomean_ratio": 1.2244885866692825
+        },
+        "sqlite": {
+          "workloads": 1,
+          "geomean_ratio": 1.3486312538853984
+        },
+        "lz4": {
+          "workloads": 2,
+          "geomean_ratio": 1.4888258868902
+        },
+        "yyjson": {
+          "workloads": 3,
+          "geomean_ratio": 1.6512201003062918
+        },
+        "quickjs": {
+          "workloads": 3,
+          "geomean_ratio": 1.4350868916258555
+        },
+        "zstd": {
+          "workloads": 2,
+          "geomean_ratio": 1.1547752015711106
+        }
+      },
+      "workloads": [
+        {
+          "app": "lua",
+          "workload": "fib",
+          "rounds": 7,
+          "keel_O_ms": 61.861125,
+          "clang_O2_ms": 49.97625,
+          "ratio": 1.2408125927069829,
+          "paired_ratios": [
+            1.2533039892429394,
+            1.2632383582201545,
+            1.2317284767385253,
+            1.2316761194891879,
+            1.2408125927069829,
+            1.2197693787129338,
+            1.2710062880353865
+          ],
+          "control_over_clang_O2": 1.0022660358752231,
+          "keel_O_samples_ms": [
+            62.798833,
+            63.131916,
+            61.671875,
+            61.502874999999996,
+            61.861125,
+            60.9565,
+            65.94520800000001
+          ],
+          "clang_O2_samples_ms": [
+            50.106625,
+            49.97625,
+            50.069375,
+            49.934292,
+            49.855333,
+            49.973791,
+            51.88425
+          ],
+          "control_samples_ms": [
+            50.085959,
+            50.125707999999996,
+            50.182834,
+            50.014333,
+            50.305915999999996,
+            50.771125,
+            51.526542
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "682c20d3da341a9dbecb948aab501f9a14323eb05e4e23fcfebcdfa7c6bd817a",
+          "clang_O2_binary_sha256": "87f35bcb8caf04be489f7ea58694e5609a7d1130275d24f01337d179f1bb33d0",
+          "workload_sha256": "b70fecd066a5030e553f4733802cbe8f2d9b869fac5312100a8b82e8243205e7",
+          "output_sha256": "cd02788b7048b882e6cf1f6b40668e345631ec416845c2c70bb1efd312a21d8b"
+        },
+        {
+          "app": "lua",
+          "workload": "sort",
+          "rounds": 7,
+          "keel_O_ms": 61.60225,
+          "clang_O2_ms": 52.608250000000005,
+          "ratio": 1.1593064585877688,
+          "paired_ratios": [
+            1.158738681781263,
+            1.2088012885622588,
+            1.1520433491804523,
+            1.1611937857591268,
+            1.155284677366362,
+            1.1593064585877688,
+            1.2089038736253734
+          ],
+          "control_over_clang_O2": 0.9902447239739013,
+          "keel_O_samples_ms": [
+            61.405666999999994,
+            62.261375,
+            61.942249999999994,
+            61.60225,
+            60.690667,
+            60.989084,
+            62.51433300000001
+          ],
+          "clang_O2_samples_ms": [
+            52.993542,
+            51.506707999999996,
+            53.767291,
+            53.050792,
+            52.533084,
+            52.608250000000005,
+            51.711583
+          ],
+          "control_samples_ms": [
+            51.833084,
+            52.119875,
+            52.291916,
+            52.615042,
+            51.936041,
+            52.095042,
+            54.316250000000004
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "682c20d3da341a9dbecb948aab501f9a14323eb05e4e23fcfebcdfa7c6bd817a",
+          "clang_O2_binary_sha256": "87f35bcb8caf04be489f7ea58694e5609a7d1130275d24f01337d179f1bb33d0",
+          "workload_sha256": "e2c1a371be0d22b3ee321dcce74a3b73d1563219198adcabab802ee43dd2d18e",
+          "output_sha256": "4f158d6d3792ec7677f8ccfb193e7bfad1d412eb074b408a30c72a474f7ab994"
+        },
+        {
+          "app": "lua",
+          "workload": "string",
+          "rounds": 7,
+          "keel_O_ms": 89.34675,
+          "clang_O2_ms": 72.061334,
+          "ratio": 1.2402646473350047,
+          "paired_ratios": [
+            1.2178248885041867,
+            1.2428674742472738,
+            1.2374246388254044,
+            1.2536531631531163,
+            1.251600483345645,
+            1.2043218133314868,
+            1.2402646473350047
+          ],
+          "control_over_clang_O2": 1.0058792417026308,
+          "keel_O_samples_ms": [
+            87.717541,
+            88.6715,
+            89.34675,
+            90.954,
+            88.474334,
+            89.461791,
+            89.375125
+          ],
+          "clang_O2_samples_ms": [
+            72.028041,
+            71.34429200000001,
+            72.20379100000001,
+            72.551167,
+            70.688958,
+            74.283958,
+            72.061334
+          ],
+          "control_samples_ms": [
+            71.65508299999999,
+            72.40487499999999,
+            72.70775,
+            72.125042,
+            73.869833,
+            72.614,
+            72.485
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "682c20d3da341a9dbecb948aab501f9a14323eb05e4e23fcfebcdfa7c6bd817a",
+          "clang_O2_binary_sha256": "87f35bcb8caf04be489f7ea58694e5609a7d1130275d24f01337d179f1bb33d0",
+          "workload_sha256": "6b3d14dadd772e26f3849df2c8fb51c0e9304c6e8aaa3958d3cf2aeb61669d1a",
+          "output_sha256": "2c09513eed4a3f7904af018aaad8037977e0923cfd71b6a599d6299a0329233d"
+        },
+        {
+          "app": "lua",
+          "workload": "float",
+          "rounds": 7,
+          "keel_O_ms": 190.229042,
+          "clang_O2_ms": 153.139292,
+          "ratio": 1.2600859042764312,
+          "paired_ratios": [
+            1.290545093219466,
+            1.2613692433970902,
+            1.1866541097172503,
+            1.242196170007107,
+            1.319873658186287,
+            1.2600859042764312,
+            1.25042735436571
+          ],
+          "control_over_clang_O2": 1.0026261471638958,
+          "keel_O_samples_ms": [
+            199.127666,
+            188.30849999999998,
+            190.215709,
+            190.229042,
+            200.57487500000002,
+            196.184875,
+            188.328792
+          ],
+          "clang_O2_samples_ms": [
+            154.297333,
+            149.288958,
+            160.295833,
+            153.139292,
+            151.965208,
+            155.691667,
+            150.611542
+          ],
+          "control_samples_ms": [
+            155.379917,
+            154.441292,
+            148.601875,
+            153.375583,
+            152.364291,
+            150.61795899999998,
+            152.939833
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "682c20d3da341a9dbecb948aab501f9a14323eb05e4e23fcfebcdfa7c6bd817a",
+          "clang_O2_binary_sha256": "87f35bcb8caf04be489f7ea58694e5609a7d1130275d24f01337d179f1bb33d0",
+          "workload_sha256": "e61b8b6508196cc9ad0ef3b84399f2b76b21f00eeaf8b7d64c9e89a9201289d0",
+          "output_sha256": "4a9e1c1901b5da02ce9872b564fa8d3a817a4e66bf7eaf6f0e270a9f192fd835"
+        },
+        {
+          "app": "lz4",
+          "workload": "compress",
+          "rounds": 7,
+          "keel_O_ms": 43.814583,
+          "clang_O2_ms": 28.074958000000002,
+          "ratio": 1.5556285944830623,
+          "paired_ratios": [
+            1.5545570896312646,
+            1.585936449436187,
+            1.5556285944830623,
+            1.5358432158859558,
+            1.5650930036301287,
+            1.5263805231723249,
+            1.6042517191262282
+          ],
+          "control_over_clang_O2": 0.9989744953492005,
+          "keel_O_samples_ms": [
+            43.644124999999995,
+            44.214917,
+            43.57225,
+            43.660375,
+            43.814583,
+            44.287041,
+            46.2215
+          ],
+          "clang_O2_samples_ms": [
+            28.074958000000002,
+            27.879375000000003,
+            28.009417000000003,
+            28.427625000000003,
+            27.994875,
+            29.014417,
+            28.811875
+          ],
+          "control_samples_ms": [
+            28.046167,
+            28.075791,
+            28.018625,
+            27.759124999999997,
+            28.309207999999998,
+            28.802457999999998,
+            28.714459
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "4a4215b627da501faedd6c8c503eeccca67e91ccd5fb58a735ebb60d5abd23c2",
+          "clang_O2_binary_sha256": "388546ca416a7f1a8ff87d492e47f11f1b55948420ce3071f73e4a2a52d65ad8",
+          "workload_sha256": "bf544bfea166e253c00c4b9f8f5c1ba00310a0902dabae115ed1f95b1f7b3fbe",
+          "output_sha256": "bb3b783440c615c0945a0e6b9ae3d87c2c3affb4ab2e25d66b15907a3f319a0c"
+        },
+        {
+          "app": "lz4",
+          "workload": "decompress",
+          "rounds": 7,
+          "keel_O_ms": 19.985792,
+          "clang_O2_ms": 14.008417,
+          "ratio": 1.4248918600078646,
+          "paired_ratios": [
+            1.4248918600078646,
+            1.3870195640567553,
+            1.3942389696284048,
+            1.3856049085283948,
+            1.4583215673890386,
+            1.4273234441835934,
+            1.4364892968586134
+          ],
+          "control_over_clang_O2": 0.9985157494954641,
+          "keel_O_samples_ms": [
+            19.92925,
+            19.567667,
+            20.0265,
+            19.985792,
+            20.208083000000002,
+            19.994542,
+            19.977915999999997
+          ],
+          "clang_O2_samples_ms": [
+            13.986500000000001,
+            14.107708,
+            14.36375,
+            14.423874999999999,
+            13.857083,
+            14.008417,
+            13.907459000000001
+          ],
+          "control_samples_ms": [
+            14.175208,
+            13.890375,
+            14.087041,
+            13.592625,
+            14.015959,
+            13.987625,
+            14.151499999999999
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "4a4215b627da501faedd6c8c503eeccca67e91ccd5fb58a735ebb60d5abd23c2",
+          "clang_O2_binary_sha256": "388546ca416a7f1a8ff87d492e47f11f1b55948420ce3071f73e4a2a52d65ad8",
+          "workload_sha256": "cd465be1a52f3042124349aa262ecb1558b6c01cde1d2a788495e5e2ef7b0e1a",
+          "output_sha256": "d251ca9fbaaa95a4c9dce718bd4c8c54ac8968fe79aac2f8356efaa18d9b2c4c"
+        },
+        {
+          "app": "quickjs",
+          "workload": "fib",
+          "rounds": 7,
+          "keel_O_ms": 50.066582999999994,
+          "clang_O2_ms": 36.602541,
+          "ratio": 1.3709311896888539,
+          "paired_ratios": [
+            1.3830360002599145,
+            1.36112476453479,
+            1.348855225465344,
+            1.3496593294053087,
+            1.3940915690056217,
+            1.3709311896888539,
+            1.3793266990254411
+          ],
+          "control_over_clang_O2": 1.0086852773619357,
+          "keel_O_samples_ms": [
+            50.486749999999994,
+            49.820625,
+            50.066582999999994,
+            49.944874999999996,
+            50.868833,
+            50.003458,
+            50.69175
+          ],
+          "clang_O2_samples_ms": [
+            36.504292,
+            36.602541,
+            37.117833000000005,
+            37.005542000000005,
+            36.488875,
+            36.474083,
+            36.751082999999994
+          ],
+          "control_samples_ms": [
+            36.998166999999995,
+            36.910291,
+            37.026999999999994,
+            36.888667,
+            36.805791,
+            37.123208,
+            37.147167
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "61be1ecb0be33bff97d673375268f3031e35892f1c31000e4a4b7a85379cde93",
+          "clang_O2_binary_sha256": "af17873d621523a2027f16db84aec2c8aee2eeadb14c5801b31fbdc558920425",
+          "workload_sha256": "20cec249a6a81a3b948123da1b42501719d02d01183ef4bc3722a606565b5a44",
+          "output_sha256": "9d61f0433d405f6583b7c3ca5c2046c2badd8c951f36cd2032efc2f7fc68bf11"
+        },
+        {
+          "app": "quickjs",
+          "workload": "sort",
+          "rounds": 7,
+          "keel_O_ms": 162.552958,
+          "clang_O2_ms": 106.485917,
+          "ratio": 1.5229527628907413,
+          "paired_ratios": [
+            1.540594565194945,
+            1.5146500843633197,
+            1.535329103084344,
+            1.5006602928275545,
+            1.522196531857945,
+            1.5412832160425542,
+            1.5229527628907413
+          ],
+          "control_over_clang_O2": 0.9987934620242952,
+          "keel_O_samples_ms": [
+            164.051625,
+            162.095833,
+            162.930084,
+            159.942625,
+            162.552958,
+            163.71125,
+            161.252459
+          ],
+          "clang_O2_samples_ms": [
+            106.485917,
+            107.018667,
+            106.12062499999999,
+            106.58149999999999,
+            106.788417,
+            106.2175,
+            105.881458
+          ],
+          "control_samples_ms": [
+            106.879166,
+            106.500625,
+            107.142375,
+            106.27695800000001,
+            105.776625,
+            106.164333,
+            105.753708
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "61be1ecb0be33bff97d673375268f3031e35892f1c31000e4a4b7a85379cde93",
+          "clang_O2_binary_sha256": "af17873d621523a2027f16db84aec2c8aee2eeadb14c5801b31fbdc558920425",
+          "workload_sha256": "5a07c1e419b3ba58579312ca91f32215099f1aaf19f97a4ae1b97b233585296d",
+          "output_sha256": "d50720839d3415ddcfa81315bcfea867c9760b6f52d81106104d535ab12cd946"
+        },
+        {
+          "app": "quickjs",
+          "workload": "string",
+          "rounds": 7,
+          "keel_O_ms": 402.161084,
+          "clang_O2_ms": 285.781833,
+          "ratio": 1.415573755812017,
+          "paired_ratios": [
+            1.355539569934804,
+            1.4067983400688764,
+            1.4178212127775578,
+            1.478645167450541,
+            1.3344561404520798,
+            1.4763455586471823,
+            1.415573755812017
+          ],
+          "control_over_clang_O2": 1.0410763872019866,
+          "keel_O_samples_ms": [
+            387.388583,
+            394.622291,
+            427.12537499999996,
+            425.02570899999995,
+            390.489167,
+            404.30904200000003,
+            402.161084
+          ],
+          "clang_O2_samples_ms": [
+            285.781833,
+            280.510916,
+            301.25475,
+            287.44266600000003,
+            292.62045800000004,
+            273.858,
+            284.09758400000004
+          ],
+          "control_samples_ms": [
+            278.781916,
+            292.03329099999996,
+            286.32937499999997,
+            304.2865,
+            288.45016699999996,
+            288.252958,
+            296.95604199999997
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "61be1ecb0be33bff97d673375268f3031e35892f1c31000e4a4b7a85379cde93",
+          "clang_O2_binary_sha256": "af17873d621523a2027f16db84aec2c8aee2eeadb14c5801b31fbdc558920425",
+          "workload_sha256": "12d0ed212646612f606798a3430819eb1b584a91cc4f8ee42abfc2e0b5236a49",
+          "output_sha256": "bde58dce27dfd866df9df89e037c5ea3aabe255a8ac94cc039cc4d6296b9117a"
+        },
+        {
+          "app": "sqlite",
+          "workload": "queries",
+          "rounds": 7,
+          "keel_O_ms": 308.32458299999996,
+          "clang_O2_ms": 228.770625,
+          "ratio": 1.3486312538853984,
+          "paired_ratios": [
+            1.350464703698777,
+            1.3515365065148304,
+            1.3436877865229229,
+            1.333972326767371,
+            1.3508069884409328,
+            1.3486312538853984,
+            1.3390089070113245
+          ],
+          "control_over_clang_O2": 0.9986684053460579,
+          "keel_O_samples_ms": [
+            308.1155,
+            307.598333,
+            309.906583,
+            308.328917,
+            309.02495899999997,
+            308.32458299999996,
+            307.410167
+          ],
+          "clang_O2_samples_ms": [
+            228.155167,
+            227.59158299999999,
+            230.63883299999998,
+            231.135917,
+            228.770625,
+            228.620375,
+            229.580375
+          ],
+          "control_samples_ms": [
+            227.469167,
+            228.914875,
+            228.700833,
+            229.862334,
+            231.129292,
+            230.50475,
+            229.274667
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "bd31dcc800d3cb9eac8e3833b48c30da09032bf07adacee8582054f7e26b4c18",
+          "clang_O2_binary_sha256": "c86cacad8ac52a0881009cc85a82c50137bc83652f5a73d4e052d38bdc05c2e2",
+          "workload_sha256": "3638100269a00bb3ee315d687b6bad27ff6466081b5581169506bdde1a71765b",
+          "output_sha256": "4f0493bded8ab090cfe6eee7acbd280710853df87da00fd98d47ab72ba61b0b9"
+        },
+        {
+          "app": "yyjson",
+          "workload": "api",
+          "rounds": 7,
+          "keel_O_ms": 88.633333,
+          "clang_O2_ms": 45.527625,
+          "ratio": 1.952588176970872,
+          "paired_ratios": [
+            1.8114860920525087,
+            1.8855543531983778,
+            1.952588176970872,
+            1.9371593530420659,
+            1.9613732541506392,
+            1.9588065490761501,
+            1.9654094513724694
+          ],
+          "control_over_clang_O2": 0.9961110572228039,
+          "keel_O_samples_ms": [
+            87.700458,
+            90.128791,
+            88.620167,
+            88.553042,
+            89.296666,
+            88.732875,
+            88.633333
+          ],
+          "clang_O2_samples_ms": [
+            48.413542,
+            47.799625,
+            45.386,
+            45.712833,
+            45.527625,
+            45.299458,
+            45.096625
+          ],
+          "control_samples_ms": [
+            46.283584000000005,
+            46.964833999999996,
+            46.575041,
+            45.603249999999996,
+            45.278833999999996,
+            45.123291,
+            46.418667
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "3809b8d913f910dba2930ce90bd5203271d85153767b78751138745ed7dd06a7",
+          "clang_O2_binary_sha256": "7763e85f6d96cf8be84ff0bfdacc6ed5ad6a7f53ad225a7868a8961e0ae003c7",
+          "workload_sha256": "5f4e7a508c18baf1033ffe627a850972d2c7613db4d367367aced95f6f40f2dd",
+          "output_sha256": "9831ea43267ebde6e98754ac0f70c7a362b044d3e2cc045dedcd1727ea3fd889"
+        },
+        {
+          "app": "yyjson",
+          "workload": "config",
+          "rounds": 7,
+          "keel_O_ms": 32.298042,
+          "clang_O2_ms": 18.901042,
+          "ratio": 1.7120351867352592,
+          "paired_ratios": [
+            1.7558233024396865,
+            1.7120351867352592,
+            1.719299539341279,
+            1.6817326790766352,
+            1.6866728478548085,
+            1.6395717903325648,
+            1.8542027662947906
+          ],
+          "control_over_clang_O2": 0.9905494099214212,
+          "keel_O_samples_ms": [
+            32.111083,
+            32.298042,
+            32.291167,
+            31.786500000000004,
+            32.884707999999996,
+            33.285083,
+            35.959790999999996
+          ],
+          "clang_O2_samples_ms": [
+            18.288334,
+            18.865291,
+            18.781583,
+            18.901042,
+            19.496790999999998,
+            20.301083000000002,
+            19.393667
+          ],
+          "control_samples_ms": [
+            18.878375,
+            18.344333000000002,
+            18.560667,
+            18.722416,
+            19.756708,
+            19.071375000000003,
+            20.182125
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "3809b8d913f910dba2930ce90bd5203271d85153767b78751138745ed7dd06a7",
+          "clang_O2_binary_sha256": "7763e85f6d96cf8be84ff0bfdacc6ed5ad6a7f53ad225a7868a8961e0ae003c7",
+          "workload_sha256": "a1213d80b88275ffd84552dfe08155bad607a0a1e86a7c186260f289cd2c43dd",
+          "output_sha256": "46e0d30b2ab7cfbc1558e75da340f17f283f5ae8f86731dac05cc0ccd39f8c73"
+        },
+        {
+          "app": "yyjson",
+          "workload": "telemetry",
+          "rounds": 7,
+          "keel_O_ms": 48.075832999999996,
+          "clang_O2_ms": 35.697291,
+          "ratio": 1.3467641844306897,
+          "paired_ratios": [
+            1.2205782870316488,
+            1.2788775871910854,
+            1.404591480565311,
+            1.3727252182328549,
+            1.3467641844306897,
+            1.351077166872546,
+            1.339584913180985
+          ],
+          "control_over_clang_O2": 1.0142496784272348,
+          "keel_O_samples_ms": [
+            48.440125,
+            46.862125,
+            47.641166999999996,
+            48.234875,
+            48.075832999999996,
+            48.730708,
+            47.608959
+          ],
+          "clang_O2_samples_ms": [
+            39.686209,
+            36.643167,
+            33.918166,
+            35.138041,
+            35.697291,
+            36.068042,
+            35.540083
+          ],
+          "control_samples_ms": [
+            35.697292,
+            35.553000000000004,
+            35.045125000000006,
+            36.176791,
+            36.851833,
+            36.582,
+            36.015875
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "3809b8d913f910dba2930ce90bd5203271d85153767b78751138745ed7dd06a7",
+          "clang_O2_binary_sha256": "7763e85f6d96cf8be84ff0bfdacc6ed5ad6a7f53ad225a7868a8961e0ae003c7",
+          "workload_sha256": "4db368c247e6cbe1e6d241fb498d66603911316de8a6c3859eb3d4a1fcf0b0e2",
+          "output_sha256": "d257aae73b7bc664f60d98eae5a053be8f0612ec38a1d418629d0bfded13dacb"
+        },
+        {
+          "app": "zstd",
+          "workload": "compress",
+          "rounds": 7,
+          "keel_O_ms": 126.199541,
+          "clang_O2_ms": 92.288792,
+          "ratio": 1.3674416824092788,
+          "paired_ratios": [
+            1.4496999701441908,
+            1.3674416824092788,
+            1.3435929709718992,
+            1.3525929719349452,
+            1.35224044196053,
+            1.3888209828829565,
+            1.384575476860544
+          ],
+          "control_over_clang_O2": 0.9894700973006559,
+          "keel_O_samples_ms": [
+            129.28224999999998,
+            126.199541,
+            123.689042,
+            126.624625,
+            126.179584,
+            132.12970900000002,
+            125.22008400000001
+          ],
+          "clang_O2_samples_ms": [
+            89.178625,
+            92.288792,
+            92.058417,
+            93.616208,
+            93.31150000000001,
+            95.13804200000001,
+            90.439334
+          ],
+          "control_samples_ms": [
+            95.27129199999999,
+            91.317,
+            94.49275,
+            91.993459,
+            92.963625,
+            90.8555,
+            89.425667
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "8e1997699f2180d478e24f4091efc16ca88a7149cf06fb07a59ec38de88d9af7",
+          "clang_O2_binary_sha256": "37af7f136a6612d08713f41536b023fdaaf064bf2c31fe3b8a4b1b8c6fead716",
+          "workload_sha256": "33d1a485c17170b49ca958e4e3486bb6e44772efcb77a18266d368e3c80e3485",
+          "output_sha256": "ea361d49ffb88abdf3ef49b135782ef17f33a75437996867a22f29097bd7dc5f"
+        },
+        {
+          "app": "zstd",
+          "workload": "decompress",
+          "rounds": 7,
+          "keel_O_ms": 133.60208400000002,
+          "clang_O2_ms": 136.720583,
+          "ratio": 0.9751829151603099,
+          "paired_ratios": [
+            0.9751829151603099,
+            0.9073230262711252,
+            0.9203735977894681,
+            0.9737545489441384,
+            1.0586283630996147,
+            1.0129491373478776,
+            1.0025995866328334
+          ],
+          "control_over_clang_O2": 0.9949951952907589,
+          "keel_O_samples_ms": [
+            132.45954200000003,
+            132.00204200000002,
+            133.60208400000002,
+            131.932625,
+            143.081166,
+            139.645084,
+            137.076
+          ],
+          "clang_O2_samples_ms": [
+            135.830458,
+            145.485167,
+            145.160709,
+            135.488584,
+            135.15712499999998,
+            137.859917,
+            136.720583
+          ],
+          "control_samples_ms": [
+            138.048791,
+            136.888416,
+            144.434208,
+            134.71975,
+            135.38375,
+            134.90574999999998,
+            136.494459
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "8e1997699f2180d478e24f4091efc16ca88a7149cf06fb07a59ec38de88d9af7",
+          "clang_O2_binary_sha256": "37af7f136a6612d08713f41536b023fdaaf064bf2c31fe3b8a4b1b8c6fead716",
+          "workload_sha256": "44751113a195fd546b0abb382002f5dc242db1bf52a0a2e99c9e251700dab433",
+          "output_sha256": "01c90b6b813e6b468e4f9a494fc9728b97d92f32f386de284671a41342b2e814"
+        }
+      ],
+      "builds": {
+        "lua/clang-O2": {
+          "text_bytes": 204220,
+          "input_sha256": "2298061c6746678088188bad17fa55b69ad01dce2989990759c1fe3689ba0d95",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "lua/keel-O": {
+          "text_bytes": 318620,
+          "input_sha256": "2298061c6746678088188bad17fa55b69ad01dce2989990759c1fe3689ba0d95",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "lz4/clang-O2": {
+          "text_bytes": 68648,
+          "input_sha256": "783543aba44c90c62dfaaa764cb2c872d120d80a0aa1b55b52323b224f4518b4",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "lz4/keel-O": {
+          "text_bytes": 96552,
+          "input_sha256": "783543aba44c90c62dfaaa764cb2c872d120d80a0aa1b55b52323b224f4518b4",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "quickjs/clang-O2": {
+          "text_bytes": 732544,
+          "input_sha256": "4d2ebb0c72168cd80490786f92be31c4c5f5743e1438c368e4c5db6791648796",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "quickjs/keel-O": {
+          "text_bytes": 1291432,
+          "input_sha256": "4d2ebb0c72168cd80490786f92be31c4c5f5743e1438c368e4c5db6791648796",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "sqlite/clang-O2": {
+          "text_bytes": 1098036,
+          "input_sha256": "29f9e311abdc2d6c39ffd926553d194fbc3afd7da1eba775e9a50cc29178072a",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "sqlite/keel-O": {
+          "text_bytes": 1491052,
+          "input_sha256": "29f9e311abdc2d6c39ffd926553d194fbc3afd7da1eba775e9a50cc29178072a",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "yyjson/clang-O2": {
+          "text_bytes": 200276,
+          "input_sha256": "97845481437dd14864f67b315b5acdf78ee0783a26fd6ed5b3517b4cd24c5b53",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "yyjson/keel-O": {
+          "text_bytes": 435552,
+          "input_sha256": "97845481437dd14864f67b315b5acdf78ee0783a26fd6ed5b3517b4cd24c5b53",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "zstd/clang-O2": {
+          "text_bytes": 475360,
+          "input_sha256": "e263c3760886ef6dd1bb20cafd8bb2f41a35b7f3dd3bd43342809f08e626a66b",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "zstd/keel-O": {
+          "text_bytes": 665040,
+          "input_sha256": "e263c3760886ef6dd1bb20cafd8bb2f41a35b7f3dd3bd43342809f08e626a66b",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        }
+      },
+      "raw_results_sha256": "1d83da10512dd72d65bc4d00fcd6b13039c4319b951956cc0bb1db0983a86373"
+    },
+    "amd-zen5-linux": {
+      "machine": "AMD Zen 5 desktop, Linux 7.3",
+      "target": "x86_64-unknown-linux-gnu",
+      "reference": "clang version 23.1.4 -O2",
+      "timing_protocol": "rotating-reversed-rounds-v1",
+      "load_average_start": [
+        0.18,
+        0.54,
+        0.42
+      ],
+      "load_average_end": [
+        1.29,
+        0.74,
+        0.5
+      ],
+      "overall_geomean_ratio": 1.3493858577358926,
+      "apps": {
+        "lua": {
+          "workloads": 4,
+          "geomean_ratio": 1.3300577018431416
+        },
+        "sqlite": {
+          "workloads": 1,
+          "geomean_ratio": 1.3562387458655372
+        },
+        "lz4": {
+          "workloads": 2,
+          "geomean_ratio": 1.1764198141825462
+        },
+        "yyjson": {
+          "workloads": 3,
+          "geomean_ratio": 1.2529530956764718
+        },
+        "quickjs": {
+          "workloads": 3,
+          "geomean_ratio": 1.87757844852038
+        },
+        "zstd": {
+          "workloads": 2,
+          "geomean_ratio": 1.209247114530165
+        }
+      },
+      "workloads": [
+        {
+          "app": "lua",
+          "workload": "fib",
+          "rounds": 7,
+          "keel_O_ms": 87.184619,
+          "clang_O2_ms": 64.859052,
+          "ratio": 1.3501939174971913,
+          "paired_ratios": [
+            1.3810857735015925,
+            1.3132808845417816,
+            1.3799859292221217,
+            1.3585020128542573,
+            1.3106625747293812,
+            1.3501939174971913,
+            1.301483996750004
+          ],
+          "control_over_clang_O2": 0.9958082040136917,
+          "keel_O_samples_ms": [
+            89.57591400000001,
+            88.785175,
+            87.429584,
+            87.184619,
+            85.438658,
+            86.561275,
+            86.678147
+          ],
+          "clang_O2_samples_ms": [
+            64.859052,
+            67.605625,
+            63.355416999999996,
+            64.177026,
+            65.187379,
+            64.11025400000001,
+            66.599472
+          ],
+          "control_samples_ms": [
+            63.083161,
+            63.919301,
+            64.433492,
+            63.908009,
+            65.364974,
+            66.15175199999999,
+            65.664531
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "51d315ffaeb2ee69228d1a706bef779aa1a3dda347e63a45b4b2cc39f5b0b26b",
+          "clang_O2_binary_sha256": "3f03dc468b979bcb468a989a2dce5bca3e6c2c36dfa76c36fca7a6003d39fdab",
+          "workload_sha256": "b70fecd066a5030e553f4733802cbe8f2d9b869fac5312100a8b82e8243205e7",
+          "output_sha256": "cd02788b7048b882e6cf1f6b40668e345631ec416845c2c70bb1efd312a21d8b"
+        },
+        {
+          "app": "lua",
+          "workload": "sort",
+          "rounds": 7,
+          "keel_O_ms": 72.916719,
+          "clang_O2_ms": 60.654134,
+          "ratio": 1.206697577128388,
+          "paired_ratios": [
+            1.2575368371570417,
+            1.1864874179182576,
+            1.1755875886303542,
+            1.2133522321460617,
+            1.206697577128388,
+            1.2403506970994294,
+            1.2021722872178837
+          ],
+          "control_over_clang_O2": 0.9881043427846045,
+          "keel_O_samples_ms": [
+            73.352589,
+            72.821866,
+            72.662012,
+            73.695127,
+            72.217032,
+            73.512413,
+            72.916719
+          ],
+          "clang_O2_samples_ms": [
+            58.33037,
+            61.376012,
+            61.809101,
+            60.736796000000005,
+            59.846836,
+            59.267441999999996,
+            60.654134
+          ],
+          "control_samples_ms": [
+            60.941551,
+            60.645904,
+            59.036307,
+            58.992016,
+            59.386345,
+            59.976129,
+            59.198861
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "51d315ffaeb2ee69228d1a706bef779aa1a3dda347e63a45b4b2cc39f5b0b26b",
+          "clang_O2_binary_sha256": "3f03dc468b979bcb468a989a2dce5bca3e6c2c36dfa76c36fca7a6003d39fdab",
+          "workload_sha256": "e2c1a371be0d22b3ee321dcce74a3b73d1563219198adcabab802ee43dd2d18e",
+          "output_sha256": "4f158d6d3792ec7677f8ccfb193e7bfad1d412eb074b408a30c72a474f7ab994"
+        },
+        {
+          "app": "lua",
+          "workload": "string",
+          "rounds": 7,
+          "keel_O_ms": 100.43439599999999,
+          "clang_O2_ms": 77.673539,
+          "ratio": 1.2884912711393257,
+          "paired_ratios": [
+            1.246026715936184,
+            1.268083881538539,
+            1.2884912711393257,
+            1.29302548367354,
+            1.329657394502902,
+            1.2985603532201242,
+            1.270166442471083
+          ],
+          "control_over_clang_O2": 1.0364018650275995,
+          "keel_O_samples_ms": [
+            100.43439599999999,
+            102.970695,
+            100.081677,
+            98.46639,
+            102.186257,
+            99.92492299999999,
+            100.497337
+          ],
+          "clang_O2_samples_ms": [
+            80.603726,
+            81.201801,
+            77.673539,
+            76.151933,
+            76.851569,
+            76.950542,
+            79.121392
+          ],
+          "control_samples_ms": [
+            88.89147799999999,
+            84.157698,
+            77.855803,
+            77.991036,
+            81.95830799999999,
+            81.494547,
+            81.860736
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "51d315ffaeb2ee69228d1a706bef779aa1a3dda347e63a45b4b2cc39f5b0b26b",
+          "clang_O2_binary_sha256": "3f03dc468b979bcb468a989a2dce5bca3e6c2c36dfa76c36fca7a6003d39fdab",
+          "workload_sha256": "6b3d14dadd772e26f3849df2c8fb51c0e9304c6e8aaa3958d3cf2aeb61669d1a",
+          "output_sha256": "2c09513eed4a3f7904af018aaad8037977e0923cfd71b6a599d6299a0329233d"
+        },
+        {
+          "app": "lua",
+          "workload": "float",
+          "rounds": 7,
+          "keel_O_ms": 274.289402,
+          "clang_O2_ms": 184.05343299999998,
+          "ratio": 1.490753579152202,
+          "paired_ratios": [
+            1.3904968304825795,
+            1.5345238008875228,
+            1.514931490503984,
+            1.4798555983255868,
+            1.5198046171130881,
+            1.4553643836202774,
+            1.490753579152202
+          ],
+          "control_over_clang_O2": 0.9915247522223862,
+          "keel_O_samples_ms": [
+            274.289402,
+            273.50535399999995,
+            274.11262800000003,
+            274.427225,
+            278.243504,
+            269.29335599999996,
+            274.378314
+          ],
+          "clang_O2_samples_ms": [
+            197.259998,
+            178.234677,
+            180.94061,
+            185.441894,
+            183.07846999999998,
+            185.035005,
+            184.05343299999998
+          ],
+          "control_samples_ms": [
+            183.778315,
+            177.570152,
+            182.378074,
+            183.870228,
+            178.075324,
+            182.880815,
+            200.237697
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "51d315ffaeb2ee69228d1a706bef779aa1a3dda347e63a45b4b2cc39f5b0b26b",
+          "clang_O2_binary_sha256": "3f03dc468b979bcb468a989a2dce5bca3e6c2c36dfa76c36fca7a6003d39fdab",
+          "workload_sha256": "e61b8b6508196cc9ad0ef3b84399f2b76b21f00eeaf8b7d64c9e89a9201289d0",
+          "output_sha256": "4a9e1c1901b5da02ce9872b564fa8d3a817a4e66bf7eaf6f0e270a9f192fd835"
+        },
+        {
+          "app": "lz4",
+          "workload": "compress",
+          "rounds": 7,
+          "keel_O_ms": 36.801422,
+          "clang_O2_ms": 34.734184,
+          "ratio": 1.0479176592447452,
+          "paired_ratios": [
+            1.0771519237211338,
+            1.0814489388531403,
+            1.0970482314853092,
+            0.9407460497715007,
+            1.010758248991829,
+            1.0427039919116496,
+            1.0479176592447452
+          ],
+          "control_over_clang_O2": 0.9777017247302097,
+          "keel_O_samples_ms": [
+            37.823676,
+            37.173051,
+            37.253023000000006,
+            33.743621000000005,
+            35.107863,
+            36.801422,
+            35.950601999999996
+          ],
+          "clang_O2_samples_ms": [
+            35.114523,
+            34.373376,
+            33.957507,
+            35.869001,
+            34.734184,
+            35.294218,
+            34.306705
+          ],
+          "control_samples_ms": [
+            34.594261,
+            33.606908999999995,
+            32.811108999999995,
+            31.950979999999998,
+            34.737604999999995,
+            33.953136,
+            35.301708
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "c0127ccea4a312556b4059b095848ea88c41ab17d30c36405f13ea3267f31dd4",
+          "clang_O2_binary_sha256": "7d63091c913cf25a00ddcdf23e35b2bf5a093b61731bce5beba0360b79c53b4b",
+          "workload_sha256": "bf544bfea166e253c00c4b9f8f5c1ba00310a0902dabae115ed1f95b1f7b3fbe",
+          "output_sha256": "bb3b783440c615c0945a0e6b9ae3d87c2c3affb4ab2e25d66b15907a3f319a0c"
+        },
+        {
+          "app": "lz4",
+          "workload": "decompress",
+          "rounds": 7,
+          "keel_O_ms": 19.513212,
+          "clang_O2_ms": 14.755571999999999,
+          "ratio": 1.3206796993942693,
+          "paired_ratios": [
+            1.2872432190361716,
+            1.3206796993942693,
+            1.364700068021642,
+            1.3608190416687236,
+            1.3035882659224365,
+            1.3429613065132664,
+            1.2602003087745335
+          ],
+          "control_over_clang_O2": 0.9960976775417449,
+          "keel_O_samples_ms": [
+            18.99401,
+            18.861196,
+            20.221229,
+            20.177577,
+            19.513212,
+            19.622475,
+            18.423787
+          ],
+          "clang_O2_samples_ms": [
+            14.755571999999999,
+            14.281431000000001,
+            14.817343000000001,
+            14.827524,
+            14.968846,
+            14.611348,
+            14.619729
+          ],
+          "control_samples_ms": [
+            14.697991,
+            15.09043,
+            14.490505,
+            14.739391,
+            14.501766,
+            14.560567,
+            15.12152
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "c0127ccea4a312556b4059b095848ea88c41ab17d30c36405f13ea3267f31dd4",
+          "clang_O2_binary_sha256": "7d63091c913cf25a00ddcdf23e35b2bf5a093b61731bce5beba0360b79c53b4b",
+          "workload_sha256": "cd465be1a52f3042124349aa262ecb1558b6c01cde1d2a788495e5e2ef7b0e1a",
+          "output_sha256": "d251ca9fbaaa95a4c9dce718bd4c8c54ac8968fe79aac2f8356efaa18d9b2c4c"
+        },
+        {
+          "app": "quickjs",
+          "workload": "fib",
+          "rounds": 7,
+          "keel_O_ms": 69.193772,
+          "clang_O2_ms": 37.766644,
+          "ratio": 1.8499476660983445,
+          "paired_ratios": [
+            1.8499476660983445,
+            1.8078471556415716,
+            1.8704610608239376,
+            1.7574812541123828,
+            1.7758649556255022,
+            1.8744770352483358,
+            1.9040351956011394
+          ],
+          "control_over_clang_O2": 1.0019370180934826,
+          "keel_O_samples_ms": [
+            69.193772,
+            69.322456,
+            70.641037,
+            68.394144,
+            67.947463,
+            68.58431800000001,
+            71.07699600000001
+          ],
+          "clang_O2_samples_ms": [
+            37.403097,
+            38.345308,
+            37.766644,
+            38.916002,
+            38.261616,
+            36.588508,
+            37.329665
+          ],
+          "control_samples_ms": [
+            37.713884,
+            37.023388,
+            37.767035,
+            38.991383,
+            36.977036999999996,
+            37.965359,
+            37.558721000000006
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "7f0aaa3e16aa1e925b70d7228d955c30446e44bcff88cf0721e80dff44039312",
+          "clang_O2_binary_sha256": "6f47962a9e3930612bd6a9d6f18bcb7d1a6d42e34caa8dd3dbce6a5a86b371f3",
+          "workload_sha256": "e5492dad7dfb48ce32f3c35afa3b530f58c0ef43cefa15d5533e0774ed0bee8d",
+          "output_sha256": "9d61f0433d405f6583b7c3ca5c2046c2badd8c951f36cd2032efc2f7fc68bf11"
+        },
+        {
+          "app": "quickjs",
+          "workload": "sort",
+          "rounds": 7,
+          "keel_O_ms": 190.735939,
+          "clang_O2_ms": 104.56824200000001,
+          "ratio": 1.824726250329377,
+          "paired_ratios": [
+            1.824726250329377,
+            1.7942065286216027,
+            1.8569982105161293,
+            1.7863722724170261,
+            1.850773229983153,
+            1.8083361340107176,
+            1.9059898884503204
+          ],
+          "control_over_clang_O2": 1.0018702604101097,
+          "keel_O_samples_ms": [
+            189.749595,
+            190.308108,
+            191.93616699999998,
+            190.735939,
+            193.532103,
+            189.59800199999998,
+            198.401046
+          ],
+          "clang_O2_samples_ms": [
+            103.987979,
+            106.068117,
+            103.358294,
+            106.77278299999999,
+            104.56824200000001,
+            104.84665899999999,
+            104.093441
+          ],
+          "control_samples_ms": [
+            102.199498,
+            106.266492,
+            103.692042,
+            104.279905,
+            105.00454300000001,
+            104.01689999999999,
+            109.13956800000001
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "7f0aaa3e16aa1e925b70d7228d955c30446e44bcff88cf0721e80dff44039312",
+          "clang_O2_binary_sha256": "6f47962a9e3930612bd6a9d6f18bcb7d1a6d42e34caa8dd3dbce6a5a86b371f3",
+          "workload_sha256": "30523412e1ffdaeca9b2949977ce3b75c1b6365dd85149e4f3cefad43f6328ef",
+          "output_sha256": "d50720839d3415ddcfa81315bcfea867c9760b6f52d81106104d535ab12cd946"
+        },
+        {
+          "app": "quickjs",
+          "workload": "string",
+          "rounds": 7,
+          "keel_O_ms": 373.80495,
+          "clang_O2_ms": 190.459002,
+          "ratio": 1.9608172209156072,
+          "paired_ratios": [
+            1.957086794737535,
+            1.9608172209156072,
+            1.968366842470427,
+            1.9698766634289377,
+            1.939451450641693,
+            1.9467509184639455,
+            2.0120589595730336
+          ],
+          "control_over_clang_O2": 0.9950496298749191,
+          "keel_O_samples_ms": [
+            374.358453,
+            373.45529100000005,
+            373.022171,
+            373.80495,
+            374.987428,
+            373.076553,
+            382.681916
+          ],
+          "clang_O2_samples_ms": [
+            191.283521,
+            190.459002,
+            189.50846099999998,
+            189.76058600000002,
+            193.34715899999998,
+            191.64062,
+            190.19418599999997
+          ],
+          "control_samples_ms": [
+            190.270578,
+            189.353677,
+            191.66039,
+            190.738389,
+            188.31663300000002,
+            190.69192800000002,
+            189.868239
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "7f0aaa3e16aa1e925b70d7228d955c30446e44bcff88cf0721e80dff44039312",
+          "clang_O2_binary_sha256": "6f47962a9e3930612bd6a9d6f18bcb7d1a6d42e34caa8dd3dbce6a5a86b371f3",
+          "workload_sha256": "0254311125a737683e39a46f63c4fe31380b374ed2b760991fc134bf781f7563",
+          "output_sha256": "bde58dce27dfd866df9df89e037c5ea3aabe255a8ac94cc039cc4d6296b9117a"
+        },
+        {
+          "app": "sqlite",
+          "workload": "queries",
+          "rounds": 7,
+          "keel_O_ms": 317.315923,
+          "clang_O2_ms": 233.71688500000002,
+          "ratio": 1.3562387458655372,
+          "paired_ratios": [
+            1.3562387458655372,
+            1.369614511954145,
+            1.3518289905409773,
+            1.3462604636269708,
+            1.3780180748848991,
+            1.3507826132855976,
+            1.3573401911896033
+          ],
+          "control_over_clang_O2": 0.9942202678253221,
+          "keel_O_samples_ms": [
+            316.975895,
+            318.065511,
+            315.586073,
+            317.315923,
+            317.35207399999996,
+            316.350731,
+            317.372765
+          ],
+          "clang_O2_samples_ms": [
+            233.71688500000002,
+            232.229951,
+            233.45118000000002,
+            235.701732,
+            230.29601699999998,
+            234.198107,
+            233.81961800000002
+          ],
+          "control_samples_ms": [
+            232.36606400000002,
+            236.281395,
+            234.560675,
+            233.49567,
+            234.742229,
+            232.39765500000001,
+            231.30723
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "c655cb8c0643c6bfc616b6df31278a7b70c232749e88fb10cba0d3d953737de5",
+          "clang_O2_binary_sha256": "8ebe6f2fbf569e488fb5d0ed5f779d80bd0dc976709ab87fafe2b5231b6d775e",
+          "workload_sha256": "3638100269a00bb3ee315d687b6bad27ff6466081b5581169506bdde1a71765b",
+          "output_sha256": "4f0493bded8ab090cfe6eee7acbd280710853df87da00fd98d47ab72ba61b0b9"
+        },
+        {
+          "app": "yyjson",
+          "workload": "api",
+          "rounds": 7,
+          "keel_O_ms": 51.495042999999995,
+          "clang_O2_ms": 41.542672,
+          "ratio": 1.247942163387785,
+          "paired_ratios": [
+            1.2230949788885546,
+            1.251960239121538,
+            1.2822741687951391,
+            1.237900922694621,
+            1.247942163387785,
+            1.2273892485304645,
+            1.255475389220672
+          ],
+          "control_over_clang_O2": 1.0024921518545742,
+          "keel_O_samples_ms": [
+            51.027262,
+            51.170666,
+            52.663681,
+            51.425712,
+            51.495042999999995,
+            51.844981999999995,
+            52.577578
+          ],
+          "clang_O2_samples_ms": [
+            41.719787000000004,
+            40.872437,
+            41.070531,
+            41.542672,
+            41.263965999999996,
+            42.240049,
+            41.878620999999995
+          ],
+          "control_samples_ms": [
+            40.908258000000004,
+            41.291166999999994,
+            41.172885,
+            41.41589,
+            41.478082,
+            42.620857,
+            41.280087
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "99d2de4d54b98b1b1798d501447c394fa5296eb7d6eba0ec67f5655fc69fd4fb",
+          "clang_O2_binary_sha256": "78ab9cef0574f2cfe3ebde7137b68b27b782b36e5601ac576f341b4a7c8928f9",
+          "workload_sha256": "f3130c0a28e921b19f74ecf97a455f34f7f3c7a318867d74fe1aada01a8a239b",
+          "output_sha256": "9831ea43267ebde6e98754ac0f70c7a362b044d3e2cc045dedcd1727ea3fd889"
+        },
+        {
+          "app": "yyjson",
+          "workload": "config",
+          "rounds": 7,
+          "keel_O_ms": 18.229392,
+          "clang_O2_ms": 14.226239999999999,
+          "ratio": 1.2791645393543802,
+          "paired_ratios": [
+            1.2197247567462162,
+            1.232367785241946,
+            1.293494697123063,
+            1.3195199190455131,
+            1.2791645393543802,
+            1.281825474706888,
+            1.2707950912674906
+          ],
+          "control_over_clang_O2": 1.0039132616910722,
+          "keel_O_samples_ms": [
+            18.239552999999997,
+            17.841193,
+            18.401566000000003,
+            18.229392,
+            17.705941,
+            17.750541000000002,
+            18.277354
+          ],
+          "clang_O2_samples_ms": [
+            14.953826999999999,
+            14.477166,
+            14.226239999999999,
+            13.81517,
+            13.841801,
+            13.847861,
+            14.382613000000001
+          ],
+          "control_samples_ms": [
+            14.758192,
+            14.116137,
+            14.281911,
+            14.824703999999999,
+            14.469215,
+            13.852771,
+            15.336326000000001
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "99d2de4d54b98b1b1798d501447c394fa5296eb7d6eba0ec67f5655fc69fd4fb",
+          "clang_O2_binary_sha256": "78ab9cef0574f2cfe3ebde7137b68b27b782b36e5601ac576f341b4a7c8928f9",
+          "workload_sha256": "88c5f7e1c2394c71f7c09994afe599ca1f3772d76b8f6064b4a7de167795c8b6",
+          "output_sha256": "46e0d30b2ab7cfbc1558e75da340f17f283f5ae8f86731dac05cc0ccd39f8c73"
+        },
+        {
+          "app": "yyjson",
+          "workload": "telemetry",
+          "rounds": 7,
+          "keel_O_ms": 33.817904000000006,
+          "clang_O2_ms": 27.155199,
+          "ratio": 1.232206713727292,
+          "paired_ratios": [
+            1.2135545693983982,
+            1.237141735734025,
+            1.2280908766482872,
+            1.2645996812617724,
+            1.2759604557861937,
+            1.221000291282832,
+            1.232206713727292
+          ],
+          "control_over_clang_O2": 0.9846416993337817,
+          "keel_O_samples_ms": [
+            33.405854,
+            33.817904000000006,
+            33.026106,
+            34.340455999999996,
+            33.831613000000004,
+            33.857194,
+            33.126527
+          ],
+          "clang_O2_samples_ms": [
+            27.527278,
+            27.335513,
+            26.892233,
+            27.155199,
+            26.514625,
+            27.729063,
+            26.883904
+          ],
+          "control_samples_ms": [
+            26.999286,
+            26.370941,
+            26.479214000000002,
+            27.19368,
+            26.225948,
+            26.610786,
+            26.669677999999998
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "99d2de4d54b98b1b1798d501447c394fa5296eb7d6eba0ec67f5655fc69fd4fb",
+          "clang_O2_binary_sha256": "78ab9cef0574f2cfe3ebde7137b68b27b782b36e5601ac576f341b4a7c8928f9",
+          "workload_sha256": "5a442609e73ed1a2475dd17ece5ff1639423d76212f8cac23ec97fbe0416fd09",
+          "output_sha256": "d257aae73b7bc664f60d98eae5a053be8f0612ec38a1d418629d0bfded13dacb"
+        },
+        {
+          "app": "zstd",
+          "workload": "compress",
+          "rounds": 7,
+          "keel_O_ms": 92.961545,
+          "clang_O2_ms": 63.486161,
+          "ratio": 1.4639437458452487,
+          "paired_ratios": [
+            1.5167357519936049,
+            1.4548438359660776,
+            1.4639437458452487,
+            1.480209883701477,
+            1.496513211145876,
+            1.4490239967654137,
+            1.4359386630534063
+          ],
+          "control_over_clang_O2": 0.9920772809610872,
+          "keel_O_samples_ms": [
+            93.18819,
+            92.36245,
+            93.003866,
+            93.609,
+            92.961545,
+            92.376681,
+            92.446653
+          ],
+          "clang_O2_samples_ms": [
+            61.439963999999996,
+            63.486161,
+            63.529672,
+            63.240356,
+            62.11876,
+            63.750967,
+            64.38064200000001
+          ],
+          "control_samples_ms": [
+            61.779692,
+            62.878358,
+            62.945519000000004,
+            63.674704999999996,
+            62.853056,
+            63.245886,
+            63.335398
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "997c3adf4d997e3f6be5c54df3bce00a0c8457feeb0341bf368c51701a5ba540",
+          "clang_O2_binary_sha256": "1239873b460fb082f639bd7404fa645a7d53fb58dba08589094bf0c0cb9775df",
+          "workload_sha256": "33d1a485c17170b49ca958e4e3486bb6e44772efcb77a18266d368e3c80e3485",
+          "output_sha256": "ea361d49ffb88abdf3ef49b135782ef17f33a75437996867a22f29097bd7dc5f"
+        },
+        {
+          "app": "zstd",
+          "workload": "decompress",
+          "rounds": 7,
+          "keel_O_ms": 162.624199,
+          "clang_O2_ms": 162.763293,
+          "ratio": 0.9988625506612231,
+          "paired_ratios": [
+            1.0046607160327905,
+            0.9988625506612231,
+            0.9987076129489815,
+            1.000605208389113,
+            0.9986944023507229,
+            1.0014880693299417,
+            0.9934981020356649
+          ],
+          "control_over_clang_O2": 1.0023760526364163,
+          "keel_O_samples_ms": [
+            163.468969,
+            162.578158,
+            162.538897,
+            162.624199,
+            162.613229,
+            163.134671,
+            163.097451
+          ],
+          "clang_O2_samples_ms": [
+            162.710621,
+            162.763293,
+            162.749232,
+            162.525837,
+            162.825814,
+            162.892276,
+            164.164834
+          ],
+          "control_samples_ms": [
+            163.09723,
+            163.268954,
+            162.504656,
+            163.07259,
+            163.51727,
+            162.590379,
+            162.600038
+          ],
+          "keel_O_positions": [
+            1,
+            0,
+            2,
+            1,
+            2,
+            0,
+            1
+          ],
+          "clang_O2_positions": [
+            0,
+            2,
+            1,
+            2,
+            0,
+            1,
+            0
+          ],
+          "keel_O_binary_sha256": "997c3adf4d997e3f6be5c54df3bce00a0c8457feeb0341bf368c51701a5ba540",
+          "clang_O2_binary_sha256": "1239873b460fb082f639bd7404fa645a7d53fb58dba08589094bf0c0cb9775df",
+          "workload_sha256": "44751113a195fd546b0abb382002f5dc242db1bf52a0a2e99c9e251700dab433",
+          "output_sha256": "01c90b6b813e6b468e4f9a494fc9728b97d92f32f386de284671a41342b2e814"
+        }
+      ],
+      "builds": {
+        "lua/clang-O2": {
+          "text_bytes": 198708,
+          "input_sha256": "e1305b44e4a2deb462534032c35853ae53d8acbb1c866d046a82993e21283169",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "lua/keel-O": {
+          "text_bytes": 299272,
+          "input_sha256": "e1305b44e4a2deb462534032c35853ae53d8acbb1c866d046a82993e21283169",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "lz4/clang-O2": {
+          "text_bytes": 79616,
+          "input_sha256": "e8dbec4c9a0395e4123b35eed570f4999a9186a6b8e6633917b5344bc9ad570c",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "lz4/keel-O": {
+          "text_bytes": 110216,
+          "input_sha256": "e8dbec4c9a0395e4123b35eed570f4999a9186a6b8e6633917b5344bc9ad570c",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "quickjs/clang-O2": {
+          "text_bytes": 791171,
+          "input_sha256": "49853f4f208a6f7740e189b991412a6db95f2ba14f0d814e0c84fb28fca5cc5a",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "quickjs/keel-O": {
+          "text_bytes": 1465923,
+          "input_sha256": "49853f4f208a6f7740e189b991412a6db95f2ba14f0d814e0c84fb28fca5cc5a",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "sqlite/clang-O2": {
+          "text_bytes": 1129875,
+          "input_sha256": "ec0900f5044846ca64c0295a5de173ea1c5a737a7377212d4520fb6acef40f40",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "sqlite/keel-O": {
+          "text_bytes": 1496931,
+          "input_sha256": "ec0900f5044846ca64c0295a5de173ea1c5a737a7377212d4520fb6acef40f40",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "yyjson/clang-O2": {
+          "text_bytes": 246511,
+          "input_sha256": "f9c3c0a0fb99c617a94e18fcf9529f55ca997d7c9f4e0f6f7af12ca1279dbc6e",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "yyjson/keel-O": {
+          "text_bytes": 444306,
+          "input_sha256": "f9c3c0a0fb99c617a94e18fcf9529f55ca997d7c9f4e0f6f7af12ca1279dbc6e",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        },
+        "zstd/clang-O2": {
+          "text_bytes": 610459,
+          "input_sha256": "4a47bd5136dc530cb6ac723176c96ce72bb4cc717f47fc8a420a7bba26eff143",
+          "config_flags": [
+            "-O2"
+          ]
+        },
+        "zstd/keel-O": {
+          "text_bytes": 814810,
+          "input_sha256": "4a47bd5136dc530cb6ac723176c96ce72bb4cc717f47fc8a420a7bba26eff143",
+          "config_flags": [
+            "--link-intent",
+            "executable",
+            "-O"
+          ]
+        }
+      },
+      "raw_results_sha256": "4bc727e8cc2ef816a38be3878f6bd82923748a80a3fb3b493753f18b62b0b9c2"
+    }
+  }
+}

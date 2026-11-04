@@ -6,11 +6,11 @@ text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 .muted{fill:var(--ink-2)}
 </style>
 <title id="ir-object-t">Keel IR → object file (backend only) (lower is better)</title>
-<desc id="ir-object-d">Keel baseline: 377 µs; Keel full: 413 µs; Cranelift none: 775 µs; Cranelift speed: 1011 µs. Keel full is 2.4× faster than Cranelift speed. Apple M5 Max · macOS 27, median of 7 runs.</desc>
+<desc id="ir-object-d">Keel baseline: 415 µs; Keel full: 474 µs; Cranelift none: 765 µs; Cranelift speed: 1040 µs. Keel full is 2.2× faster than Cranelift speed. Apple M5 Max · macOS 27, median of 7 runs.</desc>
 <rect width="720" height="282" rx="10" fill="var(--surface)"/>
 <text x="24" y="38" font-size="18" font-weight="650">Keel IR → object file (backend only)</text>
 <text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 runs</text>
-<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">2.4× faster</text>
+<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">2.2× faster</text>
 <text class="muted" x="696" y="60" font-size="12" text-anchor="end">Keel full vs Cranelift speed</text>
 <path d="M174.0 78V220" stroke="var(--grid)"/>
 <text class="muted" x="174.0" y="236" font-size="11" text-anchor="middle">0</text>
@@ -26,15 +26,15 @@ text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 <text class="muted" x="612.0" y="236" font-size="11" text-anchor="middle">1250</text>
 <text class="muted" x="393.0" y="260" font-size="12" text-anchor="middle">Wall time (µs) · lower is better</text>
 <text x="162" y="101.0" font-size="13" text-anchor="end" font-weight="600">Keel baseline</text>
-<path d="M174 87.0h128.10a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-128.10z" fill="var(--keel)"/>
-<text x="314.10" y="101.0" font-size="12" font-weight="600">377 µs</text>
+<path d="M174 87.0h141.55a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-141.55z" fill="var(--keel)"/>
+<text x="327.55" y="101.0" font-size="12" font-weight="600">415 µs</text>
 <text x="162" y="135.0" font-size="13" text-anchor="end" font-weight="600">Keel full</text>
-<path d="M174 121.0h140.76a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-140.76z" fill="var(--keel)"/>
-<text x="326.76" y="135.0" font-size="12" font-weight="600">413 µs</text>
+<path d="M174 121.0h161.94a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-161.94z" fill="var(--keel)"/>
+<text x="347.94" y="135.0" font-size="12" font-weight="600">474 µs</text>
 <text x="162" y="169.0" font-size="13" text-anchor="end">Cranelift none</text>
-<path d="M174 155.0h267.38a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-267.38z" fill="var(--other)"/>
-<text x="453.38" y="169.0" font-size="12">775 µs</text>
+<path d="M174 155.0h264.01a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-264.01z" fill="var(--other)"/>
+<text x="450.01" y="169.0" font-size="12">765 µs</text>
 <text x="162" y="203.0" font-size="13" text-anchor="end">Cranelift speed</text>
-<path d="M174 189.0h350.17a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-350.17z" fill="var(--other)"/>
-<text x="536.17" y="203.0" font-size="12">1011 µs</text>
+<path d="M174 189.0h360.26a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-360.26z" fill="var(--other)"/>
+<text x="546.26" y="203.0" font-size="12">1040 µs</text>
 </svg>

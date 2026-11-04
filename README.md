@@ -96,23 +96,27 @@ kernel. These measurements use nine alternating pairs on an AMD Ryzen 9
 Keel compiles quickly and supports application workloads and the kernel
 milestone above. Generated code still trails GCC and Clang in runtime and
 size optimization on the measured workloads.
-The application and toolchain measurements below use an Apple M5 Max.
-[Compiler](docs/benchmarks/compiler-20261024.md) ·
-[assembler/linker](docs/benchmarks/assembly-link-20261024.md) ·
-[runtime](docs/benchmarks/runtime-20261022.md) methodology
+Runtime is measured on an Apple M5 Max and an AMD Zen 5 Linux desktop. The
+toolchain timings use the Apple M5 Max.
+[Compiler](docs/benchmarks/compiler-20261105.md) ·
+[assembler/linker](docs/benchmarks/assembly-link-20261105.md) ·
+[runtime](docs/benchmarks/runtime-20261105.md) methodology
 
-<p align="center"><img src="docs/assets/readme-c-object.svg" alt="C source to object file: Keel 4.32 ms, Keel -O 5.35 ms, Clang -O0 16.8 ms, Clang -O2 41.8 ms" width="720"></p>
+<p align="center"><img src="docs/assets/readme-c-object.svg" alt="C source to object file: Keel 4.58 ms, Keel -O 6.07 ms, Clang -O0 16.2 ms, Clang -O2 41.2 ms" width="720"></p>
 
-<p align="center"><img src="docs/assets/readme-runtime.svg" alt="Run time of Keel -O programs relative to Clang -O2: Lua 1.34x, SQLite 1.48x, LZ4 1.49x, yyjson 1.66x, QuickJS 1.89x; 1.6x slower overall" width="720"></p>
+<p align="center"><img src="docs/assets/readme-runtime.svg" alt="Run time of Keel -O programs relative to Clang -O2 on an Apple M5 Max: Lua 1.22x, SQLite 1.35x, LZ4 1.49x, yyjson 1.65x, QuickJS 1.44x, Zstd 1.15x; 1.4x slower overall" width="720"></p>
 
-<p align="center"><img src="docs/assets/readme-ir-object.svg" alt="Keel IR to object file, backend only: Keel baseline 377 µs, Keel full 413 µs, Cranelift none 775 µs, Cranelift speed 1011 µs" width="720"></p>
+<p align="center"><img src="docs/assets/readme-runtime-x86.svg" alt="Run time of Keel -O programs relative to Clang -O2 on an AMD Zen 5 Linux desktop: Lua 1.33x, SQLite 1.36x, LZ4 1.18x, yyjson 1.25x, QuickJS 1.88x, Zstd 1.21x; 1.3x slower overall" width="720"></p>
 
-<p align="center"><img src="docs/assets/readme-assembly.svg" alt="Assembly to object file: keel asm 5.60 ms, clang -cc1as 16.8 ms, clang -c 23.1 ms" width="720"></p>
+<p align="center"><img src="docs/assets/readme-ir-object.svg" alt="Keel IR to object file, backend only: Keel baseline 415 µs, Keel full 474 µs, Cranelift none 765 µs, Cranelift speed 1040 µs" width="720"></p>
 
-<p align="center"><img src="docs/assets/readme-link.svg" alt="Objects to signed executable: keel link 8.45 ms, Apple ld 14.8 ms, clang 22.0 ms" width="720"></p>
+<p align="center"><img src="docs/assets/readme-assembly.svg" alt="Assembly to object file: keel asm 6.18 ms, clang -cc1as 17.3 ms, clang -c 23.5 ms" width="720"></p>
+
+<p align="center"><img src="docs/assets/readme-link.svg" alt="Objects to signed executable: keel link 16.7 ms, Apple ld 14.7 ms, clang 22.4 ms" width="720"></p>
 
 Charts are generated from the benchmark data by
 [`docs/assets/readme-render-charts.py`](docs/assets/readme-render-charts.py).
+`python3 tools/test.py charts` checks them against that data.
 
 ## Documentation
 

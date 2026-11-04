@@ -1,0 +1,4370 @@
+{
+  "schema": 1,
+  "environment": {
+    "head": "8226e95c0043b2f7066a58834047779cbb194c02",
+    "compiler_source_status": "",
+    "host": {
+      "system": "Darwin",
+      "node": "apple-m5-max",
+      "release": "27.0.0",
+      "version": "Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:40 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6050",
+      "machine": "arm64"
+    },
+    "cpu": "Apple M5 Max",
+    "hardware": "hw.model: Mac17,7\nhw.memsize: 137438953472\nhw.ncpu: 18\n",
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+    "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+    "clang_path": "/usr/bin/clang",
+    "load_start": [
+      3.67578125,
+      3.77734375,
+      4.21728515625
+    ],
+    "binaries_sha256": {
+      "target/release/keel": "09112a37ada90c331a8711e8216b1e0b1362713b0058edaeb108fef51fc53c13",
+      "crates/keel-cranelift/target/release/keel-cranelift-bench": "2227e835054df9d9a6407fad4426542ec67b1d34e43cd7c6c848586194a894d4",
+      "/usr/bin/clang": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
+    },
+    "inputs_sha256": {
+      "crates/keel-cranelift/kernels/kernels.c": "145a70a771624858c8c2638bbd598037c88627f9f0c79d3699eb179186dd56da",
+      "crates/keel-cranelift/kernels/driver.c": "c37d2a1d88e2972f3294794e986fdc96c9e72d887a18d10712e581732157e349"
+    },
+    "locks_sha256": {
+      "Cargo.lock": "66a48097c0b3de08cfd5c76e6f235b2178c47fd9bfd549ebc5ff0044d09e3bed",
+      "crates/keel-cranelift/Cargo.lock": "0406ad95c002368b7eb368575aac1ed9a6a60826188bb7156c3ff59005815bb3"
+    },
+    "source_note": "Keel and runner sources are those of commit 8226e95c; the measuring checkout differed only in documentation, test-runner files and the date the assembly and link runner records."
+  },
+  "protocol": {
+    "warmups": 2,
+    "rounds": 7,
+    "seed": 20261024,
+    "c_order": "seeded shuffled configurations per round",
+    "ir_order": "existing in-process harness rotates configurations each round; not randomized",
+    "c_boundary": "subprocess wall time: raw C read, preprocessing, frontend (including Keel frontend-IR verification), configured optimization, native code generation, integrated assembly, object write; no linking",
+    "ir_boundary": "sum of backend stage timers on identical parsed verified Keel IR; excludes parse/verify, IR optimization, process startup, filesystem writes, linking; CLIF verifier off during timing, on for gated objects; FNV64 verifier-on/off fingerprints checked per sample by existing harness",
+    "features": "native objects include unwind services; Cranelift unwind_info=false; unequal services",
+    "target_keel": "aarch64-apple-darwin",
+    "target_clang": "arm64-apple-macosx11.0.0",
+    "scope": "one maintained kernels translation unit; 21 named kernel checks plus helpers; no application or runtime performance claim",
+    "host_control": "no enforced quiet-host gate, core pinning, frequency control or scheduling isolation; load snapshots only"
+  },
+  "correctness_passed": true,
+  "correctness": {
+    "keel-raw": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "keel-O": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "clang-O0": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "clang-O2": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-keel-baseline": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-keel-full": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-clif-none": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "raw-clif-speed": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-keel-baseline": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-keel-full": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-clif-none": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    },
+    "O-clif-speed": {
+      "agrees_with_clang_O0": true,
+      "lines": 795,
+      "sha256": "8c96f7f4eb623e7d2ad3b9f5e9b73727e8f32fb3cc0843f3a7ad2f3e067a3b56"
+    }
+  },
+  "ir_sha256": {
+    "raw": "0e48664ff85bf52e726c710700c0c7b523c75d6bfd388967d3d15368259965a2",
+    "O": "41a099932fb9ad2564af58dfaf378912fdc020b1eb06a9e41d8f9925e8ac847d"
+  },
+  "objects_sha256": {
+    "keel-raw": "b204fd9ac9a764d14a7e3b4e872f98710e06772cf67c84aaf216110290bd0e54",
+    "keel-O": "6f3acb534a86c4f304879df9f69a35b92997efb4d0efaabb2a4b384f94cc7dd3",
+    "clang-O0": "18985e9b3633691d94d0375bbd57af7ea7e391c5dfdfe448e199a531dace7ec7",
+    "clang-O2": "23807732e3db129899baf33338b785f5734123825ae09b73bf43a394c2d9f2a8",
+    "raw-keel-baseline": "b204fd9ac9a764d14a7e3b4e872f98710e06772cf67c84aaf216110290bd0e54",
+    "raw-keel-full": "367ac9287f21736f13a84cf37443f5c71e115201d0555fdce13a30d0c1699bdf",
+    "raw-clif-none": "9b58aa81b76a55a76cba2ae29ba94003df1202ce5df23e038d8e2d046928ec92",
+    "raw-clif-speed": "dd4b8a2c64d00ea43813c68d5aeb61d993ebb7bed84898ff9996766194feef7c",
+    "O-keel-baseline": "6e1d34f8105c45485acc10f234e315abe9cd24d4d8e9565d25131dd629889a1a",
+    "O-keel-full": "6f3acb534a86c4f304879df9f69a35b92997efb4d0efaabb2a4b384f94cc7dd3",
+    "O-clif-none": "b93bb22ea393db3e028d1cf076493978b39c7506e97e60085ebfe4e47c114af6",
+    "O-clif-speed": "0b8ceae9a901f8b29124fd00516785ea7620d26b04ca54a5f1064714cf7c20f6"
+  },
+  "c_to_object": {
+    "keel-raw": {
+      "samples_ns": [
+        4945458,
+        4411334,
+        4402958,
+        4579208,
+        4459917,
+        4650750,
+        4740291
+      ],
+      "median_ms": 4.579208,
+      "object_bytes": 9382,
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ]
+    },
+    "keel-O": {
+      "samples_ns": [
+        6073167,
+        6125292,
+        5748208,
+        5941667,
+        6005583,
+        6382375,
+        6141333
+      ],
+      "median_ms": 6.073167,
+      "object_bytes": 8765,
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ]
+    },
+    "clang-O0": {
+      "samples_ns": [
+        16167500,
+        16225750,
+        16411750,
+        15715667,
+        16297750,
+        16186125,
+        15881208
+      ],
+      "median_ms": 16.186125,
+      "object_bytes": 8872,
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ]
+    },
+    "clang-O2": {
+      "samples_ns": [
+        41013750,
+        41296750,
+        40802250,
+        41151625,
+        41406209,
+        41070875,
+        41362083
+      ],
+      "median_ms": 41.151625,
+      "object_bytes": 7304,
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ]
+    }
+  },
+  "c_orders_including_warmups": [
+    [
+      "clang-O2",
+      "keel-raw",
+      "clang-O0",
+      "keel-O"
+    ],
+    [
+      "keel-O",
+      "keel-raw",
+      "clang-O2",
+      "clang-O0"
+    ],
+    [
+      "clang-O2",
+      "keel-raw",
+      "clang-O0",
+      "keel-O"
+    ],
+    [
+      "clang-O2",
+      "clang-O0",
+      "keel-O",
+      "keel-raw"
+    ],
+    [
+      "keel-O",
+      "keel-raw",
+      "clang-O0",
+      "clang-O2"
+    ],
+    [
+      "keel-raw",
+      "clang-O0",
+      "clang-O2",
+      "keel-O"
+    ],
+    [
+      "keel-raw",
+      "keel-O",
+      "clang-O0",
+      "clang-O2"
+    ],
+    [
+      "keel-raw",
+      "clang-O2",
+      "keel-O",
+      "clang-O0"
+    ],
+    [
+      "keel-O",
+      "clang-O2",
+      "keel-raw",
+      "clang-O0"
+    ]
+  ],
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "returncode": 0,
+      "wall_ns": 5615459
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD^{tree}"
+      ],
+      "returncode": 0,
+      "wall_ns": 6641000
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain",
+        "--",
+        "crates",
+        "Cargo.toml",
+        "Cargo.lock"
+      ],
+      "returncode": 0,
+      "wall_ns": 13675416
+    },
+    {
+      "argv": [
+        "sysctl",
+        "-n",
+        "machdep.cpu.brand_string"
+      ],
+      "returncode": 0,
+      "wall_ns": 2173792
+    },
+    {
+      "argv": [
+        "sysctl",
+        "hw.model",
+        "hw.memsize",
+        "hw.ncpu"
+      ],
+      "returncode": 0,
+      "wall_ns": 2093333
+    },
+    {
+      "argv": [
+        "sw_vers"
+      ],
+      "returncode": 0,
+      "wall_ns": 5925250
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "--version"
+      ],
+      "returncode": 0,
+      "wall_ns": 7290292
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/driver.c",
+        "-o",
+        "bench-out/driver.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 50514667
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4881542
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5703458
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 17753666
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41664792
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-ir",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 4147750
+    },
+    {
+      "argv": [
+        "crates/keel-cranelift/target/release/keel-cranelift-bench",
+        "support",
+        "bench-out/kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 7722333
+    },
+    {
+      "argv": [
+        "crates/keel-cranelift/target/release/keel-cranelift-bench",
+        "objects",
+        "--out-dir",
+        "bench-out",
+        "--label",
+        "raw",
+        "bench-out/kernels.raw.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 9033291
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-ir",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 5394000
+    },
+    {
+      "argv": [
+        "crates/keel-cranelift/target/release/keel-cranelift-bench",
+        "support",
+        "bench-out/kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 5750875
+    },
+    {
+      "argv": [
+        "crates/keel-cranelift/target/release/keel-cranelift-bench",
+        "objects",
+        "--out-dir",
+        "bench-out",
+        "--label",
+        "O",
+        "bench-out/kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 8462250
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/keel-raw.o",
+        "-o",
+        "bench-out/check-keel-raw"
+      ],
+      "returncode": 0,
+      "wall_ns": 22623208
+    },
+    {
+      "argv": [
+        "bench-out/check-keel-raw",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5156750
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/keel-O.o",
+        "-o",
+        "bench-out/check-keel-O"
+      ],
+      "returncode": 0,
+      "wall_ns": 21733458
+    },
+    {
+      "argv": [
+        "bench-out/check-keel-O",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4948458
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/clang-O0.o",
+        "-o",
+        "bench-out/check-clang-O0"
+      ],
+      "returncode": 0,
+      "wall_ns": 21360625
+    },
+    {
+      "argv": [
+        "bench-out/check-clang-O0",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 6254541
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/clang-O2.o",
+        "-o",
+        "bench-out/check-clang-O2"
+      ],
+      "returncode": 0,
+      "wall_ns": 21345875
+    },
+    {
+      "argv": [
+        "bench-out/check-clang-O2",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4466709
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/raw.keel-baseline.o",
+        "-o",
+        "bench-out/check-raw-keel-baseline"
+      ],
+      "returncode": 0,
+      "wall_ns": 21451166
+    },
+    {
+      "argv": [
+        "bench-out/check-raw-keel-baseline",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5288417
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/raw.keel-full.o",
+        "-o",
+        "bench-out/check-raw-keel-full"
+      ],
+      "returncode": 0,
+      "wall_ns": 21837083
+    },
+    {
+      "argv": [
+        "bench-out/check-raw-keel-full",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5186000
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/raw.clif-none.o",
+        "-o",
+        "bench-out/check-raw-clif-none"
+      ],
+      "returncode": 0,
+      "wall_ns": 21412625
+    },
+    {
+      "argv": [
+        "bench-out/check-raw-clif-none",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 5050667
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/raw.clif-speed.o",
+        "-o",
+        "bench-out/check-raw-clif-speed"
+      ],
+      "returncode": 0,
+      "wall_ns": 21411709
+    },
+    {
+      "argv": [
+        "bench-out/check-raw-clif-speed",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4981375
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/O.keel-baseline.o",
+        "-o",
+        "bench-out/check-O-keel-baseline"
+      ],
+      "returncode": 0,
+      "wall_ns": 20997333
+    },
+    {
+      "argv": [
+        "bench-out/check-O-keel-baseline",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4861083
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/O.keel-full.o",
+        "-o",
+        "bench-out/check-O-keel-full"
+      ],
+      "returncode": 0,
+      "wall_ns": 21491292
+    },
+    {
+      "argv": [
+        "bench-out/check-O-keel-full",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4889459
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/O.clif-none.o",
+        "-o",
+        "bench-out/check-O-clif-none"
+      ],
+      "returncode": 0,
+      "wall_ns": 21362167
+    },
+    {
+      "argv": [
+        "bench-out/check-O-clif-none",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4698125
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "bench-out/driver.o",
+        "bench-out/O.clif-speed.o",
+        "-o",
+        "bench-out/check-O-clif-speed"
+      ],
+      "returncode": 0,
+      "wall_ns": 21529833
+    },
+    {
+      "argv": [
+        "bench-out/check-O-clif-speed",
+        "check"
+      ],
+      "returncode": 0,
+      "wall_ns": 4718708
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41674708
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4618709
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16265459
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6036417
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5832584
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4263958
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41250041
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16215083
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41013750
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4945458
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16167500
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6073167
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41296750
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16225750
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6125292
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4411334
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5748208
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4402958
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16411750
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 40802250
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4579208
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 15715667
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41151625
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 5941667
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4459917
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6005583
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16297750
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41406209
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4650750
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41070875
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6382375
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 16186125
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "-O",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-O.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 6141333
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O2",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O2.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 41362083
+    },
+    {
+      "argv": [
+        "target/release/keel",
+        "cc",
+        "--target",
+        "aarch64-apple-darwin",
+        "--emit-object",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/keel-raw.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 4740291
+    },
+    {
+      "argv": [
+        "/usr/bin/clang",
+        "-target",
+        "arm64-apple-macosx11.0.0",
+        "-O0",
+        "-ffp-contract=off",
+        "-c",
+        "crates/keel-cranelift/kernels/kernels.c",
+        "-o",
+        "bench-out/clang-O0.o"
+      ],
+      "returncode": 0,
+      "wall_ns": 15881208
+    },
+    {
+      "argv": [
+        "crates/keel-cranelift/target/release/keel-cranelift-bench",
+        "time",
+        "--warmup",
+        "2",
+        "--reps",
+        "7",
+        "--out",
+        "bench-out/ir-time.json",
+        "--emit-dir",
+        "bench-out",
+        "raw=bench-out/kernels.raw.keel",
+        "O=bench-out/kernels.O.keel"
+      ],
+      "returncode": 0,
+      "wall_ns": 74798250
+    }
+  ],
+  "load_end": [
+    3.67578125,
+    3.77734375,
+    4.21728515625
+  ],
+  "raw_report_sha256": "1ddf1ff1dd88d246c6fe664e0c92a3bfbf8018a6016905879d798bab2e4423c1",
+  "support": {
+    "raw": {
+      "total_functions": 31,
+      "supported_functions": [
+        "k_logic",
+        "k_fnv1a",
+        "k_crc32",
+        "k_sieve",
+        "k_matmul",
+        "k_dot",
+        "k_saxpy",
+        "k_divmix",
+        "gcd64",
+        "k_gcd",
+        "k_isort",
+        "k_qsort",
+        "qsort_rec",
+        "k_interp",
+        "k_classify",
+        "k_classify_sum",
+        "k_bits",
+        "clamp_i8",
+        "mix_u16",
+        "k_narrow",
+        "k_fconv",
+        "k_collatz",
+        "k_copy",
+        "k_dispatch",
+        "op_rot",
+        "op_mul",
+        "op_xor",
+        "op_add",
+        "k_names",
+        "k_stackobj",
+        "acc_add"
+      ],
+      "rejections": []
+    },
+    "O": {
+      "total_functions": 30,
+      "supported_functions": [
+        "k_logic",
+        "k_fnv1a",
+        "k_crc32",
+        "k_sieve",
+        "k_matmul",
+        "k_dot",
+        "k_saxpy",
+        "k_divmix",
+        "gcd64",
+        "k_gcd",
+        "k_isort",
+        "k_qsort",
+        "qsort_rec",
+        "k_interp",
+        "k_classify",
+        "k_classify_sum",
+        "k_bits",
+        "clamp_i8",
+        "mix_u16",
+        "k_narrow",
+        "k_fconv",
+        "k_collatz",
+        "k_copy",
+        "k_dispatch",
+        "op_rot",
+        "op_mul",
+        "op_xor",
+        "op_add",
+        "k_names",
+        "k_stackobj"
+      ],
+      "rejections": []
+    }
+  },
+  "ir_to_object": {
+    "schema": 1,
+    "warmup": 2,
+    "reps": 7,
+    "timed_cranelift_settings": [
+      {
+        "opt_level": "none",
+        "is_pic": "true",
+        "unwind_info": "false",
+        "enable_verifier": "false"
+      },
+      {
+        "opt_level": "speed",
+        "is_pic": "true",
+        "unwind_info": "false",
+        "enable_verifier": "false"
+      }
+    ],
+    "inputs": [
+      {
+        "label": "raw",
+        "path": "bench-out/kernels.raw.keel",
+        "functions": 31,
+        "keel_instructions": 865,
+        "parse_verify_ns": [
+          590084,
+          575792,
+          549750,
+          538291,
+          537375,
+          596750,
+          567167
+        ],
+        "configs": {
+          "keel-baseline": {
+            "stages_ns": {
+              "codegen": [
+                293167,
+                274792,
+                295750,
+                266458,
+                294500,
+                284708,
+                262625
+              ],
+              "object": [
+                139667,
+                119917,
+                136250,
+                125042,
+                150125,
+                130666,
+                122250
+              ]
+            },
+            "total_ns": [
+              432834,
+              394709,
+              432000,
+              391500,
+              444625,
+              415374,
+              384875
+            ],
+            "object_bytes": 9382,
+            "fnv64": "e930c5072ca1b9bd",
+            "median_ms": 0.415374
+          },
+          "keel-full": {
+            "stages_ns": {
+              "codegen": [
+                355375,
+                327000,
+                340042,
+                357375,
+                395625,
+                346375,
+                308833
+              ],
+              "object": [
+                125959,
+                146584,
+                119959,
+                127709,
+                132500,
+                117750,
+                111667
+              ]
+            },
+            "total_ns": [
+              481334,
+              473584,
+              460001,
+              485084,
+              528125,
+              464125,
+              420500
+            ],
+            "object_bytes": 8750,
+            "fnv64": "2d5b612471f764b8",
+            "median_ms": 0.473584
+          },
+          "clif-none": {
+            "stages_ns": {
+              "setup": [
+                959,
+                1500,
+                875,
+                792,
+                709,
+                917,
+                750
+              ],
+              "translate": [
+                106583,
+                118875,
+                104916,
+                105167,
+                100458,
+                105666,
+                103875
+              ],
+              "codegen": [
+                667583,
+                735250,
+                636042,
+                626542,
+                650083,
+                637667,
+                677458
+              ],
+              "object": [
+                14375,
+                16083,
+                13916,
+                13250,
+                13625,
+                13917,
+                14292
+              ]
+            },
+            "total_ns": [
+              789500,
+              871708,
+              755749,
+              745751,
+              764875,
+              758167,
+              796375
+            ],
+            "object_bytes": 5376,
+            "fnv64": "d11083b00d22bfe7",
+            "median_ms": 0.764875
+          },
+          "clif-speed": {
+            "stages_ns": {
+              "setup": [
+                750,
+                750,
+                792,
+                709,
+                584,
+                1291,
+                708
+              ],
+              "translate": [
+                99250,
+                102792,
+                97167,
+                97208,
+                95875,
+                115167,
+                105375
+              ],
+              "codegen": [
+                926292,
+                945208,
+                922875,
+                866166,
+                912666,
+                1020042,
+                937333
+              ],
+              "object": [
+                13250,
+                14459,
+                13792,
+                12083,
+                12500,
+                16708,
+                14167
+              ]
+            },
+            "total_ns": [
+              1039542,
+              1063209,
+              1034626,
+              976166,
+              1021625,
+              1153208,
+              1057583
+            ],
+            "object_bytes": 5120,
+            "fnv64": "cb0d642be3f70d7f",
+            "median_ms": 1.039542
+          }
+        }
+      },
+      {
+        "label": "O",
+        "path": "bench-out/kernels.O.keel",
+        "functions": 30,
+        "keel_instructions": 905,
+        "parse_verify_ns": [
+          601458,
+          562667,
+          584083,
+          603125,
+          574291,
+          582250,
+          604584
+        ],
+        "configs": {
+          "keel-baseline": {
+            "stages_ns": {
+              "codegen": [
+                283750,
+                265292,
+                250250,
+                288833,
+                277667,
+                267834,
+                287000
+              ],
+              "object": [
+                121833,
+                116000,
+                110125,
+                124458,
+                122000,
+                115041,
+                118209
+              ]
+            },
+            "total_ns": [
+              405583,
+              381292,
+              360375,
+              413291,
+              399667,
+              382875,
+              405209
+            ],
+            "object_bytes": 9781,
+            "fnv64": "81db4e9d025840d4",
+            "median_ms": 0.399667
+          },
+          "keel-full": {
+            "stages_ns": {
+              "codegen": [
+                346084,
+                333500,
+                318208,
+                370083,
+                368375,
+                333875,
+                350541
+              ],
+              "object": [
+                107875,
+                107416,
+                102333,
+                106958,
+                109500,
+                105833,
+                113125
+              ]
+            },
+            "total_ns": [
+              453959,
+              440916,
+              420541,
+              477041,
+              477875,
+              439708,
+              463666
+            ],
+            "object_bytes": 8765,
+            "fnv64": "fc592e0ba15dd85e",
+            "median_ms": 0.453959
+          },
+          "clif-none": {
+            "stages_ns": {
+              "setup": [
+                750,
+                667,
+                625,
+                708,
+                667,
+                708,
+                625
+              ],
+              "translate": [
+                102708,
+                100416,
+                98667,
+                99250,
+                97958,
+                100541,
+                98917
+              ],
+              "codegen": [
+                666250,
+                700208,
+                663916,
+                665083,
+                620000,
+                698583,
+                679250
+              ],
+              "object": [
+                12416,
+                12917,
+                12458,
+                12875,
+                12333,
+                13500,
+                13083
+              ]
+            },
+            "total_ns": [
+              782124,
+              814208,
+              775666,
+              777916,
+              730958,
+              813332,
+              791875
+            ],
+            "object_bytes": 5456,
+            "fnv64": "d844cd87e84a1c05",
+            "median_ms": 0.782124
+          },
+          "clif-speed": {
+            "stages_ns": {
+              "setup": [
+                583,
+                750,
+                625,
+                667,
+                625,
+                708,
+                583
+              ],
+              "translate": [
+                90333,
+                99500,
+                95000,
+                92708,
+                95042,
+                106208,
+                91333
+              ],
+              "codegen": [
+                940958,
+                1034792,
+                1016125,
+                948250,
+                934833,
+                1071417,
+                956583
+              ],
+              "object": [
+                11791,
+                14208,
+                13333,
+                12334,
+                11958,
+                14250,
+                12208
+              ]
+            },
+            "total_ns": [
+              1043665,
+              1149250,
+              1125083,
+              1053959,
+              1042458,
+              1192583,
+              1060707
+            ],
+            "object_bytes": 5504,
+            "fnv64": "f122258297177496",
+            "median_ms": 1.060707
+          }
+        }
+      }
+    ]
+  },
+  "suite_retired_instructions": {
+    "method": "cargo suite codegen-diff --baseline <keel> --candidate <keel> --target <host> --icount --expect-identical, with the same keel binary on both sides; each compile is counted once per side, so the two totals are two runs of the same compiler",
+    "counter": {
+      "macos": "/usr/bin/time -l instructions retired (whole process)",
+      "linux": "perf stat -e instructions:u"
+    },
+    "hosts": {
+      "apple-m5-max": {
+        "machine": "Apple M5 Max, macOS 27.0.1",
+        "target": "aarch64-apple-darwin",
+        "keel_sha256": "841ac879d9e5540f5653fc921eee53fbd7cc88143cef78eb4ca43b1cb33144c5",
+        "configs": {
+          "keel": {
+            "objects": 79,
+            "retired": [
+              25145529316,
+              25140017285
+            ],
+            "per_object": [
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lapi.c",
+                "retired": [
+                  207448113,
+                  207910249
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lauxlib.c",
+                "retired": [
+                  152821595,
+                  152776296
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lbaselib.c",
+                "retired": [
+                  141430390,
+                  141749002
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcode.c",
+                "retired": [
+                  202004648,
+                  201372220
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcorolib.c",
+                "retired": [
+                  123676305,
+                  123989120
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lctype.c",
+                "retired": [
+                  61670942,
+                  61552176
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldblib.c",
+                "retired": [
+                  137249051,
+                  137483955
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldebug.c",
+                "retired": [
+                  165774063,
+                  165935222
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldo.c",
+                "retired": [
+                  173605360,
+                  173759044
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldump.c",
+                "retired": [
+                  117116431,
+                  117064458
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lfunc.c",
+                "retired": [
+                  125486752,
+                  126549238
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lgc.c",
+                "retired": [
+                  194847334,
+                  194185561
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/linit.c",
+                "retired": [
+                  102519304,
+                  101568993
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/liolib.c",
+                "retired": [
+                  160014748,
+                  159932552
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/llex.c",
+                "retired": [
+                  149847814,
+                  151385440
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmathlib.c",
+                "retired": [
+                  145246064,
+                  144956460
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmem.c",
+                "retired": [
+                  117880518,
+                  119098440
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loadlib.c",
+                "retired": [
+                  138999711,
+                  139127239
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lobject.c",
+                "retired": [
+                  169387434,
+                  169802092
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lopcodes.c",
+                "retired": [
+                  68577783,
+                  68635206
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loslib.c",
+                "retired": [
+                  144305711,
+                  144180868
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lparser.c",
+                "retired": [
+                  182580675,
+                  183042475
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstate.c",
+                "retired": [
+                  139593816,
+                  138976577
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstring.c",
+                "retired": [
+                  127063910,
+                  128461517
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstrlib.c",
+                "retired": [
+                  189565273,
+                  189672222
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltable.c",
+                "retired": [
+                  161911122,
+                  163864703
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltablib.c",
+                "retired": [
+                  118020695,
+                  118455081
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltm.c",
+                "retired": [
+                  134641937,
+                  135171594
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lua.c",
+                "retired": [
+                  146344083,
+                  146232170
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lundump.c",
+                "retired": [
+                  134629059,
+                  135282366
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lutf8lib.c",
+                "retired": [
+                  131127581,
+                  133070816
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lvm.c",
+                "retired": [
+                  425889142,
+                  424847965
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lzio.c",
+                "retired": [
+                  113718562,
+                  114822080
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "lz4-1.10.0/lib/lz4.c",
+                "retired": [
+                  562433346,
+                  560759694
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "suite/c/lz4/driver.c",
+                "retired": [
+                  135796728,
+                  136280267
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/qjscalc.c",
+                "retired": [
+                  167229424,
+                  166420755
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/repl.c",
+                "retired": [
+                  124382159,
+                  123327800
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/cutils.c",
+                "retired": [
+                  143061447,
+                  143396477
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libbf.c",
+                "retired": [
+                  358897651,
+                  357343645
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libregexp.c",
+                "retired": [
+                  194279171,
+                  195580865
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libunicode.c",
+                "retired": [
+                  260531286,
+                  261983397
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/qjs.c",
+                "retired": [
+                  245476018,
+                  245704510
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs-libc.c",
+                "retired": [
+                  408578077,
+                  389931558
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs.c",
+                "retired": [
+                  2415840495,
+                  2412923252
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/shell.c",
+                "retired": [
+                  745645452,
+                  741485461
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/sqlite3.c",
+                "retired": [
+                  3127207607,
+                  3151750025
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "suite/c/yyjson/driver.c",
+                "retired": [
+                  240167547,
+                  240265646
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "yyjson-0.13.0/src/yyjson.c",
+                "retired": [
+                  3757304504,
+                  3750630375
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "suite/c/zstd/driver.c",
+                "retired": [
+                  145188886,
+                  142767633
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/debug.c",
+                "retired": [
+                  33517074,
+                  33496204
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/entropy_common.c",
+                "retired": [
+                  122082120,
+                  121490564
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/error_private.c",
+                "retired": [
+                  90641413,
+                  91711533
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/fse_decompress.c",
+                "retired": [
+                  132945865,
+                  132607109
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/pool.c",
+                "retired": [
+                  138188493,
+                  137597682
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/threading.c",
+                "retired": [
+                  34155121,
+                  33955296
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/xxhash.c",
+                "retired": [
+                  150447075,
+                  150839996
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/zstd_common.c",
+                "retired": [
+                  176861285,
+                  176329903
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/fse_compress.c",
+                "retired": [
+                  159333848,
+                  160044703
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/hist.c",
+                "retired": [
+                  104941283,
+                  104169476
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/huf_compress.c",
+                "retired": [
+                  208553507,
+                  208889092
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress.c",
+                "retired": [
+                  534715527,
+                  535774247
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_literals.c",
+                "retired": [
+                  206718434,
+                  206595057
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_sequences.c",
+                "retired": [
+                  220400818,
+                  221418693
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_superblock.c",
+                "retired": [
+                  225148842,
+                  225002861
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_double_fast.c",
+                "retired": [
+                  293185193,
+                  293462564
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_fast.c",
+                "retired": [
+                  297250465,
+                  298640375
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_lazy.c",
+                "retired": [
+                  948058355,
+                  947460766
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_ldm.c",
+                "retired": [
+                  236384768,
+                  232918642
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_opt.c",
+                "retired": [
+                  341724638,
+                  340438167
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_preSplit.c",
+                "retired": [
+                  156759120,
+                  158078067
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstdmt_compress.c",
+                "retired": [
+                  259578961,
+                  259354008
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/huf_decompress.c",
+                "retired": [
+                  291617812,
+                  291211153
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_ddict.c",
+                "retired": [
+                  187067241,
+                  187414706
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress.c",
+                "retired": [
+                  279490587,
+                  277949203
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress_block.c",
+                "retired": [
+                  315395804,
+                  315088911
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/cover.c",
+                "retired": [
+                  228405617,
+                  228952990
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/divsufsort.c",
+                "retired": [
+                  230821456,
+                  230577495
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/fastcover.c",
+                "retired": [
+                  243140048,
+                  243075740
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/zdict.c",
+                "retired": [
+                  260982822,
+                  260007325
+                ]
+              }
+            ]
+          },
+          "keel-O": {
+            "objects": 79,
+            "retired": [
+              39876563342,
+              39827840765
+            ],
+            "per_object": [
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lapi.c",
+                "retired": [
+                  299135409,
+                  299370645
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lauxlib.c",
+                "retired": [
+                  197924549,
+                  197288873
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lbaselib.c",
+                "retired": [
+                  156634834,
+                  157352616
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcode.c",
+                "retired": [
+                  403582706,
+                  405513923
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcorolib.c",
+                "retired": [
+                  129088499,
+                  129267268
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lctype.c",
+                "retired": [
+                  61231230,
+                  61568793
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldblib.c",
+                "retired": [
+                  153660333,
+                  152358196
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldebug.c",
+                "retired": [
+                  208902154,
+                  208763837
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldo.c",
+                "retired": [
+                  215954002,
+                  217166601
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldump.c",
+                "retired": [
+                  153041726,
+                  153217130
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lfunc.c",
+                "retired": [
+                  135218041,
+                  136286186
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lgc.c",
+                "retired": [
+                  268498228,
+                  268630510
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/linit.c",
+                "retired": [
+                  102833001,
+                  102307199
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/liolib.c",
+                "retired": [
+                  197442111,
+                  195665426
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/llex.c",
+                "retired": [
+                  190833334,
+                  189656506
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmathlib.c",
+                "retired": [
+                  160784904,
+                  161819972
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmem.c",
+                "retired": [
+                  121926524,
+                  122471887
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loadlib.c",
+                "retired": [
+                  150531847,
+                  149894311
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lobject.c",
+                "retired": [
+                  198221934,
+                  197546697
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lopcodes.c",
+                "retired": [
+                  68790867,
+                  70529509
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loslib.c",
+                "retired": [
+                  154751696,
+                  152884820
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lparser.c",
+                "retired": [
+                  301590276,
+                  304074161
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstate.c",
+                "retired": [
+                  155026678,
+                  155459270
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstring.c",
+                "retired": [
+                  139290585,
+                  140277450
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstrlib.c",
+                "retired": [
+                  266038302,
+                  265883475
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltable.c",
+                "retired": [
+                  198116575,
+                  198924398
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltablib.c",
+                "retired": [
+                  129927909,
+                  129388986
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltm.c",
+                "retired": [
+                  149197720,
+                  149653515
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lua.c",
+                "retired": [
+                  171365762,
+                  171070246
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lundump.c",
+                "retired": [
+                  160628633,
+                  160818365
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lutf8lib.c",
+                "retired": [
+                  140181829,
+                  140079756
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lvm.c",
+                "retired": [
+                  533101226,
+                  536265123
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lzio.c",
+                "retired": [
+                  116929739,
+                  116786897
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "lz4-1.10.0/lib/lz4.c",
+                "retired": [
+                  737138469,
+                  736632609
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "suite/c/lz4/driver.c",
+                "retired": [
+                  149597562,
+                  148484990
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/qjscalc.c",
+                "retired": [
+                  171897588,
+                  168720373
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/repl.c",
+                "retired": [
+                  123904370,
+                  124408196
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/cutils.c",
+                "retired": [
+                  163646202,
+                  163554597
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libbf.c",
+                "retired": [
+                  858477054,
+                  852582810
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libregexp.c",
+                "retired": [
+                  264096647,
+                  264310226
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libunicode.c",
+                "retired": [
+                  333851369,
+                  336588814
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/qjs.c",
+                "retired": [
+                  258813111,
+                  256738294
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs-libc.c",
+                "retired": [
+                  579192842,
+                  577823199
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs.c",
+                "retired": [
+                  6288803407,
+                  6272745963
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/shell.c",
+                "retired": [
+                  1535796436,
+                  1533015794
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/sqlite3.c",
+                "retired": [
+                  7685719400,
+                  7665571193
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "suite/c/yyjson/driver.c",
+                "retired": [
+                  255466118,
+                  255412567
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "yyjson-0.13.0/src/yyjson.c",
+                "retired": [
+                  4802432750,
+                  4792541781
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "suite/c/zstd/driver.c",
+                "retired": [
+                  153798025,
+                  153035489
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/debug.c",
+                "retired": [
+                  33397578,
+                  33520729
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/entropy_common.c",
+                "retired": [
+                  129149302,
+                  130754943
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/error_private.c",
+                "retired": [
+                  92059797,
+                  92474341
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/fse_decompress.c",
+                "retired": [
+                  174563382,
+                  173429028
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/pool.c",
+                "retired": [
+                  139246837,
+                  139824481
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/threading.c",
+                "retired": [
+                  34310792,
+                  34249197
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/xxhash.c",
+                "retired": [
+                  170535054,
+                  168851193
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/zstd_common.c",
+                "retired": [
+                  178439838,
+                  177537413
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/fse_compress.c",
+                "retired": [
+                  194907173,
+                  195571277
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/hist.c",
+                "retired": [
+                  110575272,
+                  111869979
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/huf_compress.c",
+                "retired": [
+                  269083891,
+                  269908881
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress.c",
+                "retired": [
+                  892951487,
+                  889734853
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_literals.c",
+                "retired": [
+                  213514471,
+                  212562392
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_sequences.c",
+                "retired": [
+                  249492272,
+                  250084678
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_superblock.c",
+                "retired": [
+                  246286708,
+                  247884749
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_double_fast.c",
+                "retired": [
+                  427720227,
+                  429526347
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_fast.c",
+                "retired": [
+                  433286862,
+                  435458495
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_lazy.c",
+                "retired": [
+                  1460258404,
+                  1458271065
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_ldm.c",
+                "retired": [
+                  269135499,
+                  268065366
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_opt.c",
+                "retired": [
+                  474645451,
+                  473746333
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_preSplit.c",
+                "retired": [
+                  168070337,
+                  169824503
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstdmt_compress.c",
+                "retired": [
+                  335050999,
+                  335655101
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/huf_decompress.c",
+                "retired": [
+                  438059174,
+                  439965065
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_ddict.c",
+                "retired": [
+                  196245967,
+                  196064577
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress.c",
+                "retired": [
+                  361595450,
+                  363923273
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress_block.c",
+                "retired": [
+                  419704957,
+                  417815195
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/cover.c",
+                "retired": [
+                  272326693,
+                  272928393
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/divsufsort.c",
+                "retired": [
+                  364922005,
+                  364938395
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/fastcover.c",
+                "retired": [
+                  269570583,
+                  268378844
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/zdict.c",
+                "retired": [
+                  304442367,
+                  304612237
+                ]
+              }
+            ]
+          }
+        },
+        "raw_report_sha256": "bef96bcb5448bfa3d777073bed22f61daa2acd0e514abf5cd3dba05de3eef094"
+      },
+      "amd-zen5-linux": {
+        "machine": "AMD Zen 5 desktop, Linux 7.3",
+        "target": "x86_64-unknown-linux-gnu",
+        "keel_sha256": "5ee49dc9538aed19f0bdf8e49d05358aa5a62a2a00088e826d3bf1a1d389c10b",
+        "configs": {
+          "keel": {
+            "objects": 79,
+            "retired": [
+              19111400746,
+              19107777323
+            ],
+            "per_object": [
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lapi.c",
+                "retired": [
+                  115278806,
+                  115129633
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lauxlib.c",
+                "retired": [
+                  72125201,
+                  72183413
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lbaselib.c",
+                "retired": [
+                  53867662,
+                  53837362
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcode.c",
+                "retired": [
+                  145662356,
+                  145934184
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcorolib.c",
+                "retired": [
+                  38121511,
+                  38126095
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lctype.c",
+                "retired": [
+                  17722966,
+                  17734946
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldblib.c",
+                "retired": [
+                  51195549,
+                  51260798
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldebug.c",
+                "retired": [
+                  78648785,
+                  78656605
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldo.c",
+                "retired": [
+                  85277067,
+                  85359757
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldump.c",
+                "retired": [
+                  36681323,
+                  36678794
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lfunc.c",
+                "retired": [
+                  43841989,
+                  43841898
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lgc.c",
+                "retired": [
+                  106313601,
+                  106446868
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/linit.c",
+                "retired": [
+                  26635978,
+                  26626597
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/liolib.c",
+                "retired": [
+                  60334253,
+                  60361570
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/llex.c",
+                "retired": [
+                  66074899,
+                  66141288
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmathlib.c",
+                "retired": [
+                  89636423,
+                  89870786
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmem.c",
+                "retired": [
+                  36007857,
+                  36020010
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loadlib.c",
+                "retired": [
+                  52371129,
+                  52307070
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lobject.c",
+                "retired": [
+                  113099024,
+                  113227548
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lopcodes.c",
+                "retired": [
+                  23864866,
+                  23882107
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loslib.c",
+                "retired": [
+                  55544217,
+                  55527364
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lparser.c",
+                "retired": [
+                  98641671,
+                  98716829
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstate.c",
+                "retired": [
+                  54021429,
+                  54008740
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstring.c",
+                "retired": [
+                  45428739,
+                  45428037
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstrlib.c",
+                "retired": [
+                  135577889,
+                  135623155
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltable.c",
+                "retired": [
+                  112684169,
+                  112687071
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltablib.c",
+                "retired": [
+                  42831355,
+                  42814046
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltm.c",
+                "retired": [
+                  50958487,
+                  50962190
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lua.c",
+                "retired": [
+                  63448402,
+                  63477860
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lundump.c",
+                "retired": [
+                  51198313,
+                  51252634
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lutf8lib.c",
+                "retired": [
+                  44968830,
+                  44917922
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lvm.c",
+                "retired": [
+                  333140923,
+                  331334975
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lzio.c",
+                "retired": [
+                  33776350,
+                  33764257
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "lz4-1.10.0/lib/lz4.c",
+                "retired": [
+                  509143126,
+                  509102298
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "suite/c/lz4/driver.c",
+                "retired": [
+                  33497468,
+                  33494809
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/qjscalc.c",
+                "retired": [
+                  90969986,
+                  90966441
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/repl.c",
+                "retired": [
+                  51253038,
+                  51249222
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/cutils.c",
+                "retired": [
+                  58107395,
+                  58152450
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libbf.c",
+                "retired": [
+                  454333203,
+                  453292677
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libregexp.c",
+                "retired": [
+                  111371600,
+                  111431029
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libunicode.c",
+                "retired": [
+                  166944296,
+                  166940112
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/qjs.c",
+                "retired": [
+                  88965677,
+                  88869936
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs-libc.c",
+                "retired": [
+                  282621469,
+                  282724019
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs.c",
+                "retired": [
+                  2632005206,
+                  2630673755
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/shell.c",
+                "retired": [
+                  845272741,
+                  845637370
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/sqlite3.c",
+                "retired": [
+                  3201557957,
+                  3202493461
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "suite/c/yyjson/driver.c",
+                "retired": [
+                  153309220,
+                  153335007
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "yyjson-0.13.0/src/yyjson.c",
+                "retired": [
+                  3329043581,
+                  3329000587
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "suite/c/zstd/driver.c",
+                "retired": [
+                  39246115,
+                  39236706
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/debug.c",
+                "retired": [
+                  2642428,
+                  2641984
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/entropy_common.c",
+                "retired": [
+                  47024423,
+                  47021687
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/error_private.c",
+                "retired": [
+                  17491818,
+                  17496448
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/fse_decompress.c",
+                "retired": [
+                  64344841,
+                  64328978
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/pool.c",
+                "retired": [
+                  45980409,
+                  46013177
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/threading.c",
+                "retired": [
+                  3080981,
+                  3081503
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/xxhash.c",
+                "retired": [
+                  48152081,
+                  48146368
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/zstd_common.c",
+                "retired": [
+                  76859119,
+                  76839000
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/fse_compress.c",
+                "retired": [
+                  69638096,
+                  69579845
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/hist.c",
+                "retired": [
+                  27817582,
+                  27828438
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/huf_compress.c",
+                "retired": [
+                  173017199,
+                  172745898
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress.c",
+                "retired": [
+                  439780570,
+                  439578388
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_literals.c",
+                "retired": [
+                  102138996,
+                  102160002
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_sequences.c",
+                "retired": [
+                  119258110,
+                  119180976
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_superblock.c",
+                "retired": [
+                  120128349,
+                  120051246
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_double_fast.c",
+                "retired": [
+                  201839675,
+                  201705698
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_fast.c",
+                "retired": [
+                  207265381,
+                  207351051
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_lazy.c",
+                "retired": [
+                  873967523,
+                  873699150
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_ldm.c",
+                "retired": [
+                  129307650,
+                  129256872
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_opt.c",
+                "retired": [
+                  255208238,
+                  255167123
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_preSplit.c",
+                "retired": [
+                  69038743,
+                  69024625
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstdmt_compress.c",
+                "retired": [
+                  156303909,
+                  156217772
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/huf_decompress.c",
+                "retired": [
+                  271654735,
+                  271597371
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_ddict.c",
+                "retired": [
+                  86217895,
+                  86272714
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress.c",
+                "retired": [
+                  189352125,
+                  189173973
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress_block.c",
+                "retired": [
+                  315210710,
+                  315081955
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/cover.c",
+                "retired": [
+                  126062529,
+                  126098942
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/divsufsort.c",
+                "retired": [
+                  139064660,
+                  139071230
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/fastcover.c",
+                "retired": [
+                  114764172,
+                  114627349
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/zdict.c",
+                "retired": [
+                  136163702,
+                  135995272
+                ]
+              }
+            ]
+          },
+          "keel-O": {
+            "objects": 79,
+            "retired": [
+              34085842761,
+              34084781039
+            ],
+            "per_object": [
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lapi.c",
+                "retired": [
+                  205244600,
+                  205478467
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lauxlib.c",
+                "retired": [
+                  120215510,
+                  120195222
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lbaselib.c",
+                "retired": [
+                  69118459,
+                  69065543
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcode.c",
+                "retired": [
+                  356784990,
+                  357076845
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lcorolib.c",
+                "retired": [
+                  44603565,
+                  44647450
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lctype.c",
+                "retired": [
+                  17768998,
+                  17758135
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldblib.c",
+                "retired": [
+                  68191918,
+                  68111081
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldebug.c",
+                "retired": [
+                  119095138,
+                  119038314
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldo.c",
+                "retired": [
+                  128731292,
+                  128717522
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ldump.c",
+                "retired": [
+                  73436974,
+                  73437912
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lfunc.c",
+                "retired": [
+                  52737155,
+                  52706635
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lgc.c",
+                "retired": [
+                  182749093,
+                  182724483
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/linit.c",
+                "retired": [
+                  27945938,
+                  27913219
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/liolib.c",
+                "retired": [
+                  91037038,
+                  91013204
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/llex.c",
+                "retired": [
+                  105341794,
+                  105399725
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmathlib.c",
+                "retired": [
+                  106680082,
+                  106583878
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lmem.c",
+                "retired": [
+                  40633114,
+                  40620665
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loadlib.c",
+                "retired": [
+                  65406795,
+                  65472062
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lobject.c",
+                "retired": [
+                  143040488,
+                  143176581
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lopcodes.c",
+                "retired": [
+                  23884992,
+                  23891203
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/loslib.c",
+                "retired": [
+                  65891542,
+                  65871205
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lparser.c",
+                "retired": [
+                  215684379,
+                  215765373
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstate.c",
+                "retired": [
+                  68665978,
+                  68723778
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstring.c",
+                "retired": [
+                  55861126,
+                  55855180
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lstrlib.c",
+                "retired": [
+                  205324101,
+                  205335099
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltable.c",
+                "retired": [
+                  145852459,
+                  145874943
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltablib.c",
+                "retired": [
+                  54807371,
+                  54818258
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/ltm.c",
+                "retired": [
+                  63957661,
+                  63992834
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lua.c",
+                "retired": [
+                  89530106,
+                  89554301
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lundump.c",
+                "retired": [
+                  76455998,
+                  76503954
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lutf8lib.c",
+                "retired": [
+                  54746571,
+                  54769517
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lvm.c",
+                "retired": [
+                  450332964,
+                  450009226
+                ]
+              },
+              {
+                "suite": "lua",
+                "source": "lua-5.4.7/src/lzio.c",
+                "retired": [
+                  36023077,
+                  36026928
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "lz4-1.10.0/lib/lz4.c",
+                "retired": [
+                  661610252,
+                  661640501
+                ]
+              },
+              {
+                "suite": "lz4",
+                "source": "suite/c/lz4/driver.c",
+                "retired": [
+                  46823542,
+                  46853401
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/qjscalc.c",
+                "retired": [
+                  91015864,
+                  91020793
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "gen/repl.c",
+                "retired": [
+                  51296785,
+                  51298349
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/cutils.c",
+                "retired": [
+                  79555397,
+                  79529467
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libbf.c",
+                "retired": [
+                  970937105,
+                  971184888
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libregexp.c",
+                "retired": [
+                  185973527,
+                  185943735
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/libunicode.c",
+                "retired": [
+                  242637061,
+                  242754543
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/qjs.c",
+                "retired": [
+                  103963968,
+                  104013551
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs-libc.c",
+                "retired": [
+                  462929280,
+                  463101255
+                ]
+              },
+              {
+                "suite": "quickjs",
+                "source": "quickjs-2024-01-13/quickjs.c",
+                "retired": [
+                  6457919285,
+                  6459907871
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/shell.c",
+                "retired": [
+                  1641101615,
+                  1640656639
+                ]
+              },
+              {
+                "suite": "sqlite",
+                "source": "sqlite-amalgamation-3460100/sqlite3.c",
+                "retired": [
+                  7868517319,
+                  7865378382
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "suite/c/yyjson/driver.c",
+                "retired": [
+                  169512968,
+                  169586638
+                ]
+              },
+              {
+                "suite": "yyjson",
+                "source": "yyjson-0.13.0/src/yyjson.c",
+                "retired": [
+                  4433062306,
+                  4433402803
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "suite/c/zstd/driver.c",
+                "retired": [
+                  50012413,
+                  50000339
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/debug.c",
+                "retired": [
+                  2687570,
+                  2688563
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/entropy_common.c",
+                "retired": [
+                  59662656,
+                  59729861
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/error_private.c",
+                "retired": [
+                  17908662,
+                  17926453
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/fse_decompress.c",
+                "retired": [
+                  136075636,
+                  136067376
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/pool.c",
+                "retired": [
+                  47291595,
+                  47342147
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/threading.c",
+                "retired": [
+                  3126431,
+                  3128117
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/xxhash.c",
+                "retired": [
+                  64855793,
+                  64828461
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/common/zstd_common.c",
+                "retired": [
+                  78518210,
+                  78592211
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/fse_compress.c",
+                "retired": [
+                  103528556,
+                  103480947
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/hist.c",
+                "retired": [
+                  33648620,
+                  33632358
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/huf_compress.c",
+                "retired": [
+                  243798710,
+                  243693256
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress.c",
+                "retired": [
+                  748374542,
+                  748178627
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_literals.c",
+                "retired": [
+                  109792421,
+                  109711342
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_sequences.c",
+                "retired": [
+                  165270163,
+                  165112623
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_compress_superblock.c",
+                "retired": [
+                  141341125,
+                  141242140
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_double_fast.c",
+                "retired": [
+                  329394961,
+                  329747010
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_fast.c",
+                "retired": [
+                  342749290,
+                  342595775
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_lazy.c",
+                "retired": [
+                  1365699783,
+                  1365528814
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_ldm.c",
+                "retired": [
+                  161121199,
+                  161157629
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_opt.c",
+                "retired": [
+                  377699970,
+                  377638490
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstd_preSplit.c",
+                "retired": [
+                  78736675,
+                  78734950
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/compress/zstdmt_compress.c",
+                "retired": [
+                  230211250,
+                  230104219
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/huf_decompress.c",
+                "retired": [
+                  499632374,
+                  500038649
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_ddict.c",
+                "retired": [
+                  93355720,
+                  93269700
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress.c",
+                "retired": [
+                  264796500,
+                  264623684
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/decompress/zstd_decompress_block.c",
+                "retired": [
+                  469368784,
+                  469454182
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/cover.c",
+                "retired": [
+                  172175093,
+                  172006450
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/divsufsort.c",
+                "retired": [
+                  280430640,
+                  280311096
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/fastcover.c",
+                "retired": [
+                  141873235,
+                  141857359
+                ]
+              },
+              {
+                "suite": "zstd",
+                "source": "zstd-1.5.7/lib/dictBuilder/zdict.c",
+                "retired": [
+                  180066644,
+                  179956653
+                ]
+              }
+            ]
+          }
+        },
+        "raw_report_sha256": "1cc7ec87c9fa2fa86dc56f29cf02907f149916ad8b0ef37eceab5babd4472c13"
+      }
+    }
+  }
+}

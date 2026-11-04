@@ -1,21 +1,21 @@
 {
   "schema": 2,
-  "date": "2026-10-24",
+  "date": "2026-11-05",
   "machine": "Apple M5 Max \u00b7 macOS 27",
-  "source_commit": "2cd5176629ffbae049843e7af5dea2bce671ce3a",
+  "source_commit": "8226e95c0043b2f7066a58834047779cbb194c02",
   "statistic": "median of 7 runs",
   "sources": {
     "compiler": {
-      "path": "docs/benchmarks/compiler-20261024.json",
-      "sha256": "192b7857394024e2eb9fae0d47b34bab0b67ffc078f065ce204dce925a7ff720"
+      "path": "docs/benchmarks/compiler-20261105.json",
+      "sha256": "98ccb643a7ae3ddaf4df80bb142bf54a351a8d92079cf3d84488a62c9ebd9b6f"
     },
     "tools": {
-      "path": "docs/benchmarks/assembly-link-20261024.json",
-      "sha256": "50cf737afc6bf39e6c8e075e0ab8cb81e895014e53915c1e42a7a213906a262e"
+      "path": "docs/benchmarks/assembly-link-20261105.json",
+      "sha256": "5aadbd2a16b4b56c6e1c14138c5b148e6c3f964aa7a37be8f7e82261cc1c1822"
     },
     "runtime": {
-      "path": "docs/benchmarks/runtime-20261022.json",
-      "sha256": "567c46ad0c3ca66d424154427e0ba2749690b3ce25bf92e5395d7fc0a4705ac3"
+      "path": "docs/benchmarks/runtime-20261105.json",
+      "sha256": "ac86b21d95883ae1410653fd289570605685c3513fed9c0cfdf3a76645cf6e1f"
     },
     "kernel": {
       "path": "docs/benchmarks/linux-kernel.json",
@@ -40,7 +40,7 @@
             "keel-raw",
             "median_ms"
           ],
-          "median_ms": 4.31525,
+          "median_ms": 4.579208,
           "keel": true
         },
         {
@@ -51,7 +51,7 @@
             "keel-O",
             "median_ms"
           ],
-          "median_ms": 5.348208,
+          "median_ms": 6.073167,
           "keel": true
         },
         {
@@ -62,7 +62,7 @@
             "clang-O0",
             "median_ms"
           ],
-          "median_ms": 16.818,
+          "median_ms": 16.186125,
           "keel": false
         },
         {
@@ -73,7 +73,7 @@
             "clang-O2",
             "median_ms"
           ],
-          "median_ms": 41.77875,
+          "median_ms": 41.151625,
           "keel": false
         }
       ]
@@ -98,7 +98,7 @@
             "keel-baseline",
             "median_ms"
           ],
-          "median_ms": 0.377,
+          "median_ms": 0.415374,
           "keel": true
         },
         {
@@ -112,7 +112,7 @@
             "keel-full",
             "median_ms"
           ],
-          "median_ms": 0.413125,
+          "median_ms": 0.473584,
           "keel": true
         },
         {
@@ -126,7 +126,7 @@
             "clif-none",
             "median_ms"
           ],
-          "median_ms": 0.7745,
+          "median_ms": 0.764875,
           "keel": false
         },
         {
@@ -140,7 +140,7 @@
             "clif-speed",
             "median_ms"
           ],
-          "median_ms": 1.01075,
+          "median_ms": 1.039542,
           "keel": false
         }
       ]
@@ -162,7 +162,7 @@
             "median_ms",
             "keel"
           ],
-          "median_ms": 5.598959,
+          "median_ms": 6.176208,
           "keel": true
         },
         {
@@ -173,7 +173,7 @@
             "median_ms",
             "clang-cc1as"
           ],
-          "median_ms": 16.834542,
+          "median_ms": 17.261125,
           "keel": false
         },
         {
@@ -184,7 +184,7 @@
             "median_ms",
             "clang-driver"
           ],
-          "median_ms": 23.126834,
+          "median_ms": 23.4905,
           "keel": false
         }
       ]
@@ -206,7 +206,7 @@
             "median_ms",
             "keel"
           ],
-          "median_ms": 8.454292,
+          "median_ms": 16.73325,
           "keel": true
         },
         {
@@ -217,7 +217,7 @@
             "median_ms",
             "apple-ld"
           ],
-          "median_ms": 14.80275,
+          "median_ms": 14.691125,
           "keel": false
         },
         {
@@ -228,7 +228,7 @@
             "median_ms",
             "clang-driver"
           ],
-          "median_ms": 21.975958,
+          "median_ms": 22.384625,
           "keel": false
         }
       ]
@@ -244,53 +244,157 @@
           "label": "Lua",
           "source": "runtime",
           "pointer": [
+            "hosts",
+            "apple-m5-max",
             "apps",
             "lua",
             "geomean_ratio"
           ],
-          "value": 1.3372582107496485
+          "value": 1.2244885866692825
         },
         {
           "label": "SQLite",
           "source": "runtime",
           "pointer": [
+            "hosts",
+            "apple-m5-max",
             "apps",
             "sqlite",
             "geomean_ratio"
           ],
-          "value": 1.4781418642582533
+          "value": 1.3486312538853984
         },
         {
           "label": "LZ4",
           "source": "runtime",
           "pointer": [
+            "hosts",
+            "apple-m5-max",
             "apps",
             "lz4",
             "geomean_ratio"
           ],
-          "value": 1.490059808686479
+          "value": 1.4888258868902
         },
         {
           "label": "yyjson",
           "source": "runtime",
           "pointer": [
+            "hosts",
+            "apple-m5-max",
             "apps",
             "yyjson",
             "geomean_ratio"
           ],
-          "value": 1.6643286146522094
+          "value": 1.6512201003062918
         },
         {
           "label": "QuickJS",
           "source": "runtime",
           "pointer": [
+            "hosts",
+            "apple-m5-max",
             "apps",
             "quickjs",
             "geomean_ratio"
           ],
-          "value": 1.8852487155516908
+          "value": 1.4350868916258555
+        },
+        {
+          "label": "Zstd",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "apple-m5-max",
+            "apps",
+            "zstd",
+            "geomean_ratio"
+          ],
+          "value": 1.1547752015711106
         }
       ]
+    },
+    {
+      "id": "runtime-x86",
+      "kind": "ratio",
+      "title": "Run time of Keel -O programs",
+      "reference": "Clang -O2",
+      "statistic": "median of 7 paired runs",
+      "rows": [
+        {
+          "label": "Lua",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "lua",
+            "geomean_ratio"
+          ],
+          "value": 1.3300577018431416
+        },
+        {
+          "label": "SQLite",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "sqlite",
+            "geomean_ratio"
+          ],
+          "value": 1.3562387458655372
+        },
+        {
+          "label": "LZ4",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "lz4",
+            "geomean_ratio"
+          ],
+          "value": 1.1764198141825462
+        },
+        {
+          "label": "yyjson",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "yyjson",
+            "geomean_ratio"
+          ],
+          "value": 1.2529530956764718
+        },
+        {
+          "label": "QuickJS",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "quickjs",
+            "geomean_ratio"
+          ],
+          "value": 1.87757844852038
+        },
+        {
+          "label": "Zstd",
+          "source": "runtime",
+          "pointer": [
+            "hosts",
+            "amd-zen5-linux",
+            "apps",
+            "zstd",
+            "geomean_ratio"
+          ],
+          "value": 1.209247114530165
+        }
+      ],
+      "machine": "AMD Zen 5 desktop \u00b7 Linux"
     },
     {
       "id": "kernel-runtime",

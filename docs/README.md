@@ -35,7 +35,7 @@ completion ledgers or per-feature progress pages.
 | AArch64 | [Entry point](targets/aarch64/README.md), [code generation](targets/aarch64/codegen.md), [assembler and DWARF line tables](targets/aarch64/assembler.md), [inline assembly](targets/aarch64/c-inline-asm.md) |
 | Other targets | [All targets](targets/README.md), [WebAssembly](targets/wasm/README.md), [WebAssembly C profile](targets/wasm/c-frontend.md) |
 | Linux kernel | [Integration](integrations/linux-kernel.md), [fixture](../suite/integration/linux-kernel/README.md), [benchmarks](benchmarks/linux-kernel.md) |
-| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md), summaries for [compile time](benchmarks/compiler-20261024.md), [assembly and linking](benchmarks/assembly-link-20261024.md) and [runtime](benchmarks/runtime-20261022.md) |
+| Benchmarks and workload validation | [Suite](../suite/README.md), [controlled timing](benchmarks/linux-timing.md), baselines for [runtime](benchmarks/runtime-20261105.md), [compile time](benchmarks/compiler-20261105.md) and [assembly and linking](benchmarks/assembly-link-20261105.md) |
 
 Detailed safety contracts linked from implementation code remain separate where
 they define a specific API's preconditions. Generated coverage inventories remain

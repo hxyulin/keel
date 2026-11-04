@@ -6,11 +6,11 @@ text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 .muted{fill:var(--ink-2)}
 </style>
 <title id="link-t">Objects → signed executable (lower is better)</title>
-<desc id="link-d">keel link: 8.45 ms; Apple ld: 14.8 ms; clang: 22.0 ms. keel link is 1.8× faster than Apple ld. Apple M5 Max · macOS 27, median of 7 runs.</desc>
+<desc id="link-d">keel link: 16.7 ms; Apple ld: 14.7 ms; clang: 22.4 ms. keel link is 1.1× slower than Apple ld. Apple M5 Max · macOS 27, median of 7 runs.</desc>
 <rect width="720" height="248" rx="10" fill="var(--surface)"/>
 <text x="24" y="38" font-size="18" font-weight="650">Objects → signed executable</text>
 <text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 runs</text>
-<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">1.8× faster</text>
+<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">1.1× slower</text>
 <text class="muted" x="696" y="60" font-size="12" text-anchor="end">keel link vs Apple ld</text>
 <path d="M174.0 78V186" stroke="var(--grid)"/>
 <text class="muted" x="174.0" y="202" font-size="11" text-anchor="middle">0</text>
@@ -26,12 +26,12 @@ text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 <text class="muted" x="612.0" y="202" font-size="11" text-anchor="middle">25</text>
 <text class="muted" x="393.0" y="226" font-size="12" text-anchor="middle">Wall time (ms) · lower is better</text>
 <text x="162" y="101.0" font-size="13" text-anchor="end" font-weight="600">keel link</text>
-<path d="M174 87.0h144.12a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-144.12z" fill="var(--keel)"/>
-<text x="330.12" y="101.0" font-size="12" font-weight="600">8.45 ms</text>
+<path d="M174 87.0h289.17a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-289.17z" fill="var(--keel)"/>
+<text x="475.17" y="101.0" font-size="12" font-weight="600">16.7 ms</text>
 <text x="162" y="135.0" font-size="13" text-anchor="end">Apple ld</text>
-<path d="M174 121.0h255.34a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-255.34z" fill="var(--other)"/>
-<text x="441.34" y="135.0" font-size="12">14.8 ms</text>
+<path d="M174 121.0h253.39a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-253.39z" fill="var(--other)"/>
+<text x="439.39" y="135.0" font-size="12">14.7 ms</text>
 <text x="162" y="169.0" font-size="13" text-anchor="end">clang</text>
-<path d="M174 155.0h381.02a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-381.02z" fill="var(--other)"/>
-<text x="567.02" y="169.0" font-size="12">22.0 ms</text>
+<path d="M174 155.0h388.18a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-388.18z" fill="var(--other)"/>
+<text x="574.18" y="169.0" font-size="12">22.4 ms</text>
 </svg>

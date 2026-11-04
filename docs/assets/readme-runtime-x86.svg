@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="350" viewBox="0 0 720 350" role="img" aria-labelledby="runtime-x86-t runtime-x86-d">
+<style>
+svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
+@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+</style>
+<title id="runtime-x86-t">Run time of Keel -O programs (lower is better)</title>
+<desc id="runtime-x86-d">Lua: 1.33×; SQLite: 1.36×; LZ4: 1.18×; yyjson: 1.25×; QuickJS: 1.88×; Zstd: 1.21×. Overall 1.35× the run time of Clang -O2. AMD Zen 5 desktop · Linux, median of 7 paired runs.</desc>
+<rect width="720" height="350" rx="10" fill="var(--surface)"/>
+<text x="24" y="38" font-size="18" font-weight="650">Run time of Keel -O programs</text>
+<text class="muted" x="24" y="60" font-size="12">AMD Zen 5 desktop · Linux · median of 7 paired runs</text>
+<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">1.3× slower</text>
+<text class="muted" x="696" y="60" font-size="12" text-anchor="end">geometric mean vs Clang -O2</text>
+<path d="M174.0 78V288" stroke="var(--grid)"/>
+<text class="muted" x="174.0" y="304" font-size="11" text-anchor="middle">0</text>
+<path d="M283.5 78V288" stroke="var(--grid)"/>
+<text class="muted" x="283.5" y="304" font-size="11" text-anchor="middle">0.5</text>
+<path d="M393.0 78V288" stroke="var(--grid)"/>
+<text class="muted" x="393.0" y="304" font-size="11" text-anchor="middle">1</text>
+<path d="M502.5 78V288" stroke="var(--grid)"/>
+<text class="muted" x="502.5" y="304" font-size="11" text-anchor="middle">1.5</text>
+<path d="M612.0 78V288" stroke="var(--grid)"/>
+<text class="muted" x="612.0" y="304" font-size="11" text-anchor="middle">2</text>
+<text class="muted" x="393.0" y="328" font-size="12" text-anchor="middle">Run time relative to Clang -O2 · lower is better</text>
+<text x="162" y="101.0" font-size="13" text-anchor="end">Lua</text>
+<path d="M174 87.0h287.28a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-287.28z" fill="var(--keel)"/>
+<text x="473.28" y="101.0" font-size="12">1.33×</text>
+<text x="162" y="135.0" font-size="13" text-anchor="end">SQLite</text>
+<path d="M174 121.0h293.02a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-293.02z" fill="var(--keel)"/>
+<text x="479.02" y="135.0" font-size="12">1.36×</text>
+<text x="162" y="169.0" font-size="13" text-anchor="end">LZ4</text>
+<path d="M174 155.0h253.64a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-253.64z" fill="var(--keel)"/>
+<text x="439.64" y="169.0" font-size="12">1.18×</text>
+<text x="162" y="203.0" font-size="13" text-anchor="end">yyjson</text>
+<path d="M174 189.0h270.40a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-270.40z" fill="var(--keel)"/>
+<text x="456.40" y="203.0" font-size="12">1.25×</text>
+<text x="162" y="237.0" font-size="13" text-anchor="end">QuickJS</text>
+<path d="M174 223.0h407.19a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-407.19z" fill="var(--keel)"/>
+<text x="593.19" y="237.0" font-size="12">1.88×</text>
+<text x="162" y="271.0" font-size="13" text-anchor="end">Zstd</text>
+<path d="M174 257.0h260.83a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-260.83z" fill="var(--keel)"/>
+<text x="446.83" y="271.0" font-size="12">1.21×</text>
+<path d="M393.0 74V288" stroke="var(--ink)" stroke-width="1.5"/>
+<text x="393.0" y="70" font-size="11" text-anchor="middle">Clang -O2</text>
+</svg>
