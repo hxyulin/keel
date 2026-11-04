@@ -644,20 +644,17 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             continue;
         };
         if source.bytes().starts_with(b"!<thin>\n") {
-            let target = match machine {
-                keel_link::elf::Machine::X86_64 => keel_link::archive::Target::X86_64LinuxGnu,
-                keel_link::elf::Machine::Aarch64 => keel_link::archive::Target::Aarch64LinuxGnu,
-            };
-            let regular = keel_link::archive::materialize_thin(source.bytes(), target, |name| {
-                let member = path.parent().unwrap_or_else(|| Path::new(".")).join(name);
-                let metadata =
-                    std::fs::metadata(&member).map_err(|e| format!("{}: {e}", member.display()))?;
-                if metadata.len() > 512 * 1024 * 1024 {
-                    return Err("thin archive member exceeds 512 MiB limit".into());
-                }
-                std::fs::read(&member).map_err(|e| format!("{}: {e}", member.display()))
-            })
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+            let regular =
+                keel_link::archive::materialize_thin(source.bytes(), machine.target(), |name| {
+                    let member = path.parent().unwrap_or_else(|| Path::new(".")).join(name);
+                    let metadata = std::fs::metadata(&member)
+                        .map_err(|e| format!("{}: {e}", member.display()))?;
+                    if metadata.len() > 512 * 1024 * 1024 {
+                        return Err("thin archive member exceeds 512 MiB limit".into());
+                    }
+                    std::fs::read(&member).map_err(|e| format!("{}: {e}", member.display()))
+                })
+                .map_err(|e| format!("{}: {e}", path.display()))?;
             *source = Source::Read(regular);
         }
     }

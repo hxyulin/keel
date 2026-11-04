@@ -4,12 +4,8 @@ use object::{Object, ObjectSection, ObjectSymbol};
 use std::path::Path;
 
 /// The target selects both object validation and the archive/index dialect.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Target {
-    X86_64LinuxGnu,
-    Aarch64LinuxGnu,
-    Aarch64AppleDarwin,
-}
+/// Native targets only; wasm32 has no archive format here.
+pub use keel_asm_ir::Target;
 
 /// Snapshot a GNU thin archive into a regular, indexed archive.
 ///
@@ -58,6 +54,11 @@ pub fn materialize_thin(
 /// Metadata is always deterministic (zero timestamp/uid/gid, mode 0644).
 /// Index offsets are 32-bit; archives exceeding that representation are rejected.
 pub fn build(inputs: &[Input<'_>], target: Target) -> Result<Vec<u8>> {
+    if target == Target::Wasm32UnknownUnknown {
+        return Err(
+            "unsupported target wasm32-unknown-unknown: native archives are unavailable".into(),
+        );
+    }
     let darwin = target == Target::Aarch64AppleDarwin;
     let mut names = Vec::new();
     let mut symbols = Vec::new();

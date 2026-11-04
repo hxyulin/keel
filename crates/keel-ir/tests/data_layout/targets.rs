@@ -40,19 +40,23 @@ fn recognized_and_native_targets_are_distinct() {
         Target::from_triple("aarch64-linux-gnu"),
         Some(Target::Aarch64LinuxGnu)
     );
+    assert_eq!(
+        Target::from_triple("x86_64-linux-gnu"),
+        Some(Target::X86_64LinuxGnu)
+    );
 }
 
 #[test]
 fn layout_is_explicit_and_host_defaults_stay_native() {
-    const WASM: DataLayout = Target::Wasm32UnknownUnknown.data_layout();
+    const WASM: DataLayout = DataLayout::for_target(Target::Wasm32UnknownUnknown);
     assert_eq!(WASM, DataLayout::WASM32);
     assert_eq!((WASM.pointer_bytes(), WASM.pointer_align()), (4, 4));
     for target in Target::NATIVE {
-        assert_eq!(target.data_layout(), DataLayout::NATIVE64);
+        assert_eq!(DataLayout::for_target(target), DataLayout::NATIVE64);
         assert_eq!(
             (
-                target.data_layout().pointer_bytes(),
-                target.data_layout().pointer_align()
+                DataLayout::for_target(target).pointer_bytes(),
+                DataLayout::for_target(target).pointer_align()
             ),
             (8, 8)
         );

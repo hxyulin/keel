@@ -11,9 +11,11 @@ mod generated;
 pub mod x86;
 pub use directive::{Cfi, Directive, Expression, SectionKind};
 mod symbolic;
+mod target;
 pub use generated::{FieldId, Opcode};
 use smallvec::SmallVec;
 pub use symbolic::{PageKind, SymbolicInstruction};
+pub use target::Target;
 
 /// An exact AArch64 encoding. Also available as [`aarch64::Instruction`].
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -37,6 +37,26 @@ pub enum Machine {
     X86_64,
     Aarch64,
 }
+impl Machine {
+    /// The ELF machine for `target`, or `None` for a target that is not ELF.
+    pub fn for_target(target: keel_asm_ir::Target) -> Option<Self> {
+        match target {
+            keel_asm_ir::Target::X86_64LinuxGnu => Some(Self::X86_64),
+            keel_asm_ir::Target::Aarch64LinuxGnu => Some(Self::Aarch64),
+            keel_asm_ir::Target::Aarch64AppleDarwin | keel_asm_ir::Target::Wasm32UnknownUnknown => {
+                None
+            }
+        }
+    }
+
+    /// The Linux target this machine links for.
+    pub fn target(self) -> keel_asm_ir::Target {
+        match self {
+            Self::X86_64 => keel_asm_ir::Target::X86_64LinuxGnu,
+            Self::Aarch64 => keel_asm_ir::Target::Aarch64LinuxGnu,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Options {

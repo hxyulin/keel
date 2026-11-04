@@ -497,6 +497,7 @@ name = "keel-link"
 version = "0.1.0"
 dependencies = [
  "keel-asm",
+ "keel-asm-ir",
  "keel-test-support",
  "keel-util",
  "object",

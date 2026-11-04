@@ -11,7 +11,14 @@ fn object(target: Target, source: &str) -> Vec<u8> {
         Target::Aarch64LinuxGnu => keel_asm::assemble_elf_object(source).unwrap(),
         Target::X86_64LinuxGnu => keel_asm::x86::assemble_object(source).unwrap(),
         Target::Aarch64AppleDarwin => keel_asm::assemble(source).unwrap().to_macho().unwrap(),
+        Target::Wasm32UnknownUnknown => unreachable!("no native wasm32 objects"),
     }
+}
+
+#[test]
+fn wasm32_has_no_archive_dialect() {
+    let error = archive::build(&[], Target::Wasm32UnknownUnknown).unwrap_err();
+    assert!(error.contains("wasm32-unknown-unknown"), "{error}");
 }
 
 #[test]

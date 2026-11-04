@@ -22,6 +22,16 @@ impl DataLayout {
         pointer_align: 4,
     };
 
+    /// Memory storage layout only; this does not select a frontend or call ABI.
+    pub const fn for_target(target: crate::Target) -> Self {
+        match target {
+            crate::Target::Wasm32UnknownUnknown => Self::WASM32,
+            crate::Target::Aarch64AppleDarwin
+            | crate::Target::X86_64LinuxGnu
+            | crate::Target::Aarch64LinuxGnu => Self::NATIVE64,
+        }
+    }
+
     pub const fn pointer_bytes(self) -> u64 {
         self.pointer_bytes
     }

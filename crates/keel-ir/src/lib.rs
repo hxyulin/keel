@@ -22,7 +22,6 @@ mod neon;
 pub mod parser;
 pub mod section;
 pub use section::SectionName;
-pub mod target;
 pub mod types;
 pub mod vector;
 pub mod vector_capabilities;
@@ -61,12 +60,12 @@ pub use inst::{
     Symbol, UnaryOp,
 };
 pub use intrinsic::{Intrinsic, IntrinsicInfo, X86Avx512PermuteKind, X86Family};
+pub use keel_asm_ir::Target;
 pub use layout::Layout;
 pub use memory::{MemoryEffects, MemoryFlags};
 pub use module::Module;
 pub use neon::NeonIntrinsic;
 pub use parser::{ParseError, parse, parse_with_ir_lines};
-pub use target::Target;
 pub use types::Type;
 pub use vector::{VectorBinaryOp, VectorReduceOp, VectorType};
 pub use verifier::{VerifierError, verify, verify_module, verify_module_with_layout};

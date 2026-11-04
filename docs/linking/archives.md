@@ -69,7 +69,8 @@ conflict resolution belongs to the consuming linker.
 
 The library API is `keel_link::archive::build(&[Input], archive::Target)`,
 returning archive bytes without filesystem access, or
-`archive::write(&[Input], archive::Target, &Path)`. The library also permits an
+`archive::write(&[Input], archive::Target, &Path)`. `archive::Target` is the
+shared `keel_asm_ir::Target`; `build` rejects wasm32. The library also permits an
 empty indexed archive. `write` validates/builds first, writes a create-new
 sibling temporary file, syncs and closes it, renames it over the destination,
 then syncs the directory. Read, validation, write and installation errors
