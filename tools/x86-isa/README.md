@@ -340,7 +340,11 @@ To add an intrinsic:
    and set `effects`, `trap`, `inline` and, for x86, `family` on the row.
    Family membership does not require neighbouring IDs or a generator edit.
 3. Select an existing lowering recipe or implement the new behavior. Review
-   permission, state, clobber and continuation contracts explicitly.
+   permission, state, clobber and continuation contracts explicitly. A new
+   `family` adds an `X86Family` variant, and
+   `crates/keel-codegen/src/x86_64/intrinsic_family.rs` matches that enum
+   exhaustively for validation and lowering, so the backend does not build
+   until the family has both arms.
 4. Run `python3 tools/x86-isa/generate.py`. The enum, global inventory and family
    outputs follow their schemas. Update the independent frozen fixture for the
    intentional append, then run generator tests, freshness and affected Rust
