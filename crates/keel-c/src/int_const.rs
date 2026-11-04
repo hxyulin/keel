@@ -25,6 +25,7 @@ impl IntTy {
     };
     pub(crate) const INT: IntTy = IntTy::new(32, true);
     pub(crate) const INTMAX: IntTy = IntTy::new(64, true);
+    pub(crate) const UINTMAX: IntTy = IntTy::new(64, false);
 
     pub(crate) const fn new(width: u32, signed: bool) -> IntTy {
         assert!(width >= 1 && width <= 128);
@@ -51,6 +52,10 @@ impl IntTy {
 
     pub(crate) fn width(self) -> u32 {
         u32::from(self.width)
+    }
+
+    pub(crate) fn signed(self) -> bool {
+        self.signed
     }
 
     fn mask(self) -> u128 {
@@ -115,6 +120,10 @@ impl IntConst {
 
     pub(crate) fn bits(self) -> u128 {
         self.bits
+    }
+
+    pub(crate) fn ty(self) -> IntTy {
+        self.ty
     }
 
     pub(crate) fn is_zero(self) -> bool {

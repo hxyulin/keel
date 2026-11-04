@@ -1,6 +1,8 @@
 //! Token-based C preprocessing using Keel's target environment and headers.
 
 use crate::Diagnostic;
+use crate::ast::{BinOp, UnOp};
+use crate::int_const::{self, IntConst, IntTy, Policy, Ub};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -1716,26 +1718,31 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if expr.pos != tokens.len() {
             return Err(tokens[expr.pos].error("unexpected token in #if expression"));
         }
-        Ok(value.bits != 0)
+        Ok(!value.is_zero())
     }
 }
 
-#[derive(Clone, Copy)]
-struct Integer {
-    bits: u64,
-    unsigned: bool,
+/// An `#if` operand: a value of `intmax_t` or `uintmax_t`.
+type Integer = IntConst;
+
+fn boolean(v: bool) -> Integer {
+    IntConst::wrap(IntTy::INTMAX, u128::from(v))
 }
-impl Integer {
-    fn boolean(v: bool) -> Self {
-        Self {
-            bits: v as u64,
-            unsigned: false,
-        }
-    }
-    fn negative(self) -> bool {
-        !self.unsigned && (self.bits as i64) < 0
+
+/// `intmax_t`, or `uintmax_t` if either operand is unsigned.
+fn common(a: Integer, b: Integer) -> IntTy {
+    if a.ty().signed() && b.ty().signed() {
+        IntTy::INTMAX
+    } else {
+        IntTy::UINTMAX
     }
 }
+
+/// `-v` or `~v`; both wrap.
+fn unary(op: UnOp, v: Integer) -> Integer {
+    int_const::unary(op, v, Policy::CONSTANT).expect("#if negation wraps")
+}
+
 struct Expression<'t, 'a> {
     ts: &'t [Token<'a>],
     pos: usize,
@@ -1760,12 +1767,9 @@ impl Expression<'_, '_> {
                 let v = self.eval(13, live)?;
                 match t.text {
                     "+" => v,
-                    "-" => Integer {
-                        bits: v.bits.wrapping_neg(),
-                        ..v
-                    },
-                    "~" => Integer { bits: !v.bits, ..v },
-                    _ => Integer::boolean(v.bits == 0),
+                    "-" => unary(UnOp::Neg, v),
+                    "~" => unary(UnOp::BitNot, v),
+                    _ => boolean(v.is_zero()),
                 }
             }
             _ => integer(t)?,
@@ -1773,14 +1777,11 @@ impl Expression<'_, '_> {
         while let Some(op) = self.ts.get(self.pos) {
             if op.text == "?" && min <= 1 {
                 self.pos += 1;
-                let yes = self.eval(0, live && lhs.bits != 0)?;
+                let yes = self.eval(0, live && !lhs.is_zero())?;
                 self.expect(":", op)?;
-                let no = self.eval(1, live && lhs.bits == 0)?;
-                let bits = if lhs.bits != 0 { yes.bits } else { no.bits };
-                lhs = Integer {
-                    bits,
-                    unsigned: yes.unsigned || no.unsigned,
-                };
+                let no = self.eval(1, live && lhs.is_zero())?;
+                let ty = common(yes, no);
+                lhs = if lhs.is_zero() { no } else { yes }.convert(ty);
                 continue;
             }
             let prec = match op.text {
@@ -1803,70 +1804,53 @@ impl Expression<'_, '_> {
             let rhs = self.eval(
                 prec + 1,
                 live && match op.text {
-                    "&&" => lhs.bits != 0,
-                    "||" => lhs.bits == 0,
+                    "&&" => !lhs.is_zero(),
+                    "||" => lhs.is_zero(),
                     _ => true,
                 },
             )?;
-            let (a, b) = (lhs.bits, rhs.bits);
-            let unsigned = lhs.unsigned || rhs.unsigned;
-            let less = if unsigned {
-                a < b
-            } else {
-                (a as i64) < (b as i64)
-            };
+            let ty = common(lhs, rhs);
+            let (a, b) = (lhs.convert(ty), rhs.convert(ty));
             let value = match op.text {
-                "||" => Integer::boolean(a != 0 || b != 0),
-                "&&" => Integer::boolean(a != 0 && b != 0),
-                "==" => Integer::boolean(a == b),
-                "!=" => Integer::boolean(a != b),
-                "<" => Integer::boolean(less),
-                ">" => Integer::boolean(!less && a != b),
-                "<=" => Integer::boolean(less || a == b),
-                ">=" => Integer::boolean(!less),
+                "||" => boolean(!a.is_zero() || !b.is_zero()),
+                "&&" => boolean(!a.is_zero() && !b.is_zero()),
                 _ => {
-                    let bits = match op.text {
-                        "|" => a | b,
-                        "^" => a ^ b,
-                        "&" => a & b,
-                        "+" => a.wrapping_add(b),
-                        "-" => a.wrapping_sub(b),
-                        "*" => a.wrapping_mul(b),
-                        "<<" | ">>" => {
-                            if live && (rhs.negative() || b >= 64) {
-                                return Err(op.error("invalid shift count in #if"));
-                            }
-                            if op.text == "<<" {
-                                a.wrapping_shl(b as u32)
-                            } else if lhs.unsigned {
-                                a.wrapping_shr(b as u32)
-                            } else {
-                                (a as i64).wrapping_shr(b as u32) as u64
-                            }
-                        }
-                        "/" | "%" => {
-                            if b == 0 {
-                                if live {
-                                    return Err(op.error("division by zero in #if"));
-                                }
-                                0
-                            } else if unsigned {
-                                if op.text == "/" { a / b } else { a % b }
-                            } else if op.text == "/" {
-                                (a as i64).wrapping_div(b as i64) as u64
-                            } else {
-                                (a as i64).wrapping_rem(b as i64) as u64
-                            }
-                        }
-                        _ => unreachable!(),
+                    let op_kind = match op.text {
+                        "|" => BinOp::Or,
+                        "^" => BinOp::Xor,
+                        "&" => BinOp::And,
+                        "==" => BinOp::Eq,
+                        "!=" => BinOp::Ne,
+                        "<" => BinOp::Lt,
+                        "<=" => BinOp::Le,
+                        ">" => BinOp::Gt,
+                        ">=" => BinOp::Ge,
+                        "<<" => BinOp::Shl,
+                        ">>" => BinOp::Shr,
+                        "+" => BinOp::Add,
+                        "-" => BinOp::Sub,
+                        "*" => BinOp::Mul,
+                        "/" => BinOp::Div,
+                        _ => BinOp::Rem,
                     };
-                    Integer {
-                        bits,
-                        unsigned: if matches!(op.text, "<<" | ">>") {
-                            lhs.unsigned
-                        } else {
-                            unsigned
-                        },
+                    // A shift has the left operand's type.
+                    let (a, b) = if matches!(op_kind, BinOp::Shl | BinOp::Shr) {
+                        (lhs, rhs.convert(lhs.ty()))
+                    } else {
+                        (a, b)
+                    };
+                    match int_const::binary(op_kind, a, b, Policy::CONSTANT) {
+                        Ok(v) if op_kind.is_comparison() => boolean(!v.is_zero()),
+                        Ok(v) => v,
+                        // A skipped operand's value is never used.
+                        Err(_) if !live => IntConst::wrap(a.ty(), 0),
+                        Err(Ub::ShiftCount) => {
+                            return Err(op.error("invalid shift count in #if"));
+                        }
+                        Err(Ub::DivideByZero) => {
+                            return Err(op.error("division by zero in #if"));
+                        }
+                        Err(ub) => unreachable!("{ub:?} wraps in #if"),
                     }
                 }
             };
@@ -1891,10 +1875,7 @@ fn integer(t: &Token<'_>) -> Result<Integer, Diagnostic> {
         let tokens = crate::lex::tokenize(t.text, t.file, &mut files, &mut strings)
             .map_err(|e| t.error(e.message))?;
         if let crate::lex::Tok::Char(value) = tokens[0].tok {
-            return Ok(Integer {
-                bits: value as u64,
-                unsigned: false,
-            });
+            return Ok(IntConst::from_literal(IntTy::INTMAX, value));
         }
         return Err(t.error("invalid character constant in #if"));
     }
@@ -1920,10 +1901,13 @@ fn integer(t: &Token<'_>) -> Result<Integer, Diagnostic> {
     }
     let bits = u64::from_str_radix(&s[start..end], radix)
         .map_err(|_| t.error("invalid integer constant in #if"))?;
-    Ok(Integer {
-        bits,
-        unsigned: suffix.contains('u') || bits > i64::MAX as u64,
-    })
+    let unsigned = suffix.contains('u') || bits > i64::MAX as u64;
+    let ty = if unsigned {
+        IntTy::UINTMAX
+    } else {
+        IntTy::INTMAX
+    };
+    Ok(IntConst::wrap(ty, u128::from(bits)))
 }
 
 #[cfg(test)]

@@ -199,6 +199,18 @@ bad
 #else
 conditional_unsigned
 #endif
+#if 0x7fffffffffffffff + 1 < 0 && (-0x7fffffffffffffff - 1) / -1 < 0 && (1 << 63) < 0
+wraps
+#endif
+#if (-0x7fffffffffffffff - 1) % -1 == 0 && -7 / 2 == -3 && -7 % 2 == -1 && 7u / 2 == 3
+division
+#endif
+#if 0xffffffffffffffff == -1 && -1 > 0u && (1u << 63 >> 63) == 1 && (-1 >> 63) == -1
+unsigned_bits
+#endif
+#if (0 && (1 << 64)) || (1 || 1 >> -1) && (0 ? 1 << 64 : 3) == 3
+dead_shifts
+#endif
 "#,
     );
 }
@@ -282,6 +294,9 @@ fn rejects_invalid_input_with_source_location() {
         ("#if 1\n#else\n#else\n#endif", "after #else"),
         ("#if 1/0\n#endif", "division by zero"),
         ("#if 1 << 64\n#endif", "invalid shift"),
+        ("#if 1 >> -1\n#endif", "invalid shift"),
+        ("#if 1u << 0xffffffffffffffff\n#endif", "invalid shift"),
+        ("#if 1 % 0\n#endif", "division by zero"),
         ("#if (\n#endif", "expected operand"),
         (
             "#define EMPTY\n#if EMPTY\n#endif",
