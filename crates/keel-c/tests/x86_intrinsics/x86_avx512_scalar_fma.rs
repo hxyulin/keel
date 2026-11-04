@@ -130,6 +130,9 @@ fn command(cmd: &mut Command) {
 }
 #[test]
 fn scalar_fma_mask3_upper_c_mask_and_maskz_upper_a_vendor_bits_flags_and_once() {
+    if !super::pclmul::linux_headers() {
+        keel_test_support::skip!(super::pclmul::NO_LINUX_HEADERS);
+    }
     let (source, harness) = sources();
     let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
     keel_ir::verify_module(&module).unwrap();

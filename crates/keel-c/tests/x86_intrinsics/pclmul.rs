@@ -7,6 +7,20 @@ use keel_ir::Target;
 use keel_test_support::native_program;
 use std::{fs, process::Command};
 const CONTROLS: [u8; 8] = [0, 1, 16, 17, 238, 239, 254, 255];
+/// The skip reason when x86-64 Linux libc headers such as `string.h` are not
+/// found. They come from the host only on x86-64 Linux.
+pub(super) const NO_LINUX_HEADERS: &str =
+    "x86-64 Linux libc headers not found; run on x86-64 Linux";
+
+/// Whether [`parse`] can include x86-64 Linux libc headers.
+pub(super) fn linux_headers() -> bool {
+    let options = keel_c::PreprocessOptions {
+        target: Target::X86_64LinuxGnu,
+        ..Default::default()
+    };
+    keel_c::preprocess("#include <string.h>\n", "probe.c", &options).is_ok()
+}
+
 pub(super) fn parse(s: &str, target: Target) -> Result<keel_ir::Module, String> {
     let s = keel_c::preprocess(
         s,

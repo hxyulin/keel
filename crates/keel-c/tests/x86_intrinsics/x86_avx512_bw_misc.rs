@@ -10,6 +10,9 @@ use keel_codegen::{
 use keel_ir::Target;
 #[test]
 fn bw_misc_c_scalar_and_vendor_oracles_low_xmm_sources_and_spills() {
+    if !super::pclmul::linux_headers() {
+        keel_test_support::skip!(super::pclmul::NO_LINUX_HEADERS);
+    }
     let cases = common::cases();
     let (source, harness) = common::sources(&cases, true);
     let module = parse(&source, Target::X86_64LinuxGnu).unwrap();
@@ -18,6 +21,9 @@ fn bw_misc_c_scalar_and_vendor_oracles_low_xmm_sources_and_spills() {
 }
 #[test]
 fn bw_misc_c_controls_maskz_and_function_features() {
+    if !super::pclmul::linux_headers() {
+        keel_test_support::skip!(super::pclmul::NO_LINUX_HEADERS);
+    }
     for width in [128, 256, 512] {
         let p = if width == 128 {
             "_mm"
