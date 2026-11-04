@@ -209,8 +209,10 @@ The keel-llvm import tests and the native keel-opt and keel-llvm checks run
 only when these are set. Plain `cargo test` does not set them.
 
 A test that cannot run because a host tool or host is missing calls
-`keel_test_support::skip!(reason)`, which appends one line to the file named by
-`KEEL_SKIP_LOG`: `<crate>::<test>`, a tab and the reason. After the results list,
+`keel_test_support::skip!(reason)`, which returns from the test, or
+`skip_part!(reason)`, which continues with the checks that need no tool. Both
+append one line to the file named by `KEEL_SKIP_LOG`: `<package>::<test>`, a
+tab and the reason. After the results list,
 the runner prints the skipped tests grouped by reason, and `--report` records
 them under `skips`.
 
