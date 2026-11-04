@@ -10,7 +10,6 @@ use keel_ir::{Type, VectorType};
 use keel_opt::VectorTarget;
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 use native_oracle::PreparedOracle;
-use std::fs;
 
 const TINY: Pools = Pools {
     caller_saved: &[9, 10],
@@ -78,11 +77,6 @@ fn arm(module: &keel_ir::Module, allocation: AllocationTier, tiny: bool) -> keel
                     && (line.contains("[sp") || line.contains("[x29"))),
             "expected forced vector spills"
         );
-    }
-    if let Some(dir) = std::env::var_os("KEEL_WIDEN_EVIDENCE") {
-        let dir = std::path::PathBuf::from(dir);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(format!("{:?}-tiny{tiny}.s", allocation)), &text).unwrap();
     }
     program
 }

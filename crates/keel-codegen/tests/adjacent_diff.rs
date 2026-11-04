@@ -114,16 +114,11 @@ fn module(history: History, optimize: bool) -> keel_ir::Module {
 }
 
 fn evidence(history: History) -> std::path::PathBuf {
-    let (variable, default) = match history {
-        History::Wide => ("KEEL_ADJACENT_DIFF_EVIDENCE_DIR", "adjacent-diff"),
-        History::Narrow => (
-            "KEEL_ADJACENT_DIFF_NARROW_EVIDENCE_DIR",
-            "adjacent-diff-narrow",
-        ),
+    let name = match history {
+        History::Wide => "adjacent-diff",
+        History::Narrow => "adjacent-diff-narrow",
     };
-    let p = std::env::var_os(variable)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(default));
+    let p = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     std::fs::create_dir_all(&p).unwrap();
     p
 }

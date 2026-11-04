@@ -99,13 +99,6 @@ fn proven_chain_reduces_pressure_caller_stores_with_both_allocators() {
             };
             let a = emit(&m);
             let b = emit(&old);
-            if let Some(dir) = std::env::var_os("KEEL_CALL_CHAIN_EVIDENCE_DIR") {
-                let dir = std::path::PathBuf::from(dir);
-                std::fs::create_dir_all(&dir).unwrap();
-                let stem = format!("{selector:?}-{allocator:?}");
-                std::fs::write(dir.join(format!("{stem}-chain.s")), &a).unwrap();
-                std::fs::write(dir.join(format!("{stem}-abi-control.s")), &b).unwrap();
-            }
             let body = |s: String| {
                 s.split("_chain_caller:\n")
                     .nth(1)
@@ -167,13 +160,8 @@ fn forward_references_custom_pools_and_chains_agree_on_both_target_object_routes
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
-    use std::{collections::HashSet, fs};
+    use std::collections::HashSet;
     let m = keel_ir::parse(&fixture()).unwrap();
-    let evidence = std::env::var_os("KEEL_CALL_CHAIN_EVIDENCE_DIR").map(std::path::PathBuf::from);
-    if let Some(dir) = &evidence {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join("fixture.keel"), fixture()).unwrap();
-    }
     let oracle = native_oracle::PreparedOracle::new(
         "private-call-chains",
         include_str!("chain_oracle.c"),
@@ -221,15 +209,6 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
                         "{context}"
                     );
                     configurations += 1;
-                    if let Some(dir) = &evidence {
-                        fs::write(dir.join(format!("configuration-{configurations}.s")), &text)
-                            .unwrap();
-                        fs::write(
-                            dir.join(format!("configuration-{configurations}.o")),
-                            &object,
-                        )
-                        .unwrap();
-                    }
                     if !ran.contains(&object) {
                         oracle.run(&object, &context);
                         ran.insert(object);

@@ -1,6 +1,7 @@
 //! Optimizer-to-selector contract: bit transport, arbitrary nonzero masks and
 //! low-lane extension, with text/direct object parity on both targets.
 use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::AllocationTier};
+use keel_test_support::native_program;
 use object::{Object, ObjectSection};
 use std::{fs, process::Command};
 
@@ -142,15 +143,7 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
             after.to_string()
         );
     }
-    let root = std::env::var_os("KEEL_VECTOR_CANONICAL_EVIDENCE")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-vector-canonical-{}", std::process::id()))
-        })
-        .join(evidence);
-    fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("before.keel"), before.to_string()).unwrap();
-    fs::write(root.join("after.keel"), after.to_string()).unwrap();
+    let root = keel_test_support::TempDir::new(&format!("vector-canonical-{evidence}"));
     fs::write(root.join("oracle.c"), oracle).unwrap();
     for arm in [false, true] {
         for selector in [
@@ -244,8 +237,21 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
                     !shrinks || sizes[1] < sizes[0],
                     "representative forms should shrink: {stem} {sizes:?}"
                 );
-                let native = arm;
-                if native {
+                if !arm {
+                    let mut program = native_program!(&*stem).file("oracle.c", oracle);
+                    let mut inputs = vec!["oracle.c".to_owned()];
+                    for object in &objects {
+                        let file = object.file_name().unwrap().to_str().unwrap().to_owned();
+                        program = program.file(&*file, fs::read(object).unwrap());
+                        inputs.push(file);
+                    }
+                    let flags = ["-O2", "-Wall", "-Wextra", "-Werror", "-msse2", "-mno-avx"];
+                    program
+                        .link(flags.iter().map(|flag| flag.to_string()).chain(inputs))
+                        .check();
+                } else if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+                    keel_test_support::skip_part!("requires arm64 macOS");
+                } else {
                     let exe = root.join(format!("{stem}.native"));
                     command(
                         Command::new("clang")

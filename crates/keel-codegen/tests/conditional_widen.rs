@@ -121,21 +121,6 @@ fn native_arm_guard_pages_tails_extrema_wrapping_seeds_and_spills() {
                     run.status,
                     String::from_utf8_lossy(&run.stderr)
                 );
-                if let Some(evidence) = std::env::var_os("KEEL_CONDITIONAL_WIDEN_EVIDENCE") {
-                    let evidence = std::path::PathBuf::from(evidence);
-                    fs::create_dir_all(&evidence).unwrap();
-                    fs::write(evidence.join("optimized.keel"), m.to_string()).unwrap();
-                    fs::write(
-                        evidence.join(format!("{selection:?}-{allocation:?}-tiny{tiny}.s")),
-                        text,
-                    )
-                    .unwrap();
-                    fs::write(
-                        evidence.join("native.json"),
-                        String::from_utf8(run.stdout).unwrap(),
-                    )
-                    .unwrap();
-                }
             }
         }
     }

@@ -72,11 +72,7 @@ impl RegisterAllocator for Controlled {
     }
 }
 fn dir() -> PathBuf {
-    let dir = std::env::var_os("KEEL_ARM_MINMAX_EVIDENCE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("keel-arm-minmax-{}", std::process::id()))
-        });
+    let dir = std::env::temp_dir().join(format!("keel-arm-minmax-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     dir
 }
