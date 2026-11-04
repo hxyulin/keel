@@ -84,7 +84,7 @@ fn verified_wide_ir_matches_division_and_remainder_in_every_tier() {
 /// around low, final and random quotient multiples.
 #[test]
 fn full_pipeline_matches_division_for_dense_power_and_random_divisors() {
-    let mut random = 0xdec1_a1u64;
+    let mut random = 0x00de_c1a1_u64;
     let mut next = move || {
         random ^= random << 13;
         random ^= random >> 7;
