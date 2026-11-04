@@ -1,3 +1,8 @@
+; expect: exit 0
+; stdout: adjacent-abs PASS
+; The adjacent-abs pass turns the absolute-difference branch into a select.
+; adjacent_abs.c checks the result and the first-fault order against C.
+
 func @rk_adjacent(ptr, ptr, ptr, i64) -> i64 cc(c) {
 block0(v0: ptr, v1: ptr, v2: ptr, v3: i64):
     v4 = iconst.i64 0

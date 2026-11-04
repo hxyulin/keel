@@ -1,4 +1,5 @@
-// Correctness only: link with original and transformed adjacent IR functions.
+// Checks rk_adjacent from adjacent_abs.keel against a C oracle, including
+// which of the two loads faults first.
 #include <assert.h>
 #include <limits.h>
 #include <setjmp.h>
@@ -11,7 +12,6 @@
 
 typedef uint64_t (*kernel)(const int32_t *, const void *, const void *, uint64_t);
 extern uint64_t rk_adjacent(const int32_t *, const void *, const void *, uint64_t);
-extern uint64_t rk_adjacent_before(const int32_t *, const void *, const void *, uint64_t);
 static sigjmp_buf escape;
 static volatile uintptr_t fault_address;
 static volatile sig_atomic_t fault_signal;
@@ -43,10 +43,10 @@ int main(void) {
     char *mem = mmap(NULL, 3 * page, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
     assert(mem != MAP_FAILED);
     assert(mprotect(mem + page, page, PROT_READ | PROT_WRITE) == 0);
-    kernel funcs[] = {rk_adjacent_before, rk_adjacent};
+    kernel funcs[] = {rk_adjacent};
     uint32_t state = 0x12345678;
     unsigned cases = 0;
-    for (unsigned k = 0; k < 2; ++k) {
+    for (unsigned k = 0; k < sizeof funcs / sizeof funcs[0]; ++k) {
         for (unsigned i = 0; i < 2; ++i) {
             assert(funcs[k](NULL, NULL, NULL, i) == 0);
             assert(funcs[k]((int32_t *)mem, NULL, NULL, i) == 0);
@@ -78,6 +78,7 @@ int main(void) {
         assert(mprotect(mem + page, page, PROT_READ | PROT_WRITE) == 0);
     }
     assert(munmap(mem, 3 * page) == 0);
-    printf("{\"status\":\"passed\",\"array_cases\":%u,\"variants\":2,\"first_fault_order\":\"a[1] before a[0]\",\"timed\":false}\n", cases);
+    assert(cases == 258 * 8);
+    puts("adjacent-abs PASS");
     return 0;
 }
