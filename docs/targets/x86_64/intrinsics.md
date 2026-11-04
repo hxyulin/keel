@@ -151,7 +151,8 @@ AVX immediate/variable permutations and cross-half permutations preserve exact
 lane bits. Controls retain the vendor operation's 128-bit-half boundaries;
 `permute2f128`, `permute2x128`, `permute4x64`, and `permutevar8x32` can move
 values across halves where their operation specifies it. Byte shifts and
-`alignr` zero their out-of-range source bytes rather than wrapping counts.
+`alignr` zero their out-of-range source bytes rather than wrapping counts;
+each is one `__builtin_shufflevector` with constant indices.
 Immediate controls are checked constant expressions with the range defined by
 the individual wrapper. Generic lowering can use narrower operations.
 

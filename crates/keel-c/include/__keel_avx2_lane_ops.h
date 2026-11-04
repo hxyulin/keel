@@ -3,40 +3,28 @@
 #ifndef __KEEL_AVX2_LANE_OPS_H
 #define __KEEL_AVX2_LANE_OPS_H
 
-static __inline__ __attribute__((always_inline)) __m256i __keel_mm256_slli_si256(__m256i a, unsigned n) {
-  __keel_u8_256 x = (__keel_u8_256)a, r = {0};
-  for (unsigned h = 0; h < 32; h += 16)
-    for (unsigned j = 0; j < 16; ++j)
-      if (n < 16 && j >= n)
-        r[h + j] = x[h + j - n];
-  return (__m256i)r;
-}
-
 #define _mm256_slli_si256(a, i)                                                \
   __extension__({                                                              \
     _Static_assert(                                                            \
         ((i) | 0) >= 0 && ((i) | 0) <= 255,                                    \
         "SIMD lane control must be an integer constant expression in 0..255"); \
-    __keel_mm256_slli_si256((a), (i));                                         \
+    __keel_u8_256 __keel_a = (__keel_u8_256)(a);                               \
+    (__m256i) __builtin_shufflevector(                                         \
+        __keel_a & 0, __keel_a,                                                \
+        __KEEL_BSLL_LANE((i), 0, 32), __KEEL_BSLL_LANE((i), 16, 32));          \
   })
 
 #define _mm256_bslli_epi128(a, i) _mm256_slli_si256((a), (i))
-
-static __inline__ __attribute__((always_inline)) __m256i __keel_mm256_srli_si256(__m256i a, unsigned n) {
-  __keel_u8_256 x = (__keel_u8_256)a, r = {0};
-  for (unsigned h = 0; h < 32; h += 16)
-    for (unsigned j = 0; j < 16; ++j)
-      if (n < 16 && j + n < 16)
-        r[h + j] = x[h + j + n];
-  return (__m256i)r;
-}
 
 #define _mm256_srli_si256(a, i)                                                \
   __extension__({                                                              \
     _Static_assert(                                                            \
         ((i) | 0) >= 0 && ((i) | 0) <= 255,                                    \
         "SIMD lane control must be an integer constant expression in 0..255"); \
-    __keel_mm256_srli_si256((a), (i));                                         \
+    __keel_u8_256 __keel_a = (__keel_u8_256)(a);                               \
+    (__m256i) __builtin_shufflevector(                                         \
+        __keel_a, __keel_a & 0,                                                \
+        __KEEL_BSRL_LANE((i), 0, 32), __KEEL_BSRL_LANE((i), 16, 32));          \
   })
 
 #define _mm256_bsrli_epi128(a, i) _mm256_srli_si256((a), (i))
@@ -67,25 +55,16 @@ static __inline__ __attribute__((always_inline)) __m256i __keel_mm256_srli_si256
         12 + (((i) >> 4) & 3), 12 + (((i) >> 6) & 3));                         \
   })
 
-static __inline__ __attribute__((always_inline)) __m256i __keel_alignr_256(__m256i a, __m256i b, unsigned n) {
-  __keel_u8_256 x = (__keel_u8_256)a, y = (__keel_u8_256)b, r = {0};
-  for (unsigned h = 0; h < 32; h += 16)
-    for (unsigned j = 0; j < 16; ++j) {
-      unsigned k = n + j;
-      if (k < 16)
-        r[h + j] = y[h + k];
-      else if (k < 32)
-        r[h + j] = x[h + k - 16];
-    }
-  return (__m256i)r;
-}
-
-#define _mm256_alignr_epi8(a, b, i)                                            \
-  __extension__({                                                              \
-    _Static_assert(                                                            \
-        ((i) | 0) >= 0 && ((i) | 0) <= 255,                                    \
-        "SIMD lane control must be an integer constant expression in 0..255"); \
-    __keel_alignr_256((a), (b), (i));                                          \
+#define _mm256_alignr_epi8(a, b, i)                                             \
+  __extension__({                                                               \
+    _Static_assert(                                                             \
+        ((i) | 0) >= 0 && ((i) | 0) <= 255,                                     \
+        "SIMD lane control must be an integer constant expression in 0..255");  \
+    __keel_u8_256 __keel_a = (__keel_u8_256)(a), __keel_b = (__keel_u8_256)(b); \
+    (__m256i) __builtin_shufflevector(                                          \
+        (i) < 16 ? __keel_b : (i) < 32 ? __keel_a : __keel_a & 0,               \
+        (i) < 16 ? __keel_a : __keel_a & 0,                                     \
+        __KEEL_ALIGNR_LANE((i), 0, 32), __KEEL_ALIGNR_LANE((i), 16, 32));       \
   })
 
 #define _mm_blend_epi32(a, b, i)                                               \
