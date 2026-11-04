@@ -1,6 +1,6 @@
 //! `cargo suite stats`: compiles every suite translation unit with
-//! `--opt-report` and totals the reports per optimizer pass and per
-//! inlining outcome.
+//! `--opt-report` and `--codegen-report`, and totals the reports per
+//! optimizer pass, per inlining outcome and per backend counter.
 
 use crate::build::{self, Env, InputMode};
 use crate::codegen_diff::{self, Job, Target};
@@ -77,11 +77,50 @@ struct InlineSite {
     outcome: String,
 }
 
-/// One translation unit's report, or why it has none.
+/// The parts of a schema-1 `--codegen-report` that the totals use.
+#[derive(Deserialize)]
+struct CodegenReport {
+    schema_version: u32,
+    functions: Vec<CodegenFunction>,
+}
+
+#[derive(Deserialize)]
+struct CodegenFunction {
+    counters: Counters,
+}
+
+/// Backend counters by name, in the order the report lists them, so that
+/// counters a newer keel adds need no change here.
+struct Counters(Vec<(String, u64)>);
+
+impl<'de> Deserialize<'de> for Counters {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Counters;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a map of counter names to counts")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Counters, A::Error> {
+                let mut counters = Vec::new();
+                while let Some(entry) = map.next_entry()? {
+                    counters.push(entry);
+                }
+                Ok(Counters(counters))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+/// One translation unit's reports, or why it has none.
 struct Unit {
     suite: String,
     source: String,
-    report: Result<OptReport, String>,
+    report: Result<(OptReport, CodegenReport), String>,
 }
 
 #[derive(Serialize)]
@@ -94,6 +133,7 @@ pub struct Report {
     failed: Vec<Failure>,
     passes: Vec<PassTotal>,
     inline: Vec<InlineTotal>,
+    backend: Vec<BackendTotal>,
 }
 
 #[derive(Serialize)]
@@ -139,6 +179,17 @@ struct InlineTotal {
     /// `inlined`, or the first check that failed.
     outcome: String,
     sites: usize,
+}
+
+/// One `--codegen-report` counter, summed over every function.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct BackendTotal {
+    counter: String,
+    total: u64,
+    /// Functions with a nonzero count.
+    functions: usize,
+    /// The total for each suite.
+    by_suite: BTreeMap<String, u64>,
 }
 
 /// One function a pass changed, for `--pass`.
@@ -241,12 +292,17 @@ fn compile(
     let stem = job.source.file_stem().unwrap().to_string_lossy();
     let output = dir.join(format!("unit-{}-{stem}.s", job.unit));
     let report = dir.join(format!("unit-{}-{stem}.json", job.unit));
+    let codegen = dir.join(format!("unit-{}-{stem}.codegen.json", job.unit));
     let mut argv = job.cc(keel, sysroot, &output);
     argv.extend(["--opt-report".into(), report.display().to_string()]);
+    argv.extend(["--codegen-report".into(), codegen.display().to_string()]);
     let result = build::run(&argv, &job.work.join(&job.suite.manifest.build.dir), None)?;
     let report = if result.status.success() {
-        let text = fs::read(&report).with_context(|| report.display().to_string())?;
-        Ok(parse(&text).with_context(|| report.display().to_string())?)
+        let read = |path: &Path| fs::read(path).with_context(|| path.display().to_string());
+        let opt = parse(&read(&report)?).with_context(|| report.display().to_string())?;
+        let backend =
+            parse_codegen(&read(&codegen)?).with_context(|| codegen.display().to_string())?;
+        Ok((opt, backend))
     } else {
         Err(build::tail(&result, 5).trim().to_string())
     };
@@ -268,6 +324,48 @@ fn parse(json: &[u8]) -> Result<OptReport> {
     Ok(report)
 }
 
+fn parse_codegen(json: &[u8]) -> Result<CodegenReport> {
+    let report: CodegenReport = serde_json::from_slice(json)?;
+    if report.schema_version != 1 {
+        bail!(
+            "codegen report schema {} (expected 1)",
+            report.schema_version
+        );
+    }
+    Ok(report)
+}
+
+/// The backend counters over every compiled unit, in report order.
+fn backend_totals(units: &[Unit]) -> Vec<BackendTotal> {
+    let mut totals: Vec<BackendTotal> = Vec::new();
+    for unit in units {
+        let Ok((_, report)) = &unit.report else {
+            continue;
+        };
+        for function in &report.functions {
+            for (name, count) in &function.counters.0 {
+                let index = match totals.iter().position(|t| &t.counter == name) {
+                    Some(index) => index,
+                    None => {
+                        totals.push(BackendTotal {
+                            counter: name.clone(),
+                            total: 0,
+                            functions: 0,
+                            by_suite: BTreeMap::new(),
+                        });
+                        totals.len() - 1
+                    }
+                };
+                let total = &mut totals[index];
+                total.total += count;
+                total.functions += usize::from(*count != 0);
+                *total.by_suite.entry(unit.suite.clone()).or_default() += count;
+            }
+        }
+    }
+    totals
+}
+
 fn totals(units: &[Unit], keel: String, target: Target, config: &str) -> Report {
     let mut passes: BTreeMap<&str, PassTotal> = BTreeMap::new();
     let mut functions: BTreeMap<&str, BTreeSet<(&str, &str, &str)>> = BTreeMap::new();
@@ -275,7 +373,7 @@ fn totals(units: &[Unit], keel: String, target: Target, config: &str) -> Report 
     let mut failed = Vec::new();
     for unit in units {
         let report = match &unit.report {
-            Ok(report) => report,
+            Ok((report, _)) => report,
             Err(error) => {
                 failed.push(Failure {
                     suite: unit.suite.clone(),
@@ -338,6 +436,7 @@ fn totals(units: &[Unit], keel: String, target: Target, config: &str) -> Report 
                 sites,
             })
             .collect(),
+        backend: backend_totals(units),
     }
 }
 
@@ -345,7 +444,9 @@ fn totals(units: &[Unit], keel: String, target: Target, config: &str) -> Report 
 fn sites(units: &[Unit], pass: &str) -> Vec<Site> {
     let mut sites: BTreeMap<(&str, &str, &str), (usize, i64)> = BTreeMap::new();
     for unit in units {
-        let Ok(report) = &unit.report else { continue };
+        let Ok((report, _)) = &unit.report else {
+            continue;
+        };
         for inv in &report.invocations {
             let Some(function) = inv.function.as_deref().filter(|_| inv.changed) else {
                 continue;
@@ -468,6 +569,47 @@ fn print_report(report: &Report) {
         print_table(header, rows);
     }
 
+    if !report.backend.is_empty() {
+        println!();
+        println!("{}", paint("backend", Paint::Heading));
+        let suites: Vec<&str> = report
+            .backend
+            .iter()
+            .flat_map(|b| b.by_suite.keys().map(String::as_str))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let header = ["counter", "total", "functions"]
+            .into_iter()
+            .chain(suites.iter().copied())
+            .map(|h| Cell::new(h, Paint::Bold))
+            .collect();
+        let rows = report
+            .backend
+            .iter()
+            .map(|b| {
+                let fired = if b.total == 0 {
+                    Paint::Dim
+                } else {
+                    Paint::Plain
+                };
+                [
+                    Cell::new(&b.counter, fired),
+                    Cell::new(b.total.to_string(), fired),
+                    Cell::plain(b.functions.to_string()),
+                ]
+                .into_iter()
+                .chain(
+                    suites
+                        .iter()
+                        .map(|s| Cell::plain(b.by_suite.get(*s).copied().unwrap_or(0).to_string())),
+                )
+                .collect()
+            })
+            .collect();
+        print_table(header, rows);
+    }
+
     println!();
     for f in &report.failed {
         println!(
@@ -548,11 +690,60 @@ mod tests {
                 1,
             );
         }
+        unit_with_backend(suite, source, &json, &[])
+    }
+
+    /// A unit whose codegen report lists one function per `(spills, moves)`.
+    fn unit_with_backend(suite: &str, source: &str, opt: &str, functions: &[(u64, u64)]) -> Unit {
+        let functions: Vec<String> = functions
+            .iter()
+            .enumerate()
+            .map(|(n, (spills, moves))| {
+                format!(
+                    r#"{{"name":"f{n}","counters":{{"spill_stores":{spills},"register_moves":{moves},"cover_fired":0}}}}"#
+                )
+            })
+            .collect();
+        let codegen = format!(
+            r#"{{"schema_version":1,"target":"aarch64-apple-darwin","counters":{{}},"functions":[{}]}}"#,
+            functions.join(",")
+        );
         Unit {
             suite: suite.into(),
             source: source.into(),
-            report: Ok(parse(json.as_bytes()).unwrap()),
+            report: Ok((
+                parse(opt.as_bytes()).unwrap(),
+                parse_codegen(codegen.as_bytes()).unwrap(),
+            )),
         }
+    }
+
+    #[test]
+    fn totals_backend_counters_in_report_order() {
+        let empty = r#"{"schema_version":2,"invocations":[]}"#;
+        let units = vec![
+            unit_with_backend("lua", "a.c", empty, &[(2, 5), (0, 1)]),
+            unit_with_backend("lz4", "b.c", empty, &[(3, 0)]),
+            Unit {
+                suite: "lz4".into(),
+                source: "c.c".into(),
+                report: Err("error: unsupported".into()),
+            },
+        ];
+        let backend = backend_totals(&units);
+        let names: Vec<&str> = backend.iter().map(|b| b.counter.as_str()).collect();
+        assert_eq!(names, ["spill_stores", "register_moves", "cover_fired"]);
+        assert_eq!(
+            backend[0],
+            BackendTotal {
+                counter: "spill_stores".into(),
+                total: 5,
+                functions: 2,
+                by_suite: BTreeMap::from([("lua".into(), 2), ("lz4".into(), 3)]),
+            }
+        );
+        assert_eq!((backend[1].total, backend[1].functions), (6, 2));
+        assert_eq!((backend[2].total, backend[2].functions), (0, 0));
     }
 
     #[test]
@@ -642,5 +833,9 @@ mod tests {
             .err()
             .unwrap();
         assert!(error.to_string().contains("schema 3"));
+        let error = parse_codegen(br#"{"schema_version":2,"functions":[]}"#)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("schema 2"));
     }
 }

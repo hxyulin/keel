@@ -365,7 +365,7 @@ generated code. Objects that both binaries fail to compile are reported and not
 compared. Retired-instruction totals are per configuration. They come from one
 run, so repeat the run before reading a difference under about one percent.
 
-## Optimizer pass statistics
+## Pass and backend statistics
 
 ```sh
 cargo suite stats                                   # every suite, keel-O, this host's target
@@ -374,7 +374,7 @@ cargo suite stats -c keel-O --target x86_64 --x86-64-sysroot /path/to/linux-root
 ```
 
 `stats` compiles every translation unit of the selected suites once, with
-`keel cc --opt-report`, and totals the reports. It uses the same inputs and
+`keel cc --opt-report --codegen-report`, and totals the reports. It uses the same inputs and
 flags as `codegen-diff`, for one target and one configuration. Without
 `--keel`, it builds a release `keel` from this checkout. Outputs and reports go
 to `target/keel-suite/stats/<suite>/`.
@@ -394,9 +394,16 @@ in the pipeline has one row.
 The inline table counts call sites by outcome: `inlined`, or the first check
 that failed, for ordinary calls and for `alwaysinline` callees. `--pass NAME`
 also lists the functions that pass changed, largest instruction change first.
-`--json FILE` writes both tables, with each pass's totals per suite. The counts
-describe optimizer IR. They do not include instruction selection, register
-allocation or spill code.
+The pass and inline counts describe optimizer IR.
+
+The backend table sums each `--codegen-report` counter over every function,
+with the number of functions where it is nonzero and the total per suite.
+The counters are those the keel binary reports, such as spill stores, reloads
+and register moves; the [toolchain reference](../docs/toolchain.md) defines
+them. They count emitted instructions, not executions.
+
+`--json FILE` writes all three tables, with each pass's and each counter's
+totals per suite.
 
 ## Timing two compilers
 

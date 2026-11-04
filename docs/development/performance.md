@@ -35,8 +35,9 @@ earlier one.
 Before timing, check that the change reaches the workloads.
 [`cargo suite codegen-diff`](../../suite/README.md#comparing-generated-code)
 lists the functions whose code changed, and
-[`cargo suite stats`](../../suite/README.md#optimizer-pass-statistics) shows
-which optimizer passes change which functions. A change that touches no hot
+[`cargo suite stats`](../../suite/README.md#pass-and-backend-statistics) shows
+which optimizer passes change which functions, and the backend's spill,
+reload and move counts. A change that touches no hot
 function will measure as neutral. Batch changes that are each expected to
 stay inside the control spread and measure them together.
 

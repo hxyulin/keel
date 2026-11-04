@@ -114,7 +114,7 @@ enum Command {
     CodegenDiff(codegen_diff::Options),
     /// Time two keel compilers' builds against each other and give a verdict.
     Ab(ab::Options),
-    /// Total the optimizer's `--opt-report` over every suite file, per pass.
+    /// Total `--opt-report` per pass and `--codegen-report` per counter over every suite file.
     Stats(stats::Options),
     /// Check compatible same-host runtime runs for slowdowns.
     Regressions {
