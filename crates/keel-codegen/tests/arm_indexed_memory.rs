@@ -35,6 +35,7 @@ block0(v0: ptr,v1: {shape}):
                         trees: true,
                         folded_operands: true,
                         register_hints: true,
+                        covers: keel_codegen::cover::CoverSet::ALL,
                     },
                     allocation,
                     pools,
@@ -112,6 +113,7 @@ fn scalar_widths_all_selection_options_and_allocators_have_object_parity() {
                             trees: bits & 1 != 0,
                             folded_operands: bits & 2 != 0,
                             register_hints: bits & 4 != 0,
+                            covers: keel_codegen::cover::CoverSet::ALL,
                         };
                         let (text, _) = compile(&src, options, allocation, pools);
                         let indexed = text

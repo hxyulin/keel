@@ -66,6 +66,7 @@ fn displacement_limits_and_selection_tiers() {
                                 trees,
                                 folded_operands,
                                 register_hints,
+                                covers: keel_codegen::cover::CoverSet::ALL,
                             },
                         );
                         let matches = trees

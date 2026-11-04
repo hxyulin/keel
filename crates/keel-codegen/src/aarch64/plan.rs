@@ -3,6 +3,7 @@
 //! inline assembly plans, the allocation pools, selection and its covers,
 //! allocation, and the spill area.
 use super::*;
+use crate::cover::Cover;
 
 /// Rejects signatures the target cannot call or return through.
 pub(super) fn preflight(
@@ -428,60 +429,87 @@ impl Covers {
                 uses,
             )
         };
+        let on = |cover| selection.enabled(cover);
+        let [
+            abs,
+            abs_diff,
+            packed_abs,
+            minmax,
+            extended_add,
+            select_compare,
+        ] = [
+            Cover::Aarch64Abs,
+            Cover::Aarch64AbsDiff,
+            Cover::PackedAbs,
+            Cover::Aarch64PackedMinmax,
+            Cover::Aarch64ExtendedAdd,
+            Cover::Aarch64SelectCompare,
+        ]
+        .map(on);
+        let [low, replicate, immediate, widening_add, compare_branch] = [
+            Cover::Aarch64PackedLowLoad,
+            Cover::Aarch64ReplicateLoad,
+            Cover::Aarch64VectorImmediate,
+            Cover::Aarch64WideningAdd,
+            Cover::CompareBranch,
+        ]
+        .map(on);
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
-        let absolute_values = if present.select {
+        let absolute_values = if present.select && abs {
             absolute::select(func, &mut selection, uses)
         } else {
             HashMap::default()
         };
-        let absolute_differences = if present.widen_low {
+        let absolute_differences = if present.widen_low && abs_diff {
             absolute_diff::select(func, &mut selection)
         } else {
             HashMap::default()
         };
-        let packed_absolute_values = if present.vector_select {
+        let packed_absolute_values = if present.vector_select && packed_abs {
             crate::packed_absolute::select(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let packed_minmax = if present.vector_icmp {
+        let packed_minmax = if present.vector_icmp && minmax {
             packed_minmax::select(func, &mut selection)
         } else {
             HashMap::default()
         };
         // Inline assembly may observe the leaves; such functions keep them.
-        let extended_adds = if present.ptradd && !present.inline_asm {
+        let extended_adds = if present.ptradd && !present.inline_asm && extended_add {
             extended_add::select(func, &mut selection, uses)
         } else {
             HashMap::default()
         };
-        if present.select {
+        if present.select && select_compare {
             selection.fuse_aarch64_selects(
                 func,
                 |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
                 uses,
             );
         }
-        let (packed_low_loads, replicate_loads) = if present.vector_splat {
-            (
-                packed_load::select(facts, &mut selection),
-                vector::select_replicate_loads(facts, &mut selection),
-            )
+        let packed_low_loads = if present.vector_splat && low {
+            packed_load::select(facts, &mut selection)
         } else {
-            (HashMap::default(), HashMap::default())
+            HashMap::default()
         };
-        let constant_shifts = if present.vector_splat {
+        let replicate_loads = if present.vector_splat && replicate {
+            vector::select_replicate_loads(facts, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let constant_shifts = if present.vector_splat && immediate {
             vector::select_constant_operands(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let widening_adds = if present.widen_low {
+        let widening_adds = if present.widen_low && widening_add {
             vector::select_widening_adds(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let fused_compares = if present.compare && present.brif {
+        let fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(
                 func,

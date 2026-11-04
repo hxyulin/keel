@@ -108,7 +108,10 @@ impl TunedSelector {
         profiling::scope!("instruction-selection", "apple-m5");
         let mut selection =
             crate::select::Selection::compute_with_uses(func, target, self.options, uses);
-        if self.options.trees && target == crate::select::Target::Aarch64 {
+        if self.options.trees
+            && target == crate::select::Target::Aarch64
+            && selection.enabled(crate::cover::Cover::Aarch64MultiplyShift)
+        {
             selection.tune_multiplications(func, self.cpu);
         }
         if self.options.folded_operands {

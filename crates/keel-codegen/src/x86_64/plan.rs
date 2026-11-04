@@ -3,6 +3,7 @@
 //! frame, selection and its covers, allocation, spill homes, the fixed
 //! system slots, inline assembly plans, and the frame size.
 use super::*;
+use crate::cover::Cover;
 
 /// The widest vector the function handles, and what it asks of the frame.
 pub(super) struct VectorShape {
@@ -386,36 +387,58 @@ impl Covers {
             &|data| folds(func, data),
             uses,
         );
-        if present.compare {
+        let on = |cover| selection.enabled(cover);
+        let [
+            mask_tests,
+            compare_branch,
+            select_compare,
+            packed_abs,
+            positive,
+            sign,
+            low,
+            wide,
+        ] = [
+            Cover::X86MaskTest,
+            Cover::CompareBranch,
+            Cover::X86SelectCompare,
+            Cover::PackedAbs,
+            Cover::X86PackedPositive,
+            Cover::X86PackedSign,
+            Cover::X86PackedLowLoad,
+            Cover::X86PackedWideLoad,
+        ]
+        .map(on);
+        let signed_byte = on(Cover::X86SignedByteLoad);
+        if present.compare && mask_tests {
             selection.fold_x86_mask_tests(func, uses);
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
-        let fused_compares = if present.compare && present.brif {
+        let fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
             selection.fuse_compares(func, |data| folds(func, data), uses)
         } else {
             HashSet::default()
         };
-        if present.select {
+        if present.select && select_compare {
             selection.fuse_x86_selects(func, |data| folds(func, data), uses, present.inline_asm);
         }
-        let packed_absolute_values = if present.vector_select {
+        let packed_absolute_values = if present.vector_select && packed_abs {
             crate::packed_absolute::select(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let packed_positive_values = if present.vector_splat {
+        let packed_positive_values = if present.vector_splat && positive {
             packed_positive::select(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let packed_sign_values = if present.vector_icmp {
+        let packed_sign_values = if present.vector_icmp && sign {
             packed_sign::select(facts, &mut selection)
         } else {
             HashMap::default()
         };
-        let mut packed_low_loads = if present.vector_splat {
+        let mut packed_low_loads = if present.vector_splat && low {
             packed_load::select(
                 facts,
                 &mut selection,
@@ -424,14 +447,16 @@ impl Covers {
         } else {
             HashMap::default()
         };
-        if present.widen_low {
+        if present.widen_low && wide {
             packed_low_loads.extend(packed_load::select_wide(
                 facts,
                 &mut selection,
                 pipeline.selector.x86_features(),
             ));
         }
-        selection.fold_signed_byte_loads(func, uses);
+        if signed_byte {
+            selection.fold_signed_byte_loads(func, uses);
+        }
         Self {
             selection,
             fused_compares,

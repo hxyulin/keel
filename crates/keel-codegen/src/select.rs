@@ -2,7 +2,7 @@
 //! A cover is local to a block and consumes single-use nodes. Memory covers
 //! additionally preserve the original access position and exact access width.
 //! Shared DAG nodes remain materialized; selected leaves are live at the root.
-use crate::cover::Cover;
+use crate::cover::{Cover, CoverSet};
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
@@ -130,6 +130,9 @@ pub struct Selection {
     pub hints: Hints,
     /// The cover that claimed each root instruction, indexed by instruction.
     owners: Vec<Option<Cover>>,
+    /// Covers the selection options turned off. Empty by default, so a
+    /// custom selector's plan runs every backend cover.
+    disabled: CoverSet,
 }
 
 /// The input each result would like to share a register with, if any,
@@ -699,6 +702,10 @@ impl Selection {
         debug_assert!(owner.is_none(), "{root} claimed by {owner:?} and {cover:?}");
         *owner = Some(cover);
     }
+    /// Whether the selection options allow `cover` to run.
+    pub fn enabled(&self, cover: Cover) -> bool {
+        !self.disabled.contains(cover)
+    }
     /// The cover that claimed `inst` as its root, if any.
     pub fn owner(&self, inst: Inst) -> Option<Cover> {
         self.owners.get(inst.index()).copied().flatten()
@@ -810,7 +817,10 @@ impl Selection {
         options: crate::SelectionOptions,
         counted: Option<&[u8]>,
     ) -> Self {
-        let mut plan = Self::default();
+        let mut plan = Self {
+            disabled: CoverSet::ALL.difference(options.covers),
+            ..Self::default()
+        };
         if !options.trees && !options.register_hints {
             return plan;
         }
@@ -838,7 +848,7 @@ impl Selection {
                 // instruction. With exactly this adjacent sequence, emission
                 // between IDIV/DIV and the remainder read only moves registers
                 // or spill homes; no operation can clobber reserved RDX.
-                if target == Target::X86 && end >= 2 {
+                if target == Target::X86 && end >= 2 && plan.enabled(Cover::X86DivisionRemainder) {
                     let insts = func.block_insts(block);
                     let (division, product) = (insts[end - 2], insts[end - 1]);
                     if let InstData::Binary {
@@ -895,6 +905,7 @@ impl Selection {
                     cond: cc @ (IntCC::Eq | IntCC::Ne),
                     args,
                 } = *func.inst_data(inst)
+                    && plan.enabled(Cover::ZeroTest)
                     && crate::fold::iconst(func, args[1]) == Some(0)
                     && let ValueDef::Result(convert, _) = func.value_def(func.resolve(args[0]))
                     && let InstData::Convert {
@@ -946,11 +957,14 @@ impl Selection {
                     _ => None,
                 };
                 if let Some((addr, ty)) = memory {
-                    if plan.select_indexed_address(func, inst, addr, ty, &uses, target) {
+                    if plan.enabled(Cover::IndexedAddress)
+                        && plan.select_indexed_address(func, inst, addr, ty, &uses, target)
+                    {
                         continue;
                     }
                     let addr = func.resolve(addr);
-                    if uses[addr.index()] == 1
+                    if plan.enabled(Cover::OffsetAddress)
+                        && uses[addr.index()] == 1
                         && let ValueDef::Result(child, _) = func.value_def(addr)
                         && func.inst_block(child) == block
                         && !plan.covered(child)
@@ -1021,6 +1035,7 @@ impl Selection {
                 // input and replaces a single-use product plus constant add.
                 if target == Target::X86
                     && op == BinaryOp::Iadd
+                    && plan.enabled(Cover::X86LeaMul3)
                     && matches!(ty, Type::I32 | Type::I64)
                     // An aliased dead definition can still be in the layout.
                     && func.inst_results(inst).first().is_some_and(|&v| func.resolve(v) == v)
@@ -1105,6 +1120,7 @@ impl Selection {
                 // Masks wider than the remaining field deliberately fall back.
                 if target == Target::Aarch64
                     && op == BinaryOp::And
+                    && plan.enabled(Cover::Aarch64Ubfx)
                     && matches!(ty, Type::I32 | Type::I64)
                 {
                     let bits = if ty == Type::I32 { 32u64 } else { 64 };
@@ -1346,16 +1362,19 @@ impl Selection {
                     continue;
                 }
                 let (args, binary) = match *func.inst_data(consumer) {
-                    InstData::Icmp { args, .. } => (args, false),
+                    InstData::Icmp { args, .. } if self.enabled(Cover::X86CompareMemory) => {
+                        (args, false)
+                    }
                     InstData::Binary { op, args }
-                        if matches!(
-                            op,
-                            BinaryOp::Iadd
-                                | BinaryOp::Isub
-                                | BinaryOp::And
-                                | BinaryOp::Or
-                                | BinaryOp::Xor
-                        ) || (op == BinaryOp::Imul && ty != Type::I8) =>
+                        if self.enabled(Cover::X86BinaryMemory)
+                            && (matches!(
+                                op,
+                                BinaryOp::Iadd
+                                    | BinaryOp::Isub
+                                    | BinaryOp::And
+                                    | BinaryOp::Or
+                                    | BinaryOp::Xor
+                            ) || (op == BinaryOp::Imul && ty != Type::I8)) =>
                     {
                         (args, true)
                     }

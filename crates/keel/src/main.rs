@@ -65,6 +65,7 @@ const USAGE: &str = "usage:
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
   --isel / --isel-tier and --regalloc override preset stages in either order.
+  --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier; like cc, it targets the host unless --target is given.
@@ -594,26 +595,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "--emit-object" => opts.emit_object = true,
             "--isel" => {
                 explicit_selection = true;
-                let passes = args
-                    .next()
-                    .ok_or("`--isel` needs none, all, or trees,folds,hints")?;
-                opts.selection = keel_codegen::SelectionOptions::default();
-                for pass in passes.split(',') {
-                    match pass {
-                        "none" if passes == "none" => {}
-                        "all" if passes == "all" => {
-                            opts.selection = keel_codegen::SelectionOptions::ALL
-                        }
-                        "trees" => opts.selection.trees = true,
-                        "folds" => opts.selection.folded_operands = true,
-                        "hints" => opts.selection.register_hints = true,
-                        _ => {
-                            return Err(format!(
-                                "unknown selection pass `{pass}`; expected none, all, or trees,folds,hints"
-                            ));
-                        }
-                    }
-                }
+                let passes = args.next().ok_or(ISEL_PASSES)?;
+                opts.selection = selection_passes(passes)?;
             }
             "--cpu-level" => {
                 opts.x86_options
@@ -739,9 +722,47 @@ fn write_new_report(label: &str, path: &str, text: &str) -> Result<(), String> {
         .map_err(|e| format!("{label} {path}: {e}"))
 }
 
+const ISEL_PASSES: &str = "`--isel` needs none, all, or a list of trees, folds, hints, covers and cover names, each optionally prefixed with `-`";
+
+/// Parses an `--isel` list. Terms apply left to right on top of the default
+/// selection: `all` turns everything on, `covers` every cover, and a
+/// leading `-` turns a term off.
+fn selection_passes(passes: &str) -> Result<keel_codegen::SelectionOptions, String> {
+    use keel_codegen::cover::{Cover, CoverSet};
+    let mut selection = keel_codegen::SelectionOptions::default();
+    if passes == "none" {
+        return Ok(selection);
+    }
+    for pass in passes.split(',') {
+        let (on, name) = match pass.strip_prefix('-') {
+            Some(name) => (false, name),
+            None => (true, pass),
+        };
+        match name {
+            "all" if on => selection = keel_codegen::SelectionOptions::ALL,
+            "trees" => selection.trees = on,
+            "folds" => selection.folded_operands = on,
+            "hints" => selection.register_hints = on,
+            "covers" => selection.covers = if on { CoverSet::ALL } else { CoverSet::NONE },
+            _ => {
+                let Some(cover) = Cover::from_name(name) else {
+                    return Err(format!("unknown selection pass `{pass}`; {ISEL_PASSES}"));
+                };
+                if on {
+                    selection.covers.insert(cover);
+                } else {
+                    selection.covers.remove(cover);
+                }
+            }
+        }
+    }
+    Ok(selection)
+}
+
 /// Per-function backend counters as JSON, in compilation order.
 fn codegen_report_json(target: Target, report: &keel_codegen::backend_profile::Report) -> String {
     use keel_codegen::backend_profile::Counter;
+    use keel_codegen::cover::Cover;
     use std::fmt::Write;
     let counters = |values: &[u64; Counter::ALL.len()]| {
         let fields: Vec<_> = Counter::ALL
@@ -750,10 +771,20 @@ fn codegen_report_json(target: Target, report: &keel_codegen::backend_profile::R
             .collect();
         format!("{{{}}}", fields.join(","))
     };
+    // Only covers that fired, in registry order.
+    let covers = |values: &[u64; Cover::ALL.len()]| {
+        let fields: Vec<_> = Cover::ALL
+            .iter()
+            .filter(|&&c| values[c as usize] != 0)
+            .map(|&c| format!("\"{}\":{}", c.name(), values[c as usize]))
+            .collect();
+        format!("{{{}}}", fields.join(","))
+    };
     let mut out = format!(
-        "{{\"schema_version\":1,\"target\":\"{}\",\"counters\":{},\"functions\":[",
+        "{{\"schema_version\":1,\"target\":\"{}\",\"counters\":{},\"covers\":{},\"functions\":[",
         target.triple(),
-        counters(&report.counters)
+        counters(&report.counters),
+        covers(&report.covers)
     );
     for (n, function) in report.functions.iter().enumerate() {
         if n != 0 {
@@ -762,8 +793,9 @@ fn codegen_report_json(target: Target, report: &keel_codegen::backend_profile::R
         let name = serde_json::to_string(&function.name).expect("a string serializes");
         write!(
             out,
-            "{{\"name\":{name},\"counters\":{}}}",
-            counters(&function.counters)
+            "{{\"name\":{name},\"counters\":{},\"covers\":{}}}",
+            counters(&function.counters),
+            covers(&function.covers)
         )
         .unwrap();
     }
@@ -1470,6 +1502,7 @@ mod tests {
 
     #[test]
     fn optimization_preset_selection_and_explicit_overrides() {
+        use keel_codegen::cover::{Cover, CoverSet};
         use keel_codegen::{SelectionOptions, SelectionTier};
         use keel_opt::OptimizationTier;
         for tier in ["none", "fast", "basic", "full"] {
@@ -1515,6 +1548,26 @@ mod tests {
                     trees: false,
                     folded_operands: true,
                     register_hints: true,
+                    ..SelectionOptions::default()
+                },
+            ),
+            ("--isel", "all,-x86-mask-test", {
+                let mut all = SelectionOptions::ALL;
+                all.covers.remove(Cover::X86MaskTest);
+                all
+            }),
+            (
+                "--isel",
+                "trees,-covers,zero-test",
+                SelectionOptions {
+                    trees: true,
+                    covers: [Cover::ZeroTest]
+                        .into_iter()
+                        .fold(CoverSet::NONE, |mut set, c| {
+                            set.insert(c);
+                            set
+                        }),
+                    ..SelectionOptions::default()
                 },
             ),
             ("--isel-tier", "baseline", SelectionOptions::default()),
@@ -1544,6 +1597,9 @@ mod tests {
                 .selection,
             SelectionOptions::ALL
         );
+        for bad in ["x86-mask", "-all", "none,trees"] {
+            assert!(options(&["--isel", bad]).is_err(), "{bad}");
+        }
     }
 
     #[test]

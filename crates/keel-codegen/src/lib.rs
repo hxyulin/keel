@@ -52,7 +52,7 @@ pub(crate) fn require_native_target(target: Target) -> Result<(), &'static str> 
 
 /// Optional target instruction-selection passes. They preserve IR semantics,
 /// but may trade instruction count against register pressure and scheduling.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectionOptions {
     /// Fuse eligible single-use binary trees into target instructions.
     pub trees: bool,
@@ -60,13 +60,31 @@ pub struct SelectionOptions {
     pub folded_operands: bool,
     /// Prefer generated operand affinities among free permitted registers.
     pub register_hints: bool,
+    /// The named covers that may run. Selection-stage covers also need
+    /// `trees`.
+    pub covers: cover::CoverSet,
 }
 impl SelectionOptions {
     pub const ALL: Self = Self {
         trees: true,
         folded_operands: true,
         register_hints: true,
+        covers: cover::CoverSet::ALL,
     };
+}
+impl SelectionOptions {
+    /// The options of [`SelectionTier::Baseline`].
+    pub const BASELINE: Self = Self {
+        trees: false,
+        folded_operands: false,
+        register_hints: false,
+        covers: cover::CoverSet::ALL,
+    };
+}
+impl Default for SelectionOptions {
+    fn default() -> Self {
+        Self::BASELINE
+    }
 }
 
 /// Compiles a module into one assembly file for `target`.
@@ -260,6 +278,7 @@ impl SelectionTier {
             Self::Baseline => SelectionOptions::default(),
             Self::Trees => SelectionOptions {
                 trees: true,
+                covers: cover::CoverSet::ALL,
                 ..SelectionOptions::default()
             },
             Self::Full => SelectionOptions::ALL,

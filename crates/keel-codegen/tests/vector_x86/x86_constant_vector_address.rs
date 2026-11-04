@@ -278,6 +278,7 @@ fn selection_options_and_symbolic_base_keep_exact_accesses() {
                         trees,
                         folded_operands,
                         register_hints,
+                        covers: keel_codegen::cover::CoverSet::ALL,
                     },
                 );
                 assert_eq!(plan.covered(insts[1]), trees);

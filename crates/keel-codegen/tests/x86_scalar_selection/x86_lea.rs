@@ -90,6 +90,7 @@ fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assembl
                         trees,
                         folded_operands,
                         register_hints,
+                        covers: keel_codegen::cover::CoverSet::ALL,
                     };
                     let text = compile_with_options(&module, target, options).unwrap();
                     if target == Target::X86_64LinuxGnu {
@@ -255,6 +256,7 @@ fn native_edges_match_separately_compiled_clang_oracle_with_spills() {
                     trees: bits & 1 != 0,
                     folded_operands: bits & 2 != 0,
                     register_hints: bits & 4 != 0,
+                    covers: keel_codegen::cover::CoverSet::ALL,
                 };
                 let name = format!("{allocation:?}-{pool_name}-{bits}");
                 let selector = keel_codegen::OptionsSelector(options);

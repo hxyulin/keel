@@ -1042,6 +1042,7 @@ impl<'a> FunctionCompiler<'a> {
         let allocation_pools = plan::AllocationPools::plan(pools, argument_bank, &asm, moves_sp);
         let pools = allocation_pools.pools(pools);
         let covers = plan::Covers::select(func, pipeline, &facts, leaf_summaries);
+        crate::backend_profile::count_covers(&covers.selection);
         let mut alloc = plan::allocate(func, &pools, &covers.selection, pipeline).map_err(err)?;
         let plan::InlineAsmPlans {
             asm_saved,

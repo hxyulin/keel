@@ -29,6 +29,7 @@ fn options() -> impl Iterator<Item = SelectionOptions> {
         trees: n & 1 != 0,
         folded_operands: n & 2 != 0,
         register_hints: n & 4 != 0,
+        covers: keel_codegen::cover::CoverSet::ALL,
     })
 }
 

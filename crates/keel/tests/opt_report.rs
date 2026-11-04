@@ -292,3 +292,53 @@ fn codegen_reports_count_spills_reloads_and_moves_per_function() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn codegen_reports_count_cover_firings_per_function() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("codegen-report-covers");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let ir = "func @branch(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.slt v0, v1\n brif v2, block1, block2\nblock1:\n return v0\nblock2:\n return v1\n}\n\
+              func @plain(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}\n";
+    fs::write(dir.join("in.keel"), ir).unwrap();
+    let mut n = 0;
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        for (selection, fired) in [("all", 1), ("all,-compare-branch", 0)] {
+            n += 1;
+            let name = format!("report-{n}.json");
+            let output = format!("out-{n}.s");
+            let args = [
+                "compile",
+                "in.keel",
+                "--target",
+                target,
+                "--isel",
+                selection,
+                "-o",
+                &output,
+                "--codegen-report",
+                &name,
+            ];
+            let run = keel(&dir, &args);
+            assert!(
+                run.status.success(),
+                "{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
+            let report: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.join(&name)).unwrap()).unwrap();
+            let covers = |f: &serde_json::Value| f["covers"].as_object().unwrap().clone();
+            let functions = report["functions"].as_array().unwrap();
+            assert_eq!(
+                covers(&functions[0])
+                    .get("compare-branch")
+                    .and_then(|v| v.as_u64()),
+                (fired != 0).then_some(fired),
+                "{args:?}"
+            );
+            assert!(covers(&functions[1]).is_empty(), "{args:?}");
+            assert_eq!(covers(&report), covers(&functions[0]), "{args:?}");
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

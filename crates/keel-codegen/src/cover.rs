@@ -121,6 +121,10 @@ impl CoverSet {
     pub fn remove(&mut self, cover: Cover) {
         self.0 &= !(1 << cover as u8);
     }
+    /// The covers in `self` and not in `other`.
+    pub const fn difference(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
     pub fn iter(self) -> impl Iterator<Item = Cover> {
         Cover::ALL.into_iter().filter(move |&c| self.contains(c))
     }

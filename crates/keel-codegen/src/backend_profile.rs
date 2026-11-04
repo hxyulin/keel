@@ -1,8 +1,10 @@
 //! Thread-local backend counters and timing. Wrap a compilation in
 //! [`capture`] to collect them. Other threads and compilations are independent.
-//! [`Counter`]s and per-function attribution are always available; stage
-//! timings other than [`Stage::Function`] need the `backend-profile` feature.
+//! [`Counter`]s, cover firings and per-function attribution are always
+//! available; stage timings other than [`Stage::Function`] need the
+//! `backend-profile` feature.
 //! Inclusive times nest; self times subtract instrumented child scopes.
+use crate::cover::Cover;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -134,12 +136,25 @@ pub struct FunctionProfile {
     pub name: String,
     pub stages: [Timing; Stage::ALL.len()],
     pub counters: [u64; Counter::ALL.len()],
+    /// Roots each cover claimed, indexed by [`Cover`].
+    pub covers: [u64; Cover::ALL.len()],
 }
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Report {
     pub stages: [Timing; Stage::ALL.len()],
     pub counters: [u64; Counter::ALL.len()],
+    pub covers: [u64; Cover::ALL.len()],
     pub functions: Vec<FunctionProfile>,
+}
+impl Default for Report {
+    fn default() -> Self {
+        Self {
+            stages: Default::default(),
+            counters: Default::default(),
+            covers: [0; Cover::ALL.len()],
+            functions: Vec::new(),
+        }
+    }
 }
 struct Active {
     start: Instant,
@@ -196,6 +211,23 @@ pub(crate) fn count(counter: Counter) {
     });
 }
 
+/// Record the roots that covers claimed in one function's selection, only
+/// while capture is active.
+pub(crate) fn count_covers(selection: &crate::select::Selection) {
+    RECORDER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let Some(recorder) = slot.as_mut() else {
+            return;
+        };
+        for (_, cover) in selection.claims() {
+            recorder.report.covers[cover as usize] += 1;
+            if let Some(index) = recorder.function {
+                recorder.report.functions[index].covers[cover as usize] += 1;
+            }
+        }
+    });
+}
+
 /// Drop the current function's counts, for output that is discarded and
 /// compiled again. Timings stay, since the time was spent.
 pub(crate) fn discard_function_counters() {
@@ -207,8 +239,13 @@ pub(crate) fn discard_function_counters() {
         let Some(index) = recorder.function else {
             return;
         };
-        let counters = std::mem::take(&mut recorder.report.functions[index].counters);
+        let function = &mut recorder.report.functions[index];
+        let counters = std::mem::take(&mut function.counters);
+        let covers = std::mem::replace(&mut function.covers, [0; Cover::ALL.len()]);
         for (total, discarded) in recorder.report.counters.iter_mut().zip(counters) {
+            *total -= discarded;
+        }
+        for (total, discarded) in recorder.report.covers.iter_mut().zip(covers) {
             *total -= discarded;
         }
     });
@@ -248,6 +285,7 @@ pub(crate) fn function(name: &str) -> Guard {
                 name: name.to_owned(),
                 stages: [Timing::default(); Stage::ALL.len()],
                 counters: [0; Counter::ALL.len()],
+                covers: [0; Cover::ALL.len()],
             });
             functions.len() - 1
         });

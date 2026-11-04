@@ -81,6 +81,7 @@ fn widths_scales_masked_shifts_options_allocators_and_spills() {
                                 trees: bits & 1 != 0,
                                 folded_operands: bits & 2 != 0,
                                 register_hints: bits & 4 != 0,
+                                covers: keel_codegen::cover::CoverSet::ALL,
                             };
                             let (text, _) = compile(&m, options, alloc, pools);
                             assert_eq!(
