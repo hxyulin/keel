@@ -14,5 +14,8 @@ profile-with-tracy = ["profiling/profile-with-tracy"]
 profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
 
+[dev-dependencies]
+keel-test-support = { path = "../keel-test-support" }
+
 [lints]
 workspace = true

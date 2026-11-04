@@ -161,14 +161,15 @@ fn unrelated_writes_and_volatile_accesses_remain_barriers() {
     }
 }
 
+const NO_KEEL: &str = "Keel executable not given; set KEEL_TEST_KEEL";
+
 #[test]
 fn optimized_calls_match_native_readonly_and_writing_oracles() {
     let Some(keel) = std::env::var_os("KEEL_TEST_KEEL") else {
-        eprintln!("skipped native execution: set KEEL_TEST_KEEL to the rebuilt Keel executable");
-        return;
+        keel_test_support::skip!(NO_KEEL);
     };
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        return;
+        keel_test_support::skip!("native call contract checks execute only on arm64 macOS");
     }
     let dir =
         std::env::temp_dir().join(format!("keel-call-contract-native-{}", std::process::id()));
@@ -218,8 +219,7 @@ fn optimized_calls_match_native_readonly_and_writing_oracles() {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn permission_changes_preserve_the_later_load_fault() {
     let Some(keel) = std::env::var_os("KEEL_TEST_KEEL") else {
-        eprintln!("skipped native execution: set KEEL_TEST_KEEL");
-        return;
+        keel_test_support::skip!(NO_KEEL);
     };
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         return;

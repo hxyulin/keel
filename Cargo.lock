@@ -522,6 +522,7 @@ name = "keel-opt"
 version = "0.1.0"
 dependencies = [
  "keel-ir",
+ "keel-test-support",
  "profiling",
 ]
 
