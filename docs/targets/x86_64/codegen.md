@@ -415,6 +415,29 @@ when compiling an IR file. Library callers set `EmissionOptions::goal` to
 `CodegenGoal::Size`; the default is `CodegenGoal::Speed`. AArch64 has no
 goal-specific emission.
 
+## Adding an operation
+
+After the IR steps in
+[adding an operation](../../compiler/design.md#adding-an-operation):
+
+1. Add the lowering to the family module: `x86_64/lower_scalar.rs`,
+   `lower_memory.rs`, `lower_control.rs` or `lower_vector.rs`, or
+   `x86_64/intrinsic_family.rs` for a target-independent intrinsic. The family
+   matches end in a wildcard that panics, so the compiler does not point to a
+   missing arm. Feature-gated forms (AVX, AVX-512, BMI) check the function's
+   `x86::Features`.
+2. Reject shapes the lowering does not handle in `unsupported` in
+   `x86_64.rs`, which `plan::preflight` calls, rather than panicking later.
+3. Read every operand before writing the destination, since a result may
+   share an operand's register.
+4. Add a fused form only as a [cover](#covers) or a `patterns.txt` rule, so
+   Baseline keeps the plain lowering as its reference.
+5. Add a program under `crates/keel-codegen/tests/programs/` and run
+   `cargo test -p keel-codegen --test run` and `--test asm_snapshots`
+   (`BLESS=1` rewrites the snapshots). Native execution needs x86-64 Linux;
+   elsewhere, export the programs with `KEEL_TEST_EXPORT_DIR` as described in
+   [testing](../../development/testing.md#native-x86-64-programs-on-another-host).
+
 ## Tests
 
 ```sh

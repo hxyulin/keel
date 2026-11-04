@@ -773,6 +773,47 @@ multiply/add reads it in a register. A breakpoint on a folded constant's
 line stops at the instruction using it. Compare/branch fusion retains its
 existing flag lowering.
 
+## Adding an operation
+
+First decide between an instruction and an intrinsic (see
+[instructions vs intrinsics](#integer-operations)). An intrinsic's signature,
+purity, memory effects, trap and inline facts come from
+`tools/x86-isa/intrinsic-registry.json`; edit it, run
+`python3 tools/x86-isa/generate.py` and check with
+`python3 tools/test.py generators`. For an instruction, using `umulhi` as the
+model of a binary operation:
+
+1. **IR.** Add the variant to its opcode enum in `crates/keel-ir/src/inst.rs`
+   and its name in that enum's `Display`. If it does not fit an existing
+   `InstData` format, add a format and its result signature, which
+   construction and the verifier share. Add the spelling to
+   `crates/keel-ir/src/parser.rs` and a builder method to `builder.rs`.
+   Review `can_trap`, `memory_effects` and `may_trap`, which decide whether
+   the optimizer may move or delete it.
+2. **Interpreter.** Add its semantics to `crates/keel-ir-interp/src/ops.rs`
+   and a case to the matching family under
+   `crates/keel-ir-interp/tests/interp/`. The interpreter and the name are
+   the only exhaustive matches; every other consumer matches with a wildcard,
+   so the compiler does not list the places below.
+3. **Optimizer.** Add constant evaluation to `crates/keel-opt/src/const_fold.rs`,
+   which `instcombine` and Fast share. Check `gvn::is_commutative`, which GVN
+   and the canonical form share, `if_convert.rs` (speculation) and any
+   `instcombine` rule family that should see it.
+4. **Backends.** Lower it on [x86-64](../targets/x86_64/codegen.md#adding-an-operation)
+   and [AArch64](../targets/aarch64/codegen.md#adding-an-operation). If the
+   backend must find it before lowering, add a flag to `InstKinds` in
+   `crates/keel-codegen/src/kinds.rs`.
+5. **Other consumers.** keel-wasm, the keel-llvm exporter and keel-cranelift
+   reject what they do not handle; add a lowering or a clear rejection.
+6. **Tests.** Add a parse-and-print case under `crates/keel-ir/tests/golden/`
+   (`BLESS=1` rewrites `.out` files), a const-fold golden in
+   `crates/keel-opt/tests/golden/`, and a program under
+   `crates/keel-codegen/tests/programs/`. Run
+   `python3 tools/test.py ir optimizer codegen --quick`, plus
+   `python3 tools/test.py cranelift` if keel-cranelift changed. An operation
+   that no frontend emits yet must leave suite output unchanged:
+   `cargo suite codegen-diff --baseline <keel before> --candidate <keel after> --expect-identical`.
+
 ## Optimizer
 
 `keel-opt` runs function passes and module passes. The manager runs each pass

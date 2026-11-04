@@ -185,6 +185,26 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
   Clobbering an allocatable caller-saved register makes the asm a call for
   the allocator; clobbered callee-saved registers are saved by the prologue.
 
+## Adding an operation
+
+After the IR steps in
+[adding an operation](../../compiler/design.md#adding-an-operation):
+
+1. Add the lowering to the family module: `aarch64/lower_scalar.rs`,
+   `lower_memory.rs`, `lower_control.rs` or `lower_vector.rs`, or
+   `aarch64/intrinsic.rs` for a target-independent intrinsic. The family
+   matches end in a wildcard that panics, so the compiler does not point to
+   a missing arm.
+2. Reject shapes the lowering does not handle in the preflight checks of
+   `aarch64/plan.rs`, with a `CodegenError`, rather than panicking later.
+3. Add a fused form only as a [cover](#covers) or a `patterns.txt` rule, so
+   Baseline keeps the plain lowering as its reference.
+4. Add a program under `crates/keel-codegen/tests/programs/` and run
+   `cargo test -p keel-codegen --test run` (eight selection and allocator
+   configurations) and `--test asm_snapshots` (`BLESS=1` rewrites the
+   snapshots). Add a focused `arm_*` target test when the lowering has
+   boundaries such as immediate ranges.
+
 ## Decisions
 
 The register-assignment design settled the AArch64 policy: x0–x7 become

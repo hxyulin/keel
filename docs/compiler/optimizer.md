@@ -142,6 +142,43 @@ for code that tiers run inside other passes:
 - `loop-reduce` and `loop-reduce-multi` run `if-convert` on a trial copy of a
   conditional reduction.
 
+## Adding a pass
+
+1. Write the pass in its own module under `crates/keel-opt/src/`. A function
+   pass with a plain kernel is a `BuiltinPass::new(name, description, run)`;
+   other passes implement `Pass`, and module passes return `Some(changed)`
+   from `run_module`. Return true whenever the pass mutates a function. With
+   debug assertions the manager fingerprints each function and panics, naming
+   the pass, when a function it reported unchanged differs afterwards.
+2. Declare the pass properties: `requires_canonical_form` and
+   `produces_canonical_form` for the [canonical form](#canonical-form),
+   `deterministic` only if the result depends on nothing but the function and
+   the target, and `family` if a function policy turns it off. Put admission
+   rules in the module's rustdoc.
+3. Register a `pub(crate) static` in `lib.rs` and append it to `PASSES`, the
+   `keel passes` order. Add its row to the [pass table](#passes). The
+   `registry` test in `cargo test -p keel-opt --test tiers` fails until the
+   row exists, and fails for a row that names no pass.
+4. Add `crates/keel-opt/tests/golden/<pass>.keel`, whose first line is
+   `; passes: <pass>`, and its `.out`; `BLESS=1` writes the `.out`. Put focused
+   cases in `crates/keel-opt/tests/<pass>.rs`, with submodules as
+   `#[path]` files beside it. The `golden` target's
+   [differential tests](../development/testing.md#differential-optimizer-tests)
+   already run every registered pass alone on every fixture under the
+   reference interpreter. They skip functions that use an operation the
+   interpreter does not model, so check that the new fixtures run.
+5. Run the pass alone with `keel opt -p <pass>` while developing. To place it
+   in a tier, add its name to `FULL_ROUND`, `FULL_EPILOGUE`, the Balanced and
+   Size round arrays or `OptimizationTier::pipeline` in `lib.rs`. A pass that
+   no tier runs is opt-in and needs a reason in the list above.
+6. Run `python3 tools/test.py optimizer --quick`, which adds the C and
+   codegen program oracles. If a program miscompiles,
+   `--opt-bisect-limit` finds the invocation, `--opt-disable <pass>` confirms
+   it, and `--print-changed --opt-function <name>` shows the IR it produced.
+7. Before timing, check which functions change with `cargo suite stats` and
+   `cargo suite codegen-diff`. A tier change is accepted by the
+   [performance guide](../development/performance.md).
+
 ## Scalar simplification
 
 `instcombine` uses a consumer worklist, so a substitution exposes further folds

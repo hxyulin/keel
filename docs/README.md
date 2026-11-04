@@ -43,7 +43,9 @@ owned by their generators. Historical progress logs are not maintained reference
 
 ## Where to put a change
 
-- `compiler/`: shared IR, optimization and function policies.
+- `compiler/`: shared IR, optimization and function policies. Follow
+  [adding a pass](compiler/optimizer.md#adding-a-pass) and
+  [adding an operation](compiler/design.md#adding-an-operation).
 - `frontends/`: C and LLVM input semantics.
 - `linking/`: objects, archives, linking and runtime/debug metadata.
 - `targets/`: target-specific assembly, lowering and machine-state contracts.
