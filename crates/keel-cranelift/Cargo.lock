@@ -337,6 +337,7 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "keel-asm-ir",
+ "keel-util",
  "memchr",
  "object 0.36.7",
  "smallvec",
@@ -372,6 +373,7 @@ dependencies = [
  "keel-asm",
  "keel-asm-ir",
  "keel-ir",
+ "keel-util",
  "profiling",
 ]
 
@@ -429,6 +431,10 @@ dependencies = [
 
 [[package]]
 name = "keel-test-support"
+version = "0.1.0"
+
+[[package]]
+name = "keel-util"
 version = "0.1.0"
 
 [[package]]

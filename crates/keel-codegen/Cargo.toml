@@ -16,6 +16,7 @@ keel-asm = { path = "../keel-asm" }
 keel-asm-ir = { path = "../keel-asm-ir" }
 profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
+keel-util = { path = "../keel-util" }
 
 [dev-dependencies]
 keel-opt = { path = "../keel-opt" }

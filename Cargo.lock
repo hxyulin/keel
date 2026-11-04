@@ -421,6 +421,7 @@ dependencies = [
  "keel-ir",
  "keel-opt",
  "keel-test-support",
+ "keel-util",
  "memchr",
  "object",
  "serde_json",
@@ -465,6 +466,7 @@ dependencies = [
  "keel-ir",
  "keel-opt",
  "keel-test-support",
+ "keel-util",
  "object",
  "profiling",
 ]
@@ -508,6 +510,7 @@ dependencies = [
  "bbtree",
  "keel-asm",
  "keel-test-support",
+ "keel-util",
  "object",
  "serde",
  "serde_yaml",
@@ -550,6 +553,10 @@ dependencies = [
 
 [[package]]
 name = "keel-test-support"
+version = "0.1.0"
+
+[[package]]
+name = "keel-util"
 version = "0.1.0"
 
 [[package]]

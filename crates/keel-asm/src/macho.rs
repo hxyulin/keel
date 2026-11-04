@@ -2,6 +2,7 @@
 //! Serialize fields explicitly so host layout never affects the object format.
 use super::{Assembly, Error, RelocationKind, SectionContents, SectionKind};
 use crate::fxhash::FxHashMap;
+use keel_util::leb128;
 use std::collections::BTreeSet;
 
 fn u32le(out: &mut Vec<u8>, value: u32) {
@@ -374,8 +375,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     let mut loh = Vec::new();
     for hint in &assembly.linker_optimization_hints {
         let count = hint.argument_count()?;
-        uleb(&mut loh, u64::from(hint.kind));
-        uleb(&mut loh, count as u64);
+        leb128::unsigned(&mut loh, hint.kind.into());
+        leb128::unsigned(&mut loh, count as u128);
         for offset in &hint.offsets[..count] {
             if *offset % 4 != 0
                 || views
@@ -384,7 +385,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             {
                 return Err(Error::new(0, "invalid LOH text offset"));
             }
-            uleb(&mut loh, addresses[hint.section] + offset);
+            leb128::unsigned(&mut loh, (addresses[hint.section] + offset).into());
         }
     }
     let lohoff = align(file, 8)?;
@@ -543,15 +544,4 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     out.extend_from_slice(&entries);
     out.extend_from_slice(&strings);
     Ok(out)
-}
-
-fn uleb(out: &mut Vec<u8>, mut value: u64) {
-    loop {
-        let byte = (value & 127) as u8;
-        value >>= 7;
-        out.push(byte | if value == 0 { 0 } else { 128 });
-        if value == 0 {
-            break;
-        }
-    }
 }

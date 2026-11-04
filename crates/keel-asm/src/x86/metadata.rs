@@ -1,5 +1,6 @@
 use super::{Assembler, Expr, Fix, RelocKind, Sym, SymId};
 use keel_asm_ir::x86::{self, Modifier, RegisterClass};
+use keel_util::leb128;
 
 pub(super) struct Frame {
     section: usize,
@@ -13,22 +14,12 @@ pub(super) struct Frame {
     personality: Option<String>,
     lsda: Option<String>,
 }
-pub(super) fn leb(out: &mut Vec<u8>, mut n: i128, signed: bool) -> Result<(), String> {
-    if !signed && n < 0 {
-        return Err("negative unsigned LEB128".into());
-    }
-    loop {
-        let byte = (n & 0x7f) as u8;
-        n >>= 7;
-        let done = if signed {
-            (n == 0 && byte & 0x40 == 0) || (n == -1 && byte & 0x40 != 0)
-        } else {
-            n == 0
-        };
-        out.push(byte | if done { 0 } else { 0x80 });
-        if done {
-            break;
-        }
+pub(super) fn leb(out: &mut Vec<u8>, n: i128, signed: bool) -> Result<(), String> {
+    if signed {
+        leb128::signed(out, n);
+    } else {
+        let n = u128::try_from(n).map_err(|_| "negative unsigned LEB128")?;
+        leb128::unsigned(out, n);
     }
     Ok(())
 }

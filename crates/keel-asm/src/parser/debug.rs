@@ -6,6 +6,7 @@ use super::text::Trim;
 use crate::fxhash::FxHashMap;
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use bumpalo::{Bump, collections::Vec as BumpVec};
+use keel_util::leb128;
 use std::collections::BTreeMap;
 
 pub(super) struct Debug<'a> {
@@ -112,16 +113,6 @@ struct Frame<'a> {
     personality: Option<&'a str>,
     lsda: Option<&'a str>,
 }
-pub(super) fn uleb(mut n: u64, out: &mut impl Extend<u8>) {
-    loop {
-        let b = (n & 127) as u8;
-        n >>= 7;
-        out.extend([b | if n != 0 { 128 } else { 0 }]);
-        if n == 0 {
-            break;
-        }
-    }
-}
 /// The CIE uses a code-alignment factor of one, so deltas are byte offsets.
 /// Prefer the primary opcode, then the narrowest extended advance operand.
 fn advance(delta: u64, out: &mut Vec<u8>) -> Result<(), &'static str> {
@@ -142,17 +133,6 @@ fn advance(delta: u64, out: &mut Vec<u8>) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub(super) fn sleb(mut n: i64, out: &mut impl Extend<u8>) {
-    loop {
-        let b = (n & 127) as u8;
-        n >>= 7;
-        let end = (n == 0 && b & 64 == 0) || (n == -1 && b & 64 != 0);
-        out.extend([b | if end { 0 } else { 128 }]);
-        if end {
-            break;
-        }
-    }
-}
 pub(super) fn string(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim_fast();
     if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {
@@ -500,7 +480,7 @@ impl<'a> Debug<'a> {
             }
             C::DefCfaOffset(offset) => {
                 bytes.push(0x0e);
-                uleb(*offset, &mut bytes);
+                leb128::unsigned(&mut bytes, (*offset).into());
                 Rule::CfaOffset(*offset)
             }
             C::DefCfaRegister(register) => {
@@ -508,7 +488,7 @@ impl<'a> Debug<'a> {
                     return Err("invalid CFI register".into());
                 }
                 bytes.push(0x0d);
-                uleb((*register).into(), &mut bytes);
+                leb128::unsigned(&mut bytes, (*register).into());
                 Rule::Other
             }
             C::DefCfa { register, offset } => {
@@ -516,8 +496,8 @@ impl<'a> Debug<'a> {
                     return Err("invalid CFI register".into());
                 }
                 bytes.push(0x0c);
-                uleb(u64::from(*register), &mut bytes);
-                uleb(*offset, &mut bytes);
+                leb128::unsigned(&mut bytes, (*register).into());
+                leb128::unsigned(&mut bytes, (*offset).into());
                 Rule::Cfa(u64::from(*register), *offset)
             }
             C::Offset { register, offset } => {
@@ -531,9 +511,9 @@ impl<'a> Debug<'a> {
                     bytes.push(0x80 | *register)
                 } else {
                     bytes.push(0x05);
-                    uleb(u64::from(*register), &mut bytes)
+                    leb128::unsigned(&mut bytes, (*register).into())
                 }
-                uleb(offset.unsigned_abs() / 8, &mut bytes);
+                leb128::unsigned(&mut bytes, u128::from(offset.unsigned_abs() / 8));
                 Rule::Offset(u64::from(*register), *offset)
             }
             _ => unreachable!(),
@@ -720,12 +700,12 @@ impl<'a> Debug<'a> {
         match (op, args.as_slice()) {
             (".cfi_def_cfa_register", [r]) => {
                 bytes.push(0x0d);
-                uleb(reg(r)?, &mut bytes);
+                leb128::unsigned(&mut bytes, u128::from(reg(r)?));
             }
             (".cfi_def_cfa_offset", [n]) => {
-                let n = n.parse().map_err(|_| "invalid CFA offset")?;
+                let n: u64 = n.parse().map_err(|_| "invalid CFA offset")?;
                 bytes.push(0x0e);
-                uleb(n, &mut bytes);
+                leb128::unsigned(&mut bytes, n.into());
                 rule = Rule::CfaOffset(n);
             }
             (".cfi_restore", [r]) => {
@@ -734,16 +714,16 @@ impl<'a> Debug<'a> {
                     bytes.push(0xc0 | r as u8);
                 } else {
                     bytes.push(0x06);
-                    uleb(r, &mut bytes);
+                    leb128::unsigned(&mut bytes, r.into());
                 }
             }
             (".cfi_same_value", [r]) => {
                 bytes.push(0x08);
-                uleb(reg(r)?, &mut bytes);
+                leb128::unsigned(&mut bytes, u128::from(reg(r)?));
             }
             (".cfi_undefined", [r]) => {
                 bytes.push(0x07);
-                uleb(reg(r)?, &mut bytes);
+                leb128::unsigned(&mut bytes, u128::from(reg(r)?));
             }
             (".cfi_negate_ra_state", []) => {
                 // DW_CFA_AARCH64_negate_ra_state. Rule::Other keeps the
@@ -874,7 +854,7 @@ impl<'a> Debug<'a> {
                         let augmentation = 1
                             + usize::from(frame.lsda.is_some())
                             + if frame.personality.is_some() { 5 } else { 0 };
-                        uleb(augmentation as u64, &mut bytes);
+                        leb128::unsigned(&mut bytes, augmentation as u128);
                         if let Some(personality) = &frame.personality {
                             bytes.push(0x9b); // indirect, PC-relative signed 32-bit GOT pointer
                             a.relocations.push(Relocation {
@@ -1004,7 +984,7 @@ impl<'a> Debug<'a> {
             for file in self.files.values() {
                 bytes.extend(&file.name);
                 bytes.push(0);
-                uleb(file.directory.into(), &mut bytes);
+                leb128::unsigned(&mut bytes, file.directory.into());
                 bytes.extend_from_slice(&[0, 0]);
             }
             bytes.push(0);
@@ -1041,35 +1021,35 @@ impl<'a> Debug<'a> {
             for row in rows {
                 if row.address != address {
                     bytes.push(2);
-                    uleb(row.address - address, &mut bytes);
+                    leb128::unsigned(&mut bytes, u128::from(row.address - address));
                     address = row.address;
                 }
                 if row.file != file {
                     bytes.push(4);
-                    uleb(row.file.into(), &mut bytes);
+                    leb128::unsigned(&mut bytes, row.file.into());
                     file = row.file;
                 }
                 if i64::from(row.line) != line {
                     bytes.push(3);
-                    sleb(i64::from(row.line) - line, &mut bytes);
+                    leb128::signed(&mut bytes, i128::from(i64::from(row.line) - line));
                     line = row.line.into();
                 }
                 if row.column != column {
                     bytes.push(5);
-                    uleb(row.column.into(), &mut bytes);
+                    leb128::unsigned(&mut bytes, row.column.into());
                     column = row.column;
                 }
                 if row.discriminator != 0 {
                     let mut operand = Vec::new();
-                    uleb(row.discriminator.into(), &mut operand);
+                    leb128::unsigned(&mut operand, row.discriminator.into());
                     bytes.push(0);
-                    uleb(operand.len() as u64 + 1, &mut bytes);
+                    leb128::unsigned(&mut bytes, operand.len() as u128 + 1);
                     bytes.push(4);
                     bytes.extend(operand);
                 }
                 if row.isa != isa {
                     bytes.push(12);
-                    uleb(row.isa.into(), &mut bytes);
+                    leb128::unsigned(&mut bytes, row.isa.into());
                     isa = row.isa;
                 }
                 if (row.flags & IS_STMT != 0) != is_stmt {
@@ -1089,7 +1069,7 @@ impl<'a> Debug<'a> {
             } else {
                 a.sections[code_section - 1].size()
             };
-            uleb(end - address, &mut bytes);
+            leb128::unsigned(&mut bytes, u128::from(end - address));
             bytes.extend_from_slice(&[0, 1, 1]);
         }
         let len = (bytes.len() - 4) as u32;
@@ -1140,9 +1120,9 @@ fn tables5(
     const UDATA: u64 = 0x0f; // DW_FORM_udata
     const DATA16: u64 = 0x1e; // DW_FORM_data16
     bytes.push(1);
-    uleb(PATH, bytes);
-    uleb(LINE_STRP, bytes);
-    uleb(directories.len() as u64 + 1, bytes);
+    leb128::unsigned(bytes, PATH.into());
+    leb128::unsigned(bytes, LINE_STRP.into());
+    leb128::unsigned(bytes, directories.len() as u128 + 1);
     strp(compilation, bytes)?;
     for directory in directories {
         strp(directory, bytes)?;
@@ -1159,13 +1139,13 @@ fn tables5(
     }
     bytes.push(format.len() as u8);
     for (content, form) in format {
-        uleb(content, bytes);
-        uleb(form, bytes);
+        leb128::unsigned(bytes, content.into());
+        leb128::unsigned(bytes, form.into());
     }
-    uleb(files.len() as u64 + 1, bytes);
+    leb128::unsigned(bytes, files.len() as u128 + 1);
     for file in std::iter::once(root).chain(files.values()) {
         strp(&file.name, bytes)?;
-        uleb(file.directory.into(), bytes);
+        leb128::unsigned(bytes, file.directory.into());
         if md5 {
             bytes.extend_from_slice(&file.md5.expect("consistent MD5 usage"));
         }

@@ -1,4 +1,5 @@
 use crate::*;
+use keel_util::leb128;
 use read::{Fixup, Reader, Reloc};
 
 // Most object relocation lists run monotonically through the section (often
@@ -63,27 +64,6 @@ pub(crate) fn u32le(v: &mut Vec<u8>, n: u32) {
 }
 pub(crate) fn u64le(v: &mut Vec<u8>, n: u64) {
     v.extend_from_slice(&n.to_le_bytes());
-}
-pub(crate) fn uleb(v: &mut Vec<u8>, mut n: u64) {
-    loop {
-        let b = (n & 127) as u8;
-        n >>= 7;
-        v.push(b | if n == 0 { 0 } else { 128 });
-        if n == 0 {
-            break;
-        }
-    }
-}
-fn sleb(v: &mut Vec<u8>, mut n: i64) {
-    loop {
-        let b = (n & 127) as u8;
-        n >>= 7;
-        let end = (n == 0 && b & 64 == 0) || (n == -1 && b & 64 != 0);
-        v.push(b | if end { 0 } else { 128 });
-        if end {
-            break;
-        }
-    }
 }
 fn name(v: &mut Vec<u8>, s: &str) {
     let mut n = [0; 16];
@@ -226,7 +206,7 @@ impl Linker {
             let (seg, off) = segment_offset(&segments, addr)?;
             rebase.push(0x11);
             rebase.push(0x20 | seg);
-            uleb(&mut rebase, off);
+            leb128::unsigned(&mut rebase, off.into());
             rebase.push(0x51);
         }
         rebase.push(0);
@@ -238,16 +218,16 @@ impl Linker {
                 binding.push(0x30 | (*ordinal as u8 & 15));
             } else {
                 binding.push(0x20);
-                uleb(&mut binding, *ordinal as u64);
+                leb128::unsigned(&mut binding, *ordinal as u128);
             }
             binding.push(0x40 | u8::from(self.weak_imports.contains(&import)));
             binding.extend_from_slice(symbol.as_bytes());
             binding.push(0);
             binding.push(0x51);
             binding.push(0x60);
-            sleb(&mut binding, addend);
+            leb128::signed(&mut binding, addend.into());
             binding.push(0x70 | seg);
-            uleb(&mut binding, off);
+            leb128::unsigned(&mut binding, off.into());
             binding.push(0x90);
         }
         binding.push(0);
@@ -266,9 +246,9 @@ impl Linker {
                 let (seg, off) = segment_offset(&segments, addr)?;
                 weak_binding.push(0x51);
                 weak_binding.push(0x60);
-                sleb(&mut weak_binding, addend);
+                leb128::signed(&mut weak_binding, addend.into());
                 weak_binding.push(0x70 | seg);
-                uleb(&mut weak_binding, off);
+                leb128::unsigned(&mut weak_binding, off.into());
                 weak_binding.push(0x90);
             }
         }
@@ -1121,7 +1101,7 @@ impl Linker {
             let mut term = Vec::new();
             let tls = matches!(target, Target::Definition(o, sym) if self.objects[o].symbols[sym].section != 0 && self.objects[o].sections[self.objects[o].symbols[sym].section - 1].flags & 255 == 0x13);
             let weak = matches!(target, Target::Definition(o,s) if self.objects[o].symbols[s].desc & 0x80 != 0);
-            uleb(
+            leb128::unsigned(
                 &mut term,
                 (if absolute {
                     2
@@ -1131,9 +1111,9 @@ impl Linker {
                     0
                 }) | if weak { 4 } else { 0 },
             );
-            uleb(
+            leb128::unsigned(
                 &mut term,
-                self.address(target)? - if absolute { 0 } else { BASE },
+                (self.address(target)? - if absolute { 0 } else { BASE }).into(),
             );
             let mut at = 0;
             for b in symbol.bytes() {
@@ -1155,12 +1135,12 @@ impl Linker {
             let mut new = Vec::new();
             for n in &nodes {
                 new.push(out.len());
-                uleb(&mut out, n.terminal.len() as u64);
+                leb128::unsigned(&mut out, n.terminal.len() as u128);
                 out.extend_from_slice(&n.terminal);
                 out.push(n.edges.len() as u8);
                 for (&b, &id) in &n.edges {
                     out.extend_from_slice(&[b, 0]);
-                    uleb(&mut out, offsets[id] as u64);
+                    leb128::unsigned(&mut out, offsets[id] as u128);
                 }
             }
             if new == offsets {

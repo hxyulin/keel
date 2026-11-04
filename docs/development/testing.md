@@ -87,6 +87,7 @@ This can select much of the workspace for shared IR or assembler changes.
 | `cli` | `keel` |
 | `wasm` | `keel-wasm` |
 | `llvm` | `keel-llvm` |
+| `util` | `keel-util` |
 | `full` or no component | Entire workspace |
 
 Combine named components in one invocation. Use `--unit` for library unit tests

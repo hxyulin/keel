@@ -26,6 +26,7 @@ SCOPES = {
     "cli": {"keel"},
     "wasm": {"keel-wasm"},
     "llvm": {"keel-llvm"},
+    "util": {"keel-util"},
     "frontend": {"keel-c", "keel-frontend"},
     "optimizer": {"keel-opt"},
     "codegen": {"keel-codegen"},

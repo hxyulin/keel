@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 keel-asm-ir = { path = "../keel-asm-ir" }
+keel-util = { path = "../keel-util" }
 memchr = "2"
 smallvec = "1"
 object = { version = "0.36", default-features = false, features = ["write", "std"] }

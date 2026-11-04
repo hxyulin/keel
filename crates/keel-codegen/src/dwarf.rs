@@ -214,7 +214,8 @@ pub(crate) fn emit_debug_info<T: Sink>(
             string(out, &var.name);
             type_ref(out, var.ty);
             // DW_OP_fbreg and the offset.
-            let offset = sleb128(frame.slots[var.slot.index()]);
+            let mut offset = Vec::new();
+            keel_util::leb128::signed(&mut offset, frame.slots[var.slot.index()].into());
             let mut bytes = vec![(offset.len() + 1 + usize::from(var.indirect)) as u8, 0x91];
             bytes.extend(offset);
             if var.indirect {
@@ -787,18 +788,3 @@ const ABBREVS: &[AbbrevDecl] = {
         ),
     ]
 };
-
-/// `n` in the signed LEB128 encoding: seven bits a byte, low first, the
-/// top bit set on all but the last.
-fn sleb128(mut n: i64) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    loop {
-        let byte = (n & 0x7f) as u8;
-        n >>= 7;
-        let done = (n == 0 && byte & 0x40 == 0) || (n == -1 && byte & 0x40 != 0);
-        bytes.push(if done { byte } else { byte | 0x80 });
-        if done {
-            return bytes;
-        }
-    }
-}

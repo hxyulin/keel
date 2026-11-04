@@ -1,0 +1,9 @@
+[package]
+name = "keel-util"
+description = "LEB128 encoding shared by Keel crates"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

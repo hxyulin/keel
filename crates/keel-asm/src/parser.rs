@@ -57,6 +57,7 @@ use super::{Assembly, Error, InstructionLocation, Symbol, encode};
 use crate::fxhash::{FxHashMap, FxHashSet};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use keel_asm_ir::Opcode;
+use keel_util::leb128;
 use std::collections::BTreeMap;
 
 /// Label locations by name. Only looked up: wherever their order matters,
@@ -754,22 +755,17 @@ fn assemble_pass(
                         };
                         let mut bytes = Vec::new();
                         if *signed {
-                            debug::sleb(
-                                i64::try_from(value)
-                                    .map_err(|_| err("signed LEB128 value out of range".into()))?,
-                                &mut bytes,
-                            )
+                            let value = i64::try_from(value)
+                                .map_err(|_| err("signed LEB128 value out of range".into()))?;
+                            leb128::signed(&mut bytes, value.into());
                         } else {
-                            debug::uleb(
-                                u64::try_from(value).map_err(|_| {
-                                    err("unsigned LEB128 value out of range".into())
-                                })?,
-                                &mut bytes,
-                            )
+                            let value = u64::try_from(value)
+                                .map_err(|_| err("unsigned LEB128 value out of range".into()))?;
+                            leb128::unsigned(&mut bytes, value.into());
                         }
                         if expr.add.is_some() {
                             let width = leb_width(leb_widths, &mut leb_index, bytes.len());
-                            crate::pad_leb(&mut bytes, 0, width, value < 0);
+                            leb128::pad(&mut bytes, 0, width, value < 0);
                         }
                         data::append(&mut result, current, &bytes).map_err(err)?;
                     }
@@ -1172,21 +1168,17 @@ fn assemble_pass(
                 };
                 let start = bytes.len();
                 if op == ".uleb128" {
-                    debug::uleb(
-                        u64::try_from(value)
-                            .map_err(|_| err("unsigned LEB128 value out of range".into()))?,
-                        &mut bytes,
-                    );
+                    let value = u64::try_from(value)
+                        .map_err(|_| err("unsigned LEB128 value out of range".into()))?;
+                    leb128::unsigned(&mut bytes, value.into());
                 } else {
-                    debug::sleb(
-                        i64::try_from(value)
-                            .map_err(|_| err("signed LEB128 value out of range".into()))?,
-                        &mut bytes,
-                    );
+                    let value = i64::try_from(value)
+                        .map_err(|_| err("signed LEB128 value out of range".into()))?;
+                    leb128::signed(&mut bytes, value.into());
                 }
                 if expr.add.is_some() {
                     let width = leb_width(leb_widths, &mut leb_index, bytes.len() - start);
-                    crate::pad_leb(&mut bytes, start, width, value < 0);
+                    leb128::pad(&mut bytes, start, width, value < 0);
                 }
             }
             data::append(&mut result, current, &bytes).map_err(err)?;

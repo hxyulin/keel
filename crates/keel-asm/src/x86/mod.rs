@@ -1394,7 +1394,7 @@ fn assemble_items_inner<const PROFILE: bool>(
                 leb_widths[i] = bytes.len();
                 variable_changed = true;
             } else {
-                crate::pad_leb(&mut bytes, 0, width, value < 0);
+                keel_util::leb128::pad(&mut bytes, 0, width, value < 0);
                 let at = *offset as usize;
                 a.sections[*section].data[at..at + width].copy_from_slice(&bytes);
             }
