@@ -3,7 +3,7 @@
 //! ```text
 //! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
-//! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -44,7 +44,7 @@ mod x86_options;
 const USAGE: &str = "usage:
   keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
-  keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
@@ -65,6 +65,7 @@ const USAGE: &str = "usage:
   --isel / --isel-tier and --regalloc override preset stages in either order.
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
+  opt without a level runs the -O tier; like cc, it targets the host unless --target is given.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
   -fno-asynchronous-unwind-tables omits optional compiler-generated CFI.
   -funwind-tables requests tables independently; disable both to suppress both requests.
@@ -954,7 +955,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
-            let opts = parse_options(
+            let mut opts = parse_options(
                 rest,
                 &[
                     "-o",
@@ -969,25 +970,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--no-verify-each",
                 ],
             )?;
+            // With no level or tier, `opt` runs the tier `cc -O` runs. The
+            // target, its vector context and `-p` resolve as for `cc`.
+            if opts.optimization_level.is_none() && !rest.iter().any(|arg| arg == "--opt-tier") {
+                opts.optimization = optimization::Level::O3.optimization();
+            }
             let (input, mut module) = load(&opts)?;
-            let target = if opts.target.is_some() {
-                opts.vector_target()
-            } else {
-                keel_opt::VectorTarget::Portable
-            };
-            let result = match &opts.passes {
-                Some(names) => {
-                    let names: Vec<&str> = names.iter().map(String::as_str).collect();
-                    opts.run_optimization(&mut module, &names, target)
-                }
-                None if opts.optimization_level.is_some()
-                    || rest.iter().any(|arg| arg == "--opt-tier") =>
-                {
-                    opts.run_optimization(&mut module, opts.optimization.pipeline(), target)
-                }
-                None => opts.run_optimization(&mut module, keel_opt::DEFAULT_PIPELINE, target),
-            };
-            result.map_err(|e| format!("{input}: {e}"))?;
+            opts.optimize(&mut module)
+                .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &module.to_string())
         }
         "passes" => {

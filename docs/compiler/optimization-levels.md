@@ -2,8 +2,10 @@
 
 `keel cc`, `keel compile` and `keel opt` accept `-O0`, `-O1`, `-O2`,
 `-O3` and `-Os`. An unqualified `-O` retains its historical meaning: `-O3`.
-With no optimization option, `cc` and `compile` use `-O0`; `opt` retains its
-Full default. `-Og`, `-Oz`, `-Ofast` and unknown levels are rejected.
+With no optimization option, `cc` and `compile` use `-O0` and `opt` uses the
+`-O` tier. `opt` resolves its target as `cc` does, the host unless `--target`
+is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
+`cc -O` runs. `-Og`, `-Oz`, `-Ofast` and unknown levels are rejected.
 
 | Flag | IR policy | Selection | Allocation | Intended use |
 |---|---|---|---|---|

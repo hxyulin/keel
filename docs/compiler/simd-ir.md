@@ -212,8 +212,8 @@ limits (24 expression values, four streams), and a trip-count threshold. It is
 not a full target cost model. `VectorTarget::{Portable,Aarch64Neon,X86Sse2}`
 configures `run_passes_for_target` or a `Pipeline` context; optimizer APIs
 without a target default to the portable intersection. The driver supplies the selected target
-for `cc`/`compile`, including explicit pipelines. `keel opt --target <triple>`
-selects that target's gate; without a target, `opt` uses portable capabilities.
+for `cc`, `compile` and `opt`, including explicit pipelines: `--target <triple>`
+or, without one, the host.
 For example, i32 multiplication vectorizes for NEON but remains scalar for the
 current SSE2 lowering; i64 multiplication remains scalar on both.
 
