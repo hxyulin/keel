@@ -357,8 +357,9 @@ impl<'a> Parser<'a> {
                                         }
                                     } else {
                                         let value = crate::eval::eval_constant(&expr, false)
-                                            .filter(|_| expr.ty.is_integer());
-                                        let Some(crate::eval::Const::Int(value)) = value else {
+                                            .filter(|_| expr.ty.is_integer())
+                                            .and_then(crate::eval::Const::int);
+                                        let Some(value) = value else {
                                             return Err(Error::new(
                                                 expr.loc,
                                                 "asm immediate requires an integer constant expression",

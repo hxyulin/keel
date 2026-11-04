@@ -92,7 +92,6 @@ fn builtin_capabilities_and_invalid_calls_match_support() {
         "int x;int value=__builtin_ffs(x);",
         "struct S{int n;};int f(const struct S *p){_Generic(p,struct S *:(struct S *)p,default:p)->n++;return 0;}",
         "int side(void);int value=__builtin_ffs((side(),8));",
-        "int value=__builtin_ffsll((((unsigned __int128)1<<64)>>1));",
     ] {
         assert!(
             keel_c::compile(
@@ -108,6 +107,17 @@ fn builtin_capabilities_and_invalid_calls_match_support() {
             "accepted {source}"
         );
     }
+    // Wide intermediates fold exactly: (2^64 >> 1) is bit 63.
+    keel_c::compile(
+        "_Static_assert(__builtin_ffsll((((unsigned __int128)1<<64)>>1)) == 64, \"\");\
+         _Static_assert(__builtin_bswap16(1 ? 0x0800 : 0) == 8, \"\");",
+        "wide.c",
+        keel_c::Options {
+            target: Target::X86_64LinuxGnu,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 }
 #[test]
 fn bit_search_and_digit_tests_match_native_reference() {

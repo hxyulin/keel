@@ -2623,13 +2623,12 @@ impl<'a> Parser<'a> {
                                 keel_ir::OptimizationOption::Options(self.asm_string()?)
                             } else {
                                 let expr = self.conditional()?;
-                                let Some(crate::eval::Const::Int(n)) =
-                                    crate::eval::eval_constant_with_layout(
-                                        &expr,
-                                        false,
-                                        self.c_layout,
-                                    )
-                                else {
+                                let Some(n) = crate::eval::eval_constant_with_layout(
+                                    &expr,
+                                    false,
+                                    self.c_layout,
+                                )
+                                .and_then(crate::eval::Const::int) else {
                                     return Err(Error::new(
                                         loc,
                                         "optimization level must be an integer constant",
@@ -2698,8 +2697,10 @@ impl<'a> Parser<'a> {
                                 &expression,
                                 false,
                                 self.c_layout,
-                            ) {
-                                Some(crate::eval::Const::Int(n)) if expression.ty.is_integer() => n,
+                            )
+                            .and_then(crate::eval::Const::int)
+                            {
+                                Some(n) if expression.ty.is_integer() => n,
                                 _ => {
                                     return Err(Error::new(
                                         loc,
@@ -2942,8 +2943,8 @@ impl<'a> Parser<'a> {
     fn alignment_constant(&mut self, allow_zero: bool) -> R<u64> {
         let loc = self.loc();
         let e = self.conditional()?;
-        let Some(crate::eval::Const::Int(n)) =
-            crate::eval::eval_constant_with_layout(&e, false, self.c_layout)
+        let Some(n) = crate::eval::eval_constant_with_layout(&e, false, self.c_layout)
+            .and_then(crate::eval::Const::int)
         else {
             return Err(Error::new(loc, "alignment must be an integer constant"));
         };
@@ -3781,9 +3782,11 @@ impl<'a> Parser<'a> {
                 }
                 // General constant folding can discard comma operands. Bounds
                 // must retain runtime side effects even if the result is known.
-                match crate::eval::eval_constant_with_layout(&e, false, self.c_layout) {
-                    Some(crate::eval::Const::Int(n)) if n >= 0 => Some(n as u64),
-                    Some(crate::eval::Const::Int(_)) => {
+                match crate::eval::eval_constant_with_layout(&e, false, self.c_layout)
+                    .and_then(crate::eval::Const::int)
+                {
+                    Some(n) if n >= 0 => Some(n as u64),
+                    Some(_) => {
                         return Err(Error::new(loc, "array size is negative"));
                     }
                     _ => {
@@ -4404,7 +4407,7 @@ impl<'a> Parser<'a> {
             if self.eat("=") {
                 let expr = self.conditional()?;
                 let value = crate::eval::eval_constant_with_layout(&expr, true, self.c_layout);
-                let Some(crate::eval::Const::Int(bits)) = value else {
+                let Some(bits) = value.and_then(crate::eval::Const::int) else {
                     return Err(Error::new(
                         expr.loc,
                         "expected an integer constant enumerator",
@@ -4559,8 +4562,8 @@ impl<'a> Parser<'a> {
         let loc = self.loc();
         let e = self.conditional()?;
         if e.ty.is_integer()
-            && let Some(crate::eval::Const::Int(value)) =
-                crate::eval::eval_constant_with_layout(&e, true, self.c_layout)
+            && let Some(value) = crate::eval::eval_constant_with_layout(&e, true, self.c_layout)
+                .and_then(crate::eval::Const::int)
         {
             return Ok(value);
         }
@@ -4792,10 +4795,8 @@ impl<'a> Parser<'a> {
                     sw.labels += 1;
                     match values {
                         Some((first, last)) => {
-                            let first =
-                                crate::eval::normalize_with_layout(first, &sw.ty, self.c_layout);
-                            let last =
-                                crate::eval::normalize_with_layout(last, &sw.ty, self.c_layout);
+                            let first = crate::eval::wrap_literal(first, &sw.ty, self.c_layout);
+                            let last = crate::eval::wrap_literal(last, &sw.ty, self.c_layout);
                             // i64 stores unsigned constants as bits. Order those bits
                             // according to the controlling type, after conversion.
                             let key =
@@ -5192,11 +5193,14 @@ mod declaration_layout_tests {
                 panic!("scalar item")
             };
             assert_eq!(expr.ty, LONG);
-            assert_eq!(eval_with_layout(expr, layout), Some(Const::Int(value)));
+            assert_eq!(
+                eval_with_layout(expr, layout).and_then(Const::int),
+                Some(value)
+            );
             let scalar = global("scalar_values").init.unwrap().items;
             assert!(matches!(scalar, [InitItem::Expr { offset, expr, .. }]
                 if *offset == 2 * IntKind::Long.size_with_layout(layout)
-                && eval_with_layout(expr, layout) == Some(Const::Int(value))));
+                && eval_with_layout(expr, layout).and_then(Const::int) == Some(value)));
             for (name, size, bytes) in [("narrow", 4, 4), ("wide", 12, 12), ("clipped", 8, 8)] {
                 let g = global(name);
                 assert_eq!(p.size_of(&g.ty), size);

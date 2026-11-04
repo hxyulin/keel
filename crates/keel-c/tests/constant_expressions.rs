@@ -110,7 +110,6 @@ fn effects_variables_wide_intermediates_and_unrepresentable_addresses_reject() {
         "unsigned effect(void);int x=__builtin_bswap16((effect(),0x0800));",
         "unsigned n;int x=__builtin_bswap16(n);",
         "unsigned effect(void);int f(int n){switch(n){case __builtin_bswap16((effect(),0x0800)):return 1;}return 0;}",
-        "_Static_assert(__builtin_bswap64((((unsigned __int128)1<<64)>>1))==0,\"unsupported wide intermediate\");",
         "int x;int v=__builtin_bswap16((unsigned long)&x);",
         "int a,b;unsigned long value=(unsigned long)&a+(unsigned long)&b;",
         "int a;unsigned long value=(unsigned long)&a-8;",
@@ -281,4 +280,43 @@ fn out_of_range_float_conversions_saturate() {
     assert_eq!(stored(&m, "neg"), 0u32.to_le_bytes());
     assert_eq!(stored(&m, "nan"), 0i32.to_le_bytes());
     assert_eq!(stored(&m, "low"), i16::MIN.to_le_bytes());
+}
+#[test]
+fn integer_constants_are_exact_at_128_bits() {
+    let m = compile(
+        "_Static_assert(__builtin_bswap64((((unsigned __int128)1 << 64) >> 1)) == 0x80, \"\");\
+         unsigned __int128 ones = -1;\
+         unsigned __int128 low = 0xffffffffffffffffull;\
+         unsigned __int128 bit70 = (unsigned __int128)1 << 70;\
+         unsigned __int128 third = ((unsigned __int128)1 << 64) / 3;\
+         __int128 bit63 = (__int128)1 << 63;\
+         __int128 shifted = ((__int128)-1 << 100) >> 64;\
+         unsigned __int128 mixed = 0xffffffffffffffffull + (unsigned __int128)1;\
+         double wide = (double)(unsigned __int128)-1;\
+         float inf = (float)(unsigned __int128)-1;\
+         unsigned __int128 from_double = (unsigned __int128)1e30;\
+         __int128 negative = (__int128)-1e30;\
+         unsigned long narrowed = (unsigned long)(((unsigned __int128)5 << 64) | 7);",
+        Target::default(),
+        false,
+    );
+    let le = |v: u128| v.to_le_bytes().to_vec();
+    assert_eq!(stored(&m, "ones"), le(u128::MAX));
+    assert_eq!(stored(&m, "low"), le(u64::MAX.into()));
+    assert_eq!(stored(&m, "bit70"), le(1 << 70));
+    assert_eq!(stored(&m, "third"), le((1 << 64) / 3));
+    assert_eq!(stored(&m, "bit63"), le(1 << 63));
+    assert_eq!(stored(&m, "shifted"), le((-1i128 << 36) as u128));
+    assert_eq!(stored(&m, "mixed"), le(1 << 64));
+    assert_eq!(stored(&m, "wide"), 2f64.powi(128).to_le_bytes());
+    assert_eq!(stored(&m, "inf"), f32::INFINITY.to_le_bytes());
+    assert_eq!(
+        stored(&m, "from_double"),
+        le(1_000_000_000_000_000_019_884_624_838_656)
+    );
+    assert_eq!(
+        stored(&m, "negative"),
+        le(-1_000_000_000_000_000_019_884_624_838_656i128 as u128)
+    );
+    assert_eq!(stored(&m, "narrowed"), 7u64.to_le_bytes());
 }

@@ -3,9 +3,9 @@
 
 use crate::ast::*;
 use crate::eval::{
-    Const, eval_constant, eval_constant_with_layout, eval_int, eval_int_with_layout,
-    fits_i64_with_layout, normalize_with_layout,
+    Const, eval_constant, eval_constant_with_layout, eval_int, eval_int_with_layout, wrap_literal,
 };
+use crate::int_const::{IntConst, IntTy};
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
@@ -764,7 +764,7 @@ impl<'a> Parser<'a> {
                 };
                 range_fits
                     || broadcast_constant(&scalar, self.c_layout).is_some_and(|c| {
-                        let Const::Int(bits) = c else { return false };
+                        let Some(bits) = c.int() else { return false };
                         let value = if from.signed() {
                             bits as i128
                         } else {
@@ -2063,15 +2063,16 @@ impl<'a> Parser<'a> {
                 .is_integer()
                 .then(|| eval_constant_with_layout(&args[2], false, self.c_layout))
                 .flatten()
+                .and_then(Const::int)
             {
-                Some(Const::Int(0)) => FloatCC::Eq,
-                Some(Const::Int(3)) => FloatCC::Uno,
-                Some(Const::Int(4)) => FloatCC::Ne,
-                Some(Const::Int(7)) => FloatCC::Ord,
-                Some(Const::Int(17)) => FloatCC::Lt,
-                Some(Const::Int(18)) => FloatCC::Le,
-                Some(Const::Int(29)) => FloatCC::Ge,
-                Some(Const::Int(30)) => FloatCC::Gt,
+                Some(0) => FloatCC::Eq,
+                Some(3) => FloatCC::Uno,
+                Some(4) => FloatCC::Ne,
+                Some(7) => FloatCC::Ord,
+                Some(17) => FloatCC::Lt,
+                Some(18) => FloatCC::Le,
+                Some(29) => FloatCC::Ge,
+                Some(30) => FloatCC::Gt,
                 _ => {
                     return Err(Error::new(
                         loc,
@@ -2099,7 +2100,7 @@ impl<'a> Parser<'a> {
             }
             for index in &args[2..] {
                 if !index.ty.is_integer()
-                    || !matches!(eval_constant_with_layout(index, false, self.c_layout), Some(Const::Int(n)) if n >= 0 && n < i64::from(shape.lanes()) * 2)
+                    || !matches!(eval_constant_with_layout(index, false, self.c_layout).and_then(Const::int), Some(n) if n >= 0 && n < i64::from(shape.lanes()) * 2)
                 {
                     return Err(Error::new(
                         index.loc,
@@ -2269,7 +2270,7 @@ impl<'a> Parser<'a> {
                 let layout = self.c_layout;
                 let constant = |value: u64| {
                     mk(
-                        ExprKind::Int(normalize_with_layout(value as i64, &ULONG, layout)),
+                        ExprKind::Int(wrap_literal(value as i64, &ULONG, layout)),
                         ULONG,
                         loc,
                     )
@@ -2328,10 +2329,12 @@ impl<'a> Parser<'a> {
                 // Keep static designators as integer constants for enum values,
                 // initializers and existing ICE consumers. The checked-operand
                 // evaluator preserves side effects in runtime index expressions.
-                Ok(match eval_constant_with_layout(&offset, true, layout) {
-                    Some(Const::Int(value)) => mk(ExprKind::Int(value), ULONG, loc),
-                    _ => offset,
-                })
+                Ok(
+                    match eval_constant_with_layout(&offset, true, layout).and_then(Const::int) {
+                        Some(value) => mk(ExprKind::Int(value), ULONG, loc),
+                        _ => offset,
+                    },
+                )
             }
             "expect" => self.builtin_call(Builtin::Hint, &[LONG, LONG], LONG, loc),
             "prefetch" => {
@@ -2401,8 +2404,8 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 }
                 let alignment = self.cast(args[1], ULONG);
-                let Some(Const::Int(n)) =
-                    eval_constant_with_layout(&alignment, false, self.c_layout)
+                let Some(n) = eval_constant_with_layout(&alignment, false, self.c_layout)
+                    .and_then(Const::int)
                 else {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 };
@@ -2675,7 +2678,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let null = arg.ty.is_integer()
-                && eval_constant_with_layout(arg, false, self.c_layout) == Some(Const::Int(0));
+                && eval_constant_with_layout(arg, false, self.c_layout).and_then(Const::int)
+                    == Some(0);
             if (!arg.ty.is_ptr() && !null) || matches!(arg.ty.pointee(), Some(Ty::Func(_))) {
                 return Err(Error::new(
                     arg.loc,
@@ -3487,10 +3491,9 @@ impl<'a> Parser<'a> {
             && expr.ty != *ty
         {
             let null = expr.ty.is_integer()
-                && matches!(
-                    crate::eval::eval_constant_with_layout(&expr, false, self.c_layout),
-                    Some(crate::eval::Const::Int(0))
-                );
+                && crate::eval::eval_constant_with_layout(&expr, false, self.c_layout)
+                    .and_then(Const::int)
+                    == Some(0);
             let member = self.structs[id].members.iter().find(|member| {
                 member.ty.compatible(&expr.ty) || null
                     || matches!((member.ty, expr.ty), (Ty::Ptr(a), Ty::Ptr(b)) if *a == Ty::Void || *b == Ty::Void)
@@ -3551,13 +3554,10 @@ fn fold_int_cast<'a>(e: &Expr<'a>, ty: Ty<'a>, layout: CDataLayout) -> Option<Ex
     if let ExprKind::Int(v) = e.kind
         && let Ty::Int(_) = ty
         && e.ty.is_integer()
-        && fits_i64_with_layout(v, &e.ty, &ty, layout)
     {
-        return Some(mk(
-            ExprKind::Int(normalize_with_layout(v, &ty, layout)),
-            ty,
-            e.loc,
-        ));
+        let value = IntConst::from_literal(IntTy::of(&e.ty, layout)?, v);
+        let literal = value.convert(IntTy::of(&ty, layout)?).literal()?;
+        return Some(mk(ExprKind::Int(literal), ty, e.loc));
     }
     None
 }
@@ -3938,8 +3938,8 @@ mod integer_layout_tests {
                     "{src} {layout:?}"
                 );
                 assert_eq!(
-                    eval::eval_constant_with_layout(&e, false, layout),
-                    Some(Const::Int(value))
+                    eval::eval_constant_with_layout(&e, false, layout).and_then(Const::int),
+                    Some(value)
                 );
                 if layout == CDataLayout::NATIVE_LP64 {
                     assert_eq!(eval_int(&e), Some(value));
@@ -3957,17 +3957,17 @@ mod integer_layout_tests {
         ] {
             let e = expression("(void*)-1L", &arena, layout);
             assert_eq!(
-                eval::eval_with_layout(&e, layout),
-                Some(Const::Int(pointer))
+                eval::eval_with_layout(&e, layout).and_then(Const::int),
+                Some(pointer)
             );
             let e = expression("(char*)0xffffffffULL + 2", &arena, layout);
             assert_eq!(
-                eval::eval_with_layout(&e, layout),
-                Some(Const::Int(if layout == CDataLayout::WASM32 {
+                eval::eval_with_layout(&e, layout).and_then(Const::int),
+                Some(if layout == CDataLayout::WASM32 {
                     1
                 } else {
                     4294967297
-                }))
+                })
             );
             let e = expression("(char*)0x100000001ULL - (char*)1", &arena, layout);
             assert_eq!(eval::eval_int_with_layout(&e, layout), Some(difference));
@@ -3989,8 +3989,8 @@ mod integer_layout_tests {
             let truth = mk(ExprKind::Unary(UnOp::Not, &addr), INT, Loc::default());
             assert_eq!(eval::eval_with_layout(&truth, layout), None);
             assert_eq!(
-                eval::eval_with_binding_and_layout(&truth, &|_| true, layout),
-                Some(Const::Int(0))
+                eval::eval_with_binding_and_layout(&truth, &|_| true, layout).and_then(Const::int),
+                Some(0)
             );
         }
     }
@@ -4054,8 +4054,8 @@ mod integer_layout_tests {
             Some(3)
         );
         assert_eq!(
-            broadcast_constant(&e, CDataLayout::NATIVE_LP64),
-            Some(Const::Int(3))
+            broadcast_constant(&e, CDataLayout::NATIVE_LP64).and_then(Const::int),
+            Some(3)
         );
 
         // Exercise the broadcast entry even without a declaration-created vector.
@@ -4069,31 +4069,45 @@ mod integer_layout_tests {
     fn wide_casts_and_constant_proof_safeguards_stay_bounded() {
         let arena = Bump::new();
         for layout in [CDataLayout::NATIVE_LP64, CDataLayout::WASM32] {
-            // A 64-bit unsigned value above i64::MAX cannot be represented by
-            // this evaluator after widening; wasm32 unsigned long can be.
-            let e = expression("(__int128)(unsigned long)-1", &arena, layout);
+            // Widening keeps the exact value of an unsigned 64-bit constant.
+            let exact = |src| match eval::eval_with_layout(&expression(src, &arena, layout), layout)
+            {
+                Some(Const::Int(c)) => c.to_i128(),
+                _ => None,
+            };
+            let ulong_max = if layout == CDataLayout::WASM32 {
+                u32::MAX.into()
+            } else {
+                u64::MAX.into()
+            };
+            assert_eq!(exact("(__int128)(unsigned long)-1"), Some(ulong_max));
             assert_eq!(
-                eval::eval_int_with_layout(&e, layout),
-                if layout == CDataLayout::WASM32 {
-                    Some(4294967295)
-                } else {
-                    None
-                }
+                exact("(__int128)0xffffffffffffffffULL"),
+                Some(u64::MAX.into())
             );
-            let e = expression("(__int128)0xffffffffffffffffULL", &arena, layout);
-            assert_eq!(eval::eval_int_with_layout(&e, layout), None);
+            assert_eq!(
+                exact("((unsigned __int128)1 << 64) / 3"),
+                Some((1 << 64) / 3)
+            );
+            assert_eq!(exact("(unsigned __int128)-1 >> 1"), Some(i128::MAX));
+            assert_eq!(exact("(__int128)1 << 63"), Some(1 << 63));
+            assert_eq!(
+                exact("(__int128)1e30"),
+                Some(1_000_000_000_000_000_019_884_624_838_656)
+            );
+            assert_eq!(exact("(unsigned __int128)1 << 128"), None);
             let e = expression("1 / 0", &arena, layout);
             assert_eq!(eval::eval_int_with_layout(&e, layout), None);
             let e = expression("(1, 2)", &arena, layout);
             assert_eq!(eval::eval_constant_with_layout(&e, false, layout), None);
             assert_eq!(
-                eval::eval_constant_with_layout(&e, true, layout),
-                Some(Const::Int(2))
+                eval::eval_constant_with_layout(&e, true, layout).and_then(Const::int),
+                Some(2)
             );
             let e = expression("0 && (1 / 0)", &arena, layout);
             assert_eq!(
-                eval::eval_constant_with_layout(&e, false, layout),
-                Some(Const::Int(0))
+                eval::eval_constant_with_layout(&e, false, layout).and_then(Const::int),
+                Some(0)
             );
         }
         // These deliberately remain native proofs with stricter validity rules

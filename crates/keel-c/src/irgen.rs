@@ -1249,17 +1249,12 @@ impl<'p> Gen<'p> {
                                     let byte = &mut bytes[offset + (target / 8) as usize];
                                     let mask = 1 << (target % 8);
                                     *byte =
-                                        (*byte & !mask) | (((v as u128 >> bit) as u8 & 1) * mask);
+                                        (*byte & !mask) | (((v.bits() >> bit) as u8 & 1) * mask);
                                 }
                             }
-                            None => {
-                                let v = if expr.ty.is_signed() {
-                                    v as i128 as u128
-                                } else {
-                                    v as u64 as u128
-                                };
-                                write_le(&mut bytes[offset..offset + width], v);
-                            }
+                            // The value is extended to 128 bits as its type's
+                            // signedness says.
+                            None => write_le(&mut bytes[offset..offset + width], v.bits()),
                         },
                         Const::Complex(r, i) => {
                             let Ty::Complex(elem) = expr.ty else {
@@ -1518,7 +1513,7 @@ fn fold_int(e: &Expr<'_>, depth: u32, layout: CDataLayout) -> Option<i64> {
         }
         _ => return None,
     };
-    Some(crate::eval::normalize_with_layout(v, &e.ty, layout))
+    Some(crate::eval::wrap_literal(v, &e.ty, layout))
 }
 
 /// Whether `x op k` is `x` for integer `x` of type `ty`.
@@ -1526,7 +1521,7 @@ fn right_identity(op: BinOp, k: i64, ty: &Ty, layout: CDataLayout) -> bool {
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Or | BinOp::Xor | BinOp::Shl | BinOp::Shr => k == 0,
         BinOp::Mul | BinOp::Div => k == 1,
-        BinOp::And => k == crate::eval::normalize_with_layout(-1, ty, layout),
+        BinOp::And => k == crate::eval::wrap_literal(-1, ty, layout),
         _ => false,
     }
 }
@@ -1536,7 +1531,7 @@ fn left_identity(op: BinOp, k: i64, ty: &Ty, layout: CDataLayout) -> bool {
     match op {
         BinOp::Add | BinOp::Or | BinOp::Xor => k == 0,
         BinOp::Mul => k == 1,
-        BinOp::And => k == crate::eval::normalize_with_layout(-1, ty, layout),
+        BinOp::And => k == crate::eval::wrap_literal(-1, ty, layout),
         _ => false,
     }
 }
@@ -1778,9 +1773,7 @@ impl DispatchTable {
             if offset % 8 != 0 || offset / 8 >= len || !matches!(expr.ty, Ty::Ptr(_)) {
                 return None;
             }
-            let Const::Int(label) = eval(expr)? else {
-                return None;
-            };
+            let label = eval(expr)?.int()?;
             let label = usize::try_from(label).ok()?;
             if label > def.label_addrs.len() {
                 return None;
@@ -2791,7 +2784,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             ExprKind::Int(v) => match &e.ty {
                 Ty::Ptr(_) => {
-                    let bits = crate::eval::normalize_with_layout(*v, &e.ty, self.g.p.c_layout);
+                    let bits = crate::eval::wrap_literal(*v, &e.ty, self.g.p.c_layout);
                     let n = self.b.ins().iconst(Type::I64, bits);
                     self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n)
                 }
@@ -3194,7 +3187,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 if e.ty.is_ptr()
                     && let Some(n) = fold_int(inner, FOLD_DEPTH, self.g.p.c_layout)
                 {
-                    let bits = crate::eval::normalize_with_layout(n, &e.ty, self.g.p.c_layout);
+                    let bits = crate::eval::wrap_literal(n, &e.ty, self.g.p.c_layout);
                     let n = self.b.ins().iconst(Type::I64, bits);
                     let p = self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n);
                     return Ok(Some(p));
