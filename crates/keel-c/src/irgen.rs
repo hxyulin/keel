@@ -381,6 +381,9 @@ impl<'p> Gen<'p> {
                 (Ty::Func(_), Some(f)) => {
                     // Each is emitted once; its tree is not needed after.
                     let def = self.funcs[f].take().expect("a function emitted twice");
+                    if let Some(error) = def.x86_feature_error {
+                        return Err(error);
+                    }
                     let func = self.function(&def)?;
                     self.module.functions.push(func);
                 }

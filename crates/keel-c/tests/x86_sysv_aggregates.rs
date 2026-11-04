@@ -9,6 +9,7 @@ fn param_layout(source: &str, target: Target) -> String {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -65,6 +66,7 @@ fn x86_floats_under_four_byte_alignment_fail_closed() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap_err();
@@ -111,6 +113,7 @@ fn native_calls_match_gnu_and_clang() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

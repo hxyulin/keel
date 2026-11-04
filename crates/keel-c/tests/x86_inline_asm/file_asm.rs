@@ -8,6 +8,7 @@ fn compile(source: &str) -> keel_ir::Module {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -67,7 +68,8 @@ fn basic_asm_is_literal_and_invalid_source_is_diagnosed() {
                 "bad.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),
@@ -99,7 +101,8 @@ fn basic_asm_is_literal_and_invalid_source_is_diagnosed() {
                 "bad.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -163,6 +166,7 @@ int init(void) { return first + table[0] + zeros[0]; }
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -199,7 +203,8 @@ int init(void) { return first + table[0] + zeros[0]; }
                 "bad.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),
@@ -235,6 +240,7 @@ fn module_asm_has_text_typed_and_chunked_parity_across_codegen_choices() {
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info: debug,
+                    ..Default::default()
                 },
             )
             .unwrap();

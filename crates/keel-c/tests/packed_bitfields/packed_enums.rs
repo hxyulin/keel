@@ -13,6 +13,7 @@ fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -94,6 +95,7 @@ fn invalid_enum_layouts_are_diagnosed() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();

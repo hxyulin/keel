@@ -66,6 +66,7 @@ fn real_c_private_transport_both_routes_native_and_debug() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -131,6 +132,7 @@ fn real_c_private_transport_both_routes_native_and_debug() {
             keel_c::Options {
                 target,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -144,6 +146,7 @@ fn real_c_private_transport_both_routes_native_and_debug() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

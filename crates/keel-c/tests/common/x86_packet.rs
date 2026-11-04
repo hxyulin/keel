@@ -25,6 +25,7 @@ pub fn frontend(source: &str) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

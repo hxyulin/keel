@@ -1708,8 +1708,40 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Record a call to `name`, which some feature set in `sets` permits,
+    /// when the enclosing function enables none of them. Like the backend,
+    /// report it only if the function is emitted.
+    fn check_x86_features(&mut self, name: &str, sets: crate::x86_builtins::FeatureSets, loc: Loc) {
+        use keel_asm_ir::x86::Features;
+        let Some(fs) = &mut self.fs else { return };
+        let Some(enabled) = fs.x86_features.filter(|_| fs.x86_feature_error.is_none()) else {
+            return;
+        };
+        let has = |feature: &&str| Features::parse(feature).is_ok_and(|f| enabled.contains(f));
+        if sets.iter().any(|set| set.iter().all(has)) {
+            return;
+        }
+        let missing: Vec<_> = sets[0]
+            .iter()
+            .filter(|feature| !has(feature))
+            .map(|feature| format!("`{feature}`"))
+            .collect();
+        let plural = if missing.len() == 1 { "" } else { "s" };
+        fs.x86_feature_error = Some(Error::new(
+            loc,
+            format!(
+                "`{name}` requires target feature{plural} {}, which `{}` does not enable",
+                missing.join(", "),
+                fs.name
+            ),
+        ));
+    }
+
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if let Some(sets) = crate::x86_builtins::required_features(base) {
+            self.check_x86_features(name, sets, loc);
+        }
         if base.starts_with("ia32_")
             || base.starts_with("keel_sse2_")
             || base.starts_with("keel_avx2_")
@@ -3568,6 +3600,21 @@ fn memory_builtin_const(sugar: &Sugar<'_>, defs: &[TypedefDef<'_>]) -> bool {
         _ => false,
     }
 }
+
+/// x86-64 builtins parsed here rather than through the generated binding table
+/// or [`x86_reduction_builtin`]. `__has_builtin` reads this list.
+pub(crate) const X86_PARSED_BUILTINS: &[&str] = &[
+    "cpu_supports",
+    "cpu_init",
+    "ia32_pclmulqdq128",
+    "ia32_pclmulqdq256",
+    "ia32_pclmulqdq512",
+    "ia32_sha256msg1",
+    "ia32_sha256msg2",
+    "ia32_sha256rnds2",
+    "ia32_cmpps256",
+    "ia32_cmppd256",
+];
 
 /// Compiler-owned AVX512F wrappers reuse wrapping and signed/unsigned IR reductions.
 /// Names and shapes are deliberately closed so `__has_builtin` matches parsing.

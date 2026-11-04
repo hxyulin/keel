@@ -14,6 +14,7 @@ fn compile(source: &str) -> keel_ir::Module {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap()
@@ -150,6 +151,7 @@ fn conflicting_and_unproven_initializers_are_rejected() {
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info: false,
+                    ..Default::default()
                 },
             );
             let mut module = match result {

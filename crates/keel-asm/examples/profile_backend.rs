@@ -172,6 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             keel_c::Options {
                 debug_info: debug,
                 target: Target::Aarch64AppleDarwin,
+                ..Default::default()
             },
         )?
     };

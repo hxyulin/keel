@@ -4,7 +4,11 @@ fn module(src: &str, debug_info: bool, target: Target) -> keel_ir::Module {
     keel_c::compile(
         src,
         "computed-goto.c",
-        keel_c::Options { debug_info, target },
+        keel_c::Options {
+            debug_info,
+            target,
+            ..Default::default()
+        },
     )
     .unwrap()
 }

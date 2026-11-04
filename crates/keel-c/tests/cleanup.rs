@@ -26,9 +26,16 @@ fn cleanup_ir_and_both_targets() {
     for target in Target::NATIVE {
         for debug_info in [false, true] {
             for optimize in [false, true] {
-                let mut m =
-                    keel_c::compile(SOURCE, "cleanup.c", keel_c::Options { target, debug_info })
-                        .unwrap();
+                let mut m = keel_c::compile(
+                    SOURCE,
+                    "cleanup.c",
+                    keel_c::Options {
+                        target,
+                        debug_info,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
                 keel_ir::verify_module(&m).unwrap();
                 let f = m.functions.iter().find(|f| f.name == "vlas").unwrap();
                 let actions: Vec<&str> = f
@@ -320,6 +327,7 @@ fn invalid_cleanup_declarations_and_unmodeled_exits_are_diagnosed() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();
@@ -342,6 +350,7 @@ fn unused_locals_keep_hidden_address_and_callback_reference() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -384,6 +393,7 @@ fn raw_attribute_macros_work_but_general_capability_query_keeps_fallback() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -411,6 +421,7 @@ fn callbacks_keep_ordinary_weak_and_visibility_semantics() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -434,6 +445,7 @@ fn callbacks_keep_ordinary_weak_and_visibility_semantics() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

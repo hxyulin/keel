@@ -276,6 +276,7 @@ fn clang_behavior_and_bidirectional_vector_abi() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -357,6 +358,7 @@ fn darwin_homogeneous_vector_aggregates_match_clang() {
             keel_c::Options {
                 target: Target::Aarch64AppleDarwin,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();

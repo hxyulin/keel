@@ -429,6 +429,7 @@ version = "0.1.0"
 dependencies = [
  "bumpalo",
  "keel-asm",
+ "keel-asm-ir",
  "keel-codegen",
  "keel-frontend",
  "keel-ir",

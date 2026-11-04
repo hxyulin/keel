@@ -10,6 +10,7 @@ fn compile(source: &str, target: Target, optimize: bool) -> Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -225,7 +226,8 @@ fn invalid_note_storage_and_non_elf_notes_are_rejected() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -299,6 +301,7 @@ fn address_bitfields_and_out_of_range_addends_remain_unsupported() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();

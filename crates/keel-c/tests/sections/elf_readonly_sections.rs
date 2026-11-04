@@ -23,6 +23,7 @@ fn module(source: &str, target: Target) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -194,7 +195,8 @@ fn incompatible_sections_retention_and_default_relro_still_reject_or_remain_dist
                     "bad-sections.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),

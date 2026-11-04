@@ -39,6 +39,7 @@ fn string_controls_and_sse42_permissions_are_checked() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();

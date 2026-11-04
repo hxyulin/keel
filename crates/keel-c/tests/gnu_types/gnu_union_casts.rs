@@ -93,7 +93,11 @@ fn compile(
     keel_c::compile(
         source,
         "union-cast.c",
-        keel_c::Options { target, debug_info },
+        keel_c::Options {
+            target,
+            debug_info,
+            ..Default::default()
+        },
     )
 }
 

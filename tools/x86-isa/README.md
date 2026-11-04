@@ -51,7 +51,8 @@ EVEX families, MVEX, XOP and 3DNow remain outside these imports.
   forms. Encoding selectors identify exact alternatives. Memory-width and
   family expectations guard compatibility; they do not supply emitted bytes.
 - `vendor-bindings.json` owns reviewed C builtin names, semantic intrinsic IDs,
-  signatures, controls, required features and parser recipes. `vendor_bindings.py`
+  signatures, controls, required features and parser recipes. The C frontend
+  checks calls against the generated feature sets. `vendor_bindings.py`
   generates the frontend lookups and signature/ID regression checks. Existing
   Keel-private bridges remain distinct from vendor builtin compatibility.
   `vendor-references.json` owns the source commits, licences and header hashes.

@@ -21,6 +21,7 @@ fn compile(source: &str, target: Target) -> Result<Module, String> {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .map_err(|e| e.to_string())

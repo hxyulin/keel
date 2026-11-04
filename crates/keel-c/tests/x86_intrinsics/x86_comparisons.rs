@@ -21,6 +21,7 @@ fn compile(source: &str) -> Module {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -234,6 +235,7 @@ fn comparison_immediates_reject_runtime_and_out_of_range_controls() {
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();
@@ -259,6 +261,7 @@ fn comparison_immediates_reject_runtime_and_out_of_range_controls() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap_err();

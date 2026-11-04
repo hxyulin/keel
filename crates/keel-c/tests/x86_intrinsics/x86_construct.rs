@@ -27,6 +27,7 @@ fn insert_ps_requires_a_constant_control() {
         keel_c::Options {
             target: keel_ir::Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap_err();

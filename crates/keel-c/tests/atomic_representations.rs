@@ -5,9 +5,16 @@ fn representations_both_targets() {
     for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
         for debug_info in [false, true] {
             for optimize in [false, true] {
-                let mut m =
-                    keel_c::compile(SOURCE, "atomic.c", keel_c::Options { target, debug_info })
-                        .unwrap();
+                let mut m = keel_c::compile(
+                    SOURCE,
+                    "atomic.c",
+                    keel_c::Options {
+                        target,
+                        debug_info,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
                 keel_ir::verify_module(&m).unwrap();
                 if optimize {
                     keel_opt::optimize(&mut m).unwrap();
@@ -159,6 +166,7 @@ fn volatile_expected_is_written_only_on_failure() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -256,7 +264,8 @@ fn scalar_builtin_families_and_writable_buffers_match_clang() {
                     "atomic-review.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -282,6 +291,7 @@ fn scalar_builtin_families_and_writable_buffers_match_clang() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -309,6 +319,7 @@ fn under_aligned_pointer_aliases_fail_closed() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();
@@ -333,6 +344,7 @@ fn generic_buffers_preserve_volatile_members() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

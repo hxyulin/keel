@@ -120,6 +120,13 @@ pub struct Options {
     pub debug_info: bool,
     /// The target, for the types its ABI fixes.
     pub target: keel_ir::Target,
+    /// The x86 feature baseline code generation will use. With it, a call to
+    /// an x86 builtin whose features the enclosing function does not enable
+    /// is an error at the call, if the function is emitted; without it the
+    /// backend reports the intrinsic. Pass it only when no optimization runs
+    /// before code generation: a call the optimizer would delete, such as one
+    /// under `if (0)`, is accepted there but reported here.
+    pub x86_features: Option<keel_asm_ir::x86::Features>,
 }
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
@@ -187,6 +194,7 @@ pub fn compile_with_policies(
         message: e.message,
     };
     let mut parser = parse::Parser::new(src, path, opts.target, text);
+    parser.set_x86_features(opts.x86_features);
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;

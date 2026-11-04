@@ -40,6 +40,7 @@ fn constant_width_asm_paths_finalize_without_optional_optimization() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -86,6 +87,7 @@ fn incoming_goto_and_runtime_conditions_keep_asm_paths_reachable() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

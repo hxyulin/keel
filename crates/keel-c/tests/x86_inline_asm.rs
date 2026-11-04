@@ -48,6 +48,7 @@ fn compile(source: &str, debug: bool) -> Result<keel_ir::Module, String> {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .map_err(|e| e.to_string())
@@ -672,6 +673,7 @@ fn q_register_contracts_normalize_to_the_long_mode_gpr_class() {
         keel_c::Options {
             target: Target::Aarch64AppleDarwin,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap_err();

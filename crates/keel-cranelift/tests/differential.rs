@@ -218,6 +218,7 @@ fn c_kernels_raw_and_optimized_ir() {
         keel_c::Options {
             debug_info: false,
             target,
+            ..Default::default()
         },
     )
     .unwrap();

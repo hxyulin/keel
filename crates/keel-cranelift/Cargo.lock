@@ -355,6 +355,7 @@ name = "keel-c"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
+ "keel-asm-ir",
  "keel-frontend",
  "keel-ir",
  "keel-opt",

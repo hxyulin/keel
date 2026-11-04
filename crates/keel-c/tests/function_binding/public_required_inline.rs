@@ -33,7 +33,11 @@ fn public_required_body_keeps_its_symbol_and_binding() {
             let module = keel_c::compile(
                 &source,
                 "public-required.c",
-                keel_c::Options { target, debug_info },
+                keel_c::Options {
+                    target,
+                    debug_info,
+                    ..Default::default()
+                },
             )
             .unwrap();
             keel_ir::verify_module(&module).unwrap();
@@ -88,7 +92,7 @@ fn public_required_body_keeps_its_symbol_and_binding() {
 fn weak_required_definitions_keep_the_binding_gate() {
     let error = keel_c::compile(
         "inline __attribute__((gnu_inline,always_inline,weak)) int f(int x) { asm volatile(\"\" : \"+r\"(x)); return x; } int g(int x) { return f(x); }",
-        "weak-inline.c", keel_c::Options { target: Target::X86_64LinuxGnu, debug_info: false },
+        "weak-inline.c", keel_c::Options { target: Target::X86_64LinuxGnu, debug_info: false, ..Default::default() },
     ).unwrap_err();
     assert!(error.to_string().contains("public_definition"), "{error}");
 }
@@ -111,6 +115,7 @@ int main(void) { return wrap(4) != 4; }
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

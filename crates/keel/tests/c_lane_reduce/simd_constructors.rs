@@ -17,6 +17,7 @@ fn full_recovers_vector_literals_as_splats_and_shuffles() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();

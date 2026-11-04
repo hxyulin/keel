@@ -20,6 +20,7 @@ fn compile(source: &str, target: Target) -> Result<keel_ir::Module, String> {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .map_err(|e| format!("{e:?}"))?;

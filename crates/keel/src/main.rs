@@ -195,6 +195,16 @@ impl Options {
         self.optimizer.clone()
     }
 
+    /// Whether code reaches code generation without optional IR passes, which
+    /// could delete calls the C frontend would otherwise report.
+    fn optimizes(&self) -> bool {
+        self.passes
+            .as_ref()
+            .map_or(!self.optimization.pipeline().is_empty(), |names| {
+                !names.is_empty()
+            })
+    }
+
     /// Explicit pipelines override tier presets, independently of flag order.
     fn optimize(&self, module: &mut Module) -> Result<(), String> {
         let names: Vec<_> = self
@@ -1014,6 +1024,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
                 target,
+                // Code generation rejects the same calls without a C location.
+                x86_features: (!opts.optimizes()).then_some(opts.x86_features),
             };
             let mut module = {
                 profiling::scope!("c-frontend");

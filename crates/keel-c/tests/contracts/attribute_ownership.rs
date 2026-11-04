@@ -90,7 +90,11 @@ fn check_matrix(source: &str, check: impl Fn(&keel_ir::Module, bool)) {
             let original = keel_c::compile(
                 source,
                 "ownership.c",
-                keel_c::Options { target, debug_info },
+                keel_c::Options {
+                    target,
+                    debug_info,
+                    ..Default::default()
+                },
             )
             .unwrap_or_else(|e| panic!("{source}: {e}"));
             for optimized in [false, true] {

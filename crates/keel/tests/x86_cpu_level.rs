@@ -1,4 +1,6 @@
 //! Exercise strict feature selection through the public CLI, including C input.
+#[path = "x86_cpu_level/builtin_features.rs"]
+mod builtin_features;
 #[path = "x86_cpu_level/vector_context.rs"]
 mod vector_context;
 

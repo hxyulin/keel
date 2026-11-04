@@ -8,6 +8,7 @@ fn compile(source: &str, debug_info: bool) -> keel_ir::Module {
         keel_c::Options {
             target: Target::Aarch64AppleDarwin,
             debug_info,
+            ..Default::default()
         },
     )
     .unwrap()
@@ -136,6 +137,7 @@ fn invalid_or_unsupported_source_is_diagnosed() {
             keel_c::Options {
                 target: Target::Aarch64AppleDarwin,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err()
@@ -151,6 +153,7 @@ fn invalid_or_unsupported_source_is_diagnosed() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -294,6 +297,7 @@ fn symbol_labels_still_work_on_both_targets() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

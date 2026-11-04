@@ -7,6 +7,7 @@ fn compile(source: &str) -> Result<keel_ir::Module, keel_c::Diagnostic> {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
 }
@@ -64,6 +65,7 @@ fn static_compound_copies_preserve_offsets_bits_strings_and_relocations() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -120,6 +122,7 @@ fn native_check(source: &str, name: &str) {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

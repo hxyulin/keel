@@ -24,9 +24,16 @@ fn vla_ir_and_both_targets() {
         for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
             for debug_info in [false, true] {
                 for optimize in [false, true] {
-                    let mut m =
-                        keel_c::compile(source, "vla.c", keel_c::Options { target, debug_info })
-                            .unwrap();
+                    let mut m = keel_c::compile(
+                        source,
+                        "vla.c",
+                        keel_c::Options {
+                            target,
+                            debug_info,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
                     keel_ir::verify_module(&m).unwrap();
                     let count = |op| {
                         m.functions
@@ -102,6 +109,7 @@ fn qualified_vm_typedef_elements_remain_volatile() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -526,6 +534,7 @@ fn parameter_scope_and_constraint_differential_clang() {
                     keel_c::Options {
                         target,
                         debug_info: true,
+                        ..Default::default()
                     },
                 );
                 assert_eq!(result.is_ok(), success, "Keel: {source}: {result:?}");

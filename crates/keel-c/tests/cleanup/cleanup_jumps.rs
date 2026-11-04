@@ -39,7 +39,11 @@ fn cleanup_jumps_match_clang() {
                 let mut module = keel_c::compile(
                     SOURCE,
                     "cleanup-jumps.c",
-                    keel_c::Options { target, debug_info },
+                    keel_c::Options {
+                        target,
+                        debug_info,
+                        ..Default::default()
+                    },
                 )
                 .unwrap();
                 keel_ir::verify_module(&module).unwrap();
@@ -117,6 +121,7 @@ fn unsupported_cleanup_entries_and_vm_jumps_are_diagnosed() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();
@@ -169,6 +174,7 @@ int test(void){
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -252,6 +258,7 @@ int test(void){
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();

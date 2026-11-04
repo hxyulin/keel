@@ -383,7 +383,19 @@ reviewed frontend builtin bindings, and
 the reference headers. See the [generator reference](../../../tools/x86-isa/README.md)
 for regeneration. Keel-private bridge names are separate from vendor builtin
 spellings, and no general GNU or Clang `__builtin_ia32_*` compatibility is
-claimed.
+claimed. `__has_builtin` answers from the same generated table, plus the few
+x86 builtins the parser handles by name.
+
+Each binding's `features` column is generated into the C frontend. Without
+optional optimization (`-O0`), `keel cc` reports a call to a bound builtin whose
+features the enclosing function does not enable at the C call, naming the
+builtin and the missing features. This covers direct builtin calls and the
+macro wrappers. Calls inside compiler-header `static inline` bodies are not
+checked there; code generation checks them after inlining, without a C
+location. Functions that are never emitted are not checked. With optimization,
+code generation alone reports missing features, because the optimizer may first
+delete the call. The half-precision conversions also accept AVX512F plus
+AVX512VL in place of F16C.
 
 ### Builtins and diagnostics
 

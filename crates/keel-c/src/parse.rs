@@ -334,6 +334,11 @@ pub(crate) struct FuncState<'a> {
     pub ret: Ty<'a>,
     pub name: &'a str,
     pub switches: Vec<SwitchCtx<'a>>,
+    /// The function's resolved x86 features, when x86 builtin calls in it are
+    /// checked against them.
+    pub x86_features: Option<keel_asm_ir::x86::Features>,
+    /// The first builtin call those features do not permit.
+    pub x86_feature_error: Option<Error>,
 }
 
 pub struct Parser<'a> {
@@ -399,6 +404,8 @@ pub struct Parser<'a> {
     pub(crate) c_layout: CDataLayout,
     /// SysV's `struct __va_list_tag`, once a `va_list` needs it.
     va_list_tag: Option<usize>,
+    /// The module's x86 feature baseline, when builtin calls are checked.
+    x86_features: Option<keel_asm_ir::x86::Features>,
 }
 
 /// A keyword that starts a type name or declaration.
@@ -726,6 +733,7 @@ impl<'a> Parser<'a> {
                 CDataLayout::NATIVE_LP64
             },
             va_list_tag: None,
+            x86_features: None,
         };
         p.fill();
         p
@@ -745,6 +753,29 @@ impl<'a> Parser<'a> {
         p.c_layout = layout;
         p.translation_unit()?;
         Ok(p)
+    }
+
+    /// Check x86 builtin calls against `baseline` plus each function's own
+    /// target features. Only x86-64 has x86 builtins.
+    pub fn set_x86_features(&mut self, baseline: Option<keel_asm_ir::x86::Features>) {
+        self.x86_features = baseline.filter(|_| self.target == Target::X86_64LinuxGnu);
+    }
+
+    /// The features x86 builtin calls in function `g`, defined at `loc`, may
+    /// use. Compiler-owned header bodies are not checked: once inlined they
+    /// take their caller's features, and the backend checks what remains.
+    /// Features that fail to resolve are left to the backend to report.
+    fn function_x86_features(&self, g: usize, loc: Loc) -> Option<keel_asm_ir::x86::Features> {
+        let baseline = self.x86_features?;
+        let file = self.lexer.files.get(loc.file as usize)?;
+        if file.starts_with(crate::headers::ROOT) {
+            return None;
+        }
+        self.globals[g]
+            .function_attrs
+            .target_features
+            .resolve(baseline)
+            .ok()
     }
 
     /// The file names line markers mentioned; a `Loc::file` indexes them.
@@ -2371,6 +2402,7 @@ impl<'a> Parser<'a> {
         })?;
         state.ret = fty.ret;
         state.name = name;
+        state.x86_features = self.function_x86_features(g, loc);
         let bounds = std::mem::take(&mut state.vla_bounds);
         self.fs = Some(state);
         self.push_scope();
@@ -2436,6 +2468,7 @@ impl<'a> Parser<'a> {
             direct_calls: fs.direct_calls,
             scopes: fs.scopes,
             label_addrs: fs.label_addrs,
+            x86_feature_error: fs.x86_feature_error,
             body,
             loc,
             nodes,
@@ -3825,6 +3858,8 @@ impl<'a> Parser<'a> {
             ret,
             name: "",
             switches: Vec::new(),
+            x86_features: outer.as_ref().and_then(|fs| fs.x86_features),
+            x86_feature_error: None,
         });
         let arrays = std::mem::take(&mut self.parameter_arrays);
         let star = std::mem::replace(&mut self.parameter_star, false);

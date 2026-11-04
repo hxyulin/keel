@@ -4,9 +4,9 @@
 //! conversion on assignment, array and function decay (`Addr`). Code
 //! generation only has to follow it.
 
-use crate::Loc;
 use crate::arena::BodyArena;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
+use crate::{Error, Loc};
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 
 /// A switch interval after conversion to the promoted controlling type.
@@ -392,6 +392,9 @@ pub struct FuncDef<'a> {
     pub scopes: Vec<Option<usize>>,
     /// The labels whose address is taken (`&&label`), numbered from 1.
     pub label_addrs: Vec<&'a str>,
+    /// The first x86 builtin call the function's features do not permit,
+    /// reported only if the function is emitted.
+    pub x86_feature_error: Option<Error>,
     pub body: &'a [Stmt<'a>],
     pub loc: Loc,
     /// Where the body's expressions and statements are. They are freed

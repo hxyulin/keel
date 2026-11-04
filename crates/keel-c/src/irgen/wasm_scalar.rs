@@ -682,7 +682,7 @@ fn public_native_options_keep_lp64_and_arg_extensions() {
         for debug_info in [false, true] {
             let module = crate::compile(
                 "long width(long x) { volatile long y = x; return y; } signed char narrow(signed char x) { return x; }",
-                "native.c", crate::Options { target, debug_info },
+                "native.c", crate::Options { target, debug_info, ..Default::default() },
             ).unwrap();
             keel_ir::verify_module(&module).unwrap();
             let sig = module.signature("width").unwrap();

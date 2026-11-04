@@ -41,6 +41,7 @@ fn compile(source: &str, target: Target) -> Result<Module, keel_c::Diagnostic> {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
 }

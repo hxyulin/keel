@@ -86,7 +86,11 @@ fn promoted_signatures_ir_and_actual_objects() {
             let original = keel_c::compile(
                 SOURCE,
                 "old-style.c",
-                keel_c::Options { target, debug_info },
+                keel_c::Options {
+                    target,
+                    debug_info,
+                    ..Default::default()
+                },
             )
             .unwrap();
             let f = original
@@ -133,7 +137,11 @@ fn interop_units_ir_and_objects_for_both_targets() {
                         let mut m = keel_c::compile(
                             source,
                             "interop.c",
-                            keel_c::Options { target, debug_info },
+                            keel_c::Options {
+                                target,
+                                debug_info,
+                                ..Default::default()
+                            },
                         )
                         .unwrap();
                         keel_ir::verify_module(&m).unwrap();
@@ -255,6 +263,7 @@ fn declarations_scopes_and_prototype_clang_differential() {
                 keel_c::Options {
                     target,
                     debug_info: true,
+                    ..Default::default()
                 },
             )
             .unwrap_or_else(|e| panic!("{source}: {e}"));
@@ -268,7 +277,8 @@ fn declarations_scopes_and_prototype_clang_differential() {
                     "rejected.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -431,6 +441,7 @@ fn unsupported_unprototyped_calls_diagnose_before_invalid_ir() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             ) {
                 Err(e) => assert!(

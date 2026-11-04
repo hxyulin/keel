@@ -31,6 +31,7 @@ fn compile(src: &str, target: Target) -> Result<keel_ir::Module, String> {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .map_err(|e| format!("{e:?}"))?;
@@ -210,6 +211,7 @@ fn private_bridge_contract_and_header_coexistence() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

@@ -150,6 +150,7 @@ pub(super) fn compile_c(opts: &DriverOptions) -> Result<(), String> {
         keel_c::Options {
             target: Target::Wasm32UnknownUnknown,
             debug_info: false,
+            ..Default::default()
         },
     )
     .map_err(|e| e.to_string())?;

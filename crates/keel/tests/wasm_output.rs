@@ -152,6 +152,7 @@ fn raw_c_preprocessed_c_and_equivalent_raw_ir_execute() {
         keel_c::Options {
             target: keel_ir::Target::Wasm32UnknownUnknown,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

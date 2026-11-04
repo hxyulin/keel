@@ -36,7 +36,11 @@ fn compile(
     keel_c::compile(
         source,
         "statement-expression-labels.c",
-        keel_c::Options { target, debug_info },
+        keel_c::Options {
+            target,
+            debug_info,
+            ..Default::default()
+        },
     )
 }
 

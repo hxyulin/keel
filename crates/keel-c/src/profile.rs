@@ -56,6 +56,7 @@ pub fn compile(
     drop(lex_arena);
     let start = Instant::now();
     let mut parser = parse::Parser::new(src, path, opts.target, text);
+    parser.set_x86_features(opts.x86_features);
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;

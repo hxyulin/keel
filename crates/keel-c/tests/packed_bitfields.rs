@@ -11,7 +11,11 @@ fn compile(source: &str, target: Target, debug_info: bool) -> keel_ir::Module {
     let module = keel_c::compile(
         source,
         "packed-bitfields.c",
-        keel_c::Options { target, debug_info },
+        keel_c::Options {
+            target,
+            debug_info,
+            ..Default::default()
+        },
     )
     .unwrap();
     keel_ir::verify_module(&module).unwrap();
@@ -143,6 +147,7 @@ fn packed_fields_have_text_typed_and_chunked_parity_across_codegen_choices() {
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info: debug,
+                    ..Default::default()
                 },
             )
             .unwrap();

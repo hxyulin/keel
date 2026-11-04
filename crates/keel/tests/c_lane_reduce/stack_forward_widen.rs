@@ -74,6 +74,7 @@ fn private_signed_widen_c_objects_and_native_footprints() {
                     keel_c::Options {
                         target,
                         debug_info: false,
+                        ..Default::default()
                     },
                 )
                 .unwrap();

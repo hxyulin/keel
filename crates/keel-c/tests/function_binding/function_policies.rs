@@ -8,6 +8,7 @@ fn compile(source: &str, target: Target) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap()
@@ -101,6 +102,7 @@ fn policies_reject_conflicts_malformed_arguments_and_non_function_positions() {
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
                     debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),

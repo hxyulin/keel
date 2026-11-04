@@ -41,6 +41,7 @@ fn specialized_controls_and_feature_permissions_are_checked() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();

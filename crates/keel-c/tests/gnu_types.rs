@@ -25,6 +25,7 @@ fn compile(source: &str, target: Target) -> Result<keel_ir::Module, keel_c::Diag
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
 }

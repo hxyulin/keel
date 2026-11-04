@@ -44,6 +44,10 @@ VALUE_CONTROLS = {
                              'SSE4.2 string control must be an integer constant expression in 0..255'),
 }
 CONTROL_ALLOWED_VALUES = {'gather_scale': [1, 2, 4, 8]}
+# Further feature sets that also permit an intrinsic, beyond its `features` column.
+# The backend lowers the F16C conversions through EVEX with AVX512F and AVX512VL.
+FEATURE_ALTERNATIVES = {intrinsic: [['avx512f', 'avx512vl']] for intrinsic in
+                        ['X86F16cPhToPs128', 'X86F16cPhToPs256', 'X86F16cPsToPh128', 'X86F16cPsToPh256']}
 # Reviewed AVX512 data controls and independent rounding/exception controls.
 VALUE_CONTROLS.update({
     'avx512_cvt_rc': ({'X86Avx512Vcvtps2udq', 'X86Avx512Vcvtudq2ps', 'X86Avx512Vcvtpd2ps', 'X86Avx512Vcvtps2dq', 'X86Avx512Vcvtdq2ps', 'X86Avx512Vcvtpd2dq', 'X86Avx512Vcvtpd2udq'}, 3, 11, 15, 'AVX512 control must be an integer constant expression in the declared range'),
@@ -302,6 +306,34 @@ def validate(schema, root):
     return rows
 
 
+def feature_table(rows):
+    """Group intrinsics by the feature sets that permit them."""
+    fields = {row['intrinsic']: row['features'] for row in rows}
+    for row in rows:
+        if fields[row['intrinsic']] != row['features']:
+            raise ValueError(f'bindings of {row["intrinsic"]} disagree on features')
+    if not set(FEATURE_ALTERNATIVES) <= set(fields):
+        raise ValueError('feature alternative names no bound intrinsic')
+    groups = {}
+    for intrinsic, features in fields.items():
+        sets = [features] + FEATURE_ALTERNATIVES.get(intrinsic, [])
+        if features:
+            groups.setdefault(json.dumps(sets), []).append(intrinsic)
+    lines = ['/// Feature sets that permit `base`: every feature of any one set.',
+             "pub(crate) type FeatureSets = &'static [&'static [&'static str]];", '',
+             'pub(crate) fn required_features(base: &str) -> Option<FeatureSets> {',
+             '    let id = match lookup(base)? {',
+             '        Binding::Aes(id)', '        | Binding::PackedShift(id, ..)', '        | Binding::Saturating(id, ..)',
+             '        | Binding::PackedConversion(id)', '        | Binding::Value(id, _) => id,', '    };',
+             '    Some(intrinsic_features(id))', '}', '', '#[rustfmt::skip]',
+             'fn intrinsic_features(id: Intrinsic) -> FeatureSets {', '    match id {']
+    for sets, intrinsics in groups.items():
+        value = '&[' + ', '.join('&[' + ', '.join(json.dumps(f) for f in s) + ']' for s in json.loads(sets)) + ']'
+        lines.append('        ' + ' | '.join(f'Intrinsic::{i}' for i in intrinsics) + f' => {value},')
+    lines += ['        _ => &[&[]],', '    }', '}', '']
+    return lines
+
+
 def generate(schema, root):
     rows = validate(schema, root)
     lines = [HEADER, 'use keel_ir::{Intrinsic, VectorType};', '',
@@ -340,6 +372,7 @@ def generate(schema, root):
         lines.append(f'        {json.dumps(row["builtin"])} => {value},')
     lines += ['        _ => return None,', '    })', '}', '',
               'pub(crate) fn recognized(base: &str) -> bool {', '    lookup(base).is_some()', '}', '']
+    lines += feature_table(rows)
     for name, variant, ty, value in [
         ('aes_builtin', 'Aes(id)', 'Intrinsic', 'id'),
         ('packed_shift_builtin', 'PackedShift(id, shape, immediate)', '(Intrinsic, VectorType, bool)', '(id, shape, immediate)'),
@@ -368,7 +401,23 @@ def generate(schema, root):
     lines += ['        ];', '        for &(intrinsic, params, result) in signatures {',
               '            assert_eq!(intrinsic.info().params, params, "{intrinsic:?}");',
               '            assert_eq!(intrinsic.info().returns, result, "{intrinsic:?}");',
-              '        }', '    }', '}']
+              '        }', '    }', '',
+              '    #[test]', '    #[rustfmt::skip]', '    fn every_binding_is_an_x86_builtin_that_parses() {',
+              "        let names: &[&str] = &["]
+    lines += [f'            {json.dumps(row["builtin"])},' for row in rows]
+    lines += ['        ];',
+              '        for &name in names {',
+              '            let builtin = format!("__builtin_{name}");',
+              '            for (target, expected) in [(keel_ir::Target::X86_64LinuxGnu, 1), (keel_ir::Target::Aarch64AppleDarwin, 0)] {',
+              '                assert_eq!(crate::features::query("__has_builtin", &builtin, target), expected, "{name}");',
+              '            }',
+              '            let source = format!("void f(void) {{ {builtin}(); }}");',
+              '            let options = crate::Options { target: keel_ir::Target::X86_64LinuxGnu, ..Default::default() };',
+              '            if let Err(error) = crate::compile(&source, "binding.c", options) {',
+              '                assert!(!error.message.contains("is not supported"), "{name}: {error}");',
+              '            }',
+              '        }',
+              '    }', '}']
     lines += ['']
     return '\n'.join(lines)
 

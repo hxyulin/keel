@@ -23,7 +23,11 @@ fn late_contracts_reach_definitions_calls_and_inlined_calls() {
                     let original = keel_c::compile(
                         &source,
                         "contracts.c",
-                        keel_c::Options { target, debug_info },
+                        keel_c::Options {
+                            target,
+                            debug_info,
+                            ..Default::default()
+                        },
                     )
                     .unwrap();
                     for tier in [

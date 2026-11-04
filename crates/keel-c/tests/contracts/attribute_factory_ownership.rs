@@ -39,7 +39,11 @@ fn named_factory_contracts_and_inliner_legality() {
                     let original = keel_c::compile(
                         &source,
                         "factory.c",
-                        keel_c::Options { target, debug_info },
+                        keel_c::Options {
+                            target,
+                            debug_info,
+                            ..Default::default()
+                        },
                     )
                     .unwrap();
                     let h = original.functions.iter().find(|f| f.name == "h").unwrap();
@@ -88,7 +92,11 @@ fn accepted_clang_placement_oracle_preserves_named_declarations() {
                     let original = keel_c::compile(
                         &source,
                         "oracle.c",
-                        keel_c::Options { target, debug_info },
+                        keel_c::Options {
+                            target,
+                            debug_info,
+                            ..Default::default()
+                        },
                     )
                     .unwrap();
                     for optimized in [false, true] {
@@ -178,9 +186,16 @@ fn compatible_factory_redeclarations_accumulate_named_metadata() {
         } + "static inline void (*h(void))(void){return 0;} int use(void){return h()==0;}";
         for target in TARGETS {
             for debug_info in [false, true] {
-                let original =
-                    keel_c::compile(&source, "merge.c", keel_c::Options { target, debug_info })
-                        .unwrap();
+                let original = keel_c::compile(
+                    &source,
+                    "merge.c",
+                    keel_c::Options {
+                        target,
+                        debug_info,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
                 for optimized in [false, true] {
                     let mut m = original.clone();
                     if optimized {

@@ -17,6 +17,7 @@ int ww_lock(int x) { return common(x + 3); }
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

@@ -9,6 +9,7 @@ fn module(src: &str, target: Target) -> Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -166,7 +167,8 @@ fn unsupported_weak_storage_visibility_and_constant_forms_diagnose() {
                     "weak.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -632,7 +634,8 @@ int function(void) { return 1; }
                     "truth.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),

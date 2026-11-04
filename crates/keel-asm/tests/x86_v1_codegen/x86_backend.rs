@@ -100,6 +100,7 @@ fn c_metadata_and_debug_fixtures_assemble() {
                     keel_c::Options {
                         debug_info,
                         target: Target::X86_64LinuxGnu,
+                        ..Default::default()
                     },
                 )
                 .unwrap();

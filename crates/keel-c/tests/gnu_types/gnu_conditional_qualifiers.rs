@@ -52,6 +52,7 @@ fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -160,6 +161,7 @@ fn real_const_writes_and_const_pointees_still_reject() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();

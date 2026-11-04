@@ -40,6 +40,7 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
             keel_c::Options {
                 target,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -79,6 +80,7 @@ fn pointer_union_calls_cross_native_compiler_boundaries() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -106,7 +108,8 @@ fn transparent_union_restrictions_remain_diagnostics() {
                 "invalid.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),

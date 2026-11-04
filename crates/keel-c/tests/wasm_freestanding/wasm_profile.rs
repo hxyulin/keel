@@ -5,6 +5,7 @@ fn options() -> Options {
     Options {
         target: Target::Wasm32UnknownUnknown,
         debug_info: false,
+        ..Default::default()
     }
 }
 
@@ -30,6 +31,7 @@ fn public_compile_selects_wasm_layout_and_preserves_options() {
             Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

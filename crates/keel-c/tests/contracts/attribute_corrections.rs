@@ -43,7 +43,11 @@ fn inline_emission_is_finalized_after_all_declarations() {
                             let m = keel_c::compile(
                                 &source,
                                 "linkage.c",
-                                keel_c::Options { target, debug_info },
+                                keel_c::Options {
+                                    target,
+                                    debug_info,
+                                    ..Default::default()
+                                },
                             )
                             .unwrap();
                             let local = storage == "static"
@@ -127,7 +131,11 @@ fn pointer_contracts_do_not_leak_into_factory_or_indirect_calls() {
                     let m = keel_c::compile(
                         &source,
                         "pointer.c",
-                        keel_c::Options { target, debug_info },
+                        keel_c::Options {
+                            target,
+                            debug_info,
+                            ..Default::default()
+                        },
                     )
                     .unwrap();
                     for optimized in [false, true] {

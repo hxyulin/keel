@@ -60,6 +60,7 @@ fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -130,7 +131,8 @@ fn effects_variables_wide_intermediates_and_unrepresentable_addresses_reject() {
                 "not-constant.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),

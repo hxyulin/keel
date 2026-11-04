@@ -56,6 +56,7 @@ fn compile(source: &str) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -137,6 +138,7 @@ fn every_header_function_can_emit_an_object() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -187,7 +189,8 @@ fn wide_vector_semantics_and_diagnostics() {
                 "bad.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -200,7 +203,8 @@ fn wide_vector_semantics_and_diagnostics() {
                 "bad.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .unwrap_err()
@@ -222,6 +226,7 @@ fn comparison_controls_and_wide_casts_fail_closed() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -240,7 +245,8 @@ fn comparison_controls_and_wide_casts_fail_closed() {
                 "bad.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -270,6 +276,7 @@ fn shuffle_builtin_uses_the_existing_128_bit_path_on_all_targets() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1441,7 +1448,8 @@ fn packed_integer_bindings_preserve_types_features_and_operand_evaluation() {
                 "invalid.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),
@@ -1456,7 +1464,8 @@ fn packed_integer_bindings_preserve_types_features_and_operand_evaluation() {
                 "foreign.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -1468,6 +1477,7 @@ fn packed_integer_bindings_preserve_types_features_and_operand_evaluation() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1704,4 +1714,7 @@ mod x86_avx512_control_casts;
 
 #[path = "x86_intrinsics/x86_avx512_scalar_fma.rs"]
 mod x86_avx512_scalar_fma;
+
+#[path = "x86_intrinsics/x86_feature_diagnostics.rs"]
+mod x86_feature_diagnostics;
 use keel_test_support::native_program;

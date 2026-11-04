@@ -21,6 +21,7 @@ fn compile(source: &str) -> Module {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

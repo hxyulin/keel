@@ -7,6 +7,7 @@ fn compile(source: &str) -> Result<keel_ir::Module, keel_c::Diagnostic> {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
 }

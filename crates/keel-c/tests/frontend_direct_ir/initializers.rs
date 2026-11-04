@@ -10,7 +10,11 @@ fn initializer_snapshot_layout_and_execution() {
             let module = keel_c::compile(
                 SOURCE,
                 "initializer_snapshot.c",
-                keel_c::Options { target, debug_info },
+                keel_c::Options {
+                    target,
+                    debug_info,
+                    ..Default::default()
+                },
             )
             .unwrap();
             keel_ir::verify_module(&module).unwrap();
@@ -72,9 +76,16 @@ fn initializer_diagnostics_keep_designator_locations() {
                 ),
             ] {
                 let source = format!("# 41 \"initializer-errors.c\"\n{declaration}\n");
-                let error =
-                    keel_c::compile(&source, "input.i", keel_c::Options { target, debug_info })
-                        .unwrap_err();
+                let error = keel_c::compile(
+                    &source,
+                    "input.i",
+                    keel_c::Options {
+                        target,
+                        debug_info,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err();
                 assert_eq!(error.file, "initializer-errors.c");
                 assert_eq!(
                     (error.line, error.col),
@@ -104,6 +115,7 @@ fn sparse_and_empty_large_array_initializers_do_not_enumerate_children() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();

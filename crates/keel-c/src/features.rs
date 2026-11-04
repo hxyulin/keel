@@ -91,24 +91,15 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
-    if crate::x86_builtins::recognized(base) || crate::expr::x86_reduction_builtin(base).is_some() {
+    if crate::x86_builtins::recognized(base)
+        || crate::expr::x86_reduction_builtin(base).is_some()
+        || crate::expr::X86_PARSED_BUILTINS.contains(&base)
+    {
         return target == Target::X86_64LinuxGnu;
     }
     if matches!(
         base,
-        "cpu_supports"
-            | "cpu_init"
-            | "ia32_pclmulqdq128"
-            | "ia32_pclmulqdq256"
-            | "ia32_pclmulqdq512"
-            | "ia32_sha256msg1"
-            | "ia32_sha256msg2"
-            | "ia32_sha256rnds2"
-            | "ia32_cmpps256"
-            | "ia32_cmppd256"
-            | "return_address"
-            | "extract_return_addr"
-            | "frob_return_addr"
+        "return_address" | "extract_return_addr" | "frob_return_addr"
     ) {
         return target == Target::X86_64LinuxGnu;
     }
@@ -192,4 +183,34 @@ fn builtin(name: &str, target: Target) -> bool {
             | "unreachable"
             | "debugtrap"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hand_parsed_x86_builtins_answer_has_builtin_and_parse() {
+        for &name in crate::expr::X86_PARSED_BUILTINS {
+            let builtin = format!("__builtin_{name}");
+            assert_eq!(query("__has_builtin", &builtin, Target::X86_64LinuxGnu), 1);
+            assert_eq!(
+                query("__has_builtin", &builtin, Target::Aarch64AppleDarwin),
+                0
+            );
+            let source = format!("void f(void) {{ {builtin}(); }}");
+            let options = crate::Options {
+                target: Target::X86_64LinuxGnu,
+                ..Default::default()
+            };
+            if let Err(error) = crate::compile(&source, "builtin.c", options) {
+                assert!(!error.message.contains("is not supported"), "{error}");
+            }
+        }
+        let unknown = "__builtin_ia32_not_a_builtin";
+        assert_eq!(query("__has_builtin", unknown, Target::X86_64LinuxGnu), 0);
+        let source = format!("void f(void) {{ {unknown}(); }}");
+        let error = crate::compile(&source, "builtin.c", crate::Options::default()).unwrap_err();
+        assert!(error.message.contains("is not supported"), "{error}");
+    }
 }

@@ -17,6 +17,7 @@ fn optimization_removes_references_from_newly_dead_bodies_and_empty_calls() {
             Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
             FunctionBinding::NoSemanticInterposition,
         )
@@ -37,6 +38,7 @@ fn empty_call_removal_keeps_side_effectful_argument_evaluation() {
         Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();

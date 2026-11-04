@@ -259,6 +259,7 @@ fn debugger() {
             let opts = keel_c::Options {
                 debug_info: true,
                 target: Default::default(),
+                ..Default::default()
             };
             if let Err(e) = build_with_allocator(&i_path, &exe, optimize, opts, allocation) {
                 panic!("building vars.c: {e}");
@@ -433,8 +434,16 @@ fn computed_gotos_share_dispatch() {
             keel_ir::Target::Aarch64AppleDarwin,
             keel_ir::Target::X86_64LinuxGnu,
         ] {
-            let module =
-                keel_c::compile(src, "dispatch.c", keel_c::Options { debug_info, target }).unwrap();
+            let module = keel_c::compile(
+                src,
+                "dispatch.c",
+                keel_c::Options {
+                    debug_info,
+                    target,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             keel_ir::verify_module(&module).unwrap();
             for optimize in [false, true] {
                 let mut module = module.clone();
@@ -674,6 +683,7 @@ fn alignment_and_indirect_debug_locations_round_trip() {
             keel_c::Options {
                 target,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();

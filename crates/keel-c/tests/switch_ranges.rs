@@ -82,6 +82,7 @@ fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .unwrap();

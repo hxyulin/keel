@@ -10,6 +10,7 @@ fn compile(source: &str, target: Target, debug: bool) -> keel_ir::Module {
         keel_c::Options {
             target,
             debug_info: debug,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -56,6 +57,7 @@ fn unsupported_targets_and_shapes_still_reject() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -78,7 +80,8 @@ fn unsupported_targets_and_shapes_still_reject() {
                 "empty.c",
                 keel_c::Options {
                     target: Target::X86_64LinuxGnu,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),
@@ -95,6 +98,7 @@ fn empty_types_keep_c_compatibility_and_old_style_boundary() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap_err();
@@ -111,7 +115,8 @@ fn empty_types_keep_c_compatibility_and_old_style_boundary() {
             "empty.c",
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
-                debug_info: false
+                debug_info: false,
+                ..Default::default()
             }
         )
         .is_err()

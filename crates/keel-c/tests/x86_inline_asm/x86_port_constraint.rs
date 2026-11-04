@@ -7,6 +7,7 @@ fn compile(source: &str) -> Result<keel_ir::Module, String> {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .map_err(|e| e.to_string())

@@ -36,6 +36,7 @@ fn raw_c_to_ir_to_node_with_embedded_headers() {
         Options {
             target: WASM,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -274,6 +275,7 @@ fn explicit_freestanding_search_and_override_policy() {
         Options {
             target: WASM,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -291,7 +293,8 @@ fn explicit_freestanding_search_and_override_policy() {
             "spoof.c",
             Options {
                 target: WASM,
-                debug_info: false
+                debug_info: false,
+                ..Default::default()
             }
         )
         .is_err()
@@ -377,7 +380,8 @@ fn raw_headers_do_not_authorize_extended_storage_or_values() {
                 "raw-reject.c",
                 Options {
                     target: WASM,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err(),

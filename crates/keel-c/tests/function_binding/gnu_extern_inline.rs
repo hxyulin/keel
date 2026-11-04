@@ -36,6 +36,7 @@ fn inline_calls_and_external_addresses_have_separate_owners() {
             keel_c::Options {
                 target,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -89,6 +90,7 @@ fn inline_calls_and_external_addresses_have_separate_owners() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -111,6 +113,7 @@ fn aliases_cannot_target_an_unemitted_inline_implementation() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -122,7 +125,8 @@ fn aliases_cannot_target_an_unemitted_inline_implementation() {
             "invalid-inline.c",
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
-                debug_info: false
+                debug_info: false,
+                ..Default::default()
             }
         )
         .unwrap_err()
@@ -140,6 +144,7 @@ fn inline_only_sections_do_not_escape_into_external_declarations() {
         keel_c::Options {
             target: Target::X86_64LinuxGnu,
             debug_info: false,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -160,6 +165,7 @@ fn profiled_compilation_uses_the_same_inline_ownership_rules() {
     let options = keel_c::Options {
         target: Target::X86_64LinuxGnu,
         debug_info: false,
+        ..Default::default()
     };
     let normal = keel_c::compile(SOURCE, "inline-profile.c", options).unwrap();
     let (profiled, _) = keel_c::profile::compile(SOURCE, "inline-profile.c", options).unwrap();

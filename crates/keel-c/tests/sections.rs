@@ -12,7 +12,16 @@ use object::{Object, ObjectSection, ObjectSymbol};
 use std::{fs, path::Path, process::Command};
 
 fn module(src: &str, target: Target, debug_info: bool, optimize: bool) -> Module {
-    let mut m = keel_c::compile(src, "sections.c", keel_c::Options { target, debug_info }).unwrap();
+    let mut m = keel_c::compile(
+        src,
+        "sections.c",
+        keel_c::Options {
+            target,
+            debug_info,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     keel_ir::verify_module(&m).unwrap();
     if optimize {
         keel_opt::optimize(&mut m).unwrap();
@@ -178,7 +187,8 @@ fn placement_and_retention_diagnose_before_pruning() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -222,7 +232,8 @@ fn placement_and_retention_diagnose_before_pruning() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -238,7 +249,8 @@ fn placement_and_retention_diagnose_before_pruning() {
                 "bad.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -756,7 +768,8 @@ int main(void) {return kept();}
                 "bad.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -1189,7 +1202,8 @@ fn tls_placement_and_redeclarations_diagnose_before_pruning() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -1222,7 +1236,8 @@ fn tls_placement_and_redeclarations_diagnose_before_pruning() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),

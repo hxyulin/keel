@@ -364,9 +364,16 @@ fn clang_differential_and_bidirectional_abi() {
             (SelectionTier::Trees, AllocationTier::Fast, false, true),
             (SelectionTier::Full, AllocationTier::Full, true, false),
         ] {
-            let mut module =
-                keel_c::compile(&source, "complex.c", keel_c::Options { target, debug_info })
-                    .unwrap();
+            let mut module = keel_c::compile(
+                &source,
+                "complex.c",
+                keel_c::Options {
+                    target,
+                    debug_info,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
             assert!(
                 module.decls.iter().all(|d| d.name.starts_with("callback_")
                     || d.name.starts_with("cb_")
@@ -508,6 +515,7 @@ fn imaginary_literal_lexical_diagnostics_match_clang() {
                     keel_c::Options {
                         target,
                         debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -555,7 +563,8 @@ fn unsupported_complex_operations_diagnose() {
                     "unsupported.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -600,6 +609,7 @@ fn complex_abi_register_probes_match_clang() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -652,6 +662,7 @@ fn complex_abi_register_probes_match_clang() {
                     keel_c::Options {
                         target,
                         debug_info: false,
+                        ..Default::default()
                     },
                 )
                 .unwrap();
@@ -704,6 +715,7 @@ fn component_lvalue_alignment_matches_clang() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -744,7 +756,8 @@ fn component_rvalues_and_const_objects_are_not_modifiable() {
                     "lvalue.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -773,7 +786,8 @@ fn static_arithmetic_range_and_final_binding_policy() {
                     "range.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err()
@@ -785,6 +799,7 @@ fn static_arithmetic_range_and_final_binding_policy() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -794,7 +809,7 @@ fn static_arithmetic_range_and_final_binding_policy() {
         } else {
             "__muldc3"
         };
-        assert!(keel_c::compile(&format!("double _Complex other(double,double,double,double) __asm__(\"{alias}\"); double _Complex f(double _Complex a){{return a*a;}}"), "reserved.c", keel_c::Options {target, debug_info:false}).is_err());
+        assert!(keel_c::compile(&format!("double _Complex other(double,double,double,double) __asm__(\"{alias}\"); double _Complex f(double _Complex a){{return a*a;}}"), "reserved.c", keel_c::Options {target, debug_info:false, ..Default::default()}).is_err());
         let source = "extern int x; double _Complex z=&x ? __builtin_complex(1.0,2.0)*3.0 : 0;";
         keel_c::compile(
             source,
@@ -802,6 +817,7 @@ fn static_arithmetic_range_and_final_binding_policy() {
             keel_c::Options {
                 target,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -811,7 +827,8 @@ fn static_arithmetic_range_and_final_binding_policy() {
                 "binding.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -827,7 +844,8 @@ fn static_arithmetic_range_and_final_binding_policy() {
                     "reserved.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -910,6 +928,7 @@ fn raw_platform_complex_header() {
                 keel_c::Options {
                     target,
                     debug_info: !optimized,
+                    ..Default::default()
                 },
             )
             .unwrap();

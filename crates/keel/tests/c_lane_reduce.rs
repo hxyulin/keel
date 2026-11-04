@@ -236,6 +236,7 @@ fn c_wrapping_sum_effects_footprints_and_objects() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -284,6 +285,7 @@ fn c_promotions_dynamic_indices_and_distinct_loads_stay_scalar() {
             keel_c::Options {
                 target: Target::X86_64LinuxGnu,
                 debug_info: true,
+                ..Default::default()
             },
         )
         .unwrap();

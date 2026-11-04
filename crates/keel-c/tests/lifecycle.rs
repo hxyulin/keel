@@ -2,8 +2,16 @@ use keel_ir::{Module, Target};
 use object::{Object, ObjectSection, ObjectSymbol};
 
 fn module(src: &str, target: Target, debug_info: bool, optimize: bool) -> Module {
-    let mut m =
-        keel_c::compile(src, "lifecycle.c", keel_c::Options { target, debug_info }).unwrap();
+    let mut m = keel_c::compile(
+        src,
+        "lifecycle.c",
+        keel_c::Options {
+            target,
+            debug_info,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     keel_ir::verify_module(&m).unwrap();
     if optimize {
         keel_opt::optimize(&mut m).unwrap();
@@ -135,7 +143,8 @@ fn invalid_lifecycle_and_retention_contracts() {
                     "bad.c",
                     keel_c::Options {
                         target,
-                        debug_info: false
+                        debug_info: false,
+                        ..Default::default()
                     }
                 )
                 .is_err(),
@@ -474,7 +483,8 @@ fn darwin_registration_allows_ordinary_atexit_and_rejects_conflicting_interface(
                 "bad.c",
                 keel_c::Options {
                     target,
-                    debug_info: false
+                    debug_info: false,
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -502,6 +512,7 @@ fn default_priority_expressions_inline_definitions_and_gnu_spellings() {
                 keel_c::Options {
                     target,
                     debug_info: false,
+                    ..Default::default()
                 },
             )
             .unwrap_err();
@@ -614,6 +625,7 @@ fn darwin_registration_validates_unreferenced_atexit_contracts() {
             keel_c::Options {
                 target: Target::Aarch64AppleDarwin,
                 debug_info: false,
+                ..Default::default()
             },
         )
         .unwrap_err();
