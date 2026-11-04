@@ -117,13 +117,9 @@ def main(argv=None):
             ready = built and keel.is_file() and os.access(keel, os.X_OK)
             if ready:
                 report['keel'] = {'path': str(keel), 'sha256': hashlib.sha256(keel.read_bytes()).hexdigest()}
-                harness.run('c-native', [sys.executable,
-                    ROOT / 'crates/keel-c/tests/fixtures/check_attribute_semantics.py',
-                    '--keel', keel, '--out-dir', out / 'c-native'])
             else:
                 harness.stages.append(dict(name='keel-prerequisite', status='failed',
                                            reason='Keel build failed or binary is unavailable'))
-                harness.skip('c-native', 'Keel binary unavailable')
             supported = llvm_host(platform.system(), platform.machine())
             libllvm = args.libllvm.resolve() if args.libllvm else None
             if supported and libllvm is None and harness.run('rust-sysroot', ['rustc', '--print', 'sysroot']):

@@ -49,7 +49,7 @@ class FrontendValidation(unittest.TestCase):
         self.assertIn('cpp-coverage', [stage['name'] for stage in report['stages']])
 
     def test_stage_failures_propagate_and_other_checks_continue(self):
-        for name in ('harness-tests', 'c-attributes', 'c-preprocess', 'c-native', *validation.LLVM_STAGES):
+        for name in ('harness-tests', 'c-attributes', 'c-preprocess', *validation.LLVM_STAGES):
             with self.subTest(stage=name):
                 code, report = self.run_harness(fail=name)
                 self.assertEqual(code, 1)

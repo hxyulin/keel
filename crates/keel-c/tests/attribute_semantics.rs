@@ -365,3 +365,123 @@ fn representative_library_macros_keep_harmless_annotations_and_capability_fallba
         }
     }
 }
+
+/// Builds `inputs` with Clang in a fresh directory and returns the program's
+/// output, panicking unless it exits zero.
+fn run_native(
+    dir: &std::path::Path,
+    name: &str,
+    inputs: &[(&str, &str)],
+    flags: &[&str],
+) -> String {
+    use std::process::Command;
+    for (file, text) in inputs {
+        std::fs::write(dir.join(file), text).unwrap();
+    }
+    let built = Command::new("clang")
+        .current_dir(dir)
+        .args(["-std=c11", "-Wno-deprecated-declarations"])
+        .args(inputs.iter().map(|(file, _)| file))
+        .args(flags)
+        .args(["-o", name])
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(dir.join(name)).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    format!(
+        "{}\n--- stderr\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    )
+}
+
+#[test]
+fn library_macros_and_weak_symbols_run_like_clang() {
+    let Some(target) = Target::host().filter(|t| Target::NATIVE.contains(t)) else {
+        keel_test_support::skip!("requires an arm64 macOS or x86-64 Linux host");
+    };
+    let dir = keel_test_support::TempDir::new("attribute-library");
+    let source = include_str!("fixtures/attribute-library.c");
+    let expected = run_native(dir.path(), "reference", &[("reference.c", source)], &[]);
+    let preprocessed = keel_c::preprocess(
+        source,
+        "attribute-library.c",
+        &keel_c::PreprocessOptions {
+            target,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // Clang's preprocessor output takes the path of a .i file given to the CLI.
+    std::fs::write(dir.join("library.c"), source).unwrap();
+    let clang_preprocessed = std::process::Command::new("clang")
+        .current_dir(dir.path())
+        .args(["-E", "library.c"])
+        .output()
+        .unwrap();
+    assert!(clang_preprocessed.status.success());
+    let clang_preprocessed = String::from_utf8(clang_preprocessed.stdout).unwrap();
+    for (input, text) in [
+        ("keel-preprocessed", &*preprocessed),
+        ("clang-preprocessed", &*clang_preprocessed),
+    ] {
+        let mut module = compile(text, target).unwrap();
+        for optimized in [false, true] {
+            if optimized {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            let name = format!("{input}-{optimized}");
+            let assembly = keel_codegen::compile(&module, target).unwrap();
+            let file = format!("{name}.s");
+            let actual = run_native(dir.path(), &name, &[(&file, &assembly)], &[]);
+            assert_eq!(actual, expected, "{name}");
+        }
+    }
+    let weak = "int hook(void) __attribute__((weak)); extern int absent __attribute__((weak)); \
+        int value __attribute__((weak)) = 7; \
+        int main(void) { return (hook ? hook() : 0) || (&absent ? absent : 0) || value != 7; }\n";
+    let flags: &[&str] = if target == Target::Aarch64AppleDarwin {
+        &["-Wl,-U,_hook,-U,_absent"]
+    } else {
+        &[]
+    };
+    for optimized in [false, true] {
+        let mut module = compile(weak, target).unwrap();
+        if optimized {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        let name = format!("weak-{optimized}");
+        let assembly = keel_codegen::compile(&module, target).unwrap();
+        let file = format!("{name}.s");
+        run_native(dir.path(), &name, &[(&file, &assembly)], flags);
+    }
+    for (name, text) in [
+        ("weak", "static int hook(void) __attribute__((weak));"),
+        (
+            "alias",
+            "int hook(void) __attribute__((alias(\"missing_implementation\")));",
+        ),
+        (
+            "cleanup",
+            "void release(int *); int x __attribute__((cleanup(release)));",
+        ),
+        (
+            "visibility",
+            "int hook(void); int hook(void) __attribute__((visibility(\"protected\")));",
+        ),
+    ] {
+        for target in Target::NATIVE {
+            let error = compile(text, target).unwrap_err().to_string();
+            assert!(error.contains(name), "{target:?} {name}: {error}");
+        }
+    }
+}
