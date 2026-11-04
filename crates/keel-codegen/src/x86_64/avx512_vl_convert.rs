@@ -65,13 +65,6 @@ impl FunctionCompiler<'_> {
         }
         // The conversion itself clears the architectural short-result tail,
         // including when every meaningful mask bit is clear.
-        let dest = self.def_freg(result);
-        if dest != FS0 {
-            self.emit(
-                movs(output),
-                [asm_arg(simd(dest, output)), asm_arg(simd(FS0, output))],
-            );
-        }
-        self.def_done(result, dest);
+        self.def_vector_from_fs0(result, output);
     }
 }

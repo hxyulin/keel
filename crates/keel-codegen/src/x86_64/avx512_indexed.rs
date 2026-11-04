@@ -77,11 +77,7 @@ impl FunctionCompiler<'_> {
                 opcode(name, true),
                 [asm_arg(simd(FS0, ty)), asm_arg(sized(at, width))],
             );
-            let d = self.def_freg(result);
-            if d != FS0 {
-                self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-            }
-            self.def_done(result, d);
+            self.def_vector_from_fs0(result, ty);
         }
     }
 }

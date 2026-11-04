@@ -55,13 +55,6 @@ impl FunctionCompiler<'_> {
             ],
         );
         let ty = self.ty(result.expect("narrowing conversion result"));
-        let destination = self.def_freg(result);
-        if destination != FS0 {
-            self.emit(
-                movs(ty),
-                [asm_arg(simd(destination, ty)), asm_arg(simd(FS0, ty))],
-            );
-        }
-        self.def_done(result, destination);
+        self.def_vector_from_fs0(result, ty);
     }
 }

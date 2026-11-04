@@ -103,16 +103,6 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let destination = self.def_freg(result);
-        if destination != FS0 {
-            self.emit(
-                movs(output),
-                [
-                    asm_arg(simd(destination, output)),
-                    asm_arg(simd(FS0, output)),
-                ],
-            );
-        }
-        self.def_done(result, destination);
+        self.def_vector_from_fs0(result, output);
     }
 }

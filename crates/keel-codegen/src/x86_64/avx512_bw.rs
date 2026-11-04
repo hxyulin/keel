@@ -88,16 +88,6 @@ impl FunctionCompiler<'_> {
                 self.emit(instruction, [asm_arg(simd_width(FS0, width)), address]);
             }
         }
-        let destination = self.def_freg(result);
-        if destination != FS0 {
-            self.emit(
-                movs(ty),
-                [
-                    asm_arg(simd_width(destination, width)),
-                    asm_arg(simd_width(FS0, width)),
-                ],
-            );
-        }
-        self.def_done(result, destination);
+        self.def_vector_from_fs0(result, ty);
     }
 }

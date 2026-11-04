@@ -5679,6 +5679,19 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    /// Defines `result` from FS0, the scratch register an intrinsic lowering
+    /// computes into, copying it when the allocator chose another register.
+    fn def_vector_from_fs0(&mut self, result: Option<Value>, ty: Type) {
+        let destination = self.def_freg(result);
+        if destination != FS0 {
+            self.emit(
+                movs(ty),
+                [asm_arg(simd(destination, ty)), asm_arg(simd(FS0, ty))],
+            );
+        }
+        self.def_done(result, destination);
+    }
+
     fn ty(&self, value: Value) -> Type {
         self.func.value_type(self.func.resolve(value))
     }

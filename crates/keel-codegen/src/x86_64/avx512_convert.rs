@@ -91,13 +91,6 @@ impl FunctionCompiler<'_> {
                 [asm_arg(simd(FS0, output)), asm_arg(simd(FS1, input))],
             );
         }
-        let d = self.def_freg(result);
-        if d != FS0 {
-            self.emit(
-                movs(output),
-                [asm_arg(simd(d, output)), asm_arg(simd(FS0, output))],
-            );
-        }
-        self.def_done(result, d);
+        self.def_vector_from_fs0(result, output);
     }
 }

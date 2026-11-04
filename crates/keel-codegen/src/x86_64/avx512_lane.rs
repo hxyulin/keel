@@ -158,16 +158,6 @@ impl FunctionCompiler<'_> {
         }
         let value = result.expect("lane result");
         let target = self.ty(value);
-        let destination = self.def_freg(result);
-        if destination != FS0 {
-            self.emit(
-                movs(target),
-                [
-                    asm_arg(simd(destination, target)),
-                    asm_arg(simd(FS0, target)),
-                ],
-            );
-        }
-        self.def_done(result, destination);
+        self.def_vector_from_fs0(result, target);
     }
 }

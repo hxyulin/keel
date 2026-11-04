@@ -33,11 +33,7 @@ impl FunctionCompiler<'_> {
                 asm_arg(simd(FS2, ty)),
             ],
         );
-        let d = self.def_freg(result);
-        if d != FS0 {
-            self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-        }
-        self.def_done(result, d);
+        self.def_vector_from_fs0(result, ty);
     }
 }
 
@@ -215,14 +211,7 @@ impl FunctionCompiler<'_> {
             );
             self.def_done(result, d);
         } else {
-            let d = self.def_freg(result);
-            if d != FS0 {
-                self.emit(
-                    movs(target),
-                    [asm_arg(simd(d, target)), asm_arg(simd(FS0, target))],
-                );
-            }
-            self.def_done(result, d);
+            self.def_vector_from_fs0(result, target);
         }
     }
 }
@@ -271,11 +260,7 @@ impl FunctionCompiler<'_> {
                     )),
                 ],
             );
-            let d = self.def_freg(result);
-            if d != FS0 {
-                self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-            }
-            self.def_done(result, d);
+            self.def_vector_from_fs0(result, ty);
         } else if name.contains("movmsk") {
             let d = self.def_reg(result);
             self.emit(opcode, [asm_arg(r32(d)), asm_arg(simd(FS1, ty))]);
@@ -359,11 +344,7 @@ impl FunctionCompiler<'_> {
             4 => self.emit(opcode, <[AsmOperand; 4]>::try_from(operands).unwrap()),
             _ => unreachable!(),
         }
-        let d = self.def_freg(result);
-        if d != FS0 {
-            self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-        }
-        self.def_done(result, d);
+        self.def_vector_from_fs0(result, ty);
     }
 }
 

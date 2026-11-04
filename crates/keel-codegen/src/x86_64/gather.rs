@@ -29,11 +29,7 @@ impl FunctionCompiler<'_> {
                 asm_arg(simd(FS2, self.ty(args[3]))),
             ],
         );
-        let d = self.def_freg(result);
-        if d != FS0 {
-            self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-        }
-        self.def_done(result, d);
+        self.def_vector_from_fs0(result, ty);
     }
 }
 
@@ -83,11 +79,7 @@ impl FunctionCompiler<'_> {
                 opcode,
                 [asm_arg(simd(FS0, ty)), asm_arg(simd(FS1, mt)), asm_arg(at)],
             );
-            let d = self.def_freg(result);
-            if d != FS0 {
-                self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(simd(FS0, ty))]);
-            }
-            self.def_done(result, d);
+            self.def_vector_from_fs0(result, ty);
         }
     }
 }

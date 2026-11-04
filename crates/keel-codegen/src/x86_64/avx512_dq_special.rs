@@ -92,10 +92,6 @@ impl FunctionCompiler<'_> {
                 ],
             );
         }
-        let dest = self.def_freg(result);
-        if dest != FS0 {
-            self.emit(movs(ty), [asm_arg(simd(dest, ty)), asm_arg(simd(FS0, ty))]);
-        }
-        self.def_done(result, dest);
+        self.def_vector_from_fs0(result, ty);
     }
 }

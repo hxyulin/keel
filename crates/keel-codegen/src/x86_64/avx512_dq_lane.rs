@@ -88,13 +88,6 @@ impl FunctionCompiler<'_> {
                 );
             }
         }
-        let dest = self.def_freg(result);
-        if dest != FS0 {
-            self.emit(
-                movs(output),
-                [asm_arg(simd(dest, output)), asm_arg(simd(FS0, output))],
-            );
-        }
-        self.def_done(result, dest);
+        self.def_vector_from_fs0(result, output);
     }
 }
