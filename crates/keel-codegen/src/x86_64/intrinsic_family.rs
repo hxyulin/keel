@@ -1,6 +1,8 @@
 //! One exhaustive dispatch per x86 intrinsic family. Every [`X86Family`]
 //! variant needs a validation arm and a lowering arm, so a new family
-//! does not compile until it has both.
+//! does not compile until it has both. The target-independent intrinsics
+//! (libc memory calls, stack and frame access, `va_start`) are lowered
+//! here too.
 use super::*;
 use keel_ir::X86Family;
 use keel_ir::X86Family as F;
@@ -505,6 +507,135 @@ impl FunctionCompiler<'_> {
             F::X87Region => self.native_x87_region(inst, args),
             F::X87State => self.native_x87_state(id, args, result),
             F::Xstate => self.native_xstate(id, args),
+        }
+    }
+
+    /// Lowers an intrinsic: an x86 one by its family, the others here.
+    pub(super) fn intrinsic(
+        &mut self,
+        inst: Inst,
+        id: Intrinsic,
+        args: &[Value],
+        result: Option<Value>,
+    ) {
+        if id.is_x86_target() {
+            return self.x86_intrinsic(inst, id, args, result);
+        }
+        match id {
+            keel_ir::x86_intrinsics!() => unreachable!("dispatched x86 intrinsic"),
+            // The libc functions take the same arguments in the same
+            // order. memset's `int c` only uses its low byte, so the
+            // unspecified upper bits of the i8 are harmless.
+            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
+                let sig = keel_ir::Signature {
+                    params: id.info().params.iter().map(|&t| AbiParam::new(t)).collect(),
+                    returns: id
+                        .info()
+                        .returns
+                        .iter()
+                        .map(|&t| AbiParam::new(t))
+                        .collect(),
+                    cc: CallConv::C,
+                    x86_vector_abi: None,
+                    variadic: false,
+                    returns_twice: false,
+                };
+                self.move_args(&args.to_vec().into(), &sig, None, false);
+                self.emit(
+                    Opcode::Call,
+                    [asm_arg(symbol_address(&id.to_string(), Modifier::Plt))],
+                );
+                if id == Intrinsic::Memcmp {
+                    self.call_result(result, None);
+                }
+            }
+            // What clang emits for __builtin_debugtrap; a debugger can
+            // continue past it.
+            Intrinsic::Debugtrap => self.emit(Opcode::Int3, []),
+            // Round up to keep rsp 16-byte aligned; the memory starts
+            // above the outgoing arguments, which stay at rsp.
+            Intrinsic::StackAlloc => {
+                let size = self.use_reg(args[0], S0);
+                self.emit(
+                    Opcode::Lea,
+                    [
+                        asm_arg(r64(0)),
+                        asm_arg(memory(r64(size), (self.frame_align - 1) as i128)),
+                    ],
+                );
+                self.emit(
+                    Opcode::And,
+                    [asm_arg(r64(0)), asm_arg(-(self.frame_align as i128))],
+                );
+                self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(r64(0))]);
+                let d = self.def_reg(result);
+                self.emit(
+                    Opcode::Lea,
+                    [
+                        asm_arg(r64(d)),
+                        asm_arg(memory(r64(4), (self.outgoing) as i128)),
+                    ],
+                );
+                self.def_done(result, d);
+            }
+            Intrinsic::StackSave => {
+                let d = self.def_reg(result);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(4))]);
+                self.def_done(result, d);
+            }
+            // Lifetime markers constrain IR transformations but change no runtime state.
+            Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {}
+            Intrinsic::StackRestore => {
+                let mark = self.use_reg(args[0], S0);
+                self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(mark))]);
+            }
+            // Where the prologue points rbp: the saved rbp, with the
+            // return address above it.
+            Intrinsic::FrameAddress => {
+                let d = self.def_reg(result);
+                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(5))]);
+                self.def_done(result, d);
+            }
+            // SysV's va_list: the offsets of the next general and vector
+            // register in the save area (vector registers are 16 bytes,
+            // after the 48 of the general ones), the next stack argument
+            // and the save area.
+            Intrinsic::VaStart => {
+                let p = self.use_reg(args[0], S1);
+                let p = r64(p);
+                let (ints, floats) = (self.named.ints, self.named.floats);
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(sized(memory(p, 0), 32)),
+                        asm_arg(8 * u32::from(ints)),
+                    ],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(sized(memory(p, 4i128), 32)),
+                        asm_arg(48 + 16 * u32::from(floats)),
+                    ],
+                );
+                self.emit(
+                    Opcode::Lea,
+                    [
+                        asm_arg(r64(0)),
+                        asm_arg(memory(r64(5), (16 + self.named.stack) as i128)),
+                    ],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(sized(memory(p, 8i128), 64)), asm_arg(r64(0))],
+                );
+                let save = self.frame(self.reg_save.expect("a variadic function"));
+                self.emit(Opcode::Lea, [asm_arg(r64(0)), asm_arg(save)]);
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(sized(memory(p, 16i128), 64)), asm_arg(r64(0))],
+                );
+            }
         }
     }
 }

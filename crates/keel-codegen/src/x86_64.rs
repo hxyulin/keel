@@ -87,6 +87,10 @@ pub mod iretq;
 mod legacy_x87_images;
 pub mod linux_syscall;
 mod loop_align;
+mod lower_control;
+mod lower_memory;
+mod lower_scalar;
+mod lower_vector;
 mod owned_x87_stack;
 mod packed_pair;
 mod packed_search;
@@ -1605,15 +1609,16 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    fn inst(&mut self, inst: Inst) {
+    /// Lowers an instruction that selection or a backend cover claimed;
+    /// gives whether there was one.
+    fn cover(&mut self, inst: Inst, result: Option<Value>) -> bool {
         let func = self.func;
-        let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
-            return;
+            return true;
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {
             self.vector_absolute(value, result);
-            return;
+            return true;
         }
         if let Some(&value) = self.packed_sign_values.get(&inst) {
             match value {
@@ -1622,15 +1627,15 @@ impl<'a> FunctionCompiler<'a> {
                     self.vector_sign_select(x, otherwise, result)
                 }
             }
-            return;
+            return true;
         }
         if let Some(&addr) = self.packed_positive_values.get(&inst) {
             self.vector_positive32(addr, result);
-            return;
+            return true;
         }
         if let Some(&addr) = self.selection.signed_byte_memory.get(&inst) {
             self.signed_byte_load(addr, result);
-            return;
+            return true;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
             if result
@@ -1645,7 +1650,7 @@ impl<'a> FunctionCompiler<'a> {
                     [asm_arg(simd_width(d, 256)), asm_arg(&at)],
                 );
                 self.def_done(result, d);
-                return;
+                return true;
             }
             let at = self.mem(addr, S0, Type::I64);
             let d = self.def_freg(result);
@@ -1662,10 +1667,21 @@ impl<'a> FunctionCompiler<'a> {
             };
             self.emit(opcode, [asm_arg(xmm(d)), asm_arg(&at)]);
             self.def_done(result, d);
-            return;
+            return true;
         }
         if let Some(matched) = self.selection.matches.get(&inst).cloned() {
             self.selected(result, matched);
+            return true;
+        }
+        false
+    }
+
+    /// Lowers one instruction: through a cover that claimed it, a wide or
+    /// target-specific family, or its instruction family.
+    fn inst(&mut self, inst: Inst) {
+        let func = self.func;
+        let result = func.inst_results(inst).first().copied();
+        if self.cover(inst, result) {
             return;
         }
         if self.lower_i128(inst, func.inst_data(inst), result) {
@@ -1687,729 +1703,46 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match *func.inst_data(inst) {
-            InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
-            InstData::VectorSelect { args } => self.vector_select(args, result),
-            InstData::VectorBinary { op, args } => {
-                if op == keel_ir::VectorBinaryOp::Imul
-                    && self.ty(args[0]) == Type::Vector(keel_ir::VectorType::I32x4)
-                    && !self.features.sse41
-                {
-                    self.vector_multiply_dwords_sse2(args, result);
-                    return;
-                }
-                let d = self.def_freg(result);
-                let a = self.use_freg(args[0], FS0);
-                let b = self.use_freg(args[1], FS1);
-                if let Some(opcode) = self
-                    .features
-                    .avx
-                    .then(|| vector::packed_avx(op, self.ty(args[0]).vector().unwrap()))
-                    .flatten()
-                {
-                    self.emit(opcode, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(xmm(b))]);
-                    self.def_done(result, d);
-                    return;
-                }
-                // Preserve the second source if writing d would overwrite it.
-                let dst = if d == b && a != d { FS2 } else { d };
-                if dst != a {
-                    self.emit(Opcode::Movaps, [asm_arg(xmm(dst)), asm_arg(xmm(a))]);
-                }
-                self.emit(
-                    vector::packed(op, self.ty(args[0]).vector().unwrap(), self.features)
-                        .expect("legalized packed op"),
-                    [asm_arg(xmm(dst)), asm_arg(xmm(b))],
-                );
-                if dst != d {
-                    self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(dst))]);
-                }
-                self.def_done(result, d);
-            }
-            InstData::VectorUnary {
-                op: UnaryOp::Fsqrt,
-                arg,
-            } => {
-                let d = self.def_freg(result);
-                let a = self.use_freg(arg, FS1);
-                let op = if self.ty(arg).vector().unwrap().lane_type() == Type::F32 {
-                    Opcode::Sqrtps
-                } else {
-                    Opcode::Sqrtpd
-                };
-                self.emit(op, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
-                self.def_done(result, d);
-            }
-            InstData::VectorUnary {
-                op: UnaryOp::Ineg,
-                arg,
-            } => self.vector_ineg(arg, result),
-            InstData::VectorShuffle { args, ref lanes } => self.vector_shuffle(args, lanes, result),
-            InstData::VectorExtract { arg, lane } => {
-                let source = self.use_freg(arg, FS0);
-                let d = self.def_reg(result);
-                let source = if lane == 0 {
-                    source
-                } else {
-                    // Use reserved scratch; the input may still be live.
-                    self.emit(Opcode::Movhlps, [asm_arg(xmm(FS1)), asm_arg(xmm(source))]);
-                    FS1
-                };
-                self.emit(Opcode::Movq, [asm_arg(r64(d)), asm_arg(xmm(source))]);
-                self.def_done(result, d);
-            }
-            InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
-            InstData::VectorReduce {
-                op: keel_ir::VectorReduceOp::Add,
-                arg,
-            } => self.vector_reduce_add(arg, result),
-            InstData::VectorUnary { .. }
+            InstData::VectorIcmp { .. }
+            | InstData::VectorSelect { .. }
+            | InstData::VectorBinary { .. }
+            | InstData::VectorUnary { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorSplat { .. }
             | InstData::VectorReduce { .. }
             | InstData::VectorInsert { .. }
-            | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
-            InstData::StackAddr { .. } | InstData::Iconst { .. }
-                if result.is_some_and(|r| {
-                    self.folded_values.contains(&r)
-                        || matches!(self.defined(r), Some(Loc::Remat(_)))
-                }) => {}
-            InstData::Convert {
-                op: ConvertOp::IntToPtr,
-                ty: Type::Ptr,
-                ..
-            } if result.is_some_and(|r| {
-                matches!(self.defined(r), Some(Loc::Remat(v)) if v == r)
-                    && matches!(
-                        crate::regalloc::remat_recipe(self.func, r),
-                        Some(crate::regalloc::RematRecipe::NullPtr)
-                    )
-            }) => {}
-            InstData::Icmp { .. } | InstData::Fcmp { .. }
-                if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
-            InstData::Iconst { ty, imm } => {
-                let d = self.def_reg(result);
-                self.materialize(d, imm, ty);
-                self.def_done(result, d);
-            }
-            InstData::F80const {
-                significand,
-                sign_exp,
-            } => self.f80_constant(result, significand, sign_exp),
-            InstData::Fconst { bits, .. } => {
-                let d = self.def_freg(result);
-                if bits == 0 {
-                    self.emit(Opcode::Xorps, [asm_arg(xmm(d)), asm_arg(xmm(d))]);
-                } else {
-                    self.emit(Opcode::Movabs, [asm_arg(r64(0)), asm_arg(bits)]);
-                    self.emit(Opcode::Movq, [asm_arg(xmm(d)), asm_arg(r64(0))]);
-                }
-                self.def_done(result, d);
-            }
-            InstData::Call {
-                func: callee,
-                ref args,
-            } => {
-                let decl = func.callee(callee);
-                let sret = self.move_args(args, &decl.sig, None, false);
-                self.call_function(Opcode::Call, &decl.name);
-                self.call_result(result, sret);
-            }
-            InstData::CallIndirect {
-                sig,
-                callee,
-                ref args,
-            } => {
-                let sret = self.move_args(args, func.signature(sig), Some(callee), false);
-                self.emit(Opcode::Call, [asm_arg(r64(R10))]);
-                self.call_result(result, sret);
-            }
-            // Arguments into registers, then this function's epilogue, then
-            // a jump: the callee returns straight to our caller.
-            InstData::ReturnCall {
-                func: callee,
-                ref args,
-            } => {
-                let decl = func.callee(callee);
-                self.move_args(args, &decl.sig, None, true);
-                self.epilogue();
-                self.call_function(Opcode::Jmp, &decl.name);
-            }
-            // The epilogue only restores callee-saved registers and rbp,
-            // so the target stays in r10.
-            InstData::ReturnCallIndirect {
-                sig,
-                callee,
-                ref args,
-            } => {
-                self.move_args(args, func.signature(sig), Some(callee), true);
-                self.epilogue();
-                self.emit(Opcode::Jmp, [asm_arg(r64(R10))]);
-            }
-            InstData::SymbolAddr { symbol } => {
-                let d = self.def_reg(result);
-                let name = func.symbol_name(symbol);
-                let thread_local = self
-                    .symbols
-                    .data_object(name)
-                    .is_some_and(|d| d.thread_local);
-                // A thread's copies of the thread-locals are at fixed
-                // offsets from its thread pointer, the base of fs, whose
-                // first word points to itself. An executable knows the
-                // offsets of its own at link time (local-exec); others come
-                // from the GOT (initial-exec).
-                let defined = self.symbols.defines(name);
-                // Intel operand syntax reserves names such as `offset`, `ptr`
-                // and register names. Quoting keeps C symbols unambiguous.
-                let name = name.to_owned();
-                if !thread_local && self.code_model != CodeModel::PositionIndependent {
-                    let destination = match self.code_model {
-                        CodeModel::Small => r32(d),
-                        CodeModel::Kernel => r64(d),
-                        CodeModel::PositionIndependent => unreachable!("static address branch"),
-                    };
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(destination),
-                            asm_arg(symbol_address(&name, Modifier::None)),
-                        ],
-                    );
-                } else if thread_local && defined {
-                    self.emit(
-                        Opcode::Mov,
-                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
-                    );
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(symbol_memory(r64(d), &name, Modifier::TpOff)),
-                        ],
-                    );
-                } else if thread_local {
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::Add,
-                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
-                    );
-                } else if defined {
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(symbol_memory(rip(), &name, Modifier::None)),
-                        ],
-                    );
-                } else {
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64)),
-                        ],
-                    );
-                }
-                self.def_done(result, d);
-            }
-            InstData::StackAddr { slot } => {
-                let d = self.def_reg(result);
-                let at = self.frame(self.stack_slot_offsets[slot.index()]);
-                self.emit(Opcode::Lea, [asm_arg(r64(d)), asm_arg(at)]);
-                self.def_done(result, d);
-            }
-            InstData::Unary { op, arg } if op.is_float() => {
-                let d = self.def_freg(result);
-                self.float_unary(inst, op, arg, d);
-                self.def_done(result, d);
-            }
-            InstData::Unary { op, arg } => {
-                let d = self.def_reg(result);
-                self.unary(op, arg, d);
-                self.def_done(result, d);
-            }
-            InstData::Fma { args } if native_fma_legal(self.ty(args[0]), self.features) => {
-                self.native_fma(args, result)
-            }
-            InstData::Fma { args } => {
-                let ty = self.ty(args[0]);
-                let moves: Vec<(Loc, Loc)> = (0..3)
-                    .map(|i| (Loc::FReg(i as u8), self.loc(args[i])))
-                    .collect();
-                self.parallel_copy(&moves);
-                let name = if ty == Type::F32 { "fmaf" } else { "fma" };
-                self.emit(Opcode::Call, [asm_arg(symbol_address(name, Modifier::Plt))]);
-                self.call_result(result, None);
-            }
-            InstData::Overflow { op, args } => self.overflow(inst, op, args),
-            InstData::Binary { op, args } if op.is_float() => {
-                let d = self.def_freg(result);
-                self.float_binary(inst, op, args, d);
-                self.def_done(result, d);
-            }
-            InstData::Binary { .. } if self.selection.division_remainders.contains_key(&inst) => {
-                let d = self.def_reg(result);
-                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S2))]);
-                self.def_done(result, d);
-            }
-            InstData::Binary { op, args } => {
-                let d = self.def_reg(result);
-                self.binary(inst, op, args, d);
-                self.def_done(result, d);
-            }
-            InstData::Select { args }
-                if self.ty(args[1]).is_float() || self.ty(args[1]).is_vector() =>
-            {
-                let d = self.def_freg(result);
-                let skip = format!(".L{}_{inst}_select", func.name);
-                self.test_value(args[0]);
-                let a = self.use_freg(args[1], FS1);
-                let b = self.use_freg(args[2], FS2);
-                self.emit_move(Loc::FReg(FS0), Loc::FReg(b));
-                self.emit(Opcode::Jcc(4), [asm_arg(&skip)]);
-                self.emit_move(Loc::FReg(FS0), Loc::FReg(a));
-                self.out.label(skip);
-                self.emit_move(Loc::FReg(d), Loc::FReg(FS0));
-                self.def_done(result, d);
-            }
-            // The false value in rax, replaced by the true one if the
-            // condition is non-zero; the moves leave the flags alone.
-            InstData::Select { args } => {
-                let d = self.def_reg(result);
-                if let Some(&compare) = self.selection.select_compares.get(&inst) {
-                    // Stage arms outside the compare's rax/rcx scratch. It
-                    // preserves these
-                    // two reserved registers even when every operand spills.
-                    self.emit_move(Loc::Reg(S2), self.loc(args[2]));
-                    self.emit_move(Loc::Reg(S3), self.loc(args[1]));
-                    let cc = self.compare(compare);
-                    self.emit(
-                        Opcode::Cmovcc(condition(cc)),
-                        [asm_arg(r64(S2)), asm_arg(r64(S3))],
-                    );
-                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(S2))]);
-                    self.def_done(result, d);
-                    return;
-                }
-                self.test_value(args[0]);
-                let a = self.use_reg(args[1], S1);
-                let b = self.use_reg(args[2], S2);
-                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(b))]);
-                self.emit(Opcode::Cmovcc(5), [asm_arg(r64(0)), asm_arg(r64(a))]);
-                self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(0))]);
-                self.def_done(result, d);
-            }
-            InstData::Convert { op, ty, arg } if ty.is_vector() && self.ty(arg).is_vector() => {
-                self.vector_convert(op, ty, arg, result);
-            }
-            InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
-                self.float_convert(inst, op, ty, arg, result);
-            }
-            InstData::Convert { op, ty, arg } => {
-                let d = self.def_reg(result);
-                let a = self.use_reg(arg, S0);
-                let from = self.ty(arg);
-                match op {
-                    ConvertOp::Sext => match from {
-                        Type::I32 => self.emit(Opcode::Movsxd, [asm_arg(r64(d)), asm_arg(r32(a))]),
-                        _ => {
-                            self.emit(Opcode::Movsx, [asm_arg(wide(d, ty)), asm_arg(reg(a, from))])
-                        }
-                    },
-                    // Writing a 32-bit register clears the upper 32 bits.
-                    ConvertOp::Uext
-                        if self.zero_extended_narrow(arg) || self.zero_extended_i32(arg) =>
-                    {
-                        if d != a {
-                            self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(a))]);
-                        }
-                    }
-                    ConvertOp::Uext => match from {
-                        Type::I32 => self.emit(Opcode::Mov, [asm_arg(r32(d)), asm_arg(r32(a))]),
-                        _ => self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(reg(a, from))]),
-                    },
-                    // The low bits are already right; upper bits are
-                    // unspecified. A pointer is a 64-bit address already.
-                    ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
-                        if a != d {
-                            self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(a))]);
-                        }
-                    }
-                    _ => unreachable!("float conversions are lowered by float_convert"),
-                }
-                self.def_done(result, d);
-            }
-            InstData::Icmp { .. } | InstData::Fcmp { .. } => {
-                let d = self.def_reg(result);
-                let cc = self.compare(inst);
-                if matches!(*func.inst_data(inst), InstData::Fcmp { cond: FloatCC::Eq | FloatCC::Ne, args } if func.resolve(args[0]) != func.resolve(args[1]))
-                {
-                    // Eq/Ne already combined the two flags into canonical al.
-                    if d != S0 {
-                        self.emit(Opcode::Mov, [asm_arg(r8(d)), asm_arg(r8(S0))]);
-                    }
-                } else {
-                    self.emit(Opcode::Setcc(condition(cc)), [asm_arg(r8(d))]);
-                }
-                self.def_done(result, d);
-            }
-            InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
-                let d = self.def_freg(result);
-                let a = self.mem(addr, S0, ty);
-                self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(a)]);
-                self.def_done(result, d);
-            }
-            // A narrow load zero-extends to 32 bits, which avoids writing
-            // part of a register (and depending on its old value).
-            InstData::Load { ty, addr, .. } => {
-                let d = self.def_reg(result);
-                let a = self.mem(addr, S0, ty);
-                match ty {
-                    Type::I8 | Type::I16 => self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(a)]),
-                    _ => self.emit(Opcode::Mov, [asm_arg(reg(d, ty)), asm_arg(a)]),
-                }
-                self.def_done(result, d);
-            }
-            InstData::Store { value, addr, .. }
-                if self.ty(value).is_float() || self.ty(value).is_vector() =>
-            {
-                let ty = self.ty(value);
-                let v = self.use_freg(value, FS0);
-                let a = self.mem(addr, S1, ty);
-                self.emit(movs(ty), [asm_arg(a), asm_arg(simd(v, ty))]);
-            }
-            InstData::Store { value, addr, .. } => {
-                let ty = self.ty(value);
-                let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some((_, k)) => asm_arg(k),
-                    None => asm_arg(reg(self.use_reg(value, S0), ty)),
-                };
-                let a = self.mem(addr, S1, ty);
-                self.emit(Opcode::Mov, [asm_arg(a), asm_arg(v)]);
-            }
-            // x86 is strongly ordered: every load is an acquire and every
-            // store a release. Only a sequentially consistent store needs
-            // more, so that later loads cannot pass it: `xchg` with memory
-            // is locked, a full barrier.
-            InstData::AtomicLoad { ty, addr, .. } => {
-                let d = self.def_reg(result);
-                let a = self.use_reg(addr, S0);
-                let src = sized(memory(r64(a), 0), ptr(ty));
-                match ty {
-                    Type::I8 | Type::I16 => {
-                        self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(src)])
-                    }
-                    _ => self.emit(Opcode::Mov, [asm_arg(reg(d, ty)), asm_arg(src)]),
-                }
-                self.def_done(result, d);
-            }
-            InstData::AtomicStore {
-                ordering,
-                value,
-                addr,
-            } => {
-                let ty = self.ty(value);
-                let v = self.use_reg(value, S0);
-                let a = self.use_reg(addr, S1);
-                let op = if ordering == Ordering::SeqCst {
-                    Opcode::Xchg
-                } else {
-                    Opcode::Mov
-                };
-                if op == Opcode::Xchg && v != S0 {
-                    // xchg writes its register operand.
-                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(v))]);
-                }
-                let v = if op == Opcode::Xchg { S0 } else { v };
-                self.emit(
-                    op,
-                    [
-                        asm_arg(sized(memory(r64(a), 0), ptr(ty))),
-                        asm_arg(reg(v, ty)),
-                    ],
-                );
-            }
-            InstData::AtomicRmw { op, args, .. } => self.atomic_rmw(inst, op, args, result),
-            // `cmpxchg` compares memory with rax and writes the old value
-            // to rax either way.
-            InstData::AtomicCas { args, .. } => {
-                let ty = self.ty(args[1]);
-                let a = self.use_reg(args[0], S1);
-                let expected = self.use_reg(args[1], S0);
-                self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(r64(expected))]);
-                let new = self.use_reg(args[2], S2);
-                self.emit_locked(
-                    Opcode::Cmpxchg,
-                    [
-                        asm_arg(sized(memory(r64(a), 0), ptr(ty))),
-                        asm_arg(reg(new, ty)),
-                    ],
-                );
-                if let Some(loc) = result.and_then(|r| self.defined(r)) {
-                    self.emit_move(loc, Loc::Reg(S0));
-                }
-            }
-            InstData::Fence { ordering } => {
-                if ordering == Ordering::SeqCst {
-                    self.emit(Opcode::Mfence, []);
-                }
-            }
-            InstData::Jump { ref dest } => {
-                self.block_args(dest, 0);
-                self.branch_unless_next(dest.block);
-            }
-            InstData::Brif {
-                cond,
-                dests: [ref then_dest, ref else_dest],
-            } => {
-                // To the else-branch when the condition is zero, or when a
-                // fused compare's condition does not hold.
-                let not = match func.value_def(func.resolve(cond)) {
-                    ValueDef::Result(compare, _)
-                        if self.fused_compares.contains(&func.resolve(cond)) =>
-                    {
-                        invert_cond(self.compare(compare))
-                    }
-                    _ => {
-                        self.test_value(cond);
-                        "e"
-                    }
-                };
-                // Branch directly to a copy-free true edge when the false
-                // successor is next or the false edge is the only one with
-                // copies, copying its arguments inline. Otherwise keep copies
-                // on their own edges with landing pads.
-                let then_noop = self.block_args_noop(then_dest, 0);
-                if then_noop
-                    && (self.next_block == Some(else_dest.block)
-                        || !self.block_args_noop(else_dest, 1))
-                {
-                    self.jump_to_block(Opcode::Jcc(condition(invert_cond(not))), then_dest.block);
-                    self.block_args(else_dest, 1);
-                    self.branch_unless_next(else_dest.block);
-                } else if self.block_args_noop(else_dest, 1) {
-                    self.jump_to_block(Opcode::Jcc(condition(not)), else_dest.block);
-                    self.block_args(then_dest, 0);
-                    self.branch_unless_next(then_dest.block);
-                } else {
-                    let pad = format!(".L{}_{inst}_else", func.name);
-                    self.emit(Opcode::Jcc(condition(not)), [asm_arg(&pad)]);
-                    self.block_args(then_dest, 0);
-                    self.jump_to_block(Opcode::Jmp, then_dest.block);
-                    self.out.label(pad);
-                    self.block_args(else_dest, 1);
-                    self.branch_unless_next(else_dest.block);
-                }
-            }
-            InstData::Switch {
-                arg,
-                ref dests,
-                ref cases,
-            } => self.switch(inst, arg, dests, cases),
-            InstData::Intrinsic { id, ref args } if id.is_x86_target() => {
-                self.x86_intrinsic(inst, id, args, result)
-            }
-            InstData::Intrinsic { id, ref args } => match id {
-                keel_ir::x86_intrinsics!() => unreachable!("dispatched x86 intrinsic"),
-                // The libc functions take the same arguments in the same
-                // order. memset's `int c` only uses its low byte, so the
-                // unspecified upper bits of the i8 are harmless.
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
-                    let sig = keel_ir::Signature {
-                        params: id.info().params.iter().map(|&t| AbiParam::new(t)).collect(),
-                        returns: id
-                            .info()
-                            .returns
-                            .iter()
-                            .map(|&t| AbiParam::new(t))
-                            .collect(),
-                        cc: CallConv::C,
-                        x86_vector_abi: None,
-                        variadic: false,
-                        returns_twice: false,
-                    };
-                    self.move_args(&args.clone().into(), &sig, None, false);
-                    self.emit(
-                        Opcode::Call,
-                        [asm_arg(symbol_address(&id.to_string(), Modifier::Plt))],
-                    );
-                    if id == Intrinsic::Memcmp {
-                        self.call_result(result, None);
-                    }
-                }
-                // What clang emits for __builtin_debugtrap; a debugger can
-                // continue past it.
-                Intrinsic::Debugtrap => self.emit(Opcode::Int3, []),
-                // Round up to keep rsp 16-byte aligned; the memory starts
-                // above the outgoing arguments, which stay at rsp.
-                Intrinsic::StackAlloc => {
-                    let size = self.use_reg(args[0], S0);
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(0)),
-                            asm_arg(memory(r64(size), (self.frame_align - 1) as i128)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::And,
-                        [asm_arg(r64(0)), asm_arg(-(self.frame_align as i128))],
-                    );
-                    self.emit(Opcode::Sub, [asm_arg(r64(4)), asm_arg(r64(0))]);
-                    let d = self.def_reg(result);
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(memory(r64(4), (self.outgoing) as i128)),
-                        ],
-                    );
-                    self.def_done(result, d);
-                }
-                Intrinsic::StackSave => {
-                    let d = self.def_reg(result);
-                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(4))]);
-                    self.def_done(result, d);
-                }
-                // Lifetime markers constrain IR transformations but change no runtime state.
-                Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd => {}
-                Intrinsic::StackRestore => {
-                    let mark = self.use_reg(args[0], S0);
-                    self.emit(Opcode::Mov, [asm_arg(r64(4)), asm_arg(r64(mark))]);
-                }
-                // Where the prologue points rbp: the saved rbp, with the
-                // return address above it.
-                Intrinsic::FrameAddress => {
-                    let d = self.def_reg(result);
-                    self.emit(Opcode::Mov, [asm_arg(r64(d)), asm_arg(r64(5))]);
-                    self.def_done(result, d);
-                }
-                // SysV's va_list: the offsets of the next general and vector
-                // register in the save area (vector registers are 16 bytes,
-                // after the 48 of the general ones), the next stack argument
-                // and the save area.
-                Intrinsic::VaStart => {
-                    let p = self.use_reg(args[0], S1);
-                    let p = r64(p);
-                    let (ints, floats) = (self.named.ints, self.named.floats);
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(sized(memory(p, 0), 32)),
-                            asm_arg(8 * u32::from(ints)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(sized(memory(p, 4i128), 32)),
-                            asm_arg(48 + 16 * u32::from(floats)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(0)),
-                            asm_arg(memory(r64(5), (16 + self.named.stack) as i128)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::Mov,
-                        [asm_arg(sized(memory(p, 8i128), 64)), asm_arg(r64(0))],
-                    );
-                    let save = self.frame(self.reg_save.expect("a variadic function"));
-                    self.emit(Opcode::Lea, [asm_arg(r64(0)), asm_arg(save)]);
-                    self.emit(
-                        Opcode::Mov,
-                        [asm_arg(sized(memory(p, 16i128), 64)), asm_arg(r64(0))],
-                    );
-                }
-            },
-            InstData::Trap => self.emit(Opcode::Ud2, []),
-            InstData::Return { ref args } => {
-                if self.named.locs.first() == Some(&ArgLoc::SretX87) {
-                    let area = self.param_areas[0].expect("planned x87 result object");
-                    self.emit(Opcode::Fld, [asm_arg(sized(self.frame(area), 80))]);
-                }
-                // A struct result in registers is loaded from where the
-                // function wrote it; one in memory returns its address.
-                if let Some(ArgLoc::SretRegs(regs)) = self.named.locs.first().cloned() {
-                    let area = self.param_areas[0].expect("planned");
-                    if let Some(ty) = func.sig.params[0].layout().and_then(sysv::register_vector) {
-                        self.emit(
-                            movs(ty),
-                            [
-                                asm_arg(simd(0, ty)),
-                                asm_arg(sized(self.frame(area), ptr(ty))),
-                            ],
-                        );
-                    } else {
-                        for sysv::RegPiece { offset, loc: r } in regs {
-                            let at = sized(self.frame(area + offset as usize), 64);
-                            match r {
-                                Loc::Reg(r) => {
-                                    self.emit(Opcode::Mov, [asm_arg(r64(r)), asm_arg(at)])
-                                }
-                                _ => self
-                                    .emit(Opcode::Movsd, [asm_arg(xmm(loc_reg(r))), asm_arg(at)]),
-                            }
-                        }
-                    }
-                }
-                if let Some(slot) = self.sret_ptr {
-                    let at = self.frame(slot);
-                    self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(sized(at, 64))]);
-                }
-                if let Some(&value) = args.first() {
-                    let ty = self.ty(value);
-                    if ty == Type::F80 {
-                        self.f80_push(value);
-                    } else if sysv::scalar_memory_result(&func.sig) {
-                        let r = self.use_freg(value, FS0);
-                        self.emit(
-                            Opcode::Movsd,
-                            [asm_arg(sized(memory(r64(RAX), 0), 64)), asm_arg(xmm(r))],
-                        );
-                    } else {
-                        self.emit_move(sysv::return_loc(ty), self.loc(value));
-                    }
-                    if ty == Type::I128 {
-                        self.emit_move(Loc::Reg(RDX), self.hi(value));
-                    }
-                    let ret = &func.sig.returns[0];
-                    self.extend_in_place(RAX, ret.ty, ret.ext);
-                }
-                let wide_wrapper_return = func.sig.params.first().is_some_and(|p| {
-                    matches!(p.purpose, Purpose::Sret(_))
-                        && p.layout()
-                            .and_then(sysv::register_vector)
-                            .is_some_and(|t| t.bytes().is_some_and(|bytes| bytes >= 32))
-                });
-                if self.wide_vectors
-                    && !wide_wrapper_return
-                    && !args
-                        .first()
-                        .is_some_and(|&v| self.ty(v).bytes().is_some_and(|bytes| bytes >= 32))
-                {
-                    self.emit(Opcode::Vzeroupper, []);
-                }
-                if let Some(shared) = self.shared_return {
-                    let label = format!(".L{}_return", self.func.name);
-                    if shared == inst {
-                        self.out.label(label);
-                        self.epilogue();
-                        self.emit(Opcode::Ret, []);
-                    } else {
-                        self.emit(Opcode::Jmp, [asm_arg(label)]);
-                    }
-                } else {
-                    self.epilogue();
-                    self.emit(Opcode::Ret, []);
-                }
-            }
+            | InstData::VectorFcmp { .. } => self.vector_inst(inst, result),
+            InstData::Iconst { .. }
+            | InstData::F80const { .. }
+            | InstData::Fconst { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::StackAddr { .. } => self.constant_inst(inst, result),
+            InstData::Unary { .. }
+            | InstData::Fma { .. }
+            | InstData::Overflow { .. }
+            | InstData::Binary { .. }
+            | InstData::Select { .. }
+            | InstData::Convert { .. }
+            | InstData::Icmp { .. }
+            | InstData::Fcmp { .. } => self.scalar_inst(inst, result),
+            InstData::Load { .. }
+            | InstData::Store { .. }
+            | InstData::AtomicLoad { .. }
+            | InstData::AtomicStore { .. }
+            | InstData::AtomicRmw { .. }
+            | InstData::AtomicCas { .. }
+            | InstData::Fence { .. } => self.memory_inst(inst, result),
+            InstData::Call { .. }
+            | InstData::CallIndirect { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. }
+            | InstData::Jump { .. }
+            | InstData::Brif { .. }
+            | InstData::Switch { .. }
+            | InstData::Trap
+            | InstData::Return { .. } => self.control_inst(inst, result),
+            InstData::Intrinsic { id, ref args } => self.intrinsic(inst, id, args, result),
             InstData::InlineAsm { ref args, .. } => self.native_inline_asm(inst, args),
             InstData::X86RflagsRegion { ref args, .. } => self.native_rflags_region(inst, args),
             InstData::VaArg { ty, list, .. } => self.va_arg(inst, ty, list, result),
