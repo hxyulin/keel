@@ -6,6 +6,7 @@ pinned GCC image. Guest init-entry timing is similar. These measurements are
 for the minimal Linux v6.12 captured core, not a general Linux performance claim.
 
 The [integration scope](../integrations/linux-kernel.md#scope-and-limits) applies.
+Every run, image hash and host record is in [linux-kernel.json](linux-kernel.json).
 
 ## Method
 

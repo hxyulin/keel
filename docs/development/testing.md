@@ -18,8 +18,9 @@ python3 tools/test.py linker --test archive        # One integration-test target
 python3 tools/test.py --changed main --quick       # Changed packages and affected consumers
 python3 tools/test.py --dry-run                    # Print packages and commands without building
 python3 tools/test.py full                         # Merge-boundary workspace verification
-python3 tools/test.py lint                         # Merge-boundary format and clippy checks
+python3 tools/test.py lint                         # Merge-boundary format, clippy and chart checks
 python3 tools/test.py generators                   # Generated-file staleness and generator tests
+python3 tools/test.py charts                       # README charts against their benchmark evidence
 python3 tools/test.py cranelift                    # The separate keel-cranelift workspace
 ```
 
@@ -40,8 +41,9 @@ All main-workspace crates inherit the lint policy in the root manifest.
 `tools/test.py lint` runs `cargo fmt --all --check`, then
 `cargo clippy --workspace --all-targets -- -D warnings` on default features,
 then the same clippy command with every workspace feature enabled except
-`profile-with-tracy`, which builds the Tracy C++ client, and last
-`tools/check_docs.py`. Run it at each merge boundary.
+`profile-with-tracy`, which builds the Tracy C++ client, then
+`tools/check_docs.py`, and last the README chart check. Run it at each merge
+boundary.
 
 `tools/check_docs.py` checks every tracked Markdown file outside code blocks.
 Relative links must name a tracked file or directory, and a `#fragment` on a
@@ -50,6 +52,13 @@ that starts with `crates/`, `docs/`, `suite/`, `tools/` or `third-party/` must
 exist from the repository root or the page's directory, or be ignored by Git.
 Every page must be reachable by links from `docs/README.md`, except AGENTS.md
 and pages under a `tests/` directory. Run it alone after editing docs.
+
+`tools/test.py charts` runs
+`python3 docs/assets/readme-render-charts.py --check --verify-evidence`. It fails
+when a committed chart differs from `docs/assets/readme-benchmarks.json`, when an
+evidence file under `docs/benchmarks/` no longer matches its recorded hash, or
+when a plotted value differs from the evidence. `--changed` selects it for
+changes under `docs/assets/` and `docs/benchmarks/`.
 
 `tools/test.py generators` runs `generate.py --check` for the x86 tables in
 `tools/x86-isa` and the AArch64 tables in `crates/keel-asm/tools`, then each

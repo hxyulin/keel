@@ -351,7 +351,7 @@ class ConsumerAndPolicyTests(unittest.TestCase):
 
     def test_documentation_selects_nothing_unless_a_source_reads_it(self):
         for path in ["docs/compiler/optimizer.md", "README.md", "suite/README.md",
-                     "crates/codegen/tests/fixtures/README.md", "docs/assets/chart.svg"]:
+                     "crates/codegen/tests/fixtures/README.md", "docs/guide/diagram.svg"]:
             with self.subTest(path=path):
                 self.assertEqual(runner.changed_selection([path], self.packages), (set(), set()))
         with tempfile.TemporaryDirectory() as directory:
@@ -377,6 +377,8 @@ class ConsumerAndPolicyTests(unittest.TestCase):
             "tools/test.py": {"tools"},
             "tools/tests/test_test_runner.py": {"tools"},
             "crates/keel-cranelift/src/lib.rs": {"cranelift"},
+            "docs/assets/readme-benchmarks.json": {"charts"},
+            "docs/benchmarks/runtime-20261105.json": {"charts"},
         }
         for path, checks in cases.items():
             with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
@@ -581,12 +583,12 @@ class CheckScopeTests(unittest.TestCase):
         self.assertEqual(runner.lint_features(self.packages),
                          ["cli/extra", "cli/verify-each", "opt/verify-each"])
 
-    def test_lint_runs_format_and_both_clippy_passes_with_denied_warnings(self):
+    def test_lint_runs_format_both_clippy_passes_docs_and_charts(self):
         plan = runner.check_commands(["lint"], "cargo", "python3", ["opt/verify-each", "cli/extra"])
         commands = dict(plan)
         self.assertEqual([label for label, _ in plan],
                          ["format", "clippy, default features", "clippy, experimental features",
-                          "documentation links"])
+                          "documentation links", "README charts"])
         self.assertEqual(commands["format"], ["cargo", "fmt", "--all", "--check"])
         self.assertEqual(commands["documentation links"], ["python3", "tools/check_docs.py"])
         self.assertTrue((runner.ROOT / "tools/check_docs.py").is_file())
@@ -596,7 +598,13 @@ class CheckScopeTests(unittest.TestCase):
         self.assertNotIn("--features", commands["clippy, default features"])
         experimental = commands["clippy, experimental features"]
         self.assertEqual(experimental[experimental.index("--features") + 1], "opt/verify-each,cli/extra")
-        self.assertEqual(len(runner.check_commands(["lint"], "cargo", "python3", [])), 3)
+        self.assertEqual(len(runner.check_commands(["lint"], "cargo", "python3", [])), 4)
+
+    def test_charts_check_verifies_the_readme_charts_against_their_evidence(self):
+        plan = runner.check_commands(["charts"], "cargo", "python3", [])
+        self.assertEqual(plan, [("README charts", ["python3", "docs/assets/readme-render-charts.py",
+                                                   "--check", "--verify-evidence"])])
+        self.assertTrue((runner.ROOT / plan[0][1][1]).is_file())
 
     def test_generators_check_outputs_and_run_unit_tests_for_each_generator(self):
         plan = runner.check_commands(["generators"], "cargo", "python3", [])
@@ -623,7 +631,8 @@ class CheckScopeTests(unittest.TestCase):
         output = io.StringIO()
         with mock.patch.object(runner.subprocess, "run", run), contextlib.redirect_stdout(output):
             self.assertEqual(runner.run_checks(args, self.packages), 1)
-        self.assertEqual(ran, ["format", "clippy, default features", failing, "documentation links"])
+        self.assertEqual(ran, ["format", "clippy, default features", failing, "documentation links",
+                               "README charts"])
         results = output.getvalue().split("Results:\n", 1)[1]
         self.assertIn(f"FAILED (exit 101): {failing}", results)
         self.assertIn("ok: format", results)

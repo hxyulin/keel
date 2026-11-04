@@ -18,7 +18,7 @@
       "sha256": "567c46ad0c3ca66d424154427e0ba2749690b3ce25bf92e5395d7fc0a4705ac3"
     },
     "kernel": {
-      "path": "suite/linux-kernel/audit-kernel-bench.json",
+      "path": "docs/benchmarks/linux-kernel.json",
       "sha256": "32955973013bb1b43309fe010868eaf9958ed124ea40fbab469788b76aa6d17d"
     }
   },

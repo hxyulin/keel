@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run Rust tests by component or conservatively select consumers of changed files.
 
-The lint and generators scopes run repository checks instead of Rust tests."""
+The lint, generators and charts scopes run repository checks instead of Rust tests."""
 from __future__ import annotations
 
 import argparse
@@ -31,11 +31,13 @@ SCOPES = {
     "optimizer": {"keel-opt"},
     "codegen": {"keel-codegen"},
 }
-CHECK_SCOPES = ("lint", "generators", "cranelift")
+CHECK_SCOPES = ("lint", "generators", "charts", "cranelift")
 # profile-with-tracy builds the Tracy C++ client; the lint lane skips it.
 LINT_SKIPPED_FEATURES = {"profile-with-tracy"}
 # Each directory holds a generate.py with --check and its test_*.py unit tests.
 GENERATOR_DIRECTORIES = ("tools/x86-isa", "crates/keel-asm/tools")
+# Checks that the README charts match their sources and benchmark evidence.
+CHART_CHECK = ("docs/assets/readme-render-charts.py", "--check", "--verify-evidence")
 # keel-cranelift is a separate workspace. Its sources are indexed as readers of
 # workspace files, and a change that reaches keel-ir also selects its tests.
 CRANELIFT_DIRECTORY = "crates/keel-cranelift"
@@ -47,6 +49,7 @@ READER_DIRECTORIES = (CRANELIFT_DIRECTORY,)
 PATH_POLICY = (
     (r"tools/x86-isa/|crates/keel-asm/(?:tools|isa)/", "generators"),
     (r".*\.md$", None),
+    (r"docs/(?:assets|benchmarks)/", "charts"),
     (CRANELIFT_DIRECTORY + "/", "cranelift"),
     (r"suite/(?P<group>c|ir|asm|linker|integration)/", "suite {group}"),
     (r"suite/", "suite"),
@@ -345,6 +348,8 @@ def check_commands(scopes: list[str], cargo: str, python: str,
             plan.append(("clippy, experimental features",
                          [*clippy, "--features", ",".join(features), "--", "-D", "warnings"]))
         plan.append(("documentation links", [python, "tools/check_docs.py"]))
+    if "lint" in scopes or "charts" in scopes:
+        plan.append(("README charts", [python, *CHART_CHECK]))
     if "generators" in scopes:
         for directory in GENERATOR_DIRECTORIES:
             plan += [(f"{directory} generator check", [python, f"{directory}/generate.py", "--check"]),
