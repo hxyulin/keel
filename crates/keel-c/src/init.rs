@@ -446,9 +446,10 @@ impl<'a> Parser<'a> {
     fn designation(&mut self, slot: &Slot<'a>) -> R<(usize, Slot<'a>, usize)> {
         let loc = self.loc();
         if self.eat("[") {
-            let i = self.const_int()?;
+            // A value outside i64 is out of range for any array.
+            let i = self.const_int()?.to_i64().unwrap_or(-1);
             let last = if self.eat("...") {
-                self.const_int()?
+                self.const_int()?.to_i64().unwrap_or(-1)
             } else {
                 i
             };

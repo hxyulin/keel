@@ -49,6 +49,9 @@ fn packed_enum_ranges_choose_the_smallest_integer() {
         ("-32768", 2, true),
         ("-32769", 4, true),
         ("-2147483649LL", 8, true),
+        ("(__int128)5", 1, false),
+        ("(unsigned __int128)1 << 63", 8, false),
+        ("-((__int128)1 << 63)", 8, true),
     ] {
         let source = format!(
             "enum __attribute__((packed)) E {{ FIRST={range} }}; \
@@ -88,6 +91,9 @@ fn invalid_enum_layouts_are_diagnosed() {
             "more than 64 bits",
         ),
         ("enum E { A=18446744073709551615ULL, B };", "64-bit range"),
+        ("enum E { A=(__int128)1 << 64 };", "64-bit range"),
+        ("enum E { A=-((__int128)1 << 63) - 1 };", "64-bit range"),
+        ("enum E { A=(unsigned __int128)-1 };", "64-bit range"),
     ] {
         let error = keel_c::compile(
             source,

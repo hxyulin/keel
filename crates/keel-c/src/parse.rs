@@ -17,6 +17,7 @@ mod registers;
 
 use crate::arena::BodyArena;
 use crate::ast::*;
+use crate::int_const::{IntConst, IntTy};
 use crate::lex::{Lexer, Tok, Token};
 use crate::strings::Strings;
 use crate::types::*;
@@ -1859,7 +1860,7 @@ impl<'a> Parser<'a> {
         }
         self.expect(")")?;
         self.expect(";")?;
-        if value == 0 {
+        if value.is_zero() {
             return Err(Error::new(loc, "static assertion failed"));
         }
         Ok(true)
@@ -2811,7 +2812,7 @@ impl<'a> Parser<'a> {
                     }
                     "vector_size" => {
                         self.expect("(")?;
-                        let n = self.const_int()?;
+                        let n = self.const_int()?.to_i64().unwrap_or(0);
                         self.expect(")")?;
                         if n != 16 && n != 32 && n != 64 {
                             return Err(Error::new(
@@ -3782,13 +3783,14 @@ impl<'a> Parser<'a> {
                 }
                 // General constant folding can discard comma operands. Bounds
                 // must retain runtime side effects even if the result is known.
-                match crate::eval::eval_constant_with_layout(&e, false, self.c_layout)
-                    .and_then(crate::eval::Const::int)
-                {
-                    Some(n) if n >= 0 => Some(n as u64),
-                    Some(_) => {
+                match crate::eval::eval_constant_with_layout(&e, false, self.c_layout) {
+                    Some(crate::eval::Const::Int(n)) if n.is_negative() => {
                         return Err(Error::new(loc, "array size is negative"));
                     }
+                    Some(crate::eval::Const::Int(n)) => Some(
+                        n.to_u64()
+                            .ok_or_else(|| Error::new(loc, "array is too large"))?,
+                    ),
                     _ => {
                         if !self.vla_allowed || self.fs.is_none() {
                             return Err(Error::new(
@@ -4245,7 +4247,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let width = if self.eat(":") {
-                    let w = self.const_int()?;
+                    let w = self.const_int()?.to_i64().unwrap_or(-1);
                     if !ty.is_integer() || !(0..=self.size_of(&ty) as i64 * 8).contains(&w) {
                         return Err(Error::new(floc, "invalid bit-field"));
                     }
@@ -4407,25 +4409,26 @@ impl<'a> Parser<'a> {
             if self.eat("=") {
                 let expr = self.conditional()?;
                 let value = crate::eval::eval_constant_with_layout(&expr, true, self.c_layout);
-                let Some(bits) = value.and_then(crate::eval::Const::int) else {
+                let Some(crate::eval::Const::Int(value)) = value else {
                     return Err(Error::new(
                         expr.loc,
                         "expected an integer constant enumerator",
                     ));
                 };
-                if !expr.ty.is_integer() || self.size_of(&expr.ty) > 8 {
+                if !expr.ty.is_integer() {
                     return Err(Error::new(
                         expr.loc,
-                        "enumerators require an integer of at most 64 bits",
+                        "expected an integer constant enumerator",
                     ));
                 }
-                next_kind = expr.ty.int_kind().expect("integer enumerator was checked");
-                next = if expr.ty.is_signed() {
-                    i128::from(bits)
-                } else {
-                    let width = self.size_of(&expr.ty) * 8;
-                    i128::from((bits as u64) & (u64::MAX >> (64 - width)))
+                // A 128-bit value is represented in a 64-bit type of its
+                // signedness; the range check below rejects wider values.
+                next_kind = match expr.ty.int_kind().expect("integer enumerator was checked") {
+                    IntKind::Int128 => IntKind::LLong,
+                    IntKind::UInt128 => IntKind::ULLong,
+                    kind => kind,
                 };
+                next = value.to_i128().unwrap_or(i128::MAX);
             }
             if !(i128::from(i64::MIN)..=i128::from(u64::MAX)).contains(&next) {
                 return Err(Error::new(
@@ -4557,13 +4560,13 @@ impl<'a> Parser<'a> {
         Ok((ty, Sugar::Enum(id)))
     }
 
-    /// An integer constant expression.
-    pub(crate) fn const_int(&mut self) -> R<i64> {
+    /// An integer constant expression, with its exact value and type.
+    pub(crate) fn const_int(&mut self) -> R<IntConst> {
         let loc = self.loc();
         let e = self.conditional()?;
         if e.ty.is_integer()
-            && let Some(value) = crate::eval::eval_constant_with_layout(&e, true, self.c_layout)
-                .and_then(crate::eval::Const::int)
+            && let Some(crate::eval::Const::Int(value)) =
+                crate::eval::eval_constant_with_layout(&e, true, self.c_layout)
         {
             return Ok(value);
         }
@@ -4755,6 +4758,12 @@ impl<'a> Parser<'a> {
                         return Err(Error::new(loc, "switch needs an integer"));
                     }
                     let cond = self.promote(cond);
+                    if self.size_of(&cond.ty) > 8 {
+                        return Err(Error::new(
+                            loc,
+                            "switch on a 128-bit integer is not supported",
+                        ));
+                    }
                     self.expect(")")?;
                     self.fs.as_mut().unwrap().switches.push(SwitchCtx {
                         ty: cond.ty,
@@ -4795,8 +4804,11 @@ impl<'a> Parser<'a> {
                     sw.labels += 1;
                     match values {
                         Some((first, last)) => {
-                            let first = crate::eval::wrap_literal(first, &sw.ty, self.c_layout);
-                            let last = crate::eval::wrap_literal(last, &sw.ty, self.c_layout);
+                            // Convert the labels to the controlling type, whose
+                            // bits fit an i64.
+                            let ty = IntTy::of(&sw.ty, self.c_layout).expect("integer switch");
+                            let first = first.convert(ty).bits64();
+                            let last = last.convert(ty).bits64();
                             // i64 stores unsigned constants as bits. Order those bits
                             // according to the controlling type, after conversion.
                             let key =

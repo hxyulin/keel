@@ -213,3 +213,21 @@ fn duplicate_case_names_the_smallest_reused_value() {
     let err = keel_c::compile(&source, "many.c", keel_c::Options::default()).unwrap_err();
     assert_eq!(err.message, "duplicate case 9000");
 }
+#[test]
+fn switch_on_a_128_bit_integer_is_diagnosed() {
+    let err = keel_c::compile(
+        "int f(__int128 x){switch(x){case 5:return 1;}return 0;}",
+        "wide-switch.c",
+        keel_c::Options::default(),
+    )
+    .unwrap_err();
+    assert!(err.message.contains("128-bit"), "{err}");
+    // A 128-bit label converts to the controlling type.
+    let source = "int f(unsigned long x){switch(x){case 3:return 1;\
+        case ((unsigned __int128)1 << 64) + 3:return 2;}return 0;}";
+    let err = keel_c::compile(source, "wide-label.c", keel_c::Options::default()).unwrap_err();
+    assert!(err.message.contains("duplicate case 3"), "{err}");
+    let source = "int f(unsigned long x){switch(x){case (unsigned __int128)-1:return 2;}return 0;}\
+        _Static_assert((unsigned long)(unsigned __int128)-1 == 0xffffffffffffffffUL, \"\");";
+    keel_c::compile(source, "wide-label.c", keel_c::Options::default()).unwrap();
+}

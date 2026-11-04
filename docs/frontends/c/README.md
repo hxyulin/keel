@@ -196,9 +196,14 @@ map `long double` to F80.
 - **`__builtin_debugtrap()`** emits the resumable `debugtrap` intrinsic
   (`brk #0xf000` on Apple ARM64, `int3` on x86-64). Code after it stays
   reachable; without a debugger it normally raises SIGTRAP.
-- **Constants** are `i64`s, sign-extended to wider types, so an unsigned
-  64-bit constant above `i64::MAX` converted to `__int128` is extended at run
-  time rather than folded.
+- **Integer constant expressions** are evaluated exactly at every width up
+  to 128 bits. Signed overflow and `<<` into or past the sign bit wrap, and
+  out-of-range floating conversions saturate, with NaN giving 0, as GCC and
+  Clang do. Division by zero and shift counts outside `[0, width)` of the
+  left operand's type are not constants. An enumerator of a 128-bit type
+  must have a value that fits 64 bits, and `switch` on a 128-bit integer is
+  diagnosed. Conversions between 128-bit integers and floating types fold in
+  constant expressions but are rejected at run time.
 
 ## Boundaries
 

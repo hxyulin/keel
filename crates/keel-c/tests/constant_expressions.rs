@@ -320,3 +320,41 @@ fn integer_constants_are_exact_at_128_bits() {
     );
     assert_eq!(stored(&m, "narrowed"), 7u64.to_le_bytes());
 }
+#[test]
+fn consumers_check_exact_128_bit_values() {
+    compile(
+        "_Static_assert(((unsigned __int128)1 << 64) > 1, \"\");\
+         _Static_assert((unsigned __int128)1 << 64, \"\");\
+         _Static_assert(!((unsigned __int128)1 << 64 >> 65), \"\");\
+         char fits[((unsigned __int128)1 << 64) >> 60];\
+         struct S { unsigned v : ((unsigned __int128)1 << 64) >> 59; };\
+         int a[4] = { [((unsigned __int128)1 << 64) >> 63] = 1 };\
+         typedef int v4 __attribute__((vector_size(((unsigned __int128)1 << 64) >> 60)));\
+         _Static_assert(sizeof(fits) == 16 && sizeof(struct S) == 4 && sizeof(v4) == 16, \"\");",
+        Target::default(),
+        false,
+    );
+    for (source, expected) in [
+        ("char a[(unsigned __int128)1 << 64];", "too large"),
+        ("char a[-(__int128)1 << 64];", "negative"),
+        (
+            "_Static_assert((unsigned __int128)1 << 64 >> 65, \"\");",
+            "failed",
+        ),
+        (
+            "struct S { unsigned v : (unsigned __int128)1 << 64 | 1; };",
+            "bit-field",
+        ),
+        (
+            "int a[4] = { [((unsigned __int128)1 << 64) + 1] = 1 };",
+            "designator",
+        ),
+        (
+            "typedef int v __attribute__((vector_size(((unsigned __int128)1 << 64) + 16)));",
+            "vector_size",
+        ),
+    ] {
+        let err = keel_c::compile(source, "exact.c", keel_c::Options::default()).unwrap_err();
+        assert!(err.message.contains(expected), "{source}: {err}");
+    }
+}

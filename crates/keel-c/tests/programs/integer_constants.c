@@ -57,7 +57,25 @@ static const u128 from_1e30 = (u128)1e30;
 static const i128 from_neg = (i128)-1e30;
 static const u128 from_2_127 = (u128)0x1p127;
 
+// Enumerators and case labels of 128-bit type whose values fit 64 bits.
+enum wide { W_FIVE = (i128)5, W_TOP = ((u128)1 << 64) - 1 };
+enum { W_NEG = -((i128)1 << 40) };
+enum { W_SHIFTED = (int)((((u128)3 << 70) >> 70) + 1) };
+
+static int classify(unsigned long x) {
+    switch (x) {
+    case ((u128)1 << 64) + 3: return 1;
+    case (u128)-1: return 2;
+    case (i128)1 << 62: return 3;
+    default: return 0;
+    }
+}
+
 int main(void) {
+    volatile unsigned long a = 3, b = ~0UL, c = 1UL << 62;
+    printf("enum %d %llu %lld %d %d\n", (int)W_FIVE, (unsigned long long)W_TOP, (long long)W_NEG,
+           W_SHIFTED, (int)sizeof(enum wide));
+    printf("case %d %d %d %d\n", classify(a), classify(b), classify(c), classify(4));
     int_wrap();
     int_div();
     int_shr();
