@@ -43,6 +43,8 @@
 - Do not commit progress ledgers, per-run audit JSON, logs, object dumps, timing
   samples or report renderers. Store temporary experiments and their outputs in
   ignored `target/` or `suite/reports/`; use Git history for historical evidence.
+  The README chart renderer, `docs/assets/readme-render-charts.py`, and the
+  evidence files it verifies are maintained inputs, not run artifacts.
 - Prefer focused regressions in existing test targets and workloads in existing
   suite runners. Add a standalone harness only for a reusable test boundary the
   existing infrastructure cannot exercise. Place it under the owning `suite/c`,

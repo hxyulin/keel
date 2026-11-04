@@ -1,8 +1,10 @@
-# Diagnostic Keel → LLVM text exporter
+# Keel and LLVM IR
 
-`keel-llvm` reads textual Keel IR and emits a complete LLVM `.ll` module. It is
-an experiment for comparing frontend and optimizer output through LLVM, not a
-production LLVM backend. There is no LLVM library dependency. The API is
+`keel-llvm` converts in both directions. The [importer](#native-llvm-import)
+translates LLVM text into Keel IR by loading an LLVM 23 shared library at run
+time. The exporter reads textual Keel IR and emits a complete LLVM `.ll`
+module. Export is for comparing frontend and optimizer output through LLVM, not
+a production LLVM backend, and needs no LLVM library. The export API is
 `keel_llvm::export(&keel_ir::Module, TargetProfile::AppleArm64) -> Result<String, String>`.
 
 Build and use:

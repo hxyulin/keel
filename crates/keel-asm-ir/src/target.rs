@@ -11,7 +11,7 @@ pub enum Target {
     X86_64LinuxGnu,
     /// AArch64 Linux: base AAPCS64, ELF.
     Aarch64LinuxGnu,
-    /// Recognized freestanding wasm32 target; public compilation is not enabled.
+    /// Freestanding wasm32, compiled by `keel-wasm` rather than the native backends.
     Wasm32UnknownUnknown,
 }
 

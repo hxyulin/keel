@@ -159,12 +159,18 @@ target SDK. Keel does not ship a libc.
   and packed accesses are not strengthened. Alignment never implies `notrap`,
   immutability or alias freedom.
 
-Target facts come from `Options::target`. All native targets are LP64 with
-signed `char`. On Apple arm64, `long double` is `double` and `va_list` is a
-`char *`. On x86-64 Linux, `va_list` is SysV's one-element `__va_list_tag`
-array, and `long double`, `__float128` and `_Complex long double` are opaque
-types: declarations parse, but values are errors. The C frontend does not
-map `long double` to F80.
+Target facts come from `Options::target`. All native targets are LP64.
+
+| Target | Plain `char` | `va_list` | `long double` |
+| --- | --- | --- | --- |
+| `aarch64-apple-darwin` | signed | `char *` | `double` |
+| `x86_64-unknown-linux-gnu` | signed | SysV's one-element `__va_list_tag` array | x87 80-bit layout, values rejected |
+| `aarch64-unknown-linux-gnu` | unsigned, as is `wchar_t` | AAPCS64's 32-byte `__va_list_tag` struct | binary128 layout, values rejected |
+
+Where values are rejected, `long double` is an opaque type: declarations
+parse, but values are errors. On x86-64 Linux `__float128` and
+`_Complex long double` are opaque the same way. The C frontend does not map `long double` to F80. The
+[wasm32 profile](../../targets/wasm/c-frontend.md) is ILP32.
 
 ## Implementation notes
 

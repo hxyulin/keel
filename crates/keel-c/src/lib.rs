@@ -5,12 +5,14 @@
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
 //! types as it goes and builds a typed tree (`parse.rs`, `expr.rs`,
-//! `init.rs`, `ast.rs`) → IR generation (`irgen.rs`). Both targets are
-//! LP64 with a signed `char`; `va_list` is the target's (a `char *` on
-//! Apple arm64, SysV's `struct __va_list_tag[1]` on x86-64 Linux).
-//! `long double` is `double` on Apple arm64. On x86-64 Linux it is the
-//! x87 80-bit format, which keel does not have: it has its size, so
-//! declarations and layouts are right, but its values are refused.
+//! `init.rs`, `ast.rs`) → IR generation (`irgen.rs`). The native targets
+//! are LP64. Plain `char` is signed on Apple arm64 and x86-64 Linux and
+//! unsigned on AArch64 Linux. `va_list` is the target's: a `char *` on
+//! Apple arm64, SysV's `struct __va_list_tag[1]` on x86-64 Linux and the
+//! 32-byte AAPCS64 struct on AArch64 Linux. `long double` is `double` on
+//! Apple arm64. On the Linux targets it has the x87 80-bit or binary128
+//! layout, which keel does not compute with: declarations and layouts are
+//! right, but its values are refused.
 //!
 //! The language is C11-oriented, with bounded float/double complex values
 //! and automatic multidimensional VLA/VM support, explicitly typed fixed-size

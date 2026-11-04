@@ -368,7 +368,7 @@ fn prefixes(r: &mut Reader<'_>) -> Option<Prefix> {
     Some(p)
 }
 fn gpr(n: u8, bits: u16, rex: bool) -> String {
-    // Encoded GPR fields have at most four bits in the current legacy/VEX import.
+    // Legacy and VEX fields have four bits; REX2 adds a fifth (r16-r31).
     keel_asm_ir::x86::Register {
         class: keel_asm_ir::x86::RegisterClass::Gpr,
         number: n,

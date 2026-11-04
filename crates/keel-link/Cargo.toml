@@ -1,6 +1,6 @@
 [package]
 name = "keel-link"
-description = "Native arm64 Mach-O and x86-64 ELF executable linkers"
+description = "Native Mach-O and ELF linkers for arm64 macOS, AArch64 Linux and x86-64 Linux"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

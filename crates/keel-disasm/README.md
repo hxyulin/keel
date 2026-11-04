@@ -49,8 +49,9 @@ invalid and truncated input returns `None` without claiming a length.
 
 The CLI stops decoding that section at the first unknown instruction and prints
 its remaining bytes as `.byte` data. It does not assume that byte-by-byte
-recovery finds instruction boundaries. EVEX, MVEX, XOP, 3DNow and REX2 are outside
-the current import. Recognition is an inventory match, not full architectural
+recovery finds instruction boundaries. The decoder reads the legacy, VEX, REX2
+and EVEX (AVX-512F, VL, DQ, BW and CD) forms of the shared catalogue; MVEX, XOP,
+3DNow and APX EVEX forms are outside the import. Recognition is an inventory match, not full architectural
 validity, CPU feature detection or a runtime privilege check. Original bytes
 preserve exact encodings even when assembly text chooses an alias or omits an
 ignored prefix.

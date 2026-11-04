@@ -330,7 +330,8 @@ page-backing harness and the limits of small Linux timing differences.
 Synthetic compiler regressions belong beside their crate tests. Add a standalone
 harness only for a reusable boundary this infrastructure cannot exercise.
 Temporary probes, progress tracking and report renderers belong in ignored
-directories. Git history retains retired experiments.
+directories; the README chart renderer and its evidence files are the
+exception. Git history retains retired experiments.
 
 ## Comparing generated code
 

@@ -1,5 +1,6 @@
-//! Machine code generation: arm64 macOS ([`aarch64`]) and x86-64 Linux
-//! ([`x86_64`]).
+//! Machine code generation from Keel IR for arm64 macOS and AArch64 Linux
+//! ([`aarch64`]) and x86-64 Linux ([`x86_64`]): instruction selection, register
+//! allocation, frames and assembly or object emission.
 
 // Timing instrumentation is absent from ordinary builds.
 macro_rules! backend_scope {

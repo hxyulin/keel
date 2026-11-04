@@ -399,8 +399,8 @@ Native suite configurations are opt-in: `keel-native`, `keel-O-native`,
 
 ## Compiler API
 
-The native object route never builds register names, mnemonic strings or an
-assembly file:
+The native object route writes no assembly text and parses none. The encoder
+still formats each opcode's mnemonic once to choose its form:
 
 ```rust
 let program = keel_codegen::compile_program(
@@ -410,7 +410,8 @@ let program = keel_codegen::compile_program(
 let object = keel_asm::x86::assemble_program_object(&program)?;
 ```
 
-`compile_program_with_pipeline` adds selection and allocation controls. Text output may use different but equivalent
+`keel_codegen::Request` adds selection, allocation, emission and register-pool
+controls. Text output may use different but equivalent
 spellings (quoted symbols, numeric CFI register IDs, decimal immediates). The
 formatter preserves widths, high-byte registers, lock prefixes, segments, scaled
 indices and relocation modifiers, and writes symbolic non-branch immediates with

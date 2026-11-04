@@ -1,6 +1,6 @@
 [package]
 name = "keel-codegen"
-description = "Keel machine code generation"
+description = "Keel instruction selection, register allocation and AArch64 and x86-64 emission"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

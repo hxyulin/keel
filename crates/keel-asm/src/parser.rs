@@ -1,4 +1,4 @@
-//! Phase-scoped assembler allocation experiment.
+//! AArch64 assembler layout passes and the arena each pass allocates from.
 //!
 //! One local `Bump` owns scratch for each layout pass, with no global allocator,
 //! thread-local state, unsafe lifetime extension, or storage shared across calls.
