@@ -51,6 +51,19 @@ class SelectionTests(unittest.TestCase):
                     runner.arguments(args)
                 self.assertEqual(error.exception.code, 2)
 
+    def test_export_instructions_count_packets_and_name_the_runner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exports = Path(temporary) / "x86-exports"
+            self.assertIn("No x86 packets", runner.export_instructions(exports)[0])
+            for name in ("a", "b"):
+                (exports / "keel-c" / name).mkdir(parents=True)
+                (exports / "keel-c" / name / "manifest.json").write_text("{}")
+            lines = runner.export_instructions(exports)
+        self.assertEqual(lines[0], f"Exported 2 x86 packets to {exports}.")
+        self.assertTrue(any("suite/integration/x86-exports/run.py x86-exports" in line for line in lines))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            runner.arguments(["lint", "--export-x86", "out"])
+
     def test_multiple_components_and_narrow_targets_parse(self):
         args = runner.arguments(["assembler", "linker", "--test", "archive", "--quick"])
         self.assertEqual(args.scopes, ["assembler", "linker"])

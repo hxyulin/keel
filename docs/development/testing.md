@@ -282,6 +282,10 @@ KEEL_TEST_EXPORT_DIR="$PWD/target/x86-exports" python3 tools/test.py codegen --q
 python3 suite/integration/x86-exports/run.py target/x86-exports
 ```
 
+`python3 tools/test.py <component> --export-x86 target/x86-exports` sets
+`KEEL_TEST_EXPORT_DIR` to that directory for the run and then prints the
+packet count and the commands that copy and run the packets.
+
 The runner prints the failures and a `passed, failed, skipped` count. It skips
 a packet when the host lacks one of its CPU features or a build tool. Add
 `--filter <text>` to run a subset and `--keep <dir>` to keep the build

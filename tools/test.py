@@ -489,6 +489,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cargo", default="cargo", help="Cargo command or local scheduler executable")
     parser.add_argument("--dry-run", action="store_true", help="print selected packages and commands without building")
     parser.add_argument("--report", type=Path, help="write command timings and exit codes as JSON")
+    parser.add_argument("--export-x86", type=Path, metavar="DIR",
+                        help="set KEEL_TEST_EXPORT_DIR to DIR and print how to run the x86 packets")
     args = parser.parse_args(argv)
     args.scopes = args.scopes or ["full"]
     unknown = set(args.scopes) - {"full", *SCOPES, *CHECK_SCOPES}
@@ -498,7 +500,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     if checks:
         if set(args.scopes) - checks:
             parser.error(", ".join(CHECK_SCOPES) + " cannot be combined with test components")
-        if args.changed or args.consumers or args.direct or args.unit or args.test or args.quick:
+        if (args.changed or args.consumers or args.direct or args.unit or args.test or args.quick
+                or args.export_x86):
             parser.error(", ".join(CHECK_SCOPES) + " take no test selection options")
     if "full" in args.scopes and len(args.scopes) > 1:
         parser.error("full cannot be combined with named components")
@@ -557,6 +560,23 @@ def run_plan(args: argparse.Namespace, plan: list[tuple[str, list[str]]], report
     return int(any(r["returncode"] for r in records))
 
 
+def export_instructions(directory: Path) -> list[str]:
+    """How to run the packets that tests exported to directory."""
+    packets = sorted(directory.rglob("manifest.json")) if directory.is_dir() else []
+    runner = "suite/integration/x86-exports/run.py"
+    if not packets:
+        return [f"No x86 packets were exported to {directory}."]
+    archive = directory.name + ".tar"
+    return [
+        f"Exported {len(packets)} x86 packets to {directory}.",
+        "Run them on an x86-64 Linux host with a checkout of this revision:",
+        f"  tar -C {shlex.quote(str(directory.parent))} -cf {archive} {shlex.quote(directory.name)}",
+        f"  # copy {archive} to the host, then in the checkout there:",
+        f"  tar -xf {archive} && python3 {runner} {shlex.quote(directory.name)}",
+        f"cpl0 packets also run on this host with QEMU: python3 {runner} {shlex.quote(str(directory))}",
+    ]
+
+
 def workspace_packages(cargo: str) -> dict:
     metadata = json.loads(subprocess.check_output(
         [cargo, "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT))
@@ -592,6 +612,10 @@ def main() -> int:
     plan: list[tuple[str, list[str]]] = []
     records: list[dict] = []
     env = dict(os.environ)
+    if args.export_x86:
+        args.export_x86 = args.export_x86.resolve()
+        env["KEEL_TEST_EXPORT_DIR"] = str(args.export_x86)
+        print(f"KEEL_TEST_EXPORT_DIR={args.export_x86}", flush=True)
     runner = args.runner
     core_codegen = False
     if selected:
@@ -648,7 +672,10 @@ def main() -> int:
               "unit": args.unit, "targets": args.test,
               "codegen_core_targets": list(CODEGEN_CORE_TARGETS) if core_codegen else [],
               "runner": runner}
-    return run_plan(args, plan, report, True, env, records)
+    code = run_plan(args, plan, report, True, env, records)
+    if args.export_x86 and not args.dry_run:
+        print("\n".join(export_instructions(args.export_x86)))
+    return code
 
 
 if __name__ == "__main__":
