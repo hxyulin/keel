@@ -307,6 +307,12 @@ fn placement_oracle_matches_clang_named_attachment() {
     let Some(clang) = keel_test_support::clang() else {
         keel_test_support::skip!(keel_test_support::NO_CLANG);
     };
+    // The oracle records Apple Clang's parse. Other Clang releases reject some
+    // rows, such as an attribute inside an array bound.
+    let version = clang.command().arg("--version").output().unwrap().stdout;
+    if !version.starts_with(b"Apple clang") {
+        keel_test_support::skip!("the placement oracle was recorded with Apple Clang");
+    }
     let oracle = include_str!("../fixtures/attribute-placement-oracle.tsv");
     let dir = keel_test_support::TempDir::new("attribute-placement");
     let rows: Vec<_> = oracle
