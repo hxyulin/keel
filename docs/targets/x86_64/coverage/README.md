@@ -12,7 +12,7 @@ Public binding records: **1029**; without a direct source join: **86** (not an u
 Tracked compiler declarations: **45**, with **43** regular recipes and **2** hooks.
 ISA policy keys without an explicit feature classification: **69**.
 
-Separate AVX-512F/VL table: **2762** records and **539** mnemonic bindings.
+Separate AVX-512 (F, VL, DQ, BW, CD) table: **2762** records and **539** mnemonic bindings.
 It contains **2695** EVEX records plus **67** VEX mask records already present in the legacy/VEX import.
 Do not add those reused VEX records to the unique-import total. These records are listed under `avx512_forms`.
 

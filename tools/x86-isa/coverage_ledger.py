@@ -183,7 +183,7 @@ def build(root, data, adapters, exclusion_reasons, form_isa):
                    avx512_reused_vex_records=sum(r['encoding'] == 'vex' for r in vector_rows),
                    avx512_mnemonic_bindings=len({r['mnemonic'] for r in vector_rows}))
     return dict(schema_version=2,
-                scope='Pinned legacy/VEX import plus Keel extensions, with a separate AVX-512F/VL form table; structural facts and candidate relations only.',
+                scope='Pinned legacy/VEX import plus Keel extensions, with a separate AVX-512 (F, VL, DQ, BW, CD) form table; structural facts and candidate relations only.',
                 provenance=inputs['zydis-source.json'],
                 input_sha256={name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in INPUTS},
                 avx512_provenance=inputs['evex-source.json'],
@@ -206,7 +206,7 @@ def markdown(ledger):
              f'Public binding records: **{s["public_bindings"]}**; without a direct source join: **{s["bindings_without_candidates"]}** (not an unsupported count).',
              f'Tracked compiler declarations: **{s["tracked_compiler_bindings"]}**, with **{s["regular_recipes"]}** regular recipes and **{s["handwritten_hooks"]}** hooks.',
              f'ISA policy keys without an explicit feature classification: **{s["unclassified_policy_keys"]}**.', '',
-             f'Separate AVX-512F/VL table: **{s["avx512_table_records"]}** records and **{s["avx512_mnemonic_bindings"]}** mnemonic bindings.',
+             f'Separate AVX-512 (F, VL, DQ, BW, CD) table: **{s["avx512_table_records"]}** records and **{s["avx512_mnemonic_bindings"]}** mnemonic bindings.',
              f'It contains **{s["evex_encoded_records"]}** EVEX records plus **{s["avx512_reused_vex_records"]}** VEX mask records already present in the legacy/VEX import.',
              'Do not add those reused VEX records to the unique-import total. These records are listed under `avx512_forms`.', '',
              '**Registration is not successful decoding. Candidate links are not complete operand support.**',

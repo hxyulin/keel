@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "scope": "Pinned legacy/VEX import plus Keel extensions, with a separate AVX-512F/VL form table; structural facts and candidate relations only.",
+  "scope": "Pinned legacy/VEX import plus Keel extensions, with a separate AVX-512 (F, VL, DQ, BW, CD) form table; structural facts and candidate relations only.",
   "provenance": {
     "project": "Zydis instruction database",
     "commit": "eaf92a02dca616b90c12b2ebc338d87ed943c84f",

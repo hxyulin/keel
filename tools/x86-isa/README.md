@@ -20,8 +20,6 @@ The generated legacy/VEX and EVEX catalogues share repeated operand lists
 within each table. Imported operand-size rules use an exhaustive Rust enum;
 unknown rules stop generation. The `isa_table_layout` Cargo example reports
 record sizes and distinct operand-slice storage.
-See the Rust refactor review for measured
-source-size changes and remaining representation work.
 
 The input is a subset of the MIT-licensed
 [Zydis instruction database](https://github.com/zyantific/zydis-db/tree/eaf92a02dca616b90c12b2ebc338d87ed943c84f),
@@ -39,9 +37,10 @@ unclassified feature sets used by Keel adapters. It retains REX2 permission
 and excludes the alternate AMD, KNC and MPX interpretations. The default decoder uses the
 ModRM-bearing UD0 form; Keel's explicit `ud0.short` encoding remains available.
 The legacy/VEX source snapshot remains pinned; its REX2 records now enter the
-reviewed catalogue. A separate `evex.json` selection
-adds AVX-512F/VL and its VEX mask operations, from the same upstream pin. Other
-EVEX families, MVEX, XOP and 3DNow remain outside these imports.
+reviewed catalogue. A separate `evex.json` selection adds AVX-512F, VL, DQ, BW
+and CD, 512-bit VPCLMULQDQ and their VEX mask operations, from the same upstream
+pin. FP16, APX EVEX forms, other EVEX families, MVEX, XOP and 3DNow remain
+outside these imports.
 
 ## Inputs and outputs
 
@@ -427,10 +426,12 @@ Symbolic displacements retain full relocation fields; only divisible numeric
 displacements in range use disp8*N. RIP-relative fixups include any trailing
 immediate when computing the relocation addend.
 
-This increment does not add AVX-512 compiler intrinsics, selection, allocation
-or runtime qualification. It does not cover BW/DQ/CD, FP16, APX EVEX NDD/NF, additional
-EVEX opcode maps or a complete v4 profile. Those need their own import/feature
-review and witnesses; new operand or tuple kinds require shared-engine work.
+The import does not cover FP16, APX EVEX NDD/NF, additional EVEX opcode maps or
+a complete v4 profile. Those need their own import/feature review and
+witnesses; new operand or tuple kinds require shared-engine work. Compiler use
+of AVX-512 is documented separately in
+[x86 code generation](../../docs/targets/x86_64/codegen.md#512-bit-value-transport)
+and [x86 intrinsics](../../docs/targets/x86_64/intrinsics.md).
 
 ## Generated assembly smoke tests
 

@@ -379,7 +379,7 @@ synthesize large-code-model thunks.
 
 Instruction support follows the generated form catalogue and the documented
 operand subsets, including the AMX and APX boundaries above and the
-[EVEX subset](../../../tools/x86-isa/README.md#avx-512fvl-and-evex).
+[EVEX subset](../../../tools/x86-isa/README.md#avx-512fvl-dq-bw-cd-and-evex).
 Intel and AT&T dialects share the encoder. GNU preprocessing, macros, labels
 and expressions follow the [GNU language contract](gnu-assembly-language.md).
 Unsupported directives and operands return errors; successful assembly does not
