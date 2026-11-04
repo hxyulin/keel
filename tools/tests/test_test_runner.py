@@ -441,12 +441,14 @@ class RepositorySelectionTests(unittest.TestCase):
 
     def test_common_edits_select_narrow_sets(self):
         cases = {
-            "docs/compiler/optimizer.md": (set(), set()),
+            # keel-opt's tiers test reads the pass table.
+            "docs/compiler/optimizer.md": ({"keel-opt"}, set()),
             "suite/README.md": (set(), set()),
             "tools/x86-isa/generate.py": (set(), {"generators"}),
             "crates/keel-opt/tests/golden/const_fold.keel": ({"keel-opt"}, set()),
-            # keel-asm's compiler coverage test reads keel-c's program directory.
-            "crates/keel-c/tests/programs/aggregate_snapshot.c": ({"keel-c", "keel-asm"}, set()),
+            # keel-asm's compiler coverage test and keel-opt's emitted-C differential
+            # test read keel-c's program directory.
+            "crates/keel-c/tests/programs/aggregate_snapshot.c": ({"keel-c", "keel-asm", "keel-opt"}, set()),
             "crates/keel-asm/tests/common/mod.rs": ({"keel-asm"}, set()),
         }
         for path, expected in cases.items():
