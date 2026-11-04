@@ -2,7 +2,7 @@
 //! when a short branch widens or an operand folds to an absolute constant, so
 //! layout passes copy the cached encoding and fixups. A compact operand
 //! record with interned symbols rebuilds the instruction for those cases.
-use super::{Expr, SymId, Symbols, encode};
+use super::{Expr, RelocKind, SymId, Symbols, encode};
 use keel_asm_ir::{
     Expression,
     x86::{self, Address, Memory, Modifier, Operand, Register, RegisterClass},
@@ -18,7 +18,7 @@ pub(super) struct CachedFix {
     constant: i64,
     pub offset: u8,
     pub width: u8,
-    pub kind: u8,
+    pub kind: RelocKind,
     pub modifier: Modifier,
 }
 const _: () = assert!(std::mem::size_of::<CachedFix>() == 24);
@@ -165,7 +165,7 @@ impl Cache {
                 // Within one instruction, and of the encoder's few kinds.
                 offset: f.offset as u8,
                 width: f.width,
-                kind: f.kind as u8,
+                kind: f.kind,
                 modifier: f.address.modifier,
             });
         }

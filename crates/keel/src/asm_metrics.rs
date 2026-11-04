@@ -16,7 +16,7 @@ pub fn x86(source: &str, features: Features) -> Result<String, String> {
     let regions: Vec<_> = report.regions.iter().map(|r| {
         let branch = r.branch.as_ref().map(|b| json!({"displacement_bytes":b.displacement_bytes,
             "displacement":b.displacement,"target_offset":b.target_offset}));
-        let relocations: Vec<_> = r.relocations.iter().map(|f| json!({"offset":f.offset,"width":f.width,"kind":f.kind})).collect();
+        let relocations: Vec<_> = r.relocations.iter().map(|f| json!({"offset":f.offset,"width":f.width,"kind":f.kind.r_type(),"name":f.kind.name()})).collect();
         json!({"kind":match r.kind {RegionKind::Instruction=>"instruction",RegionKind::Alignment=>"alignment",RegionKind::Data=>"data",_=>unreachable!("known assembler region kind")},
             "section":r.section,"line":r.line,"offset":r.offset,"size":r.size,
             "bytes":r.bytes,"instruction":r.instruction,"prefixes":r.prefixes,"branch":branch,"relocations":relocations})

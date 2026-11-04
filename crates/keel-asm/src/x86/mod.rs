@@ -7,6 +7,7 @@ mod inputs;
 mod metadata;
 mod metrics;
 mod relax;
+mod reloc;
 mod sections;
 pub(crate) mod source;
 mod symbolic;
@@ -21,11 +22,13 @@ use keel_asm_ir::{
 pub use metrics::{
     BranchEncoding, EncodingRegion, EncodingReport, EncodingSection, RegionKind, RelocationField,
 };
+use object::elf;
 use object::write::{Comdat, Object, Relocation, Symbol, SymbolSection};
 use object::{
     Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
+pub use reloc::RelocKind;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -1791,7 +1794,7 @@ impl Assembler {
                     width: f.width,
                     modifier: f.modifier,
                     expr: f.expr(),
-                    kind: f.kind.into(),
+                    kind: f.kind.r_type(),
                     line,
                 })
             }
@@ -1855,7 +1858,7 @@ impl Assembler {
                 width: f.width,
                 modifier: f.address.modifier,
                 expr,
-                kind: f.kind,
+                kind: f.kind.r_type(),
                 line,
             })
         }
@@ -1895,14 +1898,15 @@ impl Assembler {
             return Err("symbolic initializer in NOBITS section".into());
         }
         let kind = match (modifier, width) {
-            (Modifier::None, 8) => 1,
-            (Modifier::None, 4) => 10,
-            (Modifier::None, 2) => 12,
-            (Modifier::None, 1) => 14,
-            (Modifier::DtpOff, 8) => 17,
-            (Modifier::TpOff, 4) => 23,
+            (Modifier::None, 8) => RelocKind::Abs64,
+            (Modifier::None, 4) => RelocKind::Abs32,
+            (Modifier::None, 2) => RelocKind::Abs16,
+            (Modifier::None, 1) => RelocKind::Abs8,
+            (Modifier::DtpOff, 8) => RelocKind::DtpOff64,
+            (Modifier::TpOff, 4) => RelocKind::TpOff32,
             _ => return Err("unsupported data relocation".into()),
-        };
+        }
+        .r_type();
         self.fixes.push(Fix {
             section: self.current,
             offset: self.offset(),
@@ -2812,8 +2816,8 @@ impl Assembler {
                 // A 32-bit data difference against this section becomes PC32
                 // below. An absolute positive symbol still needs its identity
                 // in that relocation, just like an explicit PC-relative fixup.
-                let pc_relative = matches!(f.kind, 2 | 4)
-                    || matches!(f.kind, 10 | 11)
+                let pc_relative = matches!(f.kind, elf::R_X86_64_PC32 | elf::R_X86_64_PLT32)
+                    || matches!(f.kind, elf::R_X86_64_32 | elf::R_X86_64_32S)
                         && f.width == 4
                         && f.expr.subtract.is_some_and(|id| {
                             self.try_eval_symbol(id, 0)
@@ -2991,12 +2995,20 @@ impl Assembler {
                 self.try_eval(expr, 0)
                     .filter(|(s, _)| s.is_none())
                     .map(|(_, n)| n)
-            } else if matches!(kind, 1 | 10 | 11 | 12 | 14)
-                && defined.is_some_and(|(s, _)| s.is_none())
+            } else if matches!(
+                kind,
+                elf::R_X86_64_64
+                    | elf::R_X86_64_32
+                    | elf::R_X86_64_32S
+                    | elf::R_X86_64_16
+                    | elf::R_X86_64_8
+            ) && defined.is_some_and(|(s, _)| s.is_none())
             {
                 defined.map(|(_, n)| n + addend)
-            } else if matches!(kind, 2 | 4 | 15)
-                && defined.is_some_and(|(s, _)| s == Some(f.section))
+            } else if matches!(
+                kind,
+                elf::R_X86_64_PC32 | elf::R_X86_64_PLT32 | elf::R_X86_64_PC8
+            ) && defined.is_some_and(|(s, _)| s == Some(f.section))
                 && self.local_symbol(name, 0)
             {
                 defined.map(|(_, n)| n + addend - i128::from(f.offset))
@@ -3006,13 +3018,20 @@ impl Assembler {
             if let Some(value) = absolute {
                 let value = if self.arm.is_none() {
                     relocation_addend(value).map_or(value, i128::from)
-                } else if kind == 11 {
+                } else if kind == elf::R_X86_64_32S {
                     encode::signed_word64(value)
                 } else {
                     value
                 };
                 let bits = u32::from(f.width) * 8;
-                let signed = matches!(kind, 2 | 4 | 15 | 11 | 23);
+                let signed = matches!(
+                    kind,
+                    elf::R_X86_64_PC32
+                        | elf::R_X86_64_PLT32
+                        | elf::R_X86_64_PC8
+                        | elf::R_X86_64_32S
+                        | elf::R_X86_64_TPOFF32
+                );
                 if value < -(1i128 << (bits - 1)) || value >= (1i128 << (bits - u32::from(signed)))
                 {
                     return Err(Error::new(
@@ -3030,13 +3049,16 @@ impl Assembler {
                 let (sec, value) = self
                     .eval_symbol(sub, 0)
                     .map_err(|e| Error::new(f.line, e))?;
-                if sec != Some(f.section) || f.width != 4 || !matches!(kind, 10 | 11) {
+                if sec != Some(f.section)
+                    || f.width != 4
+                    || !matches!(kind, elf::R_X86_64_32 | elf::R_X86_64_32S)
+                {
                     return Err(Error::new(
                         f.line,
                         "unsupported cross-section symbol difference",
                     ));
                 }
-                kind = 2;
+                kind = elf::R_X86_64_PC32;
                 addend += i128::from(f.offset) - value;
             }
             // Relocations against section-relative aliases use their underlying section symbol.
@@ -3084,6 +3106,9 @@ impl Assembler {
                 )
                 .map_err(|e| Error::new(f.line, e.to_string()))?;
             if let Some(metrics) = &mut self.metrics {
+                let kind = RelocKind::from_r_type(kind).ok_or_else(|| {
+                    Error::new(f.line, format!("unsupported x86-64 relocation {kind}"))
+                })?;
                 metrics
                     .unresolved
                     .push((f.section, f.offset, f.width, kind));

@@ -2,6 +2,7 @@ mod evex;
 mod mnemonics;
 mod tables;
 
+use super::RelocKind;
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
     Address, Instruction, Memory, Modifier, Opcode::*, Operand, Register, RegisterClass,
@@ -16,7 +17,7 @@ pub(super) struct Fixup<'a> {
     pub width: u8,
     pub address: &'a Address,
     pub adjust: i128,
-    pub kind: u32,
+    pub kind: RelocKind,
 }
 #[derive(Default)]
 pub(super) struct Encoding<'a> {
@@ -67,7 +68,7 @@ impl<'a> Encoding<'a> {
             return Err("instruction exceeds 15 bytes".into());
         }
         for fix in &mut self.fixups {
-            if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
+            if fix.kind.pc_relative() {
                 fix.adjust -= (self.bytes.len() - fix.offset) as i128;
             }
         }
@@ -91,11 +92,11 @@ impl<'a> Encoding<'a> {
             self.number(n, bytes);
         } else {
             let kind = match (a.modifier, bytes, signed) {
-                (Modifier::None, 8, _) => 1,
-                (Modifier::None, 4, false) => 10,
-                (Modifier::None, 4, true) => 11,
-                (Modifier::TpOff, 4, _) => 23,
-                (Modifier::DtpOff, 8, _) => 17,
+                (Modifier::None, 8, _) => RelocKind::Abs64,
+                (Modifier::None, 4, false) => RelocKind::Abs32,
+                (Modifier::None, 4, true) => RelocKind::Abs32S,
+                (Modifier::TpOff, 4, _) => RelocKind::TpOff32,
+                (Modifier::DtpOff, 8, _) => RelocKind::DtpOff64,
                 _ => return Err("unsupported immediate relocation".into()),
             };
             self.fixups.push(Fixup {
@@ -119,11 +120,11 @@ impl<'a> Encoding<'a> {
             address: a,
             adjust: 0,
             kind: if width == 1 {
-                15
+                RelocKind::Pc8
             } else if plt || a.modifier == Modifier::Plt {
-                4
+                RelocKind::Plt32
             } else {
-                2
+                RelocKind::Pc32
             },
         });
         self.number(0, width);
@@ -243,9 +244,9 @@ impl<'a> Encoding<'a> {
             self.bytes.push(((field & 7) << 3) | 5);
             if symbolic {
                 let kind = match a.modifier {
-                    Modifier::None => 2,
-                    Modifier::GotPcRel => 9,
-                    Modifier::GotTpOff => 22,
+                    Modifier::None => RelocKind::Pc32,
+                    Modifier::GotPcRel => RelocKind::GotPcRel,
+                    Modifier::GotTpOff => RelocKind::GotTpOff,
                     _ => return Err("invalid RIP-relative modifier".into()),
                 };
                 self.fixups.push(Fixup {

@@ -2,13 +2,15 @@
 use super::*;
 use keel_asm_ir::{PageKind, SymbolicInstruction as S};
 
+/// Map the x86-64 kinds that shared data directives record onto AArch64.
 pub(super) fn relocation(kind: u32) -> Result<u32, String> {
+    use object::elf::*;
     match kind {
-        1 => Ok(257),
-        10 => Ok(258),
-        12 => Ok(259),
-        2 => Ok(261),
-        257..=573 => Ok(kind),
+        R_X86_64_64 => Ok(R_AARCH64_ABS64),
+        R_X86_64_32 => Ok(R_AARCH64_ABS32),
+        R_X86_64_16 => Ok(R_AARCH64_ABS16),
+        R_X86_64_PC32 => Ok(R_AARCH64_PREL32),
+        R_AARCH64_ABS64..=R_AARCH64_TLSLD_LDST128_DTPREL_LO12_NC => Ok(kind),
         _ => Err(format!("unsupported AArch64 ELF relocation {kind}")),
     }
 }

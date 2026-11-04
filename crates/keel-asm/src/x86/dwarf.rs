@@ -1,7 +1,7 @@
 //! ELF line tables. File paths, checksums, source text and every supported
 //! location flag survive assembly; unsupported operands are diagnosed.
 use super::metadata::leb;
-use super::{Assembler, Expr, Fix, Sym};
+use super::{Assembler, Expr, Fix, RelocKind, Sym};
 use keel_asm_ir::x86::{self, Modifier};
 use std::collections::BTreeMap;
 
@@ -337,7 +337,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 strings.push(0);
                 at
             });
-            address(a, b, string_section, offset, 4, 10);
+            address(a, b, string_section, offset, 4, RelocKind::Abs32.r_type());
         };
         b.extend([1, 1, 0x1f]); // directory table: path, line_strp
         leb(&mut b, d.directories.len() as i128, false)?;
@@ -405,7 +405,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
     for section in order {
         let rows = rows.remove(&section).unwrap();
         b.extend([0, 9, 2]);
-        address(a, &mut b, section, 0, 8, 1);
+        address(a, &mut b, section, 0, 8, RelocKind::Abs64.r_type());
         let (mut offset, mut file, mut line, mut column, mut isa) = (0, 1, 1i128, 0, 0);
         let mut is_stmt = true;
         for r in rows {

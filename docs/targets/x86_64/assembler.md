@@ -87,7 +87,8 @@ tables are outside this inventory. `regions` covers each section in offset order
 - `instruction`: final bytes, encoded size, source line or program item,
   canonical parsed instruction and actual prefix bytes. The spelling precedes
   layout-dependent expression folding. Relocation fields identify placeholders
-  within the bytes. Direct branches report displacement width and, when locally
+  within the bytes by offset, width, ELF `kind` number and `name`, such as
+  `R_X86_64_PLT32`. Direct branches report displacement width and, when locally
   resolved, signed distance from instruction end and section-relative target.
   Indirect branch memory displacements are not branch distances.
 - `alignment`: the final padding range. Padding encoded as NOPs remains padding.

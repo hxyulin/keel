@@ -1,4 +1,4 @@
-use super::{Assembler, Expr, Fix, Sym, SymId};
+use super::{Assembler, Expr, Fix, RelocKind, Sym, SymId};
 use keel_asm_ir::x86::{self, Modifier, RegisterClass};
 
 pub(super) struct Frame {
@@ -253,7 +253,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                         width: 4,
                         modifier: Modifier::None,
                         expr: Expr::symbol(id),
-                        kind: 2,
+                        kind: RelocKind::Pc32.r_type(),
                         line: 0,
                     });
                     bytes.extend([0; 4]);
@@ -298,7 +298,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                     width: 4,
                     modifier: Modifier::None,
                     expr: Expr::symbol(id),
-                    kind: 2,
+                    kind: RelocKind::Pc32.r_type(),
                     line: 0,
                 });
                 b.extend([0; 4]);
@@ -316,7 +316,7 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 width: 4,
                 modifier: Modifier::None,
                 expr: Expr::symbol(name),
-                kind: 2,
+                kind: RelocKind::Pc32.r_type(),
                 line: 0,
             });
             a.bytes(&b)?;

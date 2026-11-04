@@ -1,5 +1,5 @@
 //! Opt-in boundaries retained through layout; bytes come from patched sections.
-use super::{Fix, Section};
+use super::{Fix, RelocKind, Section};
 use keel_asm_ir::x86;
 use std::ops::Range;
 
@@ -65,14 +65,14 @@ pub struct BranchEncoding {
     pub target_offset: Option<u64>,
 }
 
-/// A linker relocation field inside an instruction, in ELF x86 relocation terms.
+/// A linker relocation field inside an instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RelocationField {
     /// Offset relative to the instruction start.
     pub offset: u64,
     pub width: u8,
-    pub kind: u32,
+    pub kind: RelocKind,
 }
 
 pub(super) struct Span {
@@ -84,7 +84,7 @@ pub(super) struct Span {
 #[derive(Default)]
 pub(super) struct Collector {
     pub spans: Vec<Span>,
-    pub unresolved: Vec<(usize, u64, u8, u32)>,
+    pub unresolved: Vec<(usize, u64, u8, RelocKind)>,
 }
 
 fn region(kind: RegionKind, section: usize, offset: u64, size: u64) -> EncodingRegion {

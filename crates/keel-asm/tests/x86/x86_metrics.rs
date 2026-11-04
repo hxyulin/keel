@@ -1,4 +1,4 @@
-use keel_asm::x86::{self, Features, RegionKind};
+use keel_asm::x86::{self, Features, RegionKind, RelocKind};
 use object::{Object, ObjectSection, ObjectSymbol};
 
 fn check(source: &str, features: Features) -> x86::EncodingReport {
@@ -58,7 +58,8 @@ fn final_metrics_preserve_objects_and_separate_jump_tables_padding_and_relocatio
         .unwrap();
     assert_eq!(branch.target_offset, Some(target.address()));
     assert!(code[3].branch.as_ref().unwrap().displacement.is_none());
-    assert_eq!(code[3].relocations[0].kind, 4);
+    assert_eq!(code[3].relocations[0].kind, RelocKind::Plt32);
+    assert_eq!(code[3].relocations[0].kind.name(), "R_X86_64_PLT32");
     assert!(
         report
             .regions
