@@ -58,7 +58,7 @@ fn exact_signed_extrema_wrapping_and_both_routes_all_pools() {
         };
         let m = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for (pool, pools) in [
                     ("normal", &keel_codegen::aarch64::REGISTERS),
@@ -143,7 +143,7 @@ fn destructive_destination_and_all_input_spill_alias_layouts() {
         }
         let m = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             let (text, obj) =
                 support::compile(&m, &sel, &Controlled, &keel_codegen::aarch64::REGISTERS);
             assert_eq!(text.matches("sabal\t").count(), names.len());
@@ -210,7 +210,7 @@ int main(void){for(unsigned p=0;p<128;p++){for(unsigned alias=0;alias<4;alias++)
 }}return 0;}
 "#;
     let mut oracle = support::Oracle::new("sabal-live");
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
                 ("normal", &keel_codegen::aarch64::REGISTERS),
@@ -270,7 +270,7 @@ int main(void){const int32_t e[]={INT32_MIN,INT32_MAX,0,-1,1};for(unsigned p=0;p
 }return 0;}
 "#;
     let mut oracle = support::Oracle::new("sabal-history");
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
                 ("normal", &keel_codegen::aarch64::REGISTERS),
@@ -448,7 +448,7 @@ fn accumulator_and_narrow_inputs_can_share_registers() {
         c += "}return 0;}\n";
         let m = keel_ir::parse(&ir).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             let (text, obj) =
                 support::compile(&m, &sel, &Aliased, &keel_codegen::aarch64::REGISTERS);
             assert_eq!(text.matches("sabal\t").count(), 4);

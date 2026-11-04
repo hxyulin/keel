@@ -106,7 +106,7 @@ fn distinct_source_lines_prevent_covers_but_same_lines_allow_them() {
                 );
             }
             let pipeline = CodegenPipeline {
-                selector: &SelectionTier::Baseline,
+                selector: &SelectionTier::Trees,
                 allocator: &AllocationTier::Full,
             };
             let text = keel_codegen::aarch64::compile_with_pipeline(

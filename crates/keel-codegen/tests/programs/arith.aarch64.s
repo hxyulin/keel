@@ -558,7 +558,7 @@ Lload_u8_end:
 	.p2align	2
 _swap_loop:
 Lswap_loop_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x9 v4=x10 v5=x11 v6=x12 v8=x12 v9=x11 v10=x11 v11=x9 v12=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x9 v4=x10 v5=x11 v6=x12 v7=x12 v8=x12 v9=x11 v10=x11 v11=x9 v12=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -573,9 +573,11 @@ Lswap_loop_block0:
 Lswap_loop_block1:
 	; v6 = iconst.i64 0
 	; v7 = icmp.eq v5, v6
-	; brif v7, block3, block2
 	cmp	x11, #0
-	b.eq	Lswap_loop_block3
+	cset	w12, eq
+	; brif v7, block3, block2
+	tst	w12, #255
+	b.ne	Lswap_loop_block3
 Lswap_loop_block2:
 	; v8 = iconst.i64 1
 	; v9 = isub v5, v8
@@ -603,7 +605,7 @@ Lswap_loop_end:
 	.p2align	2
 _max64:
 Lmax64_begin:
-	; regalloc: v0=x9 v1=x10 v3=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -614,9 +616,11 @@ Lmax64_begin:
 	mov	x10, x1
 Lmax64_block0:
 	; v2 = icmp.sgt v0, v1
-	; brif v2, block1(v0), block1(v1)
 	cmp	x9, x10
-	b.gt	Lmax64_block1
+	cset	w11, gt
+	; brif v2, block1(v0), block1(v1)
+	tst	w11, #255
+	b.ne	Lmax64_block1
 	mov	x9, x10
 Lmax64_block1:
 	; return v3

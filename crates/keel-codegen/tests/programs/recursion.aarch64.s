@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x19 v1=x9 v2=x9 v3=x10 v5=x10 v6=x19 v7=x9 v8=x9 v9=x10 v11=x11 v12=x19 v13=x9 v14=x9 v15=x10 v17=x11 v18=x9
+	; regalloc: v0=x19 v1=x9 v2=x9 v3=x10 v4=x9 v5=x10 v6=x19 v7=x9 v8=x9 v9=x10 v10=x9 v11=x10 v12=x19 v13=x9 v14=x9 v15=x10 v16=x9 v17=x10 v18=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -24,10 +24,12 @@ Lmain_block0:
 	mov	x9, x0
 	; v3 = iconst.i64 55
 	; v4 = icmp.ne v2, v3
+	cmp	x9, #55
+	cset	w9, ne
 	; v5 = iconst.i32 1
 	movz	x10, #0x1
 	; v6 = select v4, v5, v0
-	cmp	x9, #55
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v7 = iconst.i64 20
 	movz	x9, #0x14
@@ -38,11 +40,13 @@ Lmain_block0:
 	; v9 = iconst.i64 6765
 	movz	x10, #0x1a6d
 	; v10 = icmp.ne v8, v9
-	; v11 = iconst.i32 2
-	movz	x11, #0x2
-	; v12 = select v10, v11, v6
 	cmp	x9, x10
-	csel	w19, w11, w19, ne
+	cset	w9, ne
+	; v11 = iconst.i32 2
+	movz	x10, #0x2
+	; v12 = select v10, v11, v6
+	tst	w9, #255
+	csel	w19, w10, w19, ne
 	; v13 = iconst.i64 20
 	movz	x9, #0x14
 	; v14 = call @fact(v13)
@@ -54,11 +58,13 @@ Lmain_block0:
 	movk	x10, #0x677c, lsl #32
 	movk	x10, #0x21c3, lsl #48
 	; v16 = icmp.ne v14, v15
-	; v17 = iconst.i32 3
-	movz	x11, #0x3
-	; v18 = select v16, v17, v12
 	cmp	x9, x10
-	csel	w9, w11, w19, ne
+	cset	w9, ne
+	; v17 = iconst.i32 3
+	movz	x10, #0x3
+	; v18 = select v16, v17, v12
+	tst	w9, #255
+	csel	w9, w10, w19, ne
 	; return v18
 	mov	x0, x9
 	sub	sp, x29, #16
@@ -72,7 +78,7 @@ Lmain_end:
 	.p2align	2
 _fib:
 Lfib_begin:
-	; regalloc: v0=x19 v1=x20 v3=x9 v4=x9 v5=x21 v6=x9 v7=x9 v8=x9 v9=x9
+	; regalloc: v0=x19 v1=x20 v2=x9 v3=x9 v4=x9 v5=x21 v6=x9 v7=x9 v8=x9 v9=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -88,9 +94,11 @@ Lfib_begin:
 Lfib_block0:
 	; v1 = iconst.i64 2
 	; v2 = icmp.ult v0, v1
-	; brif v2, block2(v0), block1
 	cmp	x19, #2
-	b.hs	Lfib_block1
+	cset	w9, lo
+	; brif v2, block2(v0), block1
+	tst	w9, #255
+	b.eq	Lfib_block1
 	mov	x9, x19
 	b	Lfib_block2
 Lfib_block1:
@@ -125,7 +133,7 @@ Lfib_end:
 	.p2align	2
 _fact:
 Lfact_begin:
-	; regalloc: v0=x19 v1=x9 v3=x9 v4=x9 v5=x9 v6=x9 v7=x9
+	; regalloc: v0=x19 v1=x9 v2=x9 v3=x10 v4=x9 v5=x9 v6=x9 v7=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -138,11 +146,15 @@ Lfact_begin:
 Lfact_block0:
 	; v1 = iconst.i64 0
 	; v2 = icmp.eq v0, v1
-	; v3 = iconst.i64 1
-	movz	x9, #0x1
-	; brif v2, block2(v3), block1
 	cmp	x19, #0
-	b.eq	Lfact_block2
+	cset	w9, eq
+	; v3 = iconst.i64 1
+	movz	x10, #0x1
+	; brif v2, block2(v3), block1
+	tst	w9, #255
+	b.eq	Lfact_block1
+	mov	x9, x10
+	b	Lfact_block2
 Lfact_block1:
 	; v4 = isub v0, v3
 	sub	x9, x19, #1

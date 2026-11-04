@@ -73,7 +73,7 @@ fn all_predicates_widths_results_and_spills_use_original_flags() {
     for ty in ["i32", "i64"] {
         for result in ["i32", "i64", "ptr"] {
             for cc in CCS {
-                for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+                for sel in [SelectionTier::Trees, SelectionTier::Full] {
                     for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                         for pools in [&EMPTY, &ONE, &keel_codegen::aarch64::REGISTERS] {
                             fused(&compile(&source(ty, result, cc, ""), sel, alloc, pools).0);
@@ -86,7 +86,7 @@ fn all_predicates_widths_results_and_spills_use_original_flags() {
 }
 #[test]
 fn balance_window_constants_and_aliases_publish_original_operands() {
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&EMPTY, &ONE, &keel_codegen::aarch64::REGISTERS] {
                 for ty in ["i32", "i64"] {
@@ -207,7 +207,7 @@ fn constraints_matches_covered_patterns_and_debug_lines_preserve_boundaries() {
             t: Target,
             folds: &dyn Fn(&InstData) -> Vec<Value>,
         ) -> Selection {
-            let mut plan = SelectionTier::Baseline.select(f, t, folds);
+            let mut plan = SelectionTier::Trees.select(f, t, folds);
             let i = f.layout_insts().nth(self.0).unwrap().1;
             if self.1 {
                 plan.cover(i);

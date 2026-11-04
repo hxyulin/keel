@@ -263,11 +263,7 @@ fn clang_recipe_matches(stem: &str, text: &str, object: &[u8]) {
 #[test]
 fn export_linux_oracles() {
     let (ir, c) = fixture();
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
                 ("normal", &keel_codegen::x86_64::REGISTERS),
@@ -287,11 +283,7 @@ fn export_linux_oracles() {
     }
     let (controlled_ir, controlled_c) = controlled_fixture();
     let m = keel_ir::parse(&controlled_ir).unwrap();
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         let (text, obj) =
             compile_allocator(&m, &sel, &Controlled, &keel_codegen::x86_64::REGISTERS);
         assert_eq!(text.matches("psrad\t").count(), 15);
@@ -301,11 +293,7 @@ fn export_linux_oracles() {
     }
     let (ir, c) = controlled_select_fixture();
     let m = keel_ir::parse(&ir).unwrap();
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         let (text, obj) = compile_allocator(
             &m,
             &sel,
@@ -322,11 +310,7 @@ fn export_linux_oracles() {
 
 #[test]
 fn closed_clamps_across_tiers_and_rejections() {
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
                 for root in [
@@ -445,11 +429,7 @@ fn select_source(name: &str, cc: &str, kind: u32, observed: bool) -> String {
 
 #[test]
 fn closed_sign_select_across_tiers_and_observed_fallback() {
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
                 for cc in ["slt", "ugt"] {

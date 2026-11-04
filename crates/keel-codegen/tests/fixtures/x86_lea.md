@@ -7,10 +7,10 @@ result must not be an alias. i32 factor/displacement constants are reduced
 modulo 2^32; an i64 displacement must fit signed disp32. Only factor three is
 selected; factors five and nine remain unchanged.
 
-Selection is enabled only by the existing trees options (`SelectionTier`
-Trees/Full, `--isel trees`/`all`, or the `-O` selection preset). Baseline,
-folds-only and hints-only selection do not activate it. Default pipeline
-settings are unchanged.
+Selection is the `x86-lea-mul3` cover. It runs with tree selection and the
+cover enabled (`SelectionTier` Trees/Full, `--isel all` or `trees,covers`, or
+the `-O` selection preset). Baseline, folds-only and hints-only selection do
+not activate it. Default pipeline settings are unchanged.
 
 `Machine::LeaMul3` carries the signed displacement plus one resolved input in
 its match arguments. The product is covered; constants are omitted from root

@@ -84,7 +84,7 @@ fn masks_consumers_live_sources_and_all_pipelines() {
                 for live in [false, true] {
                     let src = source("f", mask, cc, consumer, live);
                     for (s, a, pools) in crate::codegen::matrix(
-                        &crate::codegen::SELECTIONS,
+                        &[SelectionTier::Trees, SelectionTier::Full],
                         &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
                     ) {
                         for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
@@ -264,7 +264,7 @@ fn signed_byte_cover_and_mask_test_compose_at_all_roots() {
     for consumer in ["bool", "branch", "select"] {
         let src = signed_byte_source("f", "eq", consumer);
         for (s, a, pools) in crate::codegen::matrix(
-            &crate::codegen::SELECTIONS,
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
         ) {
             let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));
@@ -308,7 +308,7 @@ fn resolved_source_aliases_transfer_to_each_allocation_root() {
         let mut m = keel_ir::parse(&src).unwrap();
         alias_source(&mut m);
         for (s, a, pools) in crate::codegen::matrix(
-            &crate::codegen::SELECTIONS,
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
         ) {
             let (text, _) = compile_module(&m, &s, a, pools, Features::for_level(CpuLevel::V1));
@@ -498,11 +498,7 @@ if(edge<2) {{ memset(p,0x83,{width}); mem_{tag}(p,&out,marker); assert(*marker==
     let mut module = keel_ir::parse(&ir).unwrap();
     alias_source(&mut module);
     fs::write(dir.join("kernels.ir"), module.to_string()).unwrap();
-    for s in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for s in [SelectionTier::Trees, SelectionTier::Full] {
         for a in [AllocationTier::Fast, AllocationTier::Full] {
             for (pi, pools) in [&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS]
                 .into_iter()
@@ -548,7 +544,7 @@ fn aliased_select_arm_nonadjacent_consumer_and_constant_source() {
             .replace("icmp.eq v4, v9", "icmp.eq v4, v11"),
     ] {
         for (s, a, pools) in crate::codegen::matrix(
-            &crate::codegen::SELECTIONS,
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&EMPTY, &ONE, &keel_codegen::x86_64::REGISTERS],
         ) {
             let (text, _) = compile(&src, &s, a, pools, Features::for_level(CpuLevel::V1));

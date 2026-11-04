@@ -49,9 +49,11 @@
 	mov	r13, rsi
 .Lk_vla_block1:
 	# v9 = icmp.ult v7, v0
-	# brif v9, block2, block3
 	cmp	rdi, rbx
-	jb	".Lk_vla_block2"
+	setb	r8b
+	# brif v9, block2, block3
+	test	r8b, r8b
+	jne	".Lk_vla_block2"
 .Lk_vla_block3:
 	# v16 = iconst.i64 2
 	mov	edi, 2
@@ -151,9 +153,11 @@
 	mov	r8, rdi
 .Lk_loop_block1:
 	# v4 = icmp.ult v2, v0
-	# brif v4, block2, block3
 	cmp	rdi, rsi
-	jb	".Lk_loop_block2"
+	setb	r9b
+	# brif v4, block2, block3
+	test	r9b, r9b
+	jne	".Lk_loop_block2"
 .Lk_loop_block3:
 	# return v3
 	mov	rax, r8

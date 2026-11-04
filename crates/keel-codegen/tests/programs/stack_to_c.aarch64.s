@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x19 v1=x9 v2=x9 v3=x9 v4=x20 v6=x10 v7=x10 v8=x10 v9=x10 v10=x10 v11=x10 v12=x11 v13=x9 v14=x9 v15=x10 v16=x10 v17=x10 v18=x11 v19=x10 v20=x10 v21=x11 v22=x9 v23=x9 v25=x9 v26=x10 v27=x9
+	; regalloc: v0=x19 v1=x20 v2=x9 v3=x9 v4=x21 v5=x10 v6=x10 v7=x10 v8=x10 v9=x10 v10=x10 v11=x10 v12=x11 v13=x9 v14=x9 v15=x10 v16=x10 v17=x10 v18=x11 v19=x10 v20=x10 v21=x11 v22=x9 v23=x9 v24=x9 v25=x10 v26=x11 v27=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -14,25 +14,29 @@ Lmain_begin:
 	stp	x19, x20, [sp, #-16]!
 	.cfi_offset x19, -32
 	.cfi_offset x20, -24
+	str	x21, [sp, #-16]!
+	.cfi_offset x21, -48
 	sub	sp, sp, #48
 Lmain_block0:
 	; v0 = stack_addr ss0
 	add	x19, sp, #0
 	; v1 = iconst.i64 10
-	movz	x9, #0xa
+	movz	x20, #0xa
 	; call @fill_squares(v0, v1)
 	mov	x0, x19
-	mov	x1, x9
+	mov	x1, x20
 	bl	_fill_squares
 	; v2 = iconst.i64 0
 	movz	x9, #0x0
 	; jump block1(v2, v2)
-	mov	x20, x9
+	mov	x21, x9
 Lmain_block1:
 	; v5 = icmp.ult v3, v1
-	; brif v5, block2, block3
 	cmp	x9, #10
-	b.lo	Lmain_block2
+	cset	w10, lo
+	; brif v5, block2, block3
+	tst	w10, #255
+	b.ne	Lmain_block2
 Lmain_block3:
 	; v14 = stack_addr ss1
 	add	x9, sp, #40
@@ -59,16 +63,19 @@ Lmain_block3:
 	mov	x9, x0
 	; v23 = iconst.i64 285
 	; v24 = icmp.ne v4, v23
+	cmp	x21, #285
+	cset	w9, ne
 	; v25 = iconst.i32 1
-	movz	x9, #0x1
+	movz	x10, #0x1
 	; v26 = iconst.i32 0
-	movz	x10, #0x0
+	movz	x11, #0x0
 	; v27 = select v24, v25, v26
-	cmp	x20, #285
-	csel	w9, w9, w10, ne
+	tst	w9, #255
+	csel	w9, w10, w11, ne
 	; return v27
 	mov	x0, x9
-	sub	sp, x29, #16
+	sub	sp, x29, #32
+	ldr	x21, [sp], #16
 	ldp	x19, x20, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
@@ -84,12 +91,12 @@ Lmain_block2:
 	; v10 = sext.i64 v9
 	sxtw	x10, w10
 	; v11 = iadd v4, v10
-	add	x10, x20, x10
+	add	x10, x21, x10
 	; v12 = iconst.i64 1
 	; v13 = iadd v3, v12
 	add	x9, x9, #1
 	; jump block1(v13, v11)
-	mov	x20, x10
+	mov	x21, x10
 	b	Lmain_block1
 Lmain_end:
 	.cfi_endproc

@@ -4,7 +4,7 @@
 	.p2align	2
 _phi_loop:
 Lphi_loop_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x9 v5=x11 v7=x11 v8=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x9 v5=x11 v6=x13 v7=x11 v8=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -20,9 +20,11 @@ Lphi_loop_block0:
 	; jump block1(v0, v2)
 Lphi_loop_block1:
 	; v6 = icmp.ult v5, v1
-	; brif v6, block2, block3(v4)
 	cmp	x11, x10
-	b.lo	Lphi_loop_block2
+	cset	w13, lo
+	; brif v6, block2, block3(v4)
+	tst	w13, #255
+	b.ne	Lphi_loop_block2
 Lphi_loop_block3:
 	; return v8
 	mov	x0, x9

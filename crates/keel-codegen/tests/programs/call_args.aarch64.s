@@ -135,7 +135,7 @@ Lpoke_end:
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x25 v7=x26 v8=x27 v9=x28 v10=x9 v12=x9 v13=x19 v14=x9 v15=x10 v17=x10 v18=x19 v19=x20 v20=x9 v21=x9 v22=x10 v23=x11 v24=x9 v25=x10 v27=x11 v28=x9 v30=x10 v31=x9
+	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x25 v7=x26 v8=x27 v9=[sp, #0] v10=x28 v11=x9 v12=x10 v13=x19 v14=x9 v15=x10 v16=x9 v17=x10 v18=x19 v19=x20 v20=x9 v21=x9 v22=x10 v23=x11 v24=x9 v25=x10 v26=x9 v27=x10 v28=x9 v29=x10 v30=x11 v31=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -187,14 +187,17 @@ Lmain_block0:
 	mov	x6, x26
 	mov	x7, x27
 	bl	_weigh
-	mov	x28, x0
+	str	x0, [sp, #0]
 	; v10 = iconst.i64 204
 	; v11 = icmp.ne v9, v10
+	ldr	x16, [sp, #0]
+	cmp	x16, #204
+	cset	w9, ne
 	; v12 = iconst.i32 1
-	movz	x9, #0x1
+	movz	x10, #0x1
 	; v13 = select v11, v12, v0
-	cmp	x28, #204
-	csel	w19, w9, w19, ne
+	tst	w9, #255
+	csel	w19, w10, w19, ne
 	; v14 = call @weigh(v8, v7, v6, v5, v4, v3, v2, v1)
 	mov	x0, x27
 	mov	x1, x26
@@ -208,13 +211,15 @@ Lmain_block0:
 	mov	x9, x0
 	; v15 = iconst.i64 120
 	; v16 = icmp.ne v14, v15
+	cmp	x9, #120
+	cset	w9, ne
 	; v17 = iconst.i32 2
 	movz	x10, #0x2
 	; v18 = select v16, v17, v13
-	cmp	x9, #120
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v19 = stack_addr ss0
-	add	x20, sp, #0
+	add	x20, sp, #8
 	; v20 = iconst.i64 1000
 	movz	x9, #0x3e8
 	; call @poke(v19, v20)
@@ -239,17 +244,22 @@ Lmain_block0:
 	movz	x10, #0x8a80
 	movk	x10, #0x1, lsl #16
 	; v26 = icmp.ne v24, v25
-	; v27 = iconst.i32 4
-	movz	x11, #0x4
-	; v28 = select v26, v27, v18
 	cmp	x9, x10
-	csel	w9, w11, w19, ne
+	cset	w9, ne
+	; v27 = iconst.i32 4
+	movz	x10, #0x4
+	; v28 = select v26, v27, v18
+	tst	w9, #255
+	csel	w9, w10, w19, ne
 	; v29 = icmp.ne v9, v10
+	ldr	x16, [sp, #0]
+	cmp	x16, #204
+	cset	w10, ne
 	; v30 = iconst.i32 5
-	movz	x10, #0x5
+	movz	x11, #0x5
 	; v31 = select v29, v30, v28
-	cmp	x28, #204
-	csel	w9, w10, w9, ne
+	tst	w10, #255
+	csel	w9, w11, w9, ne
 	; return v31
 	mov	x0, x9
 	sub	sp, x29, #80

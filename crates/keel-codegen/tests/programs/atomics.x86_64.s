@@ -1577,9 +1577,11 @@
 	# jump block1(v2)
 .Lk_count_block1:
 	# v4 = icmp.ult v3, v1
-	# brif v4, block2, block3
 	cmp	r8, rdi
-	jb	".Lk_count_block2"
+	setb	r9b
+	# brif v4, block2, block3
+	test	r9b, r9b
+	jne	".Lk_count_block2"
 .Lk_count_block3:
 	# return
 	lea	rsp, [rbp + -8]
@@ -1625,9 +1627,11 @@
 	lock cmpxchg	dword ptr [rsi], r8d
 	mov	r9, rax
 	# v4 = icmp.eq v3, v1
-	# brif v4, block2, block1
 	cmp	r9d, 0
-	jne	".Lk_lock_block1"
+	sete	r9b
+	# brif v4, block2, block1
+	test	r9b, r9b
+	je	".Lk_lock_block1"
 .Lk_lock_block2:
 	# return
 	mov	rsp, rbp

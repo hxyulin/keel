@@ -4,7 +4,7 @@
 	.p2align	2
 _rk_adjacent:
 Lrk_adjacent_begin:
-	; regalloc: v0=x9 v3=x10 v4=x11 v5=x12 v7=x11 v8=x12 v9=x13 v10=x14 v11=x14 v12=x14 v13=x14 v14=x15 v15=x15 v16=x13 v17=x13 v18=x13 v19=x13 v20=x13 v21=x14 v23=x9 v24=x13 v25=x13 v26=x12 v27=x13 v28=x11
+	; regalloc: v0=x9 v3=x10 v4=x11 v5=x12 v6=x13 v7=x11 v8=x12 v9=x13 v10=x14 v11=x14 v12=x14 v13=x14 v14=x15 v15=x15 v16=x13 v17=x13 v18=x13 v19=x13 v20=x13 v21=x14 v22=x14 v23=x9 v24=x13 v25=x13 v26=x12 v27=x13 v28=x11 v29=x13
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -21,9 +21,11 @@ Lrk_adjacent_block0:
 	; jump block1
 Lrk_adjacent_block1:
 	; v6 = icmp.ugt v3, v5
-	; brif v6, block2(v5, v4), block3(v4)
 	cmp	x10, #1
-	b.ls	Lrk_adjacent_inst4_else
+	cset	w13, hi
+	; brif v6, block2(v5, v4), block3(v4)
+	tst	w13, #255
+	b.eq	Lrk_adjacent_inst4_else
 	mov	x16, x11
 	mov	x11, x12
 	mov	x12, x16
@@ -56,9 +58,11 @@ Lrk_adjacent_block2:
 	sub	x13, x14, x13
 	; v21 = iconst.i64 0
 	; v22 = icmp.slt v20, v21
-	; brif v22, block4, block5(v20)
 	cmp	x13, #0
-	b.ge	Lrk_adjacent_block5
+	cset	w14, lt
+	; brif v22, block4, block5(v20)
+	tst	w14, #255
+	b.eq	Lrk_adjacent_block5
 Lrk_adjacent_block4:
 	; v24 = ineg v20
 	neg	x13, x13
@@ -70,9 +74,11 @@ Lrk_adjacent_block5:
 	; v28 = iadd v7, v27
 	add	x11, x11, #1
 	; v29 = icmp.ugt v3, v28
-	; brif v29, block2(v28, v26), block3(v26)
 	cmp	x10, x11
-	b.hi	Lrk_adjacent_block2
+	cset	w13, hi
+	; brif v29, block2(v28, v26), block3(v26)
+	tst	w13, #255
+	b.ne	Lrk_adjacent_block2
 	mov	x9, x12
 Lrk_adjacent_block3:
 	; return v23

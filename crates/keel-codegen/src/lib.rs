@@ -73,12 +73,13 @@ impl SelectionOptions {
     };
 }
 impl SelectionOptions {
-    /// The options of [`SelectionTier::Baseline`].
+    /// The options of [`SelectionTier::Baseline`]: nothing optional, and
+    /// no cover, so Baseline is the reference for every cover.
     pub const BASELINE: Self = Self {
         trees: false,
         folded_operands: false,
         register_hints: false,
-        covers: cover::CoverSet::ALL,
+        covers: cover::CoverSet::NONE,
     };
 }
 impl Default for SelectionOptions {

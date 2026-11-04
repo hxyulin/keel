@@ -4,7 +4,7 @@
 	.p2align	2
 _k_setjmp:
 Lk_setjmp_begin:
-	; regalloc: v0=x19 v1=x9 v2=[sp, #0] v3=x9 v4=[sp, #8] v5=x9 v6=[sp, #16] v7=x9 v8=[sp, #24] v9=x9 v10=[sp, #32] v11=x9 v12=[sp, #40] v13=x9 v14=[sp, #48] v15=x9 v16=[sp, #56] v17=x9 v18=[sp, #64] v19=x9 v20=[sp, #72] v21=x9 v22=[sp, #80] v23=x9 v24=[sp, #88] v25=x9 v26=[sp, #96] v27=x9 v28=[sp, #104] v29=[sp, #112] v30=x9 v31=x10 v33=x9 v34=[sp, #120] v35=x10 v36=[sp, #128] v37=x11 v38=[sp, #136] v39=x12 v40=x12 v41=x13 v42=x13 v43=x14 v44=x14 v45=x15 v46=x15 v47=x27 v48=x27 v49=x26 v50=x26 v51=x25 v52=x25 v53=x24 v54=x24 v55=x23 v56=x23 v57=x22 v58=x22 v59=x21 v60=x21 v61=x20 v62=x20 v63=x28 v64=x28 v65=x9 v66=x9 v67=x10 v68=x10 v69=x11 v70=x11 v71=x11 v72=x11 v73=x11 v74=x11 v75=x11 v76=x11 v77=x11 v78=x11 v79=x11 v80=x11 v81=x11 v82=x11 v83=x11 v84=x9 v85=x9 v86=x10 v87=x9 v88=x9 v89=x9 v90=x9 v91=x9 v92=x9 v93=x9 v94=x9 v95=x9 v96=x9 v97=x9 v98=x9 v99=x9 v100=x9
+	; regalloc: v0=x19 v1=x9 v2=[sp, #0] v3=x9 v4=[sp, #8] v5=x9 v6=[sp, #16] v7=x9 v8=[sp, #24] v9=x9 v10=[sp, #32] v11=x9 v12=[sp, #40] v13=x9 v14=[sp, #48] v15=x9 v16=[sp, #56] v17=x9 v18=[sp, #64] v19=x9 v20=[sp, #72] v21=x9 v22=[sp, #80] v23=x9 v24=[sp, #88] v25=x9 v26=[sp, #96] v27=x9 v28=[sp, #104] v29=[sp, #112] v30=x9 v31=x10 v32=x9 v33=x9 v34=[sp, #120] v35=x10 v36=[sp, #128] v37=x11 v38=[sp, #136] v39=x12 v40=x12 v41=x13 v42=x13 v43=x14 v44=x14 v45=x15 v46=x15 v47=x27 v48=x27 v49=x26 v50=x26 v51=x25 v52=x25 v53=x24 v54=x24 v55=x23 v56=x23 v57=x22 v58=x22 v59=x21 v60=x21 v61=x20 v62=x20 v63=x28 v64=x28 v65=x9 v66=x9 v67=x10 v68=x10 v69=x11 v70=x11 v71=x11 v72=x11 v73=x11 v74=x11 v75=x11 v76=x11 v77=x11 v78=x11 v79=x11 v80=x11 v81=x11 v82=x11 v83=x11 v84=x9 v85=x9 v86=x10 v87=x9 v88=x9 v89=x9 v90=x9 v91=x9 v92=x9 v93=x9 v94=x9 v95=x9 v96=x9 v97=x9 v98=x9 v99=x9 v100=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -108,8 +108,10 @@ Lk_setjmp_block0:
 	mov	x9, x0
 	; v31 = iconst.i32 0
 	; v32 = icmp.ne v30, v31
-	; brif v32, block2, block1
 	cmp	w9, #0
+	cset	w9, ne
+	; brif v32, block2, block1
+	tst	w9, #255
 	b.ne	Lk_setjmp_block2
 Lk_setjmp_block1:
 	; v33 = iconst.i64 101
@@ -295,7 +297,7 @@ Lk_setjmp_end:
 	.p2align	2
 _k_setjmp_swapped:
 Lk_setjmp_swapped_begin:
-	; regalloc: v0=x19 v1=x9 v2=[sp, #0] v3=x9 v4=[sp, #8] v5=x9 v6=[sp, #16] v7=x9 v8=[sp, #24] v9=x9 v10=[sp, #32] v11=x9 v12=[sp, #40] v13=x9 v14=[sp, #48] v15=x9 v16=[sp, #56] v17=x9 v18=[sp, #64] v19=x9 v20=[sp, #72] v21=x9 v22=[sp, #80] v23=x9 v24=[sp, #88] v25=x9 v26=[sp, #96] v27=x9 v28=[sp, #104] v29=[sp, #112] v30=x9 v31=x10 v33=x9 v34=[sp, #120] v35=x10 v36=[sp, #128] v37=x11 v38=[sp, #136] v39=x12 v40=x12 v41=x13 v42=x13 v43=x14 v44=x14 v45=x15 v46=x15 v47=x27 v48=x27 v49=x26 v50=x26 v51=x25 v52=x25 v53=x24 v54=x24 v55=x23 v56=x23 v57=x22 v58=x22 v59=x21 v60=x21 v61=x20 v62=x20 v63=x28 v64=x28 v65=x9 v66=x9 v67=x10 v68=x10 v69=x11 v70=x11 v71=x11 v72=x11 v73=x11 v74=x11 v75=x11 v76=x11 v77=x11 v78=x11 v79=x11 v80=x11 v81=x11 v82=x11 v83=x11 v84=x9 v85=x9 v86=x10 v87=x9 v88=x9 v89=x9 v90=x9 v91=x9 v92=x9 v93=x9 v94=x9 v95=x9 v96=x9 v97=x9 v98=x9 v99=x9 v100=x9
+	; regalloc: v0=x19 v1=x9 v2=[sp, #0] v3=x9 v4=[sp, #8] v5=x9 v6=[sp, #16] v7=x9 v8=[sp, #24] v9=x9 v10=[sp, #32] v11=x9 v12=[sp, #40] v13=x9 v14=[sp, #48] v15=x9 v16=[sp, #56] v17=x9 v18=[sp, #64] v19=x9 v20=[sp, #72] v21=x9 v22=[sp, #80] v23=x9 v24=[sp, #88] v25=x9 v26=[sp, #96] v27=x9 v28=[sp, #104] v29=[sp, #112] v30=x9 v31=x10 v32=x9 v33=x9 v34=[sp, #120] v35=x10 v36=[sp, #128] v37=x11 v38=[sp, #136] v39=x12 v40=x12 v41=x13 v42=x13 v43=x14 v44=x14 v45=x15 v46=x15 v47=x27 v48=x27 v49=x26 v50=x26 v51=x25 v52=x25 v53=x24 v54=x24 v55=x23 v56=x23 v57=x22 v58=x22 v59=x21 v60=x21 v61=x20 v62=x20 v63=x28 v64=x28 v65=x9 v66=x9 v67=x10 v68=x10 v69=x11 v70=x11 v71=x11 v72=x11 v73=x11 v74=x11 v75=x11 v76=x11 v77=x11 v78=x11 v79=x11 v80=x11 v81=x11 v82=x11 v83=x11 v84=x9 v85=x9 v86=x10 v87=x9 v88=x9 v89=x9 v90=x9 v91=x9 v92=x9 v93=x9 v94=x9 v95=x9 v96=x9 v97=x9 v98=x9 v99=x9 v100=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -399,9 +401,11 @@ Lk_setjmp_swapped_block0:
 	mov	x9, x0
 	; v31 = iconst.i32 0
 	; v32 = icmp.eq v30, v31
-	; brif v32, block1, block2
 	cmp	w9, #0
-	b.eq	Lk_setjmp_swapped_block1
+	cset	w9, eq
+	; brif v32, block1, block2
+	tst	w9, #255
+	b.ne	Lk_setjmp_swapped_block1
 Lk_setjmp_swapped_block2:
 	; v88 = iadd v2, v4
 	ldr	x16, [sp, #0]

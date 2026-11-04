@@ -1246,7 +1246,7 @@ Lk_xchg_ptr_end:
 	.p2align	2
 _k_count:
 Lk_count_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v5=x12 v6=x13 v7=x11
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x12 v5=x12 v6=x13 v7=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -1261,9 +1261,11 @@ Lk_count_block0:
 	; jump block1(v2)
 Lk_count_block1:
 	; v4 = icmp.ult v3, v1
-	; brif v4, block2, block3
 	cmp	x11, x10
-	b.lo	Lk_count_block2
+	cset	w12, lo
+	; brif v4, block2, block3
+	tst	w12, #255
+	b.ne	Lk_count_block2
 Lk_count_block3:
 	; return
 	ldp	x29, x30, [sp], #16
@@ -1285,7 +1287,7 @@ Lk_count_end:
 	.p2align	2
 _k_lock:
 Lk_lock_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x12
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -1305,9 +1307,11 @@ Lk_lock_block1:
 	casa	w8, w11, [x9]
 	mov	x12, x8
 	; v4 = icmp.eq v3, v1
-	; brif v4, block2, block1
 	cmp	w12, #0
-	b.ne	Lk_lock_block1
+	cset	w12, eq
+	; brif v4, block2, block1
+	tst	w12, #255
+	b.eq	Lk_lock_block1
 Lk_lock_block2:
 	; return
 	ldp	x29, x30, [sp], #16

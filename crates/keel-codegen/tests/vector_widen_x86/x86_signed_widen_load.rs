@@ -93,11 +93,7 @@ fn fused(text: &str) -> usize {
 #[test]
 fn exact_chain_features_and_negative_gates() {
     for (_, features) in profiles() {
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
                     let text = compile(SOURCE, sel, alloc, pools, features).0;
@@ -145,11 +141,7 @@ fn optimized_and_unused_results_preserve_the_load_contract() {
             }
             keel_ir::verify_module(&m).unwrap();
             for (_, features) in profiles() {
-                for sel in [
-                    SelectionTier::Baseline,
-                    SelectionTier::Trees,
-                    SelectionTier::Full,
-                ] {
+                for sel in [SelectionTier::Trees, SelectionTier::Full] {
                     for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                         for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY] {
                             // Dead-code removal may delete an unused ordinary load;
@@ -329,11 +321,7 @@ static void on_fault(int sig) {fault_seen=sig;siglongjmp(fault_env,1);}
     );
 
     for (profile, features) in profiles() {
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for (pool, pools) in [
                     ("normal", &keel_codegen::x86_64::REGISTERS),

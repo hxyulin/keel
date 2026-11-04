@@ -201,9 +201,11 @@
 	movzx	r8d, r8b
 	# v4 = iconst.i32 0
 	# v5 = icmp.eq v3, v4
-	# brif v5, block1, block2
 	cmp	r8d, 0
-	je	".Lscalar_bool_block1"
+	sete	r8b
+	# brif v5, block1, block2
+	test	r8b, r8b
+	jne	".Lscalar_bool_block1"
 .Lscalar_bool_block2:
 	# return v1
 	mov	rax, rdi
@@ -235,9 +237,10 @@
 .Lscalar_bool_value_block0:
 	# v1 = iconst.i32 15
 	# v2 = and v0, v1
+	and	esi, 15
 	# v3 = iconst.i32 0
 	# v4 = icmp.eq v2, v3
-	test	esi, 15
+	cmp	esi, 0
 	sete	sil
 	# v5 = uext.i32 v4
 	movzx	esi, sil

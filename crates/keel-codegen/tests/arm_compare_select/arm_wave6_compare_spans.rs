@@ -52,11 +52,7 @@ fn compare_only_inputs_stay_live_across_the_span_in_all_tiers() {
         for cc in [
             "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge",
         ] {
-            for tier in [
-                SelectionTier::Baseline,
-                SelectionTier::Trees,
-                SelectionTier::Full,
-            ] {
+            for tier in [SelectionTier::Trees, SelectionTier::Full] {
                 for allocation in [AllocationTier::Fast, AllocationTier::Full] {
                     for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
                         let (text, _) = compile(&source(bits, cc, GAP), tier, &allocation, pools);

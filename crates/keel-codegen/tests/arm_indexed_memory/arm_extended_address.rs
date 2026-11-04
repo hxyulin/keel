@@ -43,7 +43,7 @@ fn compile(
 fn exact_i32_extensions_and_scales_have_object_parity_in_all_tiers() {
     for signed in [false, true] {
         for shift in 0..=4 {
-            for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+            for sel in [SelectionTier::Trees, SelectionTier::Full] {
                 for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                     for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
                         let (s, _) = compile(&source("f", signed, shift), sel, alloc, pools);

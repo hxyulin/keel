@@ -255,7 +255,7 @@ fn independent_clang_native_encoding() {
             },
         );
         let m = module(&ir);
-        let (text, p, _) = compile(&m, &SelectionTier::Baseline, &Controlled, false);
+        let (text, p, _) = compile(&m, &SelectionTier::Trees, &Controlled, false);
         assert_eq!(recipes(&text), n);
         assert!(!text.contains("bsl\t"));
         let d = dir();
@@ -285,13 +285,9 @@ fn all_four_lanes_aliases_spills_live_inputs_and_tiers() {
         let (ir, c, n) = fixture(controlled);
         let prepared = PreparedOracle::new("minmax", &c, &["-O2", "-Wall", "-Wextra", "-Werror"]);
         let m = module(&ir);
-        for (si, s) in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ]
-        .iter()
-        .enumerate()
+        for (si, s) in [SelectionTier::Trees, SelectionTier::Full]
+            .iter()
+            .enumerate()
         {
             for (ai, a) in [AllocationTier::Fast, AllocationTier::Full]
                 .iter()
@@ -453,13 +449,9 @@ fn zero_filters_all_lanes_native_aliases_spills_and_tiers() {
         let (ir, c, n) = fixture_mode(controlled, CompareMode::Zero);
         let prepared = PreparedOracle::new("minmax", &c, &["-O2", "-Wall", "-Wextra", "-Werror"]);
         let m = module(&ir);
-        for (si, s) in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ]
-        .iter()
-        .enumerate()
+        for (si, s) in [SelectionTier::Trees, SelectionTier::Full]
+            .iter()
+            .enumerate()
         {
             for (ai, a) in [AllocationTier::Fast, AllocationTier::Full]
                 .iter()

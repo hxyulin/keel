@@ -73,11 +73,7 @@ fn direct_loads(text: &str) -> usize {
 }
 #[test]
 fn exact_loads_and_shared_volatile_rejections() {
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for spill in [false, true] {
                 let text = compile(&source(), sel, alloc, spill).0;
@@ -295,11 +291,7 @@ typedef void (*Fn)(const void*,void*,uint64_t);
     let (text, obj) = compile(&control, SelectionTier::Full, AllocationTier::Full, false);
     assert_eq!(direct_loads(&text), 0);
     run("control", text, obj);
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for spill in [false, true] {
                 let (text, obj) = compile(&ir, sel, alloc, spill);

@@ -761,7 +761,7 @@ Lselect_f_end:
 	.p2align	2
 _harmonic:
 Lharmonic_begin:
-	; regalloc: v0=x9 v1=d19 v2=x10 v3=x11 v4=d19 v6=d20 v7=d21 v8=d20 v9=d19 v10=x11
+	; regalloc: v0=x9 v1=d19 v2=x10 v3=x11 v4=d19 v5=x12 v6=d20 v7=d21 v8=d20 v9=d19 v10=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -778,9 +778,11 @@ Lharmonic_block0:
 	mov	x11, x10
 Lharmonic_block1:
 	; v5 = icmp.sle v3, v0
-	; brif v5, block2, block3
 	cmp	x11, x9
-	b.le	Lharmonic_block2
+	cset	w12, le
+	; brif v5, block2, block3
+	tst	w12, #255
+	b.ne	Lharmonic_block2
 Lharmonic_block3:
 	; return v4
 	fmov	d0, d19
@@ -806,7 +808,7 @@ Lharmonic_end:
 	.p2align	2
 _swaps:
 Lswaps_begin:
-	; regalloc: v0=d19 v1=d20 v2=x9 v3=x10 v4=d19 v5=d20 v6=x10 v8=x11 v9=x10 v10=d21 v11=d19 v12=d19
+	; regalloc: v0=d19 v1=d20 v2=x9 v3=x10 v4=d19 v5=d20 v6=x10 v7=x11 v8=x11 v9=x10 v10=d21 v11=d19 v12=d19
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -822,9 +824,11 @@ Lswaps_block0:
 	; jump block1(v0, v1, v3)
 Lswaps_block1:
 	; v7 = icmp.ult v6, v2
-	; brif v7, block2, block3
 	cmp	x10, x9
-	b.lo	Lswaps_block2
+	cset	w11, lo
+	; brif v7, block2, block3
+	tst	w11, #255
+	b.ne	Lswaps_block2
 Lswaps_block3:
 	; v10 = fconst.f64 10.0
 	fmov	d21, #10.0

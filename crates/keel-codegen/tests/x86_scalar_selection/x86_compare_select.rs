@@ -46,7 +46,7 @@ fn adjacent_single_use_compare_selects_keep_flags_without_boolean() {
             "icmp.slt"
         };
         for (sel, alloc, pools) in crate::codegen::matrix(
-            &[SelectionTier::Baseline, SelectionTier::Full],
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS],
         ) {
             let (text, _) = compile(&select("f", ty, cmp, false), sel, alloc, pools);
@@ -72,7 +72,7 @@ block0(v0: {ty}):
 }}"
         );
         for (sel, alloc, pools) in crate::codegen::matrix(
-            &[SelectionTier::Baseline, SelectionTier::Full],
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&SPILLED, &ONE, &keel_codegen::x86_64::REGISTERS],
         ) {
             let (text, _) = compile(&src, sel, alloc, pools);

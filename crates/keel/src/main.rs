@@ -1457,7 +1457,7 @@ mod tests {
             "--isel-tier",
             "full",
             "--isel",
-            "trees",
+            "trees,covers",
         ])
         .unwrap();
         assert_eq!(opts.optimization, keel_opt::OptimizationTier::Full);
@@ -1540,7 +1540,15 @@ mod tests {
         for (flag, value, expected) in [
             ("--isel", "none", SelectionOptions::default()),
             ("--isel", "all", SelectionOptions::ALL),
-            ("--isel", "trees", SelectionTier::Trees.options()),
+            ("--isel", "trees,covers", SelectionTier::Trees.options()),
+            (
+                "--isel",
+                "covers,-x86-mask-test,x86-mask-test",
+                SelectionOptions {
+                    covers: CoverSet::ALL,
+                    ..SelectionOptions::default()
+                },
+            ),
             (
                 "--isel",
                 "folds,hints",
@@ -1556,20 +1564,15 @@ mod tests {
                 all.covers.remove(Cover::X86MaskTest);
                 all
             }),
-            (
-                "--isel",
-                "trees,-covers,zero-test",
+            ("--isel", "trees,-covers,zero-test", {
+                let mut covers = CoverSet::NONE;
+                covers.insert(Cover::ZeroTest);
                 SelectionOptions {
                     trees: true,
-                    covers: [Cover::ZeroTest]
-                        .into_iter()
-                        .fold(CoverSet::NONE, |mut set, c| {
-                            set.insert(c);
-                            set
-                        }),
+                    covers,
                     ..SelectionOptions::default()
-                },
-            ),
+                }
+            }),
             ("--isel-tier", "baseline", SelectionOptions::default()),
             ("--isel-tier", "trees", SelectionTier::Trees.options()),
             ("--isel-tier", "full", SelectionOptions::ALL),

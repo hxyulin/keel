@@ -26,16 +26,20 @@
 .Lmain_block1:
 	# v3 = iconst.i64 10
 	# v4 = icmp.ult v2, v3
-	# brif v4, block2, block3(v1, v1)
 	cmp	r8, 10
-	jb	".Lmain_block2"
+	setb	r9b
+	# brif v4, block2, block3(v1, v1)
+	test	r9b, r9b
+	jne	".Lmain_block2"
 	mov	r8, rdi
 .Lmain_block3:
 	# v15 = iconst.i64 10
 	# v16 = icmp.ult v13, v15
-	# brif v16, block4, block5
 	cmp	rdi, 10
-	jb	".Lmain_block4"
+	setb	r9b
+	# brif v16, block4, block5
+	test	r9b, r9b
+	jne	".Lmain_block4"
 .Lmain_block5:
 	# v25 = iconst.i32 0
 	xor	esi, esi

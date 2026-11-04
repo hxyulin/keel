@@ -380,9 +380,11 @@
 .Linvariant_block1:
 	# v9 = iconst.i64 0
 	# v10 = icmp.eq v7, v9
-	# brif v10, block3, block2
 	cmp	rdi, 0
-	je	".Linvariant_block3"
+	sete	bl
+	# brif v10, block3, block2
+	test	bl, bl
+	jne	".Linvariant_block3"
 .Linvariant_block2:
 	# v11 = iadd v8, v3
 	add	r9, r8

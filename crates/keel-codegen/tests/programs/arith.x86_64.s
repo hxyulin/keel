@@ -665,9 +665,11 @@
 .Lswap_loop_block1:
 	# v6 = iconst.i64 0
 	# v7 = icmp.eq v5, v6
-	# brif v7, block3, block2
 	cmp	r8, 0
-	je	".Lswap_loop_block3"
+	sete	r9b
+	# brif v7, block3, block2
+	test	r9b, r9b
+	jne	".Lswap_loop_block3"
 .Lswap_loop_block2:
 	# v8 = iconst.i64 1
 	# v9 = isub v5, v8
@@ -708,9 +710,11 @@
 	mov	rdi, r11
 .Lmax64_block0:
 	# v2 = icmp.sgt v0, v1
-	# brif v2, block1(v0), block1(v1)
 	cmp	rsi, rdi
-	jg	".Lmax64_block1"
+	setg	r8b
+	# brif v2, block1(v0), block1(v1)
+	test	r8b, r8b
+	jne	".Lmax64_block1"
 	mov	rsi, rdi
 .Lmax64_block1:
 	# return v3

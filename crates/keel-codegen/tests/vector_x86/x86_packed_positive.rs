@@ -53,11 +53,7 @@ fn loads(text: &str) -> usize {
 }
 #[test]
 fn exact_commuted_and_rejections_all_configurations() {
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
                 for src in [
@@ -238,11 +234,7 @@ fn native(name: &str, text: String, object: Vec<u8>, c: &str) {
 #[test]
 fn export_linux_oracles() {
     let (ir, c) = fixture();
-    for sel in [
-        SelectionTier::Baseline,
-        SelectionTier::Trees,
-        SelectionTier::Full,
-    ] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for (pool, pools) in [
                 ("normal", &keel_codegen::x86_64::REGISTERS),

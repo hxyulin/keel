@@ -4,7 +4,7 @@
 	.p2align	2
 _k_sum:
 Lk_sum_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v4=x10 v5=x11 v6=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x10 v5=x11 v6=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -16,9 +16,11 @@ Lk_sum_begin:
 Lk_sum_block0:
 	; v2 = iconst.i64 0
 	; v3 = icmp.eq v0, v2
-	; brif v3, block1, block2
 	cmp	x9, #0
-	b.eq	Lk_sum_block1
+	cset	w11, eq
+	; brif v3, block1, block2
+	tst	w11, #255
+	b.ne	Lk_sum_block1
 Lk_sum_block2:
 	; v4 = iadd v1, v0
 	add	x10, x10, x9
@@ -42,7 +44,7 @@ Lk_sum_end:
 	.p2align	2
 _k_even:
 Lk_even_begin:
-	; regalloc: v0=x9 v1=x10 v3=x9 v4=x10 v5=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x9 v4=x10 v5=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -53,9 +55,11 @@ Lk_even_begin:
 Lk_even_block0:
 	; v1 = iconst.i64 0
 	; v2 = icmp.eq v0, v1
-	; brif v2, block1, block2
 	cmp	x9, #0
-	b.eq	Lk_even_block1
+	cset	w10, eq
+	; brif v2, block1, block2
+	tst	w10, #255
+	b.ne	Lk_even_block1
 Lk_even_block2:
 	; v4 = iconst.i64 1
 	; v5 = isub v0, v4
@@ -78,7 +82,7 @@ Lk_even_end:
 	.p2align	2
 _k_odd:
 Lk_odd_begin:
-	; regalloc: v0=x9 v1=x10 v3=x9 v4=x10 v5=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x9 v4=x10 v5=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -89,9 +93,11 @@ Lk_odd_begin:
 Lk_odd_block0:
 	; v1 = iconst.i64 0
 	; v2 = icmp.eq v0, v1
-	; brif v2, block1, block2
 	cmp	x9, #0
-	b.eq	Lk_odd_block1
+	cset	w10, eq
+	; brif v2, block1, block2
+	tst	w10, #255
+	b.ne	Lk_odd_block1
 Lk_odd_block2:
 	; v4 = iconst.i64 1
 	; v5 = isub v0, v4
@@ -114,7 +120,7 @@ Lk_odd_end:
 	.p2align	2
 _k_indirect:
 Lk_indirect_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v4=x9 v5=x11 v6=x10
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x9 v5=x11 v6=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -126,9 +132,11 @@ Lk_indirect_begin:
 Lk_indirect_block0:
 	; v2 = iconst.i64 0
 	; v3 = icmp.eq v1, v2
-	; brif v3, block1, block2
 	cmp	x10, #0
-	b.eq	Lk_indirect_block1
+	cset	w11, eq
+	; brif v3, block1, block2
+	tst	w11, #255
+	b.ne	Lk_indirect_block1
 Lk_indirect_block2:
 	; v5 = iconst.i64 1
 	; v6 = isub v1, v5

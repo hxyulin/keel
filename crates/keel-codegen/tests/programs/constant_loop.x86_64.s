@@ -25,9 +25,11 @@
 	mov	r8, rdi
 .Lconstant_loop_block1:
 	# v6 = icmp.ult v3, v0
-	# brif v6, block2, block3(v4)
 	cmp	rdi, rsi
-	jb	".Lconstant_loop_block2"
+	setb	bl
+	# brif v6, block2, block3(v4)
+	test	bl, bl
+	jne	".Lconstant_loop_block2"
 	mov	rsi, r8
 .Lconstant_loop_block3:
 	# return v11

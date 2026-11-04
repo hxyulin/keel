@@ -294,7 +294,7 @@ Lnarrow_end:
 	.p2align	2
 _machine:
 Lmachine_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x12 v6=x13 v7=x10 v8=x10 v9=x11 v10=x11 v11=x10 v12=x11 v13=x12 v14=x10 v15=x12 v16=x10 v17=x11 v18=x11 v19=x12 v20=x9 v21=x10 v22=x9 v23=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x12 v5=x13 v6=x13 v7=x10 v8=x10 v9=x11 v10=x11 v11=x10 v12=x11 v13=x12 v14=x10 v15=x12 v16=x10 v17=x11 v18=x11 v19=x12 v20=x9 v21=x10 v22=x9 v23=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -310,9 +310,11 @@ Lmachine_block0:
 	mov	x12, x10
 Lmachine_block1:
 	; v5 = icmp.ult v2, v0
-	; brif v5, block2, block7(v4)
 	cmp	x10, x9
-	b.lo	Lmachine_block2
+	cset	w13, lo
+	; brif v5, block2, block7(v4)
+	tst	w13, #255
+	b.ne	Lmachine_block2
 	mov	x9, x12
 	b	Lmachine_block7
 Lmachine_block2:

@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x19 v1=x20 v2=x9 v3=x9 v4=x9 v5=x9 v6=x9 v7=x9 v8=x9 v9=x10 v10=x20 v11=x10 v12=x9 v13=x10 v15=x10 v16=x19 v17=x21 v18=x22 v19=x9 v20=x9 v21=x23 v22=x24 v23=x9 v24=x25 v26=x10 v27=x19 v28=x9 v29=x9 v30=x10 v32=x10 v33=x9 v34=x10 v35=x11 v37=x12 v38=x19 v39=x9 v41=x10 v42=x19 v43=x9 v44=x10 v45=x9 v47=x10 v48=x19 v49=x23 v50=x24 v51=x9 v53=x10 v54=x19 v55=x9 v56=x10 v57=x9 v59=x10 v60=x9 v61=x10 v62=x11 v63=x10 v64=x11 v65=x12 v66=x10 v67=x10 v69=x11 v70=x19 v71=x9 v72=x10 v74=x10 v75=x9 v76=x10 v77=x11 v78=x11 v79=x11 v80=x12 v82=x12 v83=x9 v84=x11 v85=x10 v86=x10 v87=x10 v88=x11 v90=x11 v91=x19 v92=x25 v93=x9 v94=x10 v95=x9 v97=x10 v98=x19 v99=x9 v100=x9 v102=x10 v103=x19 v104=x9 v105=x9 v106=x10 v108=x10 v109=x19 v110=x9 v111=x10 v113=x10 v114=x9
+	; regalloc: v0=x19 v1=x20 v2=x9 v3=x9 v4=x9 v5=x9 v6=x9 v7=x9 v8=x9 v9=x10 v10=x20 v11=x10 v12=x9 v13=x21 v14=x9 v15=x10 v16=x19 v17=x22 v18=x23 v19=x9 v20=x9 v21=x24 v22=x25 v23=x9 v24=x26 v25=x9 v26=x10 v27=x19 v28=x9 v29=x9 v30=x10 v31=x9 v32=x10 v33=x9 v34=x10 v35=x11 v36=x11 v37=x12 v38=x19 v39=x9 v40=x9 v41=x10 v42=x19 v43=x9 v44=x10 v45=x9 v46=x9 v47=x10 v48=x19 v49=x24 v50=x25 v51=x9 v52=x9 v53=x10 v54=x19 v55=x9 v56=x10 v57=x9 v58=x9 v59=x10 v60=x9 v61=x10 v62=x11 v63=x10 v64=x11 v65=x12 v66=x10 v67=x10 v68=x10 v69=x11 v70=x19 v71=x9 v72=x10 v73=x9 v74=x10 v75=x9 v76=x10 v77=x11 v78=x11 v79=x11 v80=x12 v81=x11 v82=x12 v83=x9 v84=x11 v85=x10 v86=x10 v87=x10 v88=x11 v89=x10 v90=x11 v91=x19 v92=x26 v93=x9 v94=x10 v95=x9 v96=x9 v97=x10 v98=x19 v99=x9 v100=x9 v101=x9 v102=x10 v103=x19 v104=x9 v105=x9 v106=x10 v107=x9 v108=x10 v109=x19 v110=x9 v111=x10 v112=x9 v113=x10 v114=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -20,8 +20,9 @@ Lmain_begin:
 	stp	x23, x24, [sp, #-16]!
 	.cfi_offset x23, -64
 	.cfi_offset x24, -56
-	str	x25, [sp, #-16]!
+	stp	x25, x26, [sp, #-16]!
 	.cfi_offset x25, -80
+	.cfi_offset x26, -72
 Lmain_block0:
 	; v0 = iconst.i32 0
 	movz	x19, #0x0
@@ -64,50 +65,56 @@ Lmain_block0:
 	mov	x9, x0
 	; v13 = iconst.i64 42
 	; v14 = icmp.ne v12, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v15 = iconst.i32 3
 	movz	x10, #0x3
 	; v16 = select v14, v15, v0
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v17 = symbol_addr @ops
-	adrp	x21, _ops@PAGE
-	add	x21, x21, _ops@PAGEOFF
+	adrp	x22, _ops@PAGE
+	add	x22, x22, _ops@PAGEOFF
 	; v18 = iconst.i64 8
-	movz	x22, #0x8
+	movz	x23, #0x8
 	; v19 = ptradd v17, v18
-	add	x9, x21, #8
+	add	x9, x22, #8
 	; v20 = load.ptr v19
 	ldr	x9, [x9]
 	; v21 = iconst.i64 10
-	movz	x23, #0xa
+	movz	x24, #0xa
 	; v22 = iconst.i64 3
-	movz	x24, #0x3
+	movz	x25, #0x3
 	; v23 = call_indirect v20(v21, v22) : (i64, i64) -> i64 cc(c)
-	mov	x0, x23
-	mov	x1, x24
+	mov	x0, x24
+	mov	x1, x25
 	blr	x9
 	mov	x9, x0
 	; v24 = iconst.i64 7
-	movz	x25, #0x7
+	movz	x26, #0x7
 	; v25 = icmp.ne v23, v24
+	cmp	x9, #7
+	cset	w9, ne
 	; v26 = iconst.i32 4
 	movz	x10, #0x4
 	; v27 = select v25, v26, v16
-	cmp	x9, #7
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v28 = load.ptr v17
-	ldr	x9, [x21]
+	ldr	x9, [x22]
 	; v29 = call_indirect v28(v21, v22) : (i64, i64) -> i64 cc(c)
-	mov	x0, x23
-	mov	x1, x24
+	mov	x0, x24
+	mov	x1, x25
 	blr	x9
 	mov	x9, x0
 	; v30 = iconst.i64 13
 	; v31 = icmp.ne v29, v30
+	cmp	x9, #13
+	cset	w9, ne
 	; v32 = iconst.i32 5
 	movz	x10, #0x5
 	; v33 = select v31, v32, v27
-	cmp	x9, #13
+	tst	w9, #255
 	csel	w9, w10, w19, ne
 	; v34 = symbol_addr @c_counter
 	adrp	x10, _c_counter@GOTPAGE
@@ -115,21 +122,25 @@ Lmain_block0:
 	; v35 = load.i64 v34
 	ldr	x11, [x10]
 	; v36 = icmp.ne v35, v24
+	cmp	x11, #7
+	cset	w11, ne
 	; v37 = iconst.i32 6
 	movz	x12, #0x6
 	; v38 = select v36, v37, v33
-	cmp	x11, #7
+	tst	w11, #255
 	csel	w19, w12, w9, ne
 	; store v18, v34
-	str	x22, [x10]
+	str	x23, [x10]
 	; v39 = call @c_read_c_counter()
 	bl	_c_read_c_counter
 	mov	x9, x0
 	; v40 = icmp.ne v39, v18
+	cmp	x9, #8
+	cset	w9, ne
 	; v41 = iconst.i32 7
 	movz	x10, #0x7
 	; v42 = select v40, v41, v38
-	cmp	x9, #8
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v43 = symbol_addr @c_double
 	adrp	x9, _c_double@GOTPAGE
@@ -141,27 +152,31 @@ Lmain_block0:
 	blr	x9
 	mov	x9, x0
 	; v46 = icmp.ne v45, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v47 = iconst.i32 8
 	movz	x10, #0x8
 	; v48 = select v46, v47, v42
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v49 = symbol_addr @add
-	adrp	x23, _add@PAGE
-	add	x23, x23, _add@PAGEOFF
+	adrp	x24, _add@PAGE
+	add	x24, x24, _add@PAGEOFF
 	; v50 = iconst.i64 40
-	movz	x24, #0x28
+	movz	x25, #0x28
 	; v51 = call @c_apply(v49, v50, v10)
-	mov	x0, x23
-	mov	x1, x24
+	mov	x0, x24
+	mov	x1, x25
 	mov	x2, x20
 	bl	_c_apply
 	mov	x9, x0
 	; v52 = icmp.ne v51, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v53 = iconst.i32 9
 	movz	x10, #0x9
 	; v54 = select v52, v53, v48
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v55 = call @c_get_mul()
 	bl	_c_get_mul
@@ -170,14 +185,16 @@ Lmain_block0:
 	movz	x10, #0x6
 	; v57 = call_indirect v55(v56, v24) : (i64, i64) -> i64 cc(c)
 	mov	x0, x10
-	mov	x1, x25
+	mov	x1, x26
 	blr	x9
 	mov	x9, x0
 	; v58 = icmp.ne v57, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v59 = iconst.i32 10
 	movz	x10, #0xa
 	; v60 = select v58, v59, v54
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w9, w10, w19, ne
 	; v61 = symbol_addr @scratch
 	adrp	x10, _scratch@PAGE
@@ -196,20 +213,24 @@ Lmain_block0:
 	; v67 = iadd v64, v66
 	add	x10, x11, x10
 	; v68 = icmp.ne v67, v65
+	cmp	x10, #99
+	cset	w10, ne
 	; v69 = iconst.i32 11
 	movz	x11, #0xb
 	; v70 = select v68, v69, v60
-	cmp	x10, #99
+	tst	w10, #255
 	csel	w19, w11, w9, ne
 	; v71 = call @c_check_mixed()
 	bl	_c_check_mixed
 	mov	x9, x0
 	; v72 = iconst.i32 1
 	; v73 = icmp.ne v71, v72
+	cmp	w9, #1
+	cset	w9, ne
 	; v74 = iconst.i32 12
 	movz	x10, #0xc
 	; v75 = select v73, v74, v70
-	cmp	w9, #1
+	tst	w9, #255
 	csel	w9, w10, w19, ne
 	; v76 = symbol_addr @mixed
 	adrp	x10, _mixed@PAGE
@@ -222,10 +243,12 @@ Lmain_block0:
 	sxth	x11, w11
 	; v80 = iconst.i64 772
 	; v81 = icmp.ne v79, v80
+	cmp	x11, #772
+	cset	w11, ne
 	; v82 = iconst.i32 13
 	movz	x12, #0xd
 	; v83 = select v81, v82, v75
-	cmp	x11, #772
+	tst	w11, #255
 	csel	w9, w12, w9, ne
 	; v84 = iconst.i64 4
 	; v85 = ptradd v76, v84
@@ -236,43 +259,49 @@ Lmain_block0:
 	sxtw	x10, w10
 	; v88 = iconst.i64 -2
 	; v89 = icmp.ne v87, v88
+	cmn	x10, #2
+	cset	w10, ne
 	; v90 = iconst.i32 14
 	movz	x11, #0xe
 	; v91 = select v89, v90, v83
-	cmn	x10, #2
+	tst	w10, #255
 	csel	w19, w11, w9, ne
 	; v92 = symbol_addr @fp
-	adrp	x25, _fp@PAGE
-	add	x25, x25, _fp@PAGEOFF
+	adrp	x26, _fp@PAGE
+	add	x26, x26, _fp@PAGEOFF
 	; v93 = load.ptr v92
-	ldr	x9, [x25]
+	ldr	x9, [x26]
 	; v94 = iconst.i64 50
 	movz	x10, #0x32
 	; v95 = call_indirect v93(v94, v18) : (i64, i64) -> i64 cc(c)
 	mov	x0, x10
-	mov	x1, x22
+	mov	x1, x23
 	blr	x9
 	mov	x9, x0
 	; v96 = icmp.ne v95, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v97 = iconst.i32 15
 	movz	x10, #0xf
 	; v98 = select v96, v97, v91
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; store v49, v92
-	str	x23, [x25]
+	str	x24, [x26]
 	; v99 = load.ptr v92
-	ldr	x9, [x25]
+	ldr	x9, [x26]
 	; v100 = call_indirect v99(v50, v10) : (i64, i64) -> i64 cc(c)
-	mov	x0, x24
+	mov	x0, x25
 	mov	x1, x20
 	blr	x9
 	mov	x9, x0
 	; v101 = icmp.ne v100, v13
+	cmp	x9, #42
+	cset	w9, ne
 	; v102 = iconst.i32 16
 	movz	x10, #0x10
 	; v103 = select v101, v102, v98
-	cmp	x9, #42
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v104 = symbol_addr @bump
 	adrp	x9, _bump@PAGE
@@ -284,26 +313,30 @@ Lmain_block0:
 	mov	x9, x0
 	; v106 = iconst.i64 43
 	; v107 = icmp.ne v105, v106
+	cmp	x9, #43
+	cset	w9, ne
 	; v108 = iconst.i32 17
 	movz	x10, #0x11
 	; v109 = select v107, v108, v103
-	cmp	x9, #43
+	tst	w9, #255
 	csel	w19, w10, w19, ne
 	; v110 = call @chain(v17)
-	mov	x0, x21
+	mov	x0, x22
 	bl	_chain
 	mov	x9, x0
 	; v111 = iconst.i64 18
 	; v112 = icmp.ne v110, v111
+	cmp	x9, #18
+	cset	w9, ne
 	; v113 = iconst.i32 18
 	movz	x10, #0x12
 	; v114 = select v112, v113, v109
-	cmp	x9, #18
+	tst	w9, #255
 	csel	w9, w10, w19, ne
 	; return v114
 	mov	x0, x9
 	sub	sp, x29, #64
-	ldr	x25, [sp], #16
+	ldp	x25, x26, [sp], #16
 	ldp	x23, x24, [sp], #16
 	ldp	x21, x22, [sp], #16
 	ldp	x19, x20, [sp], #16

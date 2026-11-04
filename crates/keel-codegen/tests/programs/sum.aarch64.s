@@ -4,7 +4,7 @@
 	.p2align	2
 _sum:
 Lsum_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x12 v6=x13 v7=x13 v8=x13 v9=x13 v10=x13 v11=x12 v12=x13 v13=x11 v14=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x12 v5=x13 v6=x13 v7=x13 v8=x13 v9=x13 v10=x13 v11=x12 v12=x13 v13=x11 v14=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -20,9 +20,11 @@ Lsum_block0:
 	mov	x12, x11
 Lsum_block1:
 	; v5 = icmp.ult v3, v1
-	; brif v5, block2, block3(v4)
 	cmp	x11, x10
-	b.lo	Lsum_block2
+	cset	w13, lo
+	; brif v5, block2, block3(v4)
+	tst	w13, #255
+	b.ne	Lsum_block2
 	mov	x9, x12
 Lsum_block3:
 	; return v14

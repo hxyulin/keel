@@ -120,7 +120,7 @@ fn exact_replicates_and_conservative_rejections() {
     );
     let shared = parse(&simple.replace(" store v3,v1", " store v2,v1\n store v3,v1"));
     let barrier = parse(&simple.replace(" v3 = vsplat", " store v1,v1\n v3 = vsplat"));
-    for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+    for selection in [SelectionTier::Trees, SelectionTier::Full] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for spilled in [false, true] {
                 let (text, _) = compile_module(&module, selection, allocation, spilled);

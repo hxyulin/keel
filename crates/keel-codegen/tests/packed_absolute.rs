@@ -242,11 +242,7 @@ fn controlled_aliases_and_spills() {
     let (ir, c) = fixture(true);
     for arm in [true, false] {
         let oracle = Oracle::new(arm, "controlled", &c);
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             let (text, obj) = compile(arm, &ir, sel, &Controlled, false);
             assert_eq!(abs_recipes(&text, arm), 10, "{text}");
             oracle.check(&format!("controlled-{sel:?}"), &text, &obj);
@@ -258,11 +254,7 @@ fn live_sources_full_fast_and_all_spills() {
     let (ir, c) = fixture(false);
     for arm in [true, false] {
         let oracle = Oracle::new(arm, "live", &c);
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for spill in [false, true] {
                     let (text, obj) = compile(arm, &ir, sel, &alloc, spill);

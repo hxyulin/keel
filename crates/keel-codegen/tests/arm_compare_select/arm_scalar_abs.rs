@@ -44,7 +44,7 @@ fn compile(src: &str, sel: SelectionTier, alloc: AllocationTier, spill: bool) ->
 }
 #[test]
 fn exact_shapes_and_shared_negatives() {
-    for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+    for sel in [SelectionTier::Trees, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for spill in [false, true] {
                 let text = compile(&source(), sel, alloc, spill).0;

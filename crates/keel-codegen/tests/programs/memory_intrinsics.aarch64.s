@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x9 v7=x9 v8=x9 v9=x10 v11=x11 v12=x9 v13=x10 v14=x19 v16=x11 v17=x25 v18=x9 v19=x9 v21=x10 v22=x19 v23=x9 v24=x9 v25=x9 v26=x9 v27=x10 v28=x9 v29=x10 v31=x11 v32=x9 v33=x10 v34=x11 v36=x12 v37=x9 v38=x10 v39=x12 v40=x12 v42=x13 v43=x9 v44=x10 v45=x10 v46=x10 v48=x12 v49=x9
+	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x9 v7=x9 v8=x9 v9=x10 v10=x9 v11=x10 v12=x9 v13=x10 v14=x19 v15=x10 v16=x11 v17=x25 v18=x9 v19=x9 v20=x9 v21=x10 v22=x19 v23=x9 v24=x9 v25=x9 v26=x9 v27=x10 v28=x9 v29=x10 v30=x9 v31=x10 v32=x9 v33=x10 v34=x11 v35=x10 v36=x12 v37=x9 v38=x10 v39=x12 v40=x12 v41=x12 v42=x13 v43=x9 v44=x10 v45=x10 v46=x10 v47=x10 v48=x11 v49=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -58,11 +58,13 @@ Lmain_block0:
 	movk	x10, #0x101, lsl #32
 	movk	x10, #0x101, lsl #48
 	; v10 = icmp.ne v8, v9
-	; v11 = iconst.i32 1
-	movz	x11, #0x1
-	; v12 = select v10, v11, v0
 	cmp	x9, x10
-	csel	w9, w11, w19, ne
+	cset	w9, ne
+	; v11 = iconst.i32 1
+	movz	x10, #0x1
+	; v12 = select v10, v11, v0
+	tst	w9, #255
+	csel	w9, w10, w19, ne
 	; v13 = load.i64 v4
 	ldr	x10, [x23]
 	; v14 = iconst.i64 506381209866536711
@@ -71,10 +73,12 @@ Lmain_block0:
 	movk	x19, #0x707, lsl #32
 	movk	x19, #0x707, lsl #48
 	; v15 = icmp.ne v13, v14
+	cmp	x10, x19
+	cset	w10, ne
 	; v16 = iconst.i32 2
 	movz	x11, #0x2
 	; v17 = select v15, v16, v12
-	cmp	x10, x19
+	tst	w10, #255
 	csel	w25, w11, w9, ne
 	; intrinsic memcpy(v2, v1, v5)
 	mov	x0, x21
@@ -86,10 +90,12 @@ Lmain_block0:
 	; v19 = load.i64 v18
 	ldr	x9, [x9]
 	; v20 = icmp.ne v19, v14
+	cmp	x9, x19
+	cset	w9, ne
 	; v21 = iconst.i32 3
 	movz	x10, #0x3
 	; v22 = select v20, v21, v17
-	cmp	x9, x19
+	tst	w9, #255
 	csel	w19, w10, w25, ne
 	; v23 = iconst.i64 506097522914230528
 	movz	x9, #0x100
@@ -122,11 +128,13 @@ Lmain_block0:
 	movk	x10, #0x403, lsl #32
 	movk	x10, #0x605, lsl #48
 	; v30 = icmp.ne v28, v29
-	; v31 = iconst.i32 4
-	movz	x11, #0x4
-	; v32 = select v30, v31, v22
 	cmp	x9, x10
-	csel	w9, w11, w19, ne
+	cset	w9, ne
+	; v31 = iconst.i32 4
+	movz	x10, #0x4
+	; v32 = select v30, v31, v22
+	tst	w9, #255
+	csel	w9, w10, w19, ne
 	; v33 = load.i64 v4
 	ldr	x10, [x23]
 	; v34 = iconst.i64 1012478732780767239
@@ -135,10 +143,12 @@ Lmain_block0:
 	movk	x11, #0xc0b, lsl #32
 	movk	x11, #0xe0d, lsl #48
 	; v35 = icmp.ne v33, v34
+	cmp	x10, x11
+	cset	w10, ne
 	; v36 = iconst.i32 5
 	movz	x12, #0x5
 	; v37 = select v35, v36, v32
-	cmp	x10, x11
+	tst	w10, #255
 	csel	w9, w12, w9, ne
 	; v38 = ptrtoint.i64 v1
 	mov	x10, x20
@@ -147,10 +157,12 @@ Lmain_block0:
 	; v40 = isub v39, v38
 	sub	x12, x12, x10
 	; v41 = icmp.ne v40, v3
+	cmp	x12, #8
+	cset	w12, ne
 	; v42 = iconst.i32 6
 	movz	x13, #0x6
 	; v43 = select v41, v42, v37
-	cmp	x12, #8
+	tst	w12, #255
 	csel	w9, w13, w9, ne
 	; v44 = iadd v38, v3
 	add	x10, x10, #8
@@ -158,11 +170,13 @@ Lmain_block0:
 	; v46 = load.i64 v45
 	ldr	x10, [x10]
 	; v47 = icmp.ne v46, v34
-	; v48 = iconst.i32 7
-	movz	x12, #0x7
-	; v49 = select v47, v48, v43
 	cmp	x10, x11
-	csel	w9, w12, w9, ne
+	cset	w10, ne
+	; v48 = iconst.i32 7
+	movz	x11, #0x7
+	; v49 = select v47, v48, v43
+	tst	w10, #255
+	csel	w9, w11, w9, ne
 	; return v49
 	mov	x0, x9
 	sub	sp, x29, #64

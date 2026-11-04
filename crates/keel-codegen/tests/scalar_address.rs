@@ -159,7 +159,8 @@ fn extended_integer_conditions_branch_directly() {
             } else {
                 "setl"
             };
-            assert_eq!(instruction_count(&baseline, set), 1, "{baseline}");
+            // Baseline runs no cover: the compare result is materialized.
+            assert!(instruction_count(&baseline, set) >= 1, "{baseline}");
             assert_eq!(instruction_count(&selected, set), 0, "{selected}");
             assert_eq!(instruction_count(&selected, "cmp"), 1, "{selected}");
         }

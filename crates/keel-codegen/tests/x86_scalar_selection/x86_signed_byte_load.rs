@@ -48,7 +48,7 @@ fn fused(text: &str) -> usize {
 fn exact_shape_and_negative_gates() {
     for level in [CpuLevel::V1, CpuLevel::V2, CpuLevel::V3] {
         for (sel, alloc, pools) in crate::codegen::matrix(
-            &crate::codegen::SELECTIONS,
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY],
         ) {
             let features = Features::for_level(level);
@@ -223,11 +223,7 @@ for(unsigned k=0;k<32;k++)if(output[k]!=0xa5)return 18;
         (CpuLevel::V2, "v2", &["sse4.2"]),
         (CpuLevel::V3, "v3", &["avx2"]),
     ] {
-        for sel in [
-            SelectionTier::Baseline,
-            SelectionTier::Trees,
-            SelectionTier::Full,
-        ] {
+        for sel in [SelectionTier::Trees, SelectionTier::Full] {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for (pool, pools) in [
                     ("normal", &keel_codegen::x86_64::REGISTERS),
@@ -342,7 +338,13 @@ fn debug_locations_and_constraints_remain_boundaries() {
                 f.set_inst_loc(i, Some(loc));
             }
         }
-        let text = keel_codegen::x86_64::compile(&m).unwrap();
+        let p = CodegenPipeline {
+            selector: &SelectionTier::Trees,
+            allocator: &AllocationTier::Full,
+        };
+        let text =
+            keel_codegen::x86_64::compile_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &p)
+                .unwrap();
         assert_eq!(fused(&text), usize::from(boundary == 0), "{text}");
     }
 }
@@ -369,7 +371,7 @@ fn symbolic_stack_address_and_resolved_input_alias() {
     ];
     for src in sources {
         for (sel, alloc, pools) in crate::codegen::matrix(
-            &crate::codegen::SELECTIONS,
+            &[SelectionTier::Trees, SelectionTier::Full],
             &[&keel_codegen::x86_64::REGISTERS, &EMPTY],
         ) {
             assert_eq!(
@@ -388,7 +390,14 @@ fn symbolic_stack_address_and_resolved_input_alias() {
     let is: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
     f.replace_all_uses(f.first_result(is[1]), f.first_result(is[0]));
     // The alias itself has no uses, and the conversion still resolves to the load.
-    assert_eq!(fused(&keel_codegen::x86_64::compile(&m).unwrap()), 1);
+    let p = CodegenPipeline {
+        selector: &SelectionTier::Trees,
+        allocator: &AllocationTier::Full,
+    };
+    let text =
+        keel_codegen::x86_64::compile_with_pipeline(&m, &keel_codegen::x86_64::REGISTERS, &p)
+            .unwrap();
+    assert_eq!(fused(&text), 1);
 }
 
 #[test]

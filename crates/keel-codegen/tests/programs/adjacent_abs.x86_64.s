@@ -28,9 +28,11 @@
 	# jump block1
 .Lrk_adjacent_block1:
 	# v6 = icmp.ugt v3, v5
-	# brif v6, block2(v5, v4), block3(v4)
 	cmp	rdi, 1
-	jbe	".Lrk_adjacent_inst4_else"
+	seta	bl
+	# brif v6, block2(v5, v4), block3(v4)
+	test	bl, bl
+	je	".Lrk_adjacent_inst4_else"
 	mov	r11, r8
 	mov	r8, r9
 	mov	r9, r11
@@ -68,9 +70,11 @@
 	mov	rbx, rax
 	# v21 = iconst.i64 0
 	# v22 = icmp.slt v20, v21
-	# brif v22, block4, block5(v20)
 	cmp	rbx, 0
-	jge	".Lrk_adjacent_block5"
+	setl	r12b
+	# brif v22, block4, block5(v20)
+	test	r12b, r12b
+	je	".Lrk_adjacent_block5"
 .Lrk_adjacent_block4:
 	# v24 = ineg v20
 	neg	rbx
@@ -82,9 +86,11 @@
 	# v28 = iadd v7, v27
 	add	r8, 1
 	# v29 = icmp.ugt v3, v28
-	# brif v29, block2(v28, v26), block3(v26)
 	cmp	rdi, r8
-	ja	".Lrk_adjacent_block2"
+	seta	bl
+	# brif v29, block2(v28, v26), block3(v26)
+	test	bl, bl
+	jne	".Lrk_adjacent_block2"
 	mov	rsi, r9
 .Lrk_adjacent_block3:
 	# return v23

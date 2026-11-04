@@ -17,9 +17,11 @@
 .Lk_sum_block0:
 	# v2 = iconst.i64 0
 	# v3 = icmp.eq v0, v2
-	# brif v3, block1, block2
 	cmp	rsi, 0
-	je	".Lk_sum_block1"
+	sete	r8b
+	# brif v3, block1, block2
+	test	r8b, r8b
+	jne	".Lk_sum_block1"
 .Lk_sum_block2:
 	# v4 = iadd v1, v0
 	add	rdi, rsi
@@ -58,9 +60,11 @@
 .Lk_even_block0:
 	# v1 = iconst.i64 0
 	# v2 = icmp.eq v0, v1
-	# brif v2, block1, block2
 	cmp	rsi, 0
-	je	".Lk_even_block1"
+	sete	dil
+	# brif v2, block1, block2
+	test	dil, dil
+	jne	".Lk_even_block1"
 .Lk_even_block2:
 	# v4 = iconst.i64 1
 	# v5 = isub v0, v4
@@ -97,9 +101,11 @@
 .Lk_odd_block0:
 	# v1 = iconst.i64 0
 	# v2 = icmp.eq v0, v1
-	# brif v2, block1, block2
 	cmp	rsi, 0
-	je	".Lk_odd_block1"
+	sete	dil
+	# brif v2, block1, block2
+	test	dil, dil
+	jne	".Lk_odd_block1"
 .Lk_odd_block2:
 	# v4 = iconst.i64 1
 	# v5 = isub v0, v4
@@ -138,9 +144,11 @@
 .Lk_indirect_block0:
 	# v2 = iconst.i64 0
 	# v3 = icmp.eq v1, v2
-	# brif v3, block1, block2
 	cmp	rdi, 0
-	je	".Lk_indirect_block1"
+	sete	r8b
+	# brif v3, block1, block2
+	test	r8b, r8b
+	jne	".Lk_indirect_block1"
 .Lk_indirect_block2:
 	# v5 = iconst.i64 1
 	# v6 = isub v1, v5
