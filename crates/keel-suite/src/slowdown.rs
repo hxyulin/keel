@@ -1,16 +1,6 @@
 //! Conservative runtime comparisons between separately collected Keel revisions.
-use crate::run::{BenchStat, IDENTICAL_CONTROL, Results, paired_ratio};
+use crate::run::{BenchStat, IDENTICAL_CONTROL, Results, median, paired_ratio};
 use anyhow::{Result, bail};
-
-fn median(values: &mut [f64]) -> f64 {
-    values.sort_by(f64::total_cmp);
-    let n = values.len();
-    if n.is_multiple_of(2) {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
-    } else {
-        values[n / 2]
-    }
-}
 
 /// Independent resampling: rounds from different runs are not paired.
 fn interval(a: &[f64], b: &[f64]) -> Option<[f64; 2]> {

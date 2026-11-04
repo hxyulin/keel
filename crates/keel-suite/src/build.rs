@@ -218,18 +218,9 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
     });
     progress.finish_and_clear();
     let times = times.with_context(|| format!("building {} with {}", suite.name, config.name))?;
-    let objects: Vec<String> = sources
-        .pre
-        .iter()
-        .enumerate()
-        .map(|(i, _)| path(&out.join(format!("unit-{i}.o"))))
-        .collect();
-    let mut argv = vec!["clang".to_string()];
-    argv.extend(objects);
-    argv.extend(["-o".into(), path(&bin)]);
-    argv.extend(suite.manifest.build.lib_flags());
+    let objects = (0..sources.pre.len()).map(|i| out.join(format!("unit-{i}.o")));
     let link_start = Instant::now();
-    run_checked(&argv, &out, None).with_context(|| format!("linking {}", suite.name))?;
+    link(suite, objects, &bin, &out)?;
     let link_ms = link_start.elapsed().as_secs_f64() * 1000.0;
 
     let sum = |f: fn(&(Duration, Duration)) -> Duration| -> f64 {
@@ -274,6 +265,21 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
         stat,
         cached: false,
     })
+}
+
+/// Links a suite's objects into `bin` with clang and the manifest's libraries.
+pub fn link(
+    suite: &Suite,
+    objects: impl IntoIterator<Item = PathBuf>,
+    bin: &Path,
+    dir: &Path,
+) -> Result<()> {
+    let mut argv = vec!["clang".to_string()];
+    argv.extend(objects.into_iter().map(|o| path(&o)));
+    argv.extend(["-o".into(), path(bin)]);
+    argv.extend(suite.manifest.build.lib_flags());
+    run_checked(&argv, dir, None).with_context(|| format!("linking {}", suite.name))?;
+    Ok(())
 }
 
 /// Compiles one translation unit to an object; gives the time of each
@@ -471,7 +477,7 @@ pub fn tail(output: &Output, n: usize) -> String {
 }
 
 /// The size of an executable's code, as `size` reports it.
-fn text_size(bin: &Path) -> Option<u64> {
+pub fn text_size(bin: &Path) -> Option<u64> {
     let flag = if cfg!(target_os = "macos") {
         "-m"
     } else {

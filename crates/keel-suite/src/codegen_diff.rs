@@ -3,6 +3,7 @@
 //! changed, with instruction and byte deltas from `keel asm-metrics`.
 
 use crate::build::{self, Env, InputMode};
+use crate::counters;
 use crate::manifest::{Compiler, Config, Configs, Suite};
 use crate::style::{Cell, Paint, bar, fail_mark, ok_mark, paint, print_table};
 use anyhow::{Context, Result, bail};
@@ -486,13 +487,10 @@ fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled
     ]);
     let output = build::run(&argv, &job.work.join(&build.dir), None)?;
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let retired = if !tools.icount {
-        None
-    } else if cfg!(target_os = "macos") {
-        retired_from_time(&stderr)
-    } else {
-        retired_from_perf(&stderr)
-    };
+    let retired = tools
+        .icount
+        .then(|| counters::parse(&stderr).get("instructions").copied())
+        .flatten();
     if !output.status.success() {
         return Ok(Compiled {
             text: None,
@@ -504,25 +502,6 @@ fn compile(tools: &Tools, keel: &Path, job: &Job, out: &Path) -> Result<Compiled
         text: Some(fs::read(out).with_context(|| out.display().to_string())?),
         error: None,
         retired,
-    })
-}
-
-/// Retired instructions from macOS `/usr/bin/time -l`.
-fn retired_from_time(stderr: &str) -> Option<u64> {
-    stderr.lines().find_map(|line| {
-        let count = line.trim().strip_suffix("instructions retired")?;
-        count.trim().parse().ok()
-    })
-}
-
-/// Retired instructions from Linux `perf stat -x ,`.
-fn retired_from_perf(stderr: &str) -> Option<u64> {
-    stderr.lines().find_map(|line| {
-        let fields: Vec<&str> = line.split(',').collect();
-        if fields.len() < 3 || !fields[2].starts_with("instructions") {
-            return None;
-        }
-        fields[0].trim().parse().ok()
     })
 }
 
@@ -1121,22 +1100,5 @@ _g:
             }
         );
         assert!(parse_metrics(br#"{"text_bytes":0}"#).is_err());
-    }
-
-    #[test]
-    fn parses_retired_instructions() {
-        let time = "        1.02 real         0.95 user         0.05 sys
-            12345678  maximum resident set size
-          4567890123  instructions retired
-          1234567890  cycles elapsed
-";
-        assert_eq!(retired_from_time(time), Some(4_567_890_123));
-        assert_eq!(retired_from_time("keel: error\n"), None);
-        let perf = "keel: warning: something\n987654321,,instructions:u,1000,100.00,,\n";
-        assert_eq!(retired_from_perf(perf), Some(987_654_321));
-        assert_eq!(
-            retired_from_perf("<not counted>,,instructions:u,0,0.00,,\n"),
-            None
-        );
     }
 }

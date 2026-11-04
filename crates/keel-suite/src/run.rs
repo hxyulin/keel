@@ -52,7 +52,6 @@ pub fn test(env: &Env, suites: &[&Suite], configs: &[Config], all: &Configs) -> 
             continue;
         };
         let sources = build::sources(env, suite)?;
-        let dir = sources.work.join(test.dir.as_deref().unwrap_or(""));
         let reference = match &test.compare {
             Some(name) => {
                 let config = all.get(name)?;
@@ -69,30 +68,17 @@ pub fn test(env: &Env, suites: &[&Suite], configs: &[Config], all: &Configs) -> 
             let result = build::build(env, suite, &sources, config).and_then(|built| {
                 built_line(config, &built, sources.pre.len());
                 start = Instant::now();
-                let vars = suite.vars(&sources.work, Some(&built.bin));
-                let stdin = test.stdin.as_deref().map(|s| vars.word(s)).transpose()?;
-                for (i, command) in test.run.iter().enumerate() {
-                    let argv = vars.expand(command)?;
-                    let progress = spinner(format!("{} {}: {command}", suite.name, config.name));
-                    let output = run(&argv, &dir, stdin.as_deref().map(Path::new));
-                    progress.finish_and_clear();
-                    let output = output?;
-                    if !output.status.success() {
-                        bail!("`{command}` {}{}", failure(&output), tail(&output, 20));
-                    }
-                    if let Some((name, bin)) = &reference {
-                        if expected[i].is_none() {
-                            let vars = suite.vars(&sources.work, Some(bin));
-                            let argv = vars.expand(command)?;
-                            expected[i] = Some(run(&argv, &dir, stdin.as_deref().map(Path::new))?);
-                        }
-                        let want = expected[i].as_ref().unwrap();
-                        if let Some(diff) = difference(want, &output) {
-                            bail!("`{command}` printed differently from {name}:\n{diff}");
-                        }
-                    }
-                }
-                Ok(())
+                let reference = reference
+                    .as_ref()
+                    .map(|(name, bin)| (name.as_str(), bin.as_path()));
+                run_tests(
+                    suite,
+                    &sources,
+                    &config.name,
+                    &built.bin,
+                    reference,
+                    &mut expected,
+                )
             });
             let elapsed = paint(duration(start.elapsed()), Paint::Dim);
             match result {
@@ -116,6 +102,47 @@ pub fn test(env: &Env, suites: &[&Suite], configs: &[Config], all: &Configs) -> 
     Ok(passed)
 }
 
+/// Runs the suite's test commands against `bin`. With a reference, each
+/// command must print what it printed for the reference, computed once into
+/// `expected`.
+pub fn run_tests(
+    suite: &Suite,
+    sources: &build::Sources,
+    label: &str,
+    bin: &Path,
+    reference: Option<(&str, &Path)>,
+    expected: &mut [Option<Output>],
+) -> Result<()> {
+    let Some(test) = &suite.manifest.test else {
+        return Ok(());
+    };
+    let dir = sources.work.join(test.dir.as_deref().unwrap_or(""));
+    let vars = suite.vars(&sources.work, Some(bin));
+    let stdin = test.stdin.as_deref().map(|s| vars.word(s)).transpose()?;
+    for (i, command) in test.run.iter().enumerate() {
+        let argv = vars.expand(command)?;
+        let progress = spinner(format!("{} {label}: {command}", suite.name));
+        let output = run(&argv, &dir, stdin.as_deref().map(Path::new));
+        progress.finish_and_clear();
+        let output = output?;
+        if !output.status.success() {
+            bail!("`{command}` {}{}", failure(&output), tail(&output, 20));
+        }
+        if let Some((name, reference)) = reference {
+            if expected[i].is_none() {
+                let vars = suite.vars(&sources.work, Some(reference));
+                let argv = vars.expand(command)?;
+                expected[i] = Some(run(&argv, &dir, stdin.as_deref().map(Path::new))?);
+            }
+            let want = expected[i].as_ref().unwrap();
+            if let Some(diff) = difference(want, &output) {
+                bail!("`{command}` printed differently from {name}:\n{diff}");
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `exit 1`, or the signal that killed the process.
 pub fn status(status: std::process::ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
@@ -128,7 +155,7 @@ pub fn status(status: std::process::ExitStatus) -> String {
 
 /// Why a command failed: its status, and the first line it printed to
 /// standard error.
-fn failure(output: &Output) -> String {
+pub fn failure(output: &Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     match stderr.lines().find(|l| !l.trim().is_empty()) {
         Some(line) => format!("failed ({}): {}", status(output.status), line.trim()),
@@ -145,7 +172,7 @@ fn plural(n: usize, word: &str) -> String {
 }
 
 /// The first line where two outputs differ, if they do.
-fn difference(want: &Output, got: &Output) -> Option<String> {
+pub fn difference(want: &Output, got: &Output) -> Option<String> {
     if want.status.code() != got.status.code() {
         return Some(format!(
             "    {} instead of {}",
@@ -481,7 +508,7 @@ fn workload_digest(
     Ok(digest_hex(hasher))
 }
 
-fn invocation(
+pub fn invocation(
     suite: &Suite,
     bench: &Bench,
     work: &Path,
@@ -512,7 +539,7 @@ fn round_order(active: &[usize], round: usize) -> Vec<usize> {
     order
 }
 
-fn median(values: &mut [f64]) -> f64 {
+pub fn median(values: &mut [f64]) -> f64 {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
     if values.len().is_multiple_of(2) {

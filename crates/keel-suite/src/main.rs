@@ -13,6 +13,7 @@
 mod build;
 mod checks;
 mod codegen_diff;
+mod counters;
 mod frontends;
 mod manifest;
 mod report;
