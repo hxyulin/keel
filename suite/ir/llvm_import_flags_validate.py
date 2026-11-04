@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Integer flag checks; invoke through suite/common/fast_opt_locked.py (no lock here).
+"""Integer no-wrap, exact, disjoint, samesign and nneg flags.
 
-Use a new private --out directory. Original LLVM and Clang output is consumed
-unchanged. See llvm_import_flags_fixtures/README.md for the refinement domain.
+A generated matrix wraps narrow flagged operations in i64 functions whose
+expected results come from the Python oracles below; poison results select a
+marker value instead. Clang output and a handwritten poison-dividend module are
+imported unchanged.
 """
-import argparse
-import hashlib
-import json
-from pathlib import Path
 import re
-import subprocess
-import sys
 
-ROOT = Path(__file__).resolve().parents[2]
-TOOL = ROOT / 'suite/ir/llvm_import.py'
+from harness import HEADER, ROOT, TIERS, keel_functions, llvm_functions, main, require
+
 FIXTURES = ROOT / 'suite/ir/llvm_import_flags_fixtures'
-HEADER = '''target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"
-target triple = "arm64-apple-macosx11.0.0"
-'''
+REJECTIONS = {
+    'i1-arithmetic': 'define void @f() { %v = add nsw i1 true, false\nret void }',
+    'i1-ordered': 'define void @f(i64 %x) { %a = trunc i64 %x to i1\n%v = icmp samesign slt i1 %a, true\nret void }',
+    'pointer-samesign': 'define void @f(ptr %x) { %v = icmp samesign eq ptr %x, null\nret void }',
+    'vector': 'define <2 x i64> @f(<2 x i64> %x) { %v = add nsw <2 x i64> %x, %x\nret <2 x i64> %v }',
+    'fp-nneg': 'define double @f(i64 %x) { %v = uitofp nneg i64 %x to double\nret double %v }',
+    'unknown-flag': 'define i64 @f(i64 %x) { %v = add imaginary i64 %x, 1\nret i64 %v }',
+    'late-rejection': 'define i64 @good(i64 %x) { %r = add nsw i64 %x, 1\nret i64 %r }\ndefine i128 @bad() { ret i128 0 }',
+    'unsupported-abi': 'declare void @g(ptr byval(i64))',
+    'malformed': 'define i64 @f( {',
+}
 
 
 def signed(x, width):
@@ -147,106 +151,39 @@ def matrix():
     return HEADER + '\n'.join(definitions) + 'declare i64 @unused_declaration(i64)\n', driver, count
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--libllvm', required=True)
-    p.add_argument('--keel', required=True)
-    p.add_argument('--clang', default='clang')
-    p.add_argument('--out', required=True)
-    args = p.parse_args()
-    out = Path(args.out).resolve()
-    out.mkdir(parents=True, exist_ok=False)
-    commands, checks = [], []
-
-    def run(command, ok=True, stdin=None):
-        command = list(map(str, command))
-        commands.append(command)
-        result = subprocess.run(command, input=stdin, capture_output=True, timeout=180)
-        if ok:
-            assert result.returncode == 0, (command, result.returncode, result.stderr.decode(errors='replace'))
-        return result
-
-    def importer(source, dest, keel=None, stdin=None):
-        return run([sys.executable, TOOL, '--libllvm', args.libllvm, '--keel', keel or args.keel,
-                    source, '-o', dest], ok=False, stdin=stdin)
-
-    try:
-        ir, driver, count = matrix()
-        (out/'matrix.ll').write_text(ir)
-        (out/'matrix_driver.c').write_text(driver)
-        compiler = out/'signed_contract.ll'
-        run([args.clang, '-x', 'c++', '-O1', '-S', '-emit-llvm', FIXTURES/'signed_contract.cpp', '-o', compiler])
-        assert re.search(rb'\b(?:add|mul|shl)\s+(?:nuw\s+)?nsw\b', compiler.read_bytes()), 'Clang fixture must exercise nsw'
-        for name, source, driver in [('matrix', out/'matrix.ll', out/'matrix_driver.c'),
-                ('poison-dividend', FIXTURES/'poison_dividend.ll', FIXTURES/'poison_dividend_driver.c'),
-                ('signed-contract', compiler, FIXTURES/'signed_contract_driver.c')]:
-            original = source.read_bytes()
-            dest = out/f'{name}.keel'
-            dest.write_bytes(b'sentinel\n')
-            result = importer(source, dest)
-            assert result.returncode == 0 and not result.stdout, result.stderr.decode()
-            assert source.read_bytes() == original and dest.read_bytes() != b'sentinel\n'
-            source_names = re.findall(rb'^(?:define|declare)\b[^@\n]*@([\w.$]+)\(', original, re.M)
-            output_names = re.findall(rb'^(?:func|decl) @([\w.$]+)\(', dest.read_bytes(), re.M)
-            assert source_names == output_names, (source_names, output_names)
-            result = importer('-', '-', stdin=original)
-            assert result.returncode == 0 and result.stdout == dest.read_bytes(), result.stderr.decode()
-            run([args.clang, '-O0', '-c', source, '-o', out/f'{name}.reference.o'])
-            run([args.clang, '-O0', '-c', driver, '-o', out/f'{name}.driver.o'])
-            run([args.clang, out/f'{name}.driver.o', out/f'{name}.reference.o', '-o', out/f'{name}.reference'])
-            expected = run([out/f'{name}.reference']).stdout
-            for tier in ('none', 'fast', 'full'):
-                obj, exe = out/f'{name}.{tier}.o', out/f'{name}.{tier}'
-                run([args.keel, 'compile', '--opt-tier', tier, '--emit-object', dest, '-o', obj])
-                run([args.clang, out/f'{name}.driver.o', obj, '-o', exe])
-                assert run([exe]).stdout == expected, (name, tier)
-                if name == 'poison-dividend':
-                    assert run([exe, 'zero'], ok=False).returncode != 0, 'zero-divisor trap lost'
-                checks.append(dict(kind='native-independent-oracle', case=name, tier=tier))
-            assert source.read_bytes() == original
-            checks.append(dict(kind='source-and-all-functions-preserved', case=name,
-                               sha256=hashlib.sha256(original).hexdigest()))
-        cases = {
-            'i1-arithmetic': 'define void @f() { %v = add nsw i1 true, false\nret void }',
-            'i1-ordered': 'define void @f(i64 %x) { %a = trunc i64 %x to i1\n%v = icmp samesign slt i1 %a, true\nret void }',
-            'pointer-samesign': 'define void @f(ptr %x) { %v = icmp samesign eq ptr %x, null\nret void }',
-            'vector': 'define <2 x i64> @f(<2 x i64> %x) { %v = add nsw <2 x i64> %x, %x\nret <2 x i64> %v }',
-            'fp-nneg': 'define double @f(i64 %x) { %v = uitofp nneg i64 %x to double\nret double %v }',
-            'unknown-flag': 'define i64 @f(i64 %x) { %v = add imaginary i64 %x, 1\nret i64 %v }',
-            'late-rejection': 'define i64 @good(i64 %x) { %r = add nsw i64 %x, 1\nret i64 %r }\ndefine i128 @bad() { ret i128 0 }',
-            'unsupported-abi': 'declare void @g(ptr byval(i64))',
-            'malformed': 'define i64 @f( {',
-        }
-        for name, body in cases.items():
-            source = out/f'reject-{name}.ll'
-            original = (HEADER + body + '\n').encode()
-            source.write_bytes(original)
-            for destination_exists in (True, False):
-                dest = out/f'reject-{name}-{destination_exists}.keel'
-                if destination_exists:
-                    dest.write_bytes(b'sentinel\n')
-                result = importer(source, dest)
-                assert result.returncode == 1 and not result.stdout and b'llvm-import:' in result.stderr, (name, result)
-                assert source.read_bytes() == original
-                assert dest.read_bytes() == b'sentinel\n' if destination_exists else not dest.exists()
-            checks.append(dict(kind='rejection-preservation', case=name))
-        for verifier in ('/usr/bin/false', out/'missing-keel'):
-            for destination_exists in (True, False):
-                dest = out/f'verifier-preserved-{destination_exists}.keel'
-                if destination_exists:
-                    dest.write_bytes(b'sentinel\n')
-                result = importer(out/'matrix.ll', dest, verifier)
-                assert result.returncode == 1 and not result.stdout and b'llvm-import:' in result.stderr
-                assert dest.read_bytes() == b'sentinel\n' if destination_exists else not dest.exists()
-        result = importer('-', '-', stdin=(HEADER + cases['late-rejection']).encode())
-        assert result.returncode == 1 and not result.stdout and b'llvm-import:' in result.stderr
-        checks.append(dict(kind='verifier-failure-preservation'))
-        print(json.dumps(dict(native_builds=9, independent_matrix_assertions=count,
-                              rejections=len(cases), checks=len(checks))))
-    finally:
-        (out/'commands.json').write_text(json.dumps(commands, indent=2))
-        (out/'checks.json').write_text(json.dumps(checks, indent=2))
+def validate(ctx):
+    run, out = ctx.run, ctx.out
+    ir, driver, count = matrix()
+    (out / 'matrix.ll').write_text(ir)
+    (out / 'matrix_driver.c').write_text(driver)
+    compiler = out / 'signed_contract.ll'
+    run.require([ctx.clang, '-x', 'c++', '-O1', '-S', '-emit-llvm', FIXTURES / 'signed_contract.cpp',
+                 '-o', compiler])
+    require(re.search(rb'\b(?:add|mul|shl)\s+(?:nuw\s+)?nsw\b', compiler.read_bytes()),
+            'Clang fixture must exercise nsw')
+    for name, source, driver in [('matrix', out / 'matrix.ll', out / 'matrix_driver.c'),
+                                 ('poison-dividend', FIXTURES / 'poison_dividend.ll',
+                                  FIXTURES / 'poison_dividend_driver.c'),
+                                 ('signed-contract', compiler, FIXTURES / 'signed_contract_driver.c')]:
+        text = out / f'{name}.keel'
+        imported = ctx.importer.accept(source, text)
+        require(llvm_functions(source.read_bytes()) == keel_functions(imported), (name, 'function inventory'))
+        run.require([ctx.clang, '-O0', '-c', source, '-o', out / f'{name}.reference.o'])
+        run.require([ctx.clang, '-O0', '-c', driver, '-o', out / f'{name}.driver.o'])
+        expected = ctx.link_and_run(ctx.clang, [out / f'{name}.driver.o', out / f'{name}.reference.o'],
+                                    out / f'{name}.reference')
+        ctx.tiers(name, text, [out / f'{name}.driver.o'], expected)
+        if name == 'poison-dividend':
+            for tier in TIERS:
+                trap = run.run([out / f'{name}.{tier}', 'zero'])
+                require(trap.returncode != 0, f'{tier}: zero-divisor trap lost')
+    ctx.reject_all(REJECTIONS)
+    ctx.verifier_failures(out / 'matrix.ll')
+    late = run.run(ctx.importer.command('-', '-'), (HEADER + REJECTIONS['late-rejection']).encode())
+    require(late.returncode == 1 and not late.stdout and late.stderr.startswith(b'llvm-import:'),
+            'late rejection through stdin')
+    return dict(independent_matrix_assertions=count)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main(validate, __doc__, timeout=180))

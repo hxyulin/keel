@@ -1,6 +1,6 @@
 decl @callback(i64) -> i64 cc(c)
 
-func @mixed(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) -> i64 cc(fast) local {
+func @mixed(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) -> i64 cc(fast) noinline local {
 block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64, v9: i64, v10: i64, v11: i64, v12: f64, v13: f64, v14: f64, v15: f64, v16: f64, v17: f64, v18: f64, v19: f64, v20: f64, v21: f64):
     v55 = iadd v0, v1
     v56 = iadd v55, v2
@@ -38,7 +38,7 @@ block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v
     return v87
 }
 
-func @recursive(i64) -> i64 cc(fast) local {
+func @recursive(i64) -> i64 cc(fast) noinline local {
 block0(v0: i64):
     v5 = iconst.i64 0
     v6 = icmp.eq v0, v5
@@ -54,14 +54,14 @@ block2:
     return v11
 }
 
-func @narrow(i8) -> i8 cc(fast) local {
+func @narrow(i8) -> i8 cc(fast) noinline local {
 block0(v0: i8):
     v2 = iconst.i8 -5
     v3 = iadd v0, v2
     return v3
 }
 
-func @predicate(i64) -> i8 uext cc(fast) local {
+func @predicate(i64) -> i8 uext cc(fast) noinline local {
 block0(v0: i64):
     v2 = iconst.i64 0
     v3 = icmp.ne v0, v2

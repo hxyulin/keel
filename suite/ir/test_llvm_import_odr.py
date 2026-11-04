@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Real LLVM 23 policy/translation checks; no native interoperability claims.
+"""ODR, RTTI, vtable and lifetime translation policy through keel-llvm-import.
 
-python3 suite/ir/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib
-Add --keel /path/to/keel for real CLI preservation/atomicity checks. Once the
-foundational syntax is merged, add --verify-weak-odr to require its verifier.
-Run compiler builds/native validation separately under fast_opt_locked.py.
+python3 suite/ir/test_llvm_import_odr.py --libllvm LIB --importer target/debug/keel-llvm-import
+Add --keel target/debug/keel for the native lifetime and CLI preservation tests
+(the importer then defaults to the keel-llvm-import next to it), and
+--verify-weak-odr to require that Keel accepts the weak_odr outputs.
+Ordinary test discovery skips these tests.
 """
 import argparse
-import ctypes as C
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
-
-from llvm_import import LLVM, P, Unsupported, import_module
 
 
 HEADER = b'''target triple = "arm64-apple-macosx14.0.0"
@@ -77,42 +76,33 @@ define i64 @lifetime_roundtrip(i64 %x) {
 ARGS = None
 
 
+def import_module(source, localize_odr=False):
+    """Run keel-llvm-import from stdin to stdout."""
+    command = [str(ARGS.importer), '--libllvm', ARGS.libllvm, '-']
+    if localize_odr:
+        command.append('--localize-odr-functions')
+    return subprocess.run(command, input=source, capture_output=True, timeout=60)
+
+
 class ODRImport(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if ARGS is None:
             raise unittest.SkipTest("Native LLVM checks run through cargo suite test-frontends")
-        cls.llvm = LLVM(ARGS.libllvm)
 
-    def translate(self, body, **kwargs):
-        source = HEADER + body.encode()
-        before = bytes(source)
-        result = import_module(self.llvm, source, **kwargs)
-        self.assertEqual(source, before)
-        return result
+    def translate(self, body, localize_odr=False):
+        result = import_module(HEADER + body.encode(), localize_odr)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+        return result.stdout.decode()
 
-    def reject(self, body, diagnostic=None, **kwargs):
-        with self.assertRaisesRegex(Unsupported, diagnostic or '.'):
-            self.translate(body, **kwargs)
-
-    def test_c_api_linkage_values(self):
-        # Verify the named constants against this installed C API, too.
-        l = self.llvm
-        for spelling, expected in [('linkonce_odr', l.LinkOnceODRLinkage),
-                                   ('weak_odr', l.WeakODRLinkage)]:
-            with self.subTest(spelling=spelling):
-                context, module, error = l.ContextCreate(), P(), P()
-                try:
-                    source = HEADER + f'define {spelling} void @f() {{ ret void }}'.encode()
-                    buffer = l.CreateMemoryBufferWithMemoryRangeCopy(source, len(source), b'odr')
-                    self.assertEqual(l.ParseIRInContext(context, buffer, C.byref(module), C.byref(error)), 0)
-                    self.assertEqual(l.GetLinkage(l.GetFirstFunction(module)), expected)
-                finally:
-                    if error.value:
-                        l.DisposeMessage(error)
-                    if module.value:
-                        l.DisposeModule(module)
-                    l.ContextDispose(context)
+    def reject(self, body, diagnostic=None, localize_odr=False):
+        result = import_module(HEADER + body.encode(), localize_odr)
+        stderr = result.stderr.decode(errors='replace')
+        self.assertEqual(result.returncode, 1, result.stdout.decode(errors='replace'))
+        self.assertEqual(result.stdout, b'')
+        self.assertTrue(stderr.startswith('llvm-import: '), stderr)
+        if diagnostic:
+            self.assertRegex(stderr, re.escape(diagnostic))
 
     def test_definition_linkages_and_symbol_identities(self):
         for linkage in ('linkonce_odr', 'weak_odr'):
@@ -326,7 +316,7 @@ define ptr @instruction(ptr %object) {
             source, text = root / 'lifetimes.ll', root / 'lifetimes.keel'
             original = HEADER + LIFETIMES.encode()
             source.write_bytes(original)
-            text.write_text(import_module(self.llvm, original))
+            text.write_text(self.translate(LIFETIMES))
             driver = root / 'driver.c'
             driver.write_text('''#include <assert.h>
 #include <stdint.h>
@@ -360,8 +350,8 @@ int main(void) {
             root = Path(tmp)
             source, dest = root / 'input.ll', root / 'output.keel'
             source.write_bytes(HEADER + b'define void @control() { ret void }')
-            command = [sys.executable, str(Path(__file__).with_name('llvm_import.py')),
-                       '--libllvm', ARGS.libllvm, '--keel', ARGS.keel, str(source), '-o', str(dest)]
+            command = [str(ARGS.importer), '--libllvm', ARGS.libllvm, '--keel', ARGS.keel,
+                       str(source), '-o', str(dest)]
             control = subprocess.run(command, capture_output=True)
             self.assertEqual(control.returncode, 0, control.stderr)
             # This checks the removed defined-typeinfo gate with today's real
@@ -401,7 +391,7 @@ define ptr @constructor(ptr returned %object) {
                     else:
                         self.assertEqual(dest.read_bytes(), b'preserve existing destination\n')
                         self.assertEqual(result.stdout, b'')
-                        self.assertEqual(list(root.glob('.llvm-import-*')), [])
+                        self.assertEqual(list(root.glob('.keel-llvm-import-*')), [])
                         if name in ('odr', 'tagged-odr'):
                             self.assertIn(b'Keel verification failed:', result.stderr)
                         dest.unlink()
@@ -421,6 +411,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--libllvm', required=True)
     parser.add_argument('--keel')
+    parser.add_argument('--importer', type=Path, help='keel-llvm-import binary; default: next to --keel')
     parser.add_argument('--verify-weak-odr', action='store_true')
     ARGS, remaining = parser.parse_known_args()
+    if ARGS.importer is None:
+        if not ARGS.keel:
+            parser.error('pass --importer or --keel')
+        ARGS.importer = Path(ARGS.keel).resolve().with_name('keel-llvm-import')
     unittest.main(argv=[sys.argv[0], *remaining])

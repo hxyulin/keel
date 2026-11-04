@@ -37,7 +37,7 @@
   "inttoptr": "@g = global ptr inttoptr (i64 8 to ptr)",
   "metadata": "@g = global i32 1, !type !0\n!0 = !{i64 0, !\"type\"}",
   "late-failure": "@good = global i32 7\n@bad = global ptr poison\ndefine i32 @f() { ret i32 1 }",
-  "late-function": "@good = global i32 7\ndefine i32 @f() { ret i32 poison }",
+  "late-function": "@good = global i32 7\ndefine i128 @f() { ret i128 0 }",
   "half": "@g = global half 1.0",
   "half-zero": "@g = global half 0.0",
   "half-nested": "@g = global { i8, half } zeroinitializer",

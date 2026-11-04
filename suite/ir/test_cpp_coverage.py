@@ -1,4 +1,4 @@
-"""Harness failure semantics; native differential checks live in cpp_coverage.py."""
+"""Harness failure semantics; native differential checks live in cpp_coverage.py and harness.py."""
 import contextlib
 import io
 import json
@@ -59,7 +59,7 @@ class ArtifactSafety(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runner = coverage.Runner(Path(tmp), 0.1)
             record = runner.run([sys.executable, '-u', '-c',
-                                 'import time; print("before timeout"); time.sleep(5)'])
+                                 'import time; print("before timeout"); time.sleep(5)']).record
             self.assertEqual(record['failure'], 'timeout')
             self.assertIsNone(record['returncode'])
             self.assertIn('before timeout', Path(record['stdout']).read_text())

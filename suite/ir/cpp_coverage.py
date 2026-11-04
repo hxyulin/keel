@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Clang C++ -> untouched LLVM IR -> llvm_import -> native differential checks.
+"""Clang C++ -> untouched LLVM IR -> keel-llvm-import -> native differential checks.
 
-Run under suite/common/fast_opt_locked.py; see README.md. No timing claims.
+No timing claims.
 """
 import argparse
 from collections import Counter
@@ -10,12 +10,10 @@ import json
 from pathlib import Path
 import re
 import shutil
-import subprocess
-import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+from harness import ROOT, SENTINEL, Failed, Runner, classify_import, digest
+
 FIXTURES = ROOT / 'suite/ir/cpp_coverage_fixtures'
-IMPORTER = ROOT / 'suite/ir/llvm_import.py'
 CASES = [
     # Required profiles establish a regression floor; probes can evolve to pass.
     ('scalar', 'scalar wrapping arithmetic and volatile memory', True, '-O2'),
@@ -33,80 +31,11 @@ CASES = [
     ('eh_int', 'typed integer throw and catch with external runtime typeinfo', True, '-O1'),
     ('eh', 'throw/catch and exception runtime', True, '-O1'),
 ]
-SENTINEL = b'cpp-coverage destination preservation sentinel\n'
-
-
-class Failed(Exception):
-    pass
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def classify_import(returncode, stdout, stderr, preserved):
-    """Only known unsupported diagnostics count as coverage blockers."""
-    if returncode == 0:
-        return 'accepted' if not stdout and not preserved else 'import_protocol_failure'
-    if not preserved or stdout:
-        return 'destination_preservation_failure'
-    if returncode is None:
-        return 'import_timeout_or_unavailable'
-    if returncode != 1:
-        return 'import_crash' if returncode < 0 else 'import_failure'
-    # Parser errors, Keel verifier failures, missing APIs and library failures
-    # must not be hidden as expected feature rejections.
-    diagnostic = stderr.removeprefix('llvm-import: ').strip()
-    known = ('unsupported', 'not supported', 'single-block', 'multiple blocks',
-             'only single', 'global data', 'globals', 'nsw', 'nuw', 'poison',
-             'ordinary C', 'supported types', 'personality', 'intrinsic',
-             'stack allocation', 'non-C calling convention', 'variadic signature',
-             'i1 ABI', 'no-wrap', 'flagged')
-    if (stderr.startswith('llvm-import: ') and
-            'Keel verification failed' not in diagnostic and
-            not re.search(r'input\.ll:\d+:\d+:', diagnostic) and
-            any(word in diagnostic for word in known)):
-        return 'rejected'
-    return 'import_failure'
-
-
-class Runner:
-    def __init__(self, out, timeout):
-        self.out, self.timeout, self.commands = out, timeout, []
-
-    def run(self, command, cwd=None):
-        argv = list(map(str, command))
-        index = len(self.commands)
-        record = {'argv': argv, 'cwd': str(cwd or ROOT)}
-        self.commands.append(record)
-        prefix = self.out / f'command-{index:04d}'
-        record.update(stdout=str(prefix) + '.stdout', stderr=str(prefix) + '.stderr')
-        try:
-            result = subprocess.run(argv, cwd=cwd or ROOT, capture_output=True,
-                                    timeout=self.timeout)
-            stdout, stderr = result.stdout, result.stderr
-            record['returncode'] = result.returncode
-        except subprocess.TimeoutExpired as e:
-            stdout, stderr = e.stdout or b'', e.stderr or b''
-            record.update(returncode=None, failure='timeout')
-        except OSError as e:
-            stdout, stderr = b'', str(e).encode()
-            record.update(returncode=None, failure='unavailable')
-        Path(record['stdout']).write_bytes(stdout)
-        Path(record['stderr']).write_bytes(stderr)
-        return record
-
-    def require(self, command):
-        result = self.run(command)
-        if result['returncode'] != 0:
-            raise Failed(f"command failed; see {result['stderr']}")
-        return result
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--libllvm', required=True)
     parser.add_argument('--keel', required=True)
+    parser.add_argument('--importer', help='keel-llvm-import binary; default: next to --keel')
     parser.add_argument('--out', required=True, help='new private artifact directory; never overwritten')
     parser.add_argument('--clangxx', default='clang++')
     parser.add_argument('--clang', default='clang')
@@ -142,26 +71,17 @@ def main(argv=None):
                 record = runner.require([tool, '--version'])
                 report['environment'][key] = {
                     'path': shutil.which(tool) or tool,
-                    'version': Path(record['stdout']).read_text(errors='replace')}
+                    'version': record.stdout.decode(errors='replace')}
         revision = runner.require(['git', 'rev-parse', 'HEAD'])
-        report['environment']['git_commit'] = Path(revision['stdout']).read_text().strip()
-        shutil.copy2(IMPORTER, out/'llvm_import.py')
-        global_helper = IMPORTER.with_name('llvm_import_globals.py')
-        shutil.copy2(global_helper, out / global_helper.name)
-        report['environment']['globals_helper_sha256'] = digest(global_helper)
-        linkage_helper = IMPORTER.with_name('llvm_import_linkage.py')
-        shutil.copy2(linkage_helper, out / linkage_helper.name)
-        report['environment']['linkage_helper_sha256'] = digest(linkage_helper)
-        report['environment']['python'] = sys.version
-        report['environment']['keel'] = {'path': str(Path(args.keel).resolve()), 'sha256': digest(Path(args.keel))}
-        report['environment']['importer_sha256'] = digest(IMPORTER)
-        report['environment']['libllvm'] = str(Path(args.libllvm).resolve())
-        probe = runner.require([sys.executable, '-c',
-            'import sys; sys.path.insert(0, sys.argv[1]); from llvm_import import LLVM; '
-            'print(".".join(map(str, LLVM(sys.argv[2]).version)))', str(IMPORTER.parent), args.libllvm])
-        report['environment']['llvm_version'] = Path(probe['stdout']).read_text().strip()
+        report['environment']['git_commit'] = revision.stdout.decode().strip()
+        keel = Path(args.keel).resolve()
+        importer = Path(args.importer or keel.with_name('keel-llvm-import')).resolve()
+        report['environment']['keel'] = {'path': str(keel), 'sha256': digest(keel)}
+        report['environment']['importer'] = {'path': str(importer), 'sha256': digest(importer)}
+        libllvm = Path(args.libllvm).resolve()
+        report['environment']['libllvm'] = {'path': str(libllvm), 'sha256': digest(libllvm)}
         target_probe = runner.require([args.clangxx, '-dumpmachine'])
-        target = args.target or Path(target_probe['stdout']).read_text().strip()
+        target = args.target or target_probe.stdout.decode().strip()
         report['environment']['target'] = target
         target_flags = ['-target', target]
         # Preflight failure is unavailable/incompatible infrastructure, not a feature rejection.
@@ -227,8 +147,7 @@ def main(argv=None):
                 for boundary_name, boundary in boundaries:
                     exe = directory / f'reference-{boundary_name}'
                     runner.require([args.clangxx, *target_flags, driver, boundary, reference_obj, '-o', exe])
-                    result = runner.require([exe])
-                    output = Path(result['stdout']).read_bytes()
+                    output = runner.require([exe]).stdout
                     if len(output.splitlines()) != 4241 or not output.splitlines()[-1].startswith(b'cases=4240 checksum='):
                         raise Failed('invalid native reference output')
                     expected[boundary_name] = output
@@ -237,15 +156,14 @@ def main(argv=None):
                     case['native'].append({'boundary': boundary_name, 'status': 'passed', 'output_sha256': hashlib.sha256(output).hexdigest()})
                 case['stage'] = 'import'
                 dest.write_bytes(SENTINEL)
-                result = runner.run([sys.executable, IMPORTER, '--libllvm', args.libllvm,
-                                     '--keel', args.keel, *import_options, ir, '-o', dest])
-                stdout = Path(result['stdout']).read_bytes()
-                stderr = Path(result['stderr']).read_text(errors='replace')
+                result = runner.run([importer, '--libllvm', libllvm, '--keel', keel,
+                                     *import_options, ir, '-o', dest])
+                stderr = result.stderr.decode(errors='replace')
                 preserved = dest.exists() and dest.read_bytes() == SENTINEL
-                status = classify_import(result['returncode'], stdout, stderr, preserved)
-                case['import'] = {'status': status, 'returncode': result['returncode'],
+                status = classify_import(result.returncode, result.stdout, stderr, preserved)
+                case['import'] = {'status': status, 'returncode': result.returncode,
                                   'diagnostic': stderr, 'destination_preserved': preserved,
-                                  'stdout': result['stdout'], 'stderr': result['stderr']}
+                                  'stdout': result.record['stdout'], 'stderr': result.record['stderr']}
                 if digest(ir) != original_hash:
                     raise Failed('input IR changed during import')
                 if status == 'rejected':
@@ -256,16 +174,16 @@ def main(argv=None):
                 for tier in report['tiers']:
                     case['stage'] = 'keel_compile_' + tier
                     obj = directory / f'{tier}.o'
-                    runner.require([args.keel, 'compile', '--opt-tier', tier, '--emit-object', dest, '-o', obj])
+                    runner.require([keel, 'compile', '--opt-tier', tier, '--emit-object', dest, '-o', obj])
                     for boundary_name, boundary in boundaries:
                         exe = directory / f'{tier}-{boundary_name}'
                         runner.require([args.clangxx, *target_flags, driver, boundary, obj, '-o', exe])
                         case['stage'] = 'native_differential_' + tier + '_' + boundary_name
                         actual = runner.require([exe])
-                        matches = Path(actual['stdout']).read_bytes() == expected[boundary_name]
+                        matches = actual.stdout == expected[boundary_name]
                         case['differential'].append({'tier': tier, 'boundary': boundary_name,
                                                      'status': 'passed' if matches else 'mismatch',
-                                                     'stdout': actual['stdout']})
+                                                     'stdout': actual.record['stdout']})
                         if not matches:
                             raise Failed(f'native differential mismatch at {tier}/{boundary_name}')
                 case.update(status='passed', stage='complete')

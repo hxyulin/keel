@@ -28,12 +28,16 @@ class FrontendValidation(unittest.TestCase):
             binary = Path(temporary) / 'keel'
             binary.write_text('placeholder')
             binary.chmod(0o755)
+            importer = Path(temporary) / 'keel-llvm-import'
+            importer.write_text('placeholder')
+            importer.chmod(0o755)
             with (patch.object(validation.Harness, 'run', fake_run),
                   patch.object(validation.platform, 'system', return_value=system),
                   patch.object(validation.platform, 'machine', return_value=machine),
                   patch.object(validation, 'LOCK', str(Path(temporary) / 'lock')),
                   contextlib.redirect_stdout(io.StringIO())):
-                code = validation.main(['--out', str(out), '--keel', str(binary), *extra])
+                code = validation.main(['--out', str(out), '--keel', str(binary),
+                                        '--importer', str(importer), *extra])
             return code, json.loads((out / 'report.json').read_text())
 
     def test_all_checks_run_on_supported_host(self):
@@ -45,15 +49,16 @@ class FrontendValidation(unittest.TestCase):
         self.assertIn('cpp-coverage', [stage['name'] for stage in report['stages']])
 
     def test_stage_failures_propagate_and_other_checks_continue(self):
-        for name in ('harness-tests', 'c-attributes', 'c-preprocess', 'c-native',
-                     'llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                     'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
-                     'cpp-coverage', 'cpp-odr'):
+        for name in ('harness-tests', 'c-attributes', 'c-preprocess', 'c-native', *validation.LLVM_STAGES):
             with self.subTest(stage=name):
                 code, report = self.run_harness(fail=name)
                 self.assertEqual(code, 1)
                 self.assertEqual(report['status'], 'failed')
                 self.assertIn('cpp-coverage', [stage['name'] for stage in report['stages']])
+
+    def test_every_import_validator_runs(self):
+        scripts = sorted(path.name for path in (validation.ROOT / 'suite/ir').glob('llvm_import*_validate.py'))
+        self.assertEqual(sorted(script for _, script in validation.VALIDATORS), scripts)
 
     def test_discovery_failure_cannot_be_a_successful_skip(self):
         code, report = self.run_harness(fail='rust-sysroot')
@@ -65,9 +70,7 @@ class FrontendValidation(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report['status'], 'passed_with_skips')
         skips = [stage['name'] for stage in report['stages'] if stage['status'] == 'skipped']
-        self.assertEqual(skips, ['llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                                'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
-                                'cpp-coverage', 'cpp-odr'])
+        self.assertEqual(skips, validation.LLVM_STAGES)
         code, report = self.run_harness(system='Linux', machine='x86_64', extra=['--require-llvm'])
         self.assertEqual(code, 1)
         self.assertEqual(report['status'], 'failed')

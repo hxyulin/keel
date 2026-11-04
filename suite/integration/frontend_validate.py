@@ -15,6 +15,22 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK = '/tmp/keel-perf-20261019.lock'
+# Stage name and script for each suite/ir LLVM import validator.
+VALIDATORS = [
+    ('llvm-import', 'llvm_import_validate.py'),
+    ('llvm-calls', 'llvm_import_calls_validate.py'),
+    ('llvm-fp', 'llvm_import_fp_validate.py'),
+    ('llvm-globals', 'llvm_import_globals_validate.py'),
+    ('llvm-linkage', 'llvm_import_linkage_validate.py'),
+    ('llvm-flags', 'llvm_import_flags_validate.py'),
+    ('llvm-eh', 'llvm_import_eh_validate.py'),
+    ('llvm-aggregate', 'llvm_import_aggregate_validate.py'),
+    ('llvm-bool', 'llvm_import_bool_validate.py'),
+    ('llvm-fast', 'llvm_import_fast_validate.py'),
+    ('llvm-memory', 'llvm_import_memory_validate.py'),
+    ('llvm-odr', 'llvm_import_odr_validate.py'),
+]
+LLVM_STAGES = [name for name, _ in VALIDATORS] + ['odr-core', 'llvm-odr-policy', 'cpp-coverage', 'cpp-odr']
 
 
 def llvm_host(system, machine):
@@ -60,6 +76,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--keel', type=Path)
+    parser.add_argument('--importer', type=Path)
     parser.add_argument('--libllvm', type=Path)
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--require-llvm', action='store_true')
@@ -88,7 +105,8 @@ def main(argv=None):
                 report['revision'] = (out / 'revision.stdout').read_text().strip()
             harness.run('working-tree', ['git', 'status', '--porcelain'])
             harness.run('harness-tests', [sys.executable, '-m', 'unittest',
-                                        'suite.ir.test_cpp_coverage', 'suite.integration.test_frontend_validate', '-v'])
+                                        'suite.ir.test_cpp_coverage', 'suite.ir.test_harness',
+                                        'suite.integration.test_frontend_validate', '-v'])
             harness.run('c-attributes', [cargo, 'test', *cargo_flags, '-p', 'keel-c',
                                        '--test', 'attribute_semantics'])
             harness.run('c-preprocess', [cargo, 'test', *cargo_flags, '-p', 'keel',
@@ -110,43 +128,37 @@ def main(argv=None):
             libllvm = args.libllvm.resolve() if args.libllvm else None
             if supported and libllvm is None and harness.run('rust-sysroot', ['rustc', '--print', 'sysroot']):
                 libllvm = Path((out / 'rust-sysroot.stdout').read_text().strip()) / 'lib/libLLVM.dylib'
-            if supported and ready and libllvm is not None:
+            reason = None
+            if not supported:
+                reason = 'LLVM import currently requires Apple AArch64'
+            elif not ready or libllvm is None:
+                reason = 'LLVM library discovery or Keel prerequisite failed'
+            else:
+                importer = args.importer.resolve() if args.importer else out / 'target/debug/keel-llvm-import'
+                built = bool(args.importer) or harness.run('build-importer', [cargo, 'build', *cargo_flags,
+                                                                            '-p', 'keel-llvm', '--bin', 'keel-llvm-import'])
+                if not (built and importer.is_file() and os.access(importer, os.X_OK)):
+                    reason = 'keel-llvm-import build failed or binary is unavailable'
+            if reason is None:
                 report['libllvm'] = str(libllvm)
-                harness.run('llvm-import', [sys.executable, ROOT / 'suite/ir/llvm_import_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-import'])
-                harness.run('llvm-calls', [sys.executable, ROOT / 'suite/ir/llvm_import_calls_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-calls'])
-                harness.run('llvm-fp', [sys.executable, ROOT / 'suite/ir/llvm_import_fp_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-fp'])
-                harness.run('llvm-globals', [sys.executable, ROOT / 'suite/ir/llvm_import_globals_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-globals'])
-                harness.run('llvm-linkage', [sys.executable, ROOT / 'suite/ir/llvm_import_linkage_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-linkage'])
-                harness.run('llvm-flags', [sys.executable, ROOT / 'suite/ir/llvm_import_flags_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-flags'])
-                harness.run('llvm-eh', [sys.executable, ROOT / 'suite/ir/llvm_import_eh_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-eh'])
+                report['importer'] = {'path': str(importer),
+                                      'sha256': hashlib.sha256(importer.read_bytes()).hexdigest()}
+                tools = ['--libllvm', libllvm, '--keel', keel, '--importer', importer]
+                for name, script in VALIDATORS:
+                    harness.run(name, [sys.executable, ROOT / 'suite/ir' / script, *tools, '--out', out / name])
                 harness.run('odr-core', [cargo, 'test', *cargo_flags, '-p', 'keel-ir',
                     '-p', 'keel-opt', '-p', 'keel-codegen', '-p', 'keel-llvm', '--test', 'weak_odr'])
                 harness.run('llvm-odr-policy', [sys.executable, ROOT / 'suite/ir/test_llvm_import_odr.py',
-                    '--libllvm', libllvm, '--keel', keel, '--verify-weak-odr', '-v'])
-                harness.run('llvm-odr', [sys.executable, ROOT / 'suite/ir/llvm_import_odr_validate.py',
-                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-odr'])
+                    *tools, '--verify-weak-odr', '-v'])
                 harness.run('cpp-coverage', [sys.executable, ROOT / 'suite/ir/cpp_coverage.py',
-                    '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
-                    '--out', out / 'cpp-coverage'])
+                    *tools, '--abi-rustc', 'rustc', '--out', out / 'cpp-coverage'])
                 # These fixtures export only cpp_case; their ODR helper symbols
                 # are not used by the separately compiled C/Rust boundaries.
                 harness.run('cpp-odr', [sys.executable, ROOT / 'suite/ir/cpp_coverage.py',
-                    '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
-                    '--localize-odr-functions', '--case', 'constexpr_runtime',
+                    *tools, '--abi-rustc', 'rustc', '--localize-odr-functions', '--case', 'constexpr_runtime',
                     '--out', out / 'cpp-odr'])
             else:
-                reason = ('LLVM import currently requires Apple AArch64' if not supported
-                          else 'LLVM library discovery or Keel prerequisite failed')
-                for name in ('llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                             'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
-                             'cpp-coverage', 'cpp-odr'):
+                for name in LLVM_STAGES:
                     harness.skip(name, reason)
                 if supported or args.require_llvm:
                     harness.stages.append(dict(name='llvm-prerequisite', status='failed', reason=reason))

@@ -11,6 +11,9 @@ pub struct Options {
     /// Existing Keel binary; otherwise build privately under the artifact directory.
     #[arg(long)]
     keel: Option<PathBuf>,
+    /// Existing keel-llvm-import binary; otherwise build privately under the artifact directory.
+    #[arg(long)]
+    importer: Option<PathBuf>,
     /// LLVM 23 shared library; otherwise discover it through rustc's sysroot.
     #[arg(long)]
     libllvm: Option<PathBuf>,
@@ -33,6 +36,9 @@ pub fn run(root: &Path, options: Options, jobs: usize) -> Result<bool> {
         .arg(jobs.to_string());
     if let Some(keel) = options.keel {
         command.arg("--keel").arg(keel);
+    }
+    if let Some(importer) = options.importer {
+        command.arg("--importer").arg(importer);
     }
     if let Some(libllvm) = options.libllvm {
         command.arg("--libllvm").arg(libllvm);

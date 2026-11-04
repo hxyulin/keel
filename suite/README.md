@@ -212,8 +212,10 @@ This runs `suite/integration/frontend_validate.py`, which covers:
 
 - the C attribute and preprocessing regression tests and a representative C CLI
   compatibility check;
-- the LLVM importer's native/rejection, indirect-call/ABI, scalar FP,
-  global-object, integer-flag, EH and ODR-linkage validation;
+- every `suite/ir/llvm_import*_validate.py` validator for `keel-llvm-import`:
+  scalar/CFG, indirect calls, scalar FP, global objects, ODR local copies,
+  integer flags, EH, two-word aggregates, booleans, fastcc, memory intrinsics
+  and exported ODR/RTTI, plus the ODR translation-policy tests;
 - all 14 required C++ profiles with an independent Rust C ABI boundary, at
   None/Fast/Full, including virtual dispatch and user-defined RTTI;
 - a separate `cpp-odr` stage for runtime constexpr helper localization.
@@ -221,11 +223,10 @@ This runs `suite/integration/frontend_validate.py`, which covers:
 It downloads no applications and runs no performance measurements.
 
 The output directory must be new. It receives `report.json`, per-stage command
-logs, and each child runner's artifacts under `llvm-import/`, `llvm-calls/`,
-`llvm-fp/`, `llvm-globals/`, `llvm-linkage/`, `llvm-flags/`, `llvm-eh/`,
-`llvm-odr/`, `cpp-coverage/` and `cpp-odr/`. Any failed build, test, native
-comparison or profile fails the command. Existing artifacts are never
-overwritten.
+logs, and each child runner's artifacts in a directory named after its stage
+(`llvm-import/`, `llvm-calls/` and so on, `cpp-coverage/` and `cpp-odr/`). Any
+failed build, test, native comparison or profile fails the command. Existing
+artifacts are never overwritten.
 
 Options:
 
@@ -233,6 +234,7 @@ Options:
 |--------|--------|
 | `-j N` (before the subcommand) | Cargo jobs for the private `target/` (default 2) |
 | `--keel PATH` | Use an existing Keel binary for native checks; Rust regression tests still build from source |
+| `--importer PATH` | Use an existing `keel-llvm-import` binary instead of building one |
 | `--libllvm PATH` | LLVM 23 shared library; default is discovered from `rustc --print sysroot` |
 | `--require-llvm` | Fail instead of skipping the LLVM stages on unsupported hosts |
 
@@ -253,15 +255,19 @@ frontend. Its native route requires Apple AArch64 and an LLVM 23 shared library
 with the required C API. Other hosts skip unsupported LLVM stages unless
 `--require-llvm` is set. Use `--libllvm PATH` to select the library explicitly.
 Run `cargo suite test-frontends --out target/frontend-check-1` rather than
-invoking the individual stage scripts. Crate regressions own the detailed
-contracts; see [LLVM semantics](../docs/frontends/llvm.md).
+invoking the individual stage scripts. To debug one validator, run it with
+`--libllvm PATH --keel PATH --out NEW_DIR`; it uses the `keel-llvm-import` next
+to `--keel` unless `--importer` names one. The validators share
+`suite/ir/harness.py`, which runs and logs commands and checks that a rejected
+import writes nothing. Crate regressions own the detailed contracts; see
+[LLVM semantics](../docs/frontends/llvm.md).
 
 ## Components and commands
 
 | Directory | Responsibility | Entry point |
 | --- | --- | --- |
 | `c/` | Native C application manifests, drivers and paired benchmarks | `cargo suite test lua`, `cargo suite run lua/fib` |
-| `ir/` | LLVM import fixtures, ABI checks and C++/Rust importer comparisons | `cargo suite test-frontends --out target/frontend-check-1` |
+| `ir/` | LLVM import fixtures and native validators for `keel-llvm-import` | `cargo suite test-frontends --out target/frontend-check-1` |
 | `asm/` | Compiler-generated assembly and independent object inspection | `python3 suite/asm/compiler_asm_compat/run.py --help` |
 | `linker/` | Assembly/link benchmark and independent runtime oracle | `python3 suite/linker/run.py --help` |
 | `integration/` | Kernel build/boot, privileged guests, frontend orchestration and compiler benchmarks | Each runner's `--help` |
