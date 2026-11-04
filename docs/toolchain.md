@@ -102,6 +102,18 @@ optimization report. `--opt-disable`, `--opt-bisect-limit`,
 invocation behind a regression; see the
 [pass manager](compiler/optimizer.md#pass-manager).
 
+`keel compile` and `keel cc` also take `--codegen-report file.json`. It writes
+static backend counts for each function, in compilation order: `spill_stores`,
+`reloads`, `register_moves`, `rematerialized_constants` and
+`rematerialized_stack_addresses`, plus module totals under `counters`. They
+count emitted instructions, not executions. On x86-64, an instruction that
+reads or writes a spilled value in place as a memory operand is not counted.
+Neither report flag overwrites an existing file, and they need different paths.
+
+```sh
+keel cc -O --codegen-report spills.json --emit-object input.c -o input.o
+```
+
 ## Targets
 
 **macOS arm64** is the primary target: Mach-O objects, the native linker and

@@ -1,4 +1,5 @@
-//! CLI report destination and output-channel contract. No native toolchain needed.
+//! CLI report destination and output-channel contract for `--opt-report` and
+//! `--codegen-report`. No native toolchain needed.
 use std::{
     fs,
     path::Path,
@@ -137,6 +138,35 @@ fn report_errors_preserve_inputs_outputs_and_existing_evidence() {
             "out",
         ],
         vec!["cc", "in.keel", "-E", "--opt-report", "new.json"],
+        vec!["cc", "in.c", "--emit-ir", "--codegen-report", "new.json"],
+        vec!["cc", "in.c", "-E", "--codegen-report", "new.json"],
+        vec!["opt", "in.keel", "--codegen-report", "new.json"],
+        vec!["compile", "in.keel", "--codegen-report", "old.json"],
+        vec!["compile", "in.keel", "--codegen-report", "-"],
+        vec![
+            "compile",
+            "in.keel",
+            "--codegen-report",
+            "new.json",
+            "-o",
+            "new.json",
+        ],
+        vec![
+            "compile",
+            "in.keel",
+            "--codegen-report",
+            "new.json",
+            "--opt-report",
+            "./new.json",
+        ],
+        vec![
+            "compile",
+            "in.keel",
+            "--codegen-report",
+            "new.json",
+            "--codegen-report",
+            "second.json",
+        ],
     ] {
         let output = keel(&dir, &args);
         assert!(!output.status.success(), "{args:?}");
@@ -178,6 +208,87 @@ fn report_errors_preserve_inputs_outputs_and_existing_evidence() {
             .success()
         );
         assert!(!dir.join("new.json").exists());
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// 20 values live across a call: more than either target's callee-saved
+/// registers, so `pressure` must spill. `small` needs no spill.
+fn pressure_ir() -> String {
+    let mut ir = String::from(
+        "decl @clobber()\nfunc @small(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}\nfunc @pressure(i64) -> i64 {\nblock0(v0: i64):\n",
+    );
+    for i in 1..=20 {
+        ir.push_str(&format!(
+            " v{} = iconst.i64 {i}\n v{} = iadd v0, v{}\n",
+            2 * i - 1,
+            2 * i,
+            2 * i - 1
+        ));
+    }
+    ir.push_str(" call @clobber()\n v41 = iadd v2, v4\n");
+    for i in 3..=20 {
+        ir.push_str(&format!(" v{} = iadd v{}, v{}\n", 39 + i, 38 + i, 2 * i));
+    }
+    ir.push_str(" return v58\n}\n");
+    ir
+}
+#[test]
+fn codegen_reports_count_spills_reloads_and_moves_per_function() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("codegen-report-output");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("in.keel"), pressure_ir()).unwrap();
+    let mut n = 0;
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        for extra in [vec![], vec!["-O"], vec!["--emit-object"]] {
+            n += 1;
+            let output = format!("out-{n}");
+            let mut args = vec!["compile", "in.keel", "--target", target, "-o", &output];
+            args.extend(&extra);
+            let plain = keel(&dir, &args);
+            assert!(
+                plain.status.success(),
+                "{}",
+                String::from_utf8_lossy(&plain.stderr)
+            );
+            let expected = fs::read(dir.join(&output)).unwrap();
+            fs::remove_file(dir.join(&output)).unwrap();
+            let name = format!("report-{n}.json");
+            args.extend(["--codegen-report", &name]);
+            let observed = keel(&dir, &args);
+            assert!(
+                observed.status.success(),
+                "{}",
+                String::from_utf8_lossy(&observed.stderr)
+            );
+            assert_eq!(plain.stdout, observed.stdout);
+            assert_eq!(plain.stderr, observed.stderr);
+            assert_eq!(expected, fs::read(dir.join(&output)).unwrap(), "{args:?}");
+            let report: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(dir.join(&name)).unwrap()).unwrap();
+            assert_eq!(report["schema_version"], 1);
+            assert_eq!(report["target"], target);
+            let functions = report["functions"].as_array().unwrap();
+            let names: Vec<_> = functions.iter().map(|f| &f["name"]).collect();
+            assert_eq!(names, ["small", "pressure"], "{args:?}");
+            let counters = |f: &serde_json::Value, key: &str| f["counters"][key].as_u64().unwrap();
+            for key in [
+                "spill_stores",
+                "reloads",
+                "register_moves",
+                "rematerialized_constants",
+                "rematerialized_stack_addresses",
+            ] {
+                let sum: u64 = functions.iter().map(|f| counters(f, key)).sum();
+                assert_eq!(counters(&report, key), sum, "{key} {args:?}");
+            }
+            assert_eq!(counters(&functions[0], "spill_stores"), 0);
+            assert_eq!(counters(&functions[0], "reloads"), 0);
+            for key in ["spill_stores", "reloads", "register_moves"] {
+                assert!(counters(&functions[1], key) > 0, "{key} {args:?}");
+            }
+        }
     }
     fs::remove_dir_all(dir).unwrap();
 }

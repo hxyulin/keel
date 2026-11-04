@@ -47,6 +47,7 @@ const USAGE: &str = "usage:
   keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
+  keel compile|cc [--codegen-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
@@ -104,6 +105,7 @@ struct Options {
     input: Option<String>,
     output: Option<String>,
     opt_report: Option<String>,
+    codegen_report: Option<String>,
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
     optimizer: keel_opt::OptimizeOptions,
@@ -250,16 +252,7 @@ impl Options {
             .report(&mut report)
             .run(module)
             .map_err(|e| e.to_string())?;
-        // Never overwrite an input, output, previous report, symlink, or device.
-        // Path conflicts are checked before compilation; create_new also guards races.
-        use std::io::Write;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|e| format!("optimization report {path}: {e}"))?;
-        file.write_all(report.to_json().as_bytes())
-            .map_err(|e| format!("optimization report {path}: {e}"))
+        write_new_report("optimization report", path, &report.to_json())
     }
 
     fn vector_target(&self) -> keel_opt::VectorTarget {
@@ -477,13 +470,18 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     .ok_or("`--opt-function` needs a function name")?;
                 opts.optimizer.print_function = Some(name.clone());
             }
-            "--opt-report" => {
-                let path = args.next().ok_or("`--opt-report` needs a file")?;
+            "--opt-report" | "--codegen-report" => {
+                let path = args.next().ok_or(format!("`{flag}` needs a file"))?;
                 if path.is_empty() || path == "-" {
-                    return Err("`--opt-report` needs a nonempty file path (not stdout)".into());
+                    return Err(format!("`{flag}` needs a nonempty file path (not stdout)"));
                 }
-                if opts.opt_report.replace(path.clone()).is_some() {
-                    return Err("`--opt-report` may only be specified once".into());
+                let report = if flag == "--opt-report" {
+                    &mut opts.opt_report
+                } else {
+                    &mut opts.codegen_report
+                };
+                if report.replace(path.clone()).is_some() {
+                    return Err(format!("`{flag}` may only be specified once"));
                 }
             }
             "-O" => {
@@ -687,22 +685,80 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     if opts.emit_ir && opts.emit_object {
         return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
     }
-    if let Some(report) = &opts.opt_report {
+    if opts.codegen_report.is_some() && opts.emit_ir {
+        return Err("`--codegen-report` cannot be used with `--emit-ir`".into());
+    }
+    let mut reports = Vec::new();
+    for (flag, label, report) in [
+        ("--opt-report", "optimization report", &opts.opt_report),
+        ("--codegen-report", "codegen report", &opts.codegen_report),
+    ] {
+        let Some(report) = report else { continue };
         if opts.preprocess_only {
-            return Err("`--opt-report` cannot be used with preprocessing only".into());
+            return Err(format!("`{flag}` cannot be used with preprocessing only"));
         }
         let path = std::path::Path::new(report);
         if path.symlink_metadata().is_ok() {
-            return Err(format!("optimization report {report}: file already exists"));
+            return Err(format!("{label} {report}: file already exists"));
         }
         let resolved_report = report_destination(path)?;
         for other in [&opts.input, &opts.output].into_iter().flatten() {
             if report_destination(std::path::Path::new(other))? == resolved_report {
-                return Err("optimization report path conflicts with input or output".into());
+                return Err(format!("{label} path conflicts with input or output"));
             }
         }
+        if reports.contains(&resolved_report) {
+            return Err("`--opt-report` and `--codegen-report` need different files".into());
+        }
+        reports.push(resolved_report);
     }
     Ok(opts)
+}
+
+/// Writes a report to a new file. Never overwrites an input, output, previous
+/// report, symlink, or device: path conflicts are checked before compilation,
+/// and create_new also guards races.
+fn write_new_report(label: &str, path: &str, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("{label} {path}: {e}"))?;
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("{label} {path}: {e}"))
+}
+
+/// Per-function backend counters as JSON, in compilation order.
+fn codegen_report_json(target: Target, report: &keel_codegen::backend_profile::Report) -> String {
+    use keel_codegen::backend_profile::Counter;
+    use std::fmt::Write;
+    let counters = |values: &[u64; Counter::ALL.len()]| {
+        let fields: Vec<_> = Counter::ALL
+            .iter()
+            .map(|&c| format!("\"{}\":{}", c.name(), values[c as usize]))
+            .collect();
+        format!("{{{}}}", fields.join(","))
+    };
+    let mut out = format!(
+        "{{\"schema_version\":1,\"target\":\"{}\",\"counters\":{},\"functions\":[",
+        target.triple(),
+        counters(&report.counters)
+    );
+    for (n, function) in report.functions.iter().enumerate() {
+        if n != 0 {
+            out.push(',');
+        }
+        let name = serde_json::to_string(&function.name).expect("a string serializes");
+        write!(
+            out,
+            "{{\"name\":{name},\"counters\":{}}}",
+            counters(&function.counters)
+        )
+        .unwrap();
+    }
+    out.push_str("]}\n");
+    out
 }
 
 fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -827,6 +883,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--wasm-stack-top",
                     "--isel",
                     "--opt-report",
+                    "--codegen-report",
                     "--verify-each",
                     "--no-verify-each",
                     "--opt-disable",
@@ -893,6 +950,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--wasm-stack-top",
                     "--isel",
                     "--opt-report",
+                    "--codegen-report",
                     "--verify-each",
                     "--no-verify-each",
                     "--opt-disable",
@@ -1094,10 +1152,11 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             Target::X86_64LinuxGnu => &mut x86_sink,
         };
         let emission = opts.emission_options();
-        keel_codegen::compile_program_chunks_with_pipeline_and_emission(
-            &module, target, &pipeline, emission, sink,
-        )
-        .map_err(|e| e.to_string())?;
+        with_codegen_report(opts, target, || {
+            keel_codegen::compile_program_chunks_with_pipeline_and_emission(
+                &module, target, &pipeline, emission, sink,
+            )
+        })?;
         drop(module);
         let object = {
             profiling::scope!("object-finalization");
@@ -1116,14 +1175,34 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
         let emission = opts.emission_options();
-        let source =
+        let source = with_codegen_report(opts, target, || {
             keel_codegen::compile_with_pipeline_and_emission(&module, target, &pipeline, emission)
-                .map_err(|e| e.to_string())?;
+        })?;
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.
         std::mem::forget(module);
         write_output(opts, &source)
     }
+}
+
+/// Runs code generation, collecting and writing the backend counters when
+/// `--codegen-report` asks for them.
+fn with_codegen_report<T>(
+    opts: &Options,
+    target: Target,
+    compile: impl FnOnce() -> Result<T, keel_codegen::CodegenError>,
+) -> Result<T, String> {
+    let Some(path) = &opts.codegen_report else {
+        return compile().map_err(|e| e.to_string());
+    };
+    let (result, report) = keel_codegen::backend_profile::capture(compile);
+    let result = result.map_err(|e| e.to_string())?;
+    write_new_report(
+        "codegen report",
+        path,
+        &codegen_report_json(target, &report),
+    )?;
+    Ok(result)
 }
 
 /// Reads, parses and verifies the input.
