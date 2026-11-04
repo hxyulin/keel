@@ -4,8 +4,8 @@ use super::{Assignment, Command, Expr, Output, Phdr, Script};
 use crate::{
     Result,
     elf::{
-        Executable, Options, PAGE, Section, Symbol, Unit, align, end, put16, put32, put64,
-        reloc::x86_64, shdr, string,
+        Executable, Options, PAGE, Section, Symbol, Unit, end, put16, put32, put64, reloc::x86_64,
+        shdr, string, symbol_and_section_tables, symbol_record,
     },
 };
 use bbtree::unsync::{BBTreeMap as BTreeMap, BBTreeSet as BTreeSet};
@@ -930,14 +930,14 @@ fn emit(
         let index = value.section.map_or(0xfff1, |i| section_indices[i]);
         // Empty outputs have no section header; boundary symbols remain absolute.
         let index = if index == 0 { 0xfff1 } else { index };
-        let mut sym = [0; 24];
-        put32(&mut sym, 0, string(&mut strings, name));
-        sym[4] = info;
-        sym[5] = other;
-        put16(&mut sym, 6, index);
-        put64(&mut sym, 8, value.n);
-        put64(&mut sym, 16, size);
-        symbols.extend_from_slice(&sym);
+        symbols.extend_from_slice(&symbol_record(
+            string(&mut strings, name),
+            info,
+            other,
+            index,
+            value.n,
+            size,
+        ));
         Ok(())
     };
     let mut locals = 1;
@@ -965,59 +965,8 @@ fn emit(
     for (name, value) in script_values {
         record(name, *value, 0, 0x10, 0)?;
     }
-    let sym_offset = align(bytes.len() as u64, 8)?;
-    bytes.resize(sym_offset as usize, 0);
-    bytes.extend_from_slice(&symbols);
-    let str_index = headers.len() + 1;
-    headers.push(shdr(
-        string(&mut names, ".symtab"),
-        2,
-        0,
-        0,
-        sym_offset,
-        symbols.len() as u64,
-        str_index as u32,
-        locals,
-        8,
-        24,
-    ));
-    let str_offset = bytes.len() as u64;
-    bytes.extend_from_slice(&strings);
-    headers.push(shdr(
-        string(&mut names, ".strtab"),
-        3,
-        0,
-        0,
-        str_offset,
-        strings.len() as u64,
-        0,
-        0,
-        1,
-        0,
-    ));
-    let names_name = string(&mut names, ".shstrtab");
-    let names_offset = bytes.len() as u64;
-    bytes.extend_from_slice(&names);
-    headers.push(shdr(
-        names_name,
-        3,
-        0,
-        0,
-        names_offset,
-        names.len() as u64,
-        0,
-        0,
-        1,
-        0,
-    ));
-    if headers.len() >= 0xff00 {
-        return Err("too many script output sections".into());
-    }
-    let shoff = align(bytes.len() as u64, 8)?;
-    bytes.resize(shoff as usize, 0);
-    for h in &headers {
-        bytes.extend_from_slice(h);
-    }
+    let shoff =
+        symbol_and_section_tables(&mut bytes, &mut headers, names, &symbols, &strings, locals)?;
     end(0, bytes.len() as u64)?;
     bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     put16(&mut bytes, 16, 2);

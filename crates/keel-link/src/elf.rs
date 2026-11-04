@@ -1256,14 +1256,14 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             if index >= 0xff00 && index != 0xfff1 {
                 return Err("too many output sections".into());
             }
-            let mut record = [0u8; 24];
-            put32(&mut record, 0, string(&mut strings, &s.name));
-            record[4] = s.info;
-            record[5] = s.other;
-            put16(&mut record, 6, index as u16);
-            put64(&mut record, 8, definition_address(ui, s)?);
-            put64(&mut record, 16, s.size);
-            symbols.extend_from_slice(&record);
+            symbols.extend_from_slice(&symbol_record(
+                string(&mut strings, &s.name),
+                s.info,
+                s.other,
+                index as u16,
+                definition_address(ui, s)?,
+                s.size,
+            ));
         }
     }
     let first_global = u32::try_from(symbols.len() / 24).map_err(|_| "too many local symbols")?;
@@ -1282,18 +1282,14 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         if index >= 0xff00 && index != 0xfff1 {
             return Err("too many output sections".into());
         }
-        let mut record = [0u8; 24];
-        put32(&mut record, 0, string(&mut strings, name));
-        record[4] = s.info;
-        record[5] = s.other;
-        put16(&mut record, 6, index as u16);
-        put64(&mut record, 8, definition_address(ui, s)?);
-        put64(
-            &mut record,
-            16,
+        symbols.extend_from_slice(&symbol_record(
+            string(&mut strings, name),
+            s.info,
+            s.other,
+            index as u16,
+            definition_address(ui, s)?,
             common_sizes.get(name).copied().unwrap_or(s.size),
-        );
-        symbols.extend_from_slice(&record);
+        ));
     }
     for (name, &(index, stop)) in &linker_symbols {
         if !units.iter().any(|u| {
@@ -1306,71 +1302,24 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         if index + 1 >= 0xff00 {
             return Err("too many output sections".into());
         }
-        let mut record = [0u8; 24];
-        put32(&mut record, 0, string(&mut strings, name));
-        record[4] = if linker_owned(name) { 0x11 } else { 0x10 }; // GLOBAL, hidden and absent from .dynsym.
-        record[5] = 2;
-        put16(&mut record, 6, (index + 1) as u16);
-        put64(
-            &mut record,
-            8,
+        // GLOBAL, hidden and absent from .dynsym.
+        symbols.extend_from_slice(&symbol_record(
+            string(&mut strings, name),
+            if linker_owned(name) { 0x11 } else { 0x10 },
+            2,
+            (index + 1) as u16,
             BASE + sections[index].offset + if stop { sections[index].size } else { 0 },
-        );
-        symbols.extend_from_slice(&record);
+            0,
+        ));
     }
-    let str_index = headers.len() + 1;
-    let sym_offset = align(bytes.len() as u64, 8)?;
-    bytes.resize(sym_offset as usize, 0);
-    bytes.extend_from_slice(&symbols);
-    headers.push(shdr(
-        string(&mut names, ".symtab"),
-        2,
-        0,
-        0,
-        sym_offset,
-        symbols.len() as u64,
-        str_index as u32,
+    let shoff = symbol_and_section_tables(
+        &mut bytes,
+        &mut headers,
+        names,
+        &symbols,
+        &strings,
         first_global,
-        8,
-        24,
-    ));
-    let str_offset = bytes.len() as u64;
-    bytes.extend_from_slice(&strings);
-    headers.push(shdr(
-        string(&mut names, ".strtab"),
-        3,
-        0,
-        0,
-        str_offset,
-        strings.len() as u64,
-        0,
-        0,
-        1,
-        0,
-    ));
-    let names_name = string(&mut names, ".shstrtab");
-    let names_offset = bytes.len() as u64;
-    bytes.extend_from_slice(&names);
-    headers.push(shdr(
-        names_name,
-        3,
-        0,
-        0,
-        names_offset,
-        names.len() as u64,
-        0,
-        0,
-        1,
-        0,
-    ));
-    if headers.len() >= 0xff00 {
-        return Err("too many output sections".into());
-    }
-    let shoff = align(bytes.len() as u64, 8)?;
-    bytes.resize(shoff as usize, 0);
-    for h in &headers {
-        bytes.extend_from_slice(h);
-    }
+    )?;
     bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     if sections.iter().any(|s| s.flags & 0x200000 != 0) {
         bytes[7] = 3;
@@ -1457,6 +1406,83 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         put64(&mut bytes, at + 48, *alignment);
     }
     Ok(Executable { bytes, warnings })
+}
+/// Append .symtab, .strtab, .shstrtab and the section header table, and
+/// return the header table offset. `symbols` starts with the null record, and
+/// its first `locals` records (null included) are the local symbols.
+fn symbol_and_section_tables(
+    bytes: &mut Vec<u8>,
+    headers: &mut Vec<[u8; 64]>,
+    mut names: Vec<u8>,
+    symbols: &[u8],
+    strings: &[u8],
+    locals: u32,
+) -> Result<u64> {
+    let sym_offset = align(bytes.len() as u64, 8)?;
+    bytes.resize(sym_offset as usize, 0);
+    bytes.extend_from_slice(symbols);
+    let str_index = headers.len() + 1;
+    headers.push(shdr(
+        string(&mut names, ".symtab"),
+        object::elf::SHT_SYMTAB,
+        0,
+        0,
+        sym_offset,
+        symbols.len() as u64,
+        str_index as u32,
+        locals,
+        8,
+        24,
+    ));
+    let str_offset = bytes.len() as u64;
+    bytes.extend_from_slice(strings);
+    headers.push(shdr(
+        string(&mut names, ".strtab"),
+        object::elf::SHT_STRTAB,
+        0,
+        0,
+        str_offset,
+        strings.len() as u64,
+        0,
+        0,
+        1,
+        0,
+    ));
+    let names_name = string(&mut names, ".shstrtab");
+    let names_offset = bytes.len() as u64;
+    bytes.extend_from_slice(&names);
+    headers.push(shdr(
+        names_name,
+        object::elf::SHT_STRTAB,
+        0,
+        0,
+        names_offset,
+        names.len() as u64,
+        0,
+        0,
+        1,
+        0,
+    ));
+    if headers.len() >= 0xff00 {
+        return Err("too many output sections".into());
+    }
+    let shoff = align(bytes.len() as u64, 8)?;
+    bytes.resize(shoff as usize, 0);
+    for h in headers.iter() {
+        bytes.extend_from_slice(h);
+    }
+    Ok(shoff)
+}
+/// One Elf64_Sym record.
+fn symbol_record(name: u32, info: u8, other: u8, section: u16, value: u64, size: u64) -> [u8; 24] {
+    let mut record = [0u8; 24];
+    put32(&mut record, 0, name);
+    record[4] = info;
+    record[5] = other;
+    put16(&mut record, 6, section);
+    put64(&mut record, 8, value);
+    put64(&mut record, 16, size);
+    record
 }
 fn string(table: &mut Vec<u8>, name: &str) -> u32 {
     let at = table.len() as u32;
