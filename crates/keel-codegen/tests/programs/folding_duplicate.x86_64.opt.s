@@ -1,0 +1,25 @@
+	.intel_syntax noprefix
+	.section	".text","ax",@progbits
+	.globl "folding_duplicate"
+	.p2align	4
+	.type	"folding_duplicate",@function
+"folding_duplicate":
+.Lfolding_duplicate_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+.Lfolding_duplicate_block0:
+	# v1 = iconst.i64 14
+	mov	esi, 14
+	# return v1
+	mov	rax, rsi
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lfolding_duplicate_end:
+	.cfi_endproc
+	.size "folding_duplicate", .-"folding_duplicate"
+	.section	".note.GNU-stack","",@progbits

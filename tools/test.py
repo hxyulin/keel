@@ -63,7 +63,7 @@ CODEGEN_CORE_TARGETS = (
     "arm_constants", "arm_indexed_memory", "arm_zero_branches",
     "neon_d_vectors", "vector_ir", "vector_mask_proofs", "vector_x86_256",
     "x86_features", "x86_aggregate_boundary", "x86_asm_clobbers",
-    "x86_generated_binding_smoke", "f80_allocation",
+    "x86_generated_binding_smoke", "f80_allocation", "asm_snapshots",
 )
 # keel-opt's own tests check IR text. These crates/keel tests compile C or IR
 # through optimizing pipelines and run the result against an independent oracle.

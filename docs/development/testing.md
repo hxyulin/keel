@@ -367,6 +367,7 @@ tests need `lldb`. Tests run on macOS arm64 and x86-64 Linux.
 | IR interpreter | `crates/keel-ir-interp/tests/interp/` | textual IR, one module per instruction family |
 | Optimizer passes | `crates/keel-opt/tests/golden/` | first line `; passes: a, b` |
 | Codegen programs | `crates/keel-codegen/tests/programs/` | `; expect: exit N` or `; expect: trap`; optional same-named `.c` driver; built in 8 allocator/selection configurations |
+| Codegen assembly snapshots | `crates/keel-codegen/tests/programs/<stem>.<target>[.opt].s` | baseline and optimized assembly for `aarch64` and `x86_64`, compile only; `BLESS=1 cargo test -p keel-codegen --test asm_snapshots` rewrites them |
 | C programs | `crates/keel-c/tests/programs/` | output must match Clang, with and without `-O` |
 | Applications | `suite/c/` | see the [suite guide](../../suite/README.md) |
 
