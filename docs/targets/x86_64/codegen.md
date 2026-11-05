@@ -370,10 +370,13 @@ or exception personality. Calls, including helper calls for wide division and
 software FMA, intrinsics, inline assembly and exception instructions keep the
 frame.
 
-A single-block function that contains only a direct `return_call` with an
-identical signature, where each argument forwards the matching entry
-parameter, also omits its frame and argument moves. Debug files, variadic
-signatures, `returns_twice` and exception personalities keep the normal path.
+A single-block function that contains only a direct `return_call`, where each
+argument forwards the matching entry parameter, is a single `jmp` when the
+arguments are already placed for the callee. That holds for an identical
+signature, and for `cc(c)` and `cc(fast)` signatures with the same scalar or
+pointer parameter and result types whose callee needs no extension the caller
+lacks. Debug files, variadic signatures, `returns_twice` and exception
+personalities keep the normal path.
 
 A frameless function leaves `rsp` and `rbp` unchanged. Its CFA is `rsp + 8`,
 with the return address at `CFA - 8`, and the assembler still emits an FDE.

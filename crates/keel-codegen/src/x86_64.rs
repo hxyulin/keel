@@ -238,36 +238,6 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     )
 }
 
-// An explicit tail terminator already permits discarding this activation. With
-// the same signature and unchanged parameters, every physical argument (including
-// stack arguments and aggregate pieces) is already in its destination. Keep the
-// normal path for debug homes and for any instruction that could observe a frame.
-fn identity_tail_callee(func: &Function) -> Option<&str> {
-    if func.sig.variadic || func.sig.returns_twice || func.personality.is_some() {
-        return None;
-    }
-    let mut blocks = func.blocks();
-    let entry = blocks.next()?;
-    if blocks.next().is_some() {
-        return None;
-    }
-    let [inst] = func.block_insts(entry) else {
-        return None;
-    };
-    let InstData::ReturnCall { func: callee, args } = func.inst_data(*inst) else {
-        return None;
-    };
-    let decl = func.callee(*callee);
-    (decl.sig == func.sig
-        && !args.has_explicit_abi()
-        && args.len() == func.block_params(entry).len()
-        && args
-            .iter()
-            .zip(func.block_params(entry))
-            .all(|(&arg, &param)| func.resolve(arg) == func.resolve(param)))
-    .then_some(decl.name.as_str())
-}
-
 /// Address materialization for an x86-64 ELF image. Independent of CPU features.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1229,7 +1199,10 @@ impl<'a> FunctionCompiler<'a> {
             self.prologue_end = true;
         }
         self.cfi(Cfi::Start);
-        if let Some(callee) = (!self.debug).then(|| identity_tail_callee(func)).flatten() {
+        if let Some(callee) = (!self.debug)
+            .then(|| crate::lowering::identity_tail_callee(func))
+            .flatten()
+        {
             self.cfi(Cfi::DefCfa {
                 register: 7,
                 offset: 8,

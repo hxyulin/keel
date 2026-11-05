@@ -252,17 +252,7 @@ _k_narrow:
 Lk_narrow_begin:
 	; regalloc: v0=x9
 	.cfi_startproc
-	stp	x29, x30, [sp, #-16]!
-	mov	x29, sp
-	.cfi_def_cfa x29, 16
-	.cfi_offset x30, -8
-	.cfi_offset x29, -16
-	mov	x9, x0
-Lk_narrow_block0:
-	; return_call @k_negate(v0)
-	mov	x0, x9
-	sxtb	w0, w0
-	ldp	x29, x30, [sp], #16
+	.cfi_def_cfa_offset 0
 	b	_k_negate
 Lk_narrow_end:
 	.cfi_endproc

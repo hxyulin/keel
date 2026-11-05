@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
+
 use keel_codegen::regalloc::{AllocationTier, Pools};
 use keel_codegen::{CodegenPipeline, SelectionTier};
 
@@ -190,4 +194,127 @@ fn tls_getters_keep_lr_frame_and_argument_bank_reserved() {
     assert!(arm.contains("mov\tx9, x0"), "{arm}");
     let x86 = keel_codegen::compile(&m, keel_codegen::Target::X86_64LinuxGnu).unwrap();
     assert!(x86.contains("push\trbp"), "{x86}");
+}
+
+/// `@helper` is called directly and through two escaped addresses.
+const ADDRESSED: &str = "func @helper(i8 sext, i64, f64) -> i64 noinline local {
+block0(v0: i8, v1: i64, v2: f64):
+ v3 = sext.i64 v0
+ v4 = fptosi.i64 v2
+ v5 = iadd v3, v1
+ v6 = iadd v5, v4
+ return v6
+}
+func @direct(i64, f64) -> i64 {
+block0(v0: i64, v1: f64):
+ v2 = trunc.i8 v0
+ v3 = call @helper(v2, v0, v1)
+ return v3
+}
+func @address() -> ptr {
+block0:
+ v0 = symbol_addr @helper
+ return v0
+}
+data @table = align 8 { ptr @helper }";
+
+const ADDRESSED_ORACLE: &str = r#"
+#include <stdint.h>
+typedef int64_t (*F)(signed char, int64_t, double);
+int64_t direct(int64_t, double);
+F address(void);
+extern F table;
+int main(void) {
+    F f = address();
+    if (f != table) return 1;
+    for (int64_t i = -300; i <= 300; i += 7) {
+        signed char c = (signed char)(i * 37);
+        double d = (double)i / 3;
+        if (f(c, i, d) != (int64_t)c + i + (int64_t)d) return 2;
+        if (direct(i, d) != (int64_t)(signed char)i + i + (int64_t)d) return 3;
+    }
+    return 0;
+}
+"#;
+
+/// The instructions between `label` and `end`, without directives or comments.
+fn thunk_instructions<'t>(text: &'t str, label: &str, end: &str) -> Vec<&'t str> {
+    let body = text.split(label).nth(1).unwrap();
+    body[..body.find(end).unwrap()]
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with(['.', ';', '#']) && !l.ends_with(':'))
+        .collect()
+}
+
+#[test]
+fn address_taken_fast_helpers_run_through_their_c_thunk() {
+    let mut m = keel_ir::parse(ADDRESSED).unwrap();
+    keel_opt::run_passes(&mut m, &["internal-fast-calls", "tail-calls"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(m.functions[0].sig.cc, keel_ir::CallConv::Fast);
+    assert!(m.functions.iter().any(|f| f.name == "helper.c"));
+    let oracle = native_oracle::PreparedOracle::new("fast-thunk", ADDRESSED_ORACLE, &["-O2"]);
+    for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+        for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &allocator,
+            };
+            let registers = &keel_codegen::aarch64::REGISTERS;
+            let text =
+                keel_codegen::aarch64::compile_with_pipeline(&m, registers, &pipeline).unwrap();
+            // The thunk is a single jump to the fast body.
+            assert_eq!(
+                thunk_instructions(&text, "_helper.c:", "Lhelper.c_end:"),
+                ["b\t_helper"]
+            );
+            let program =
+                keel_codegen::aarch64::compile_program_with_pipeline(&m, registers, &pipeline)
+                    .unwrap();
+            let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
+            assert_eq!(keel_asm::assemble_object(&text).unwrap(), object);
+            oracle.run(&object, &format!("{selector:?} {allocator:?}"));
+            let x86 = keel_codegen::x86_64::compile_with_pipeline(
+                &m,
+                &keel_codegen::x86_64::REGISTERS,
+                &pipeline,
+            )
+            .unwrap();
+            assert_eq!(
+                thunk_instructions(&x86, "\"helper.c\":", ".Lhelper.c_end:"),
+                ["jmp\t\"helper\""]
+            );
+            keel_asm::x86::assemble_object(&x86).unwrap();
+        }
+    }
+}
+
+#[test]
+fn forwarders_jump_only_when_arguments_are_already_placed() {
+    let source = |caller: &str, callee: &str| {
+        format!(
+            "func @g({callee}) -> i64 noinline local {{\nblock0(v0: i8):\n v1 = sext.i64 v0\n return v1\n}}\nfunc @f({caller}) -> i64 {{\nblock0(v0: i8):\n return_call @g(v0)\n}}"
+        )
+    };
+    for (caller, callee, jumps) in [
+        ("i8 sext", "i8 sext", true),
+        ("i8 sext", "i8", true),
+        // `@g` relies on an extension that `@f`'s callers did not apply.
+        ("i8", "i8 sext", false),
+        ("i8 uext", "i8 sext", false),
+    ] {
+        let m = keel_ir::parse(&source(caller, callee)).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        let arm = keel_codegen::aarch64::compile(&m).unwrap();
+        let x86 = keel_codegen::x86_64::compile(&m).unwrap();
+        let arm = thunk_instructions(&arm, "_f:", "Lf_end:");
+        let x86 = thunk_instructions(&x86, "\"f\":", ".Lf_end:");
+        assert_eq!(arm == ["b\t_g"], jumps, "{caller} -> {callee}: {arm:?}");
+        assert_eq!(
+            x86 == ["jmp\t\"g\""],
+            jumps,
+            "{caller} -> {callee}: {x86:?}"
+        );
+    }
 }

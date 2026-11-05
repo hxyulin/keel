@@ -1170,6 +1170,22 @@ impl<'a> FunctionCompiler<'a> {
             self.cfi(Cfi::Personality(["_", personality.as_str()].concat()));
             self.cfi(Cfi::Lsda(["L", name, "_lsda"].concat()));
         }
+        if let Some(callee) = (!self.debug)
+            .then(|| crate::lowering::identity_tail_callee(func))
+            .flatten()
+        {
+            // The arguments are already in place: jump with no frame.
+            self.cfi(Cfi::DefCfaOffset(0));
+            self.out.branch_name(
+                false,
+                if self.linux {
+                    Name::Text(callee)
+                } else {
+                    Name::Symbol(callee)
+                },
+            );
+            return self.finish(out, start);
+        }
         if self.frameless {
             // The AArch64 CIE starts at CFA = sp. Keep LR and FP untouched;
             // offset zero also has the standard frameless compact encoding.
@@ -1413,6 +1429,13 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         }
+        self.finish(out, start)
+    }
+
+    /// Ends the function that `begin_function` started at `start`.
+    fn finish(mut self, out: &mut Output, start: usize) -> Vec<(String, Option<DebugScope>)> {
+        let func = self.func;
+        let name = &func.name;
         {
             backend_scope!(LoweringFinish);
             if self.uses_trap {

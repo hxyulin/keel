@@ -49,7 +49,10 @@ slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
 values have unspecified upper bits. Guaranteed tail calls move their
 arguments into registers, run the epilogue and jump with `b` or `br`.
 Arguments that would go on the stack, struct arguments and callers that
-return a struct are rejected.
+return a struct are rejected. A function whose only instruction is a direct
+`return_call` forwarding its entry parameters in order, with arguments already
+placed for the callee, is a single `b` with no frame, under the same rule as
+[x86-64](../x86_64/codegen.md#frames). Debug files keep the normal path.
 
 ## Frame
 

@@ -127,7 +127,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `constant-args`, `empty-calls`, `unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
-| `internal-fast-calls` | Final private transport for contained direct calls |
+| `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
 | `fast-cfg`, `fast-local`, `fast-loop-reduce` | The bounded Fast tier; see [Fast](#fast-tier) |
 
@@ -309,6 +309,31 @@ conservative.
 snapshots before callee effects. `sret` keeps the caller's destination. Callee
 lines, scopes and stack variable homes move into a fresh scope below the call
 site; the IR has no DWARF inline-subroutine representation.
+
+## Internal fast calls
+
+Balanced, Size and Full run `internal-fast-calls` once, after the last inlining
+and before `tail-calls`. It gives a `local` C function `cc(fast)` and drops its
+`sext`/`uext` attributes, then updates every direct callee entry. It skips
+constructors, destructors, `used`, `retain`, sectioned, weak and `weak_odr`
+functions, variadic and `returns_twice` signatures, `sret` and `byval`
+parameters, and functions with more than one result. It also skips a function
+that is an exception personality, the callee of a call with explicit ABI
+operands, or either end of a `return_call`. Inline assembly anywhere in the
+module disables the pass.
+
+`cc(fast)` makes no promise to stay callable from C, so a fast function's
+address never escapes. A function whose address is taken by `symbol_addr` or by
+a data `ptr` with no addend becomes fast only when the module also calls it
+directly. Its signature needs at most six scalar or pointer parameters and
+results without extension attributes. The pass then adds a local C thunk named
+`<name>.c` (with a numeric suffix if that name is taken), whose body is one
+`return_call` to the fast function. It redirects every `symbol_addr` and data
+pointer to the thunk, so addresses still compare equal and every indirect
+caller uses the C convention. While fast and C place these arguments alike,
+both backends emit the thunk as a single jump. Other address-taken functions,
+data pointers with an addend, Apple RTTI names, and any address taken in a
+module with module assembly keep the C convention.
 
 ## Tail calls
 

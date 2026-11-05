@@ -180,6 +180,64 @@ pub(crate) fn returns_twice(func: &Function, data: &InstData) -> bool {
     }
 }
 
+/// The callee of a function whose whole body is one `return_call` passing
+/// its parameters unchanged. An explicit tail terminator already permits
+/// discarding this activation, and every physical argument (including stack
+/// arguments and aggregate pieces) is already where the callee expects it,
+/// so the function can be a single jump. Callers keep the normal path for
+/// debug homes.
+pub(crate) fn identity_tail_callee(func: &Function) -> Option<&str> {
+    if func.sig.variadic || func.sig.returns_twice || func.personality.is_some() {
+        return None;
+    }
+    let mut blocks = func.blocks();
+    let entry = blocks.next()?;
+    if blocks.next().is_some() {
+        return None;
+    }
+    let [inst] = func.block_insts(entry) else {
+        return None;
+    };
+    let InstData::ReturnCall { func: callee, args } = func.inst_data(*inst) else {
+        return None;
+    };
+    let decl = func.callee(*callee);
+    (same_placement(&decl.sig, &func.sig)
+        && !args.has_explicit_abi()
+        && args.len() == func.block_params(entry).len()
+        && args
+            .iter()
+            .zip(func.block_params(entry))
+            .all(|(&arg, &param)| func.resolve(arg) == func.resolve(param)))
+    .then_some(decl.name.as_str())
+}
+
+/// Whether arguments placed for `caller` are already placed for `callee`.
+/// Equal signatures are. So are fast and C signatures of scalars and
+/// pointers, which both conventions place alike, provided the callee needs
+/// no extension the caller's own callers did not apply.
+fn same_placement(callee: &keel_ir::Signature, caller: &keel_ir::Signature) -> bool {
+    use keel_ir::{ArgExt, Purpose};
+    let scalar = |p: &keel_ir::AbiParam| {
+        p.purpose == Purpose::Normal
+            && matches!(
+                p.ty,
+                Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Ptr
+            )
+    };
+    callee == caller
+        || (callee.returns == caller.returns
+            && !callee.variadic
+            && !callee.returns_twice
+            && callee.x86_vector_abi.is_none()
+            && caller.x86_vector_abi.is_none()
+            && callee.params.len() == caller.params.len()
+            && callee.returns.iter().all(scalar)
+            && callee.params.iter().zip(&caller.params).all(|(c, p)| {
+                scalar(c) && c.ty == p.ty && (c.ext == ArgExt::None || c.ext == p.ext)
+            }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
