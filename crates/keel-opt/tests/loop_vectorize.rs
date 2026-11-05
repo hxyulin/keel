@@ -29,8 +29,8 @@ fn kernel(ty: Type, index: Type, op: &str, signed: bool) -> String {
         format!(" v10 = iconst.i64 {bytes}\n v11 = imul {idx},v10\n")
     };
     let offset = if bytes == 1 { idx } else { "v11" };
-    // Only the first stream may fault, so the vector loop faults where the
-    // scalar loop does; see map_loops_with_two_faulting_streams_stay_scalar.
+    // Every access marks its fault undefined, as C emits it; see
+    // map_loops_with_observable_faults_stay_scalar.
     format!(
         "func @map(ptr,ptr,ptr,{index}) {{
 block0(v0: ptr,v1: ptr,v2: ptr,v3: {index}):
@@ -43,10 +43,10 @@ block2:
 {extend}{scale} v12 = ptradd v0,{offset}
  v13 = ptradd v1,{offset}
  v14 = ptradd v2,{offset}
- v15 = load.{ty} v13
- v16 = load.{ty} notrap v14
+ v15 = load.{ty} trap_ub v13
+ v16 = load.{ty} trap_ub v14
  v17 = {op} v15,v16
- store v17,v12
+ store trap_ub v17,v12
  v18 = iconst.{index} 1
  v19 = iadd v5,v18
  jump block1(v19)
@@ -74,44 +74,54 @@ fn run_short_map(m: &keel_ir::Module, n: u64, short: u64) -> (Outcome, Vec<u8>) 
 }
 
 #[test]
-fn map_loops_with_two_faulting_streams_stay_scalar() {
+fn map_loops_with_observable_faults_stay_scalar() {
     // The scalar loop stores c[0..37] and then faults on b[37], just past
-    // the end of b. A vector loop would load b[36..40] before storing c[36].
-    let source = kernel(Type::I32, Type::I64, "iadd", false).replace("load.i32 notrap", "load.i32");
-    let before = keel_ir::parse(&source).unwrap();
-    let (expected, stored) = run_short_map(&before, 64, 37);
-    let Outcome::Trap(Trap::OutOfBounds { size: 4, .. }) = expected else {
-        panic!("{expected:?}");
-    };
-    assert_eq!(stored.chunks(4).filter(|lane| lane != &[0; 4]).count(), 37);
-    for target in [
-        VectorTarget::Portable,
-        VectorTarget::Aarch64Neon,
-        VectorTarget::X86Sse2,
+    // the end of b. A vector loop would load b[36..40] before storing c[36],
+    // whether or not the a stream may fault too.
+    let source = kernel(Type::I32, Type::I64, "iadd", false);
+    for source in [
+        source.replace("trap_ub ", ""),
+        source.replace("load.i32 trap_ub v14", "load.i32 v14"),
     ] {
-        let after = optimize(&source, target);
-        assert_eq!(packed(&after), 0, "{after}");
-        assert_eq!(
-            run_short_map(&after, 64, 37),
-            (expected.clone(), stored.clone())
-        );
+        let before = keel_ir::parse(&source).unwrap();
+        let (expected, stored) = run_short_map(&before, 64, 37);
+        let Outcome::Trap(Trap::OutOfBounds { size: 4, .. }) = expected else {
+            panic!("{expected:?}");
+        };
+        assert_eq!(stored.chunks(4).filter(|lane| lane != &[0; 4]).count(), 37);
+        for target in [
+            VectorTarget::Portable,
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+        ] {
+            let after = optimize(&source, target);
+            assert_eq!(packed(&after), 0, "{after}");
+            assert_eq!(
+                run_short_map(&after, 64, 37),
+                (expected.clone(), stored.clone())
+            );
+        }
     }
+    // A store that may fault observably keeps the map scalar too.
+    let source = source.replace("store trap_ub", "store");
+    assert_eq!(packed(&optimize(&source, VectorTarget::Aarch64Neon)), 0);
 }
 
 #[test]
-fn map_loops_whose_faults_are_undefined_vectorize() {
-    // C and LLVM IR make a faulting read undefined behavior, so which
-    // stream faults first does not matter.
-    let source = kernel(Type::I32, Type::I64, "iadd", false)
-        .replace("load.i32 notrap", "load.i32")
-        .replace("load.i32 v", "load.i32 trap_ub v");
-    assert_eq!(source.matches("trap_ub").count(), 2);
-    for target in [
-        VectorTarget::Portable,
-        VectorTarget::Aarch64Neon,
-        VectorTarget::X86Sse2,
+fn map_loops_whose_accesses_cannot_fault_observably_vectorize() {
+    let source = kernel(Type::I32, Type::I64, "iadd", false);
+    for source in [
+        source.clone(),
+        source.replace("trap_ub", "notrap"),
+        source.replace("load.i32 trap_ub v13", "load.i32 notrap v13"),
     ] {
-        assert!(packed(&optimize(&source, target)) > 0);
+        for target in [
+            VectorTarget::Portable,
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+        ] {
+            assert!(packed(&optimize(&source, target)) > 0, "{source}");
+        }
     }
 }
 
@@ -452,8 +462,8 @@ fn dead_nontrapping_read_cleanup_unlocks_vectorization_without_relaxing_faults()
     let original = kernel(Type::I32, Type::I64, "iadd", false);
     for (flags, vectorizes) in [("notrap", true), ("", false), ("volatile notrap", false)] {
         let source = original.replace(
-            "store v17,v12",
-            &format!("store v17,v12\n v50 = load.i32 {flags} v13\n v51 = iadd v50,v50"),
+            "store trap_ub v17,v12",
+            &format!("store trap_ub v17,v12\n v50 = load.i32 {flags} v13\n v51 = iadd v50,v50"),
         );
         let mut m = keel_ir::parse(&source).unwrap();
         keel_opt::run_passes_for_target(
@@ -478,11 +488,11 @@ fn rejects_volatile_calls_nonunit_strides_offsets_reductions_and_escaping_values
             .replace("block1(v5: i64)", "block1(v5: i64,v51: i32)")
             .replace("v17 = iadd v15,v16", "v17 = iadd v15,v51")
             .replace("jump block1(v19)", "jump block1(v19,v17)"),
-        source.replace("load.i32", "load.i32 volatile"),
-        source.replace("store v17", "store volatile v17"),
+        source.replace("load.i32 trap_ub", "load.i32 volatile"),
+        source.replace("store trap_ub v17", "store volatile v17"),
         format!(
             "decl @effect()\n{}",
-            source.replace(" store v17", " call @effect()\n store v17")
+            source.replace(" store trap_ub v17", " call @effect()\n store trap_ub v17")
         ),
         source.replace("iconst.i64 1\n", "iconst.i64 2\n"),
         source.replace("iconst.i64 4\n", "iconst.i64 8\n"),

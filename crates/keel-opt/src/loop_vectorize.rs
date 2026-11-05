@@ -678,18 +678,21 @@ fn analyze(
         }
     }
     // Reading A then B a vector at a time could fault at A[1] before the
-    // scalar loop's B[0], in sums and maps alike. With at most one read
-    // whose fault is observable, lane grouping keeps the first fault on the
-    // access the scalar loop faults on. Other streams need `notrap`, or
-    // `trap_ub` where a fault is undefined behavior anyway.
-    let trapping_reads = a
+    // scalar loop's B[0]. A sum with at most one read whose fault is
+    // observable keeps the first fault on the access the scalar loop faults
+    // on. A map also stores a whole vector after its reads, so a fault
+    // anywhere in a group drops the stores the scalar loop makes for the
+    // group's earlier lanes: every access needs `notrap`, or `trap_ub`
+    // where a fault is undefined behavior anyway.
+    let observable_faults = a
         .allowed
         .iter()
         .filter(|&&i| {
-            matches!(f.inst_data(i), D::Load { flags, .. } if !flags.notrap && !flags.trap_ub)
+            matches!(f.inst_data(i), D::Load { flags, .. } | D::Store { flags, .. }
+                if !flags.notrap && !flags.trap_ub)
         })
         .count();
-    if trapping_reads > 1 {
+    if observable_faults > usize::from(matches!(output, Output::Sum { .. })) {
         return None;
     }
     if a.c

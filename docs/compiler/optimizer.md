@@ -325,7 +325,7 @@ asm, `debugtrap` and lifetime barriers end their facts through the IR
 memory-effects model. Functions with debugger-visible variable homes are
 excluded, because a debugger can edit a home between source locations.
 Alignment, `notrap` and `trap_ub` never establish alias freedom.
-`loop-vectorize` is the one pass that uses `trap_ub`: it may reorder reads
+`loop-vectorize` is the one pass that uses `trap_ub`: it may reorder accesses
 whose fault is undefined behavior.
 
 ### stack-forward

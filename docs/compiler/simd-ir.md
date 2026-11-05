@@ -176,11 +176,13 @@ accumulator is added once after reducing the vector lanes; the original scalar
 loop handles the tail. The same bounded lane-wise integer expression and
 contiguous-stream analysis applies. Hidden reads, writes, calls, extra
 recurrences and volatile accesses reject the candidate. Floating-point sums
-are not reassociated. At most one read may fault observably, in sums and maps
-alike; additional reads need `notrap`, or `trap_ub` where a fault is undefined
-behavior, so widening cannot change which access faults first. C and imported
-LLVM IR mark their accesses `trap_ub`, so this limit applies only to IR from
-other producers.
+are not reassociated. At most one read of a sum may fault observably;
+additional reads need `notrap`, or `trap_ub` where a fault is undefined
+behavior, so widening cannot change which access faults first. A map stores a
+whole vector after its reads, so a fault anywhere in a group would drop the
+stores of the group's earlier lanes: every read and the store of a map need
+`notrap` or `trap_ub`. C and imported LLVM IR mark their accesses `trap_ub`,
+so these limits apply only to IR from other producers.
 Negative signed starts, short/empty ranges and unsafe
 address arithmetic keep the scalar path. No new IR opcode or frontend memory
 promise is needed. Cheap trip-count checks reject short ranges before pointer-range
