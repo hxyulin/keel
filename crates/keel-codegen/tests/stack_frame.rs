@@ -345,3 +345,124 @@ fn unused_entry_parameters_take_no_callee_saved_registers() {
         }
     }
 }
+
+/// Slots aligned above 16 get aligned addresses on AArch64, which rounds `sp`
+/// down in the prologue. The C caller varies the incoming `sp` modulo 64, and
+/// the cases cover stack arguments, which are addressed from x29, and dynamic
+/// allocation, which addresses the frame from x19.
+#[test]
+fn slots_aligned_above_sixteen_have_aligned_addresses() {
+    let source = "decl @check(ptr, ptr) -> i64
+func @aligned(i64) -> i64 {
+    ss0 = stack_slot 8, align 8
+    ss1 = stack_slot 64, align 64
+    ss2 = stack_slot 32, align 32
+block0(v0: i64):
+    v1 = stack_addr ss0
+    store v0, v1
+    v2 = stack_addr ss1
+    v3 = stack_addr ss2
+    store v0, v2
+    v4 = call @check(v2, v3)
+    v5 = load.i64 v1
+    v6 = load.i64 v2
+    v7 = iadd v4, v5
+    v8 = iadd v7, v6
+    return v8
+}
+func @many(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 {
+    ss0 = stack_slot 64, align 64
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64, v9: i64):
+    v10 = stack_addr ss0
+    store v9, v10
+    v11 = call @check(v10, v10)
+    v12 = load.i64 v10
+    v13 = iadd v11, v12
+    v14 = iadd v13, v8
+    return v14
+}
+func @dynamic(i64) -> i64 {
+    ss0 = stack_slot 64, align 64
+block0(v0: i64):
+    v1 = intrinsic stack_alloc(v0)
+    v2 = stack_addr ss0
+    store v0, v2
+    store v0, v1
+    v3 = call @check(v2, v1)
+    v4 = load.i64 v2
+    v5 = load.i64 v1
+    v6 = iadd v3, v4
+    v7 = iadd v6, v5
+    return v7
+}
+";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let debug = keel_ir::parse(&format!("file f0 = \"frame.c\"\n{source}")).unwrap();
+    let oracle = r#"
+#include <alloca.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+long aligned(long), many(long, long, long, long, long, long, long, long, long, long), dynamic(long);
+/* Misalignment is reported as a large value, so sums cannot hide it. */
+long check(void *a, void *b) {
+    return ((uintptr_t)a & 63 ? 1000000 : 0) + ((uintptr_t)b & 15 ? 1000000 : 0);
+}
+static long run(int pad) {
+    volatile char *p = alloca(pad + 1);
+    p[0] = 0;
+    return aligned(7) - 14 + many(0, 0, 0, 0, 0, 0, 0, 0, 5, 9) - 14 + dynamic(24) - 48;
+}
+int main(void) {
+    for (int pad = 0; pad < 128; pad += 16)
+        if (run(pad)) { fprintf(stderr, "pad %d: %ld\n", pad, run(pad)); return 1; }
+    return 0;
+}
+"#;
+    let dir = std::env::temp_dir().join(format!("keel-aligned-slots-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("oracle.c"), oracle).unwrap();
+    for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+        for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+            let pipeline = CodegenPipeline {
+                selector: &selector,
+                allocator: &allocator,
+            };
+            for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+                for m in [&module, &debug] {
+                    let asm = keel_codegen::compile_with_pipeline(m, target, &pipeline).unwrap();
+                    keel_asm::assemble_source_for(target, &asm).unwrap();
+                }
+            }
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                let asm = keel_codegen::compile_with_pipeline(
+                    &module,
+                    Target::Aarch64AppleDarwin,
+                    &pipeline,
+                )
+                .unwrap();
+                assert!(asm.contains("and\tsp, x16, #0xffffffffffffffc0"), "{asm}");
+                std::fs::write(dir.join("frame.s"), asm).unwrap();
+                let status = std::process::Command::new("clang")
+                    .arg(dir.join("oracle.c"))
+                    .arg(dir.join("frame.s"))
+                    .arg("-o")
+                    .arg(dir.join("frame"))
+                    .status()
+                    .unwrap();
+                assert!(status.success());
+                let run = std::process::Command::new(dir.join("frame"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    run.status.success(),
+                    "{selector:?}/{allocator:?}: {}",
+                    String::from_utf8_lossy(&run.stderr)
+                );
+            }
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -336,16 +336,16 @@ pub(crate) fn compile_output(
         )?;
         compiler.debug = debug;
         compiler.unwind_tables = emission.unwind_tables;
-        let slots = if debug {
+        let (frame_register, slots) = if debug {
             compiler.slot_frame_offsets()
         } else {
-            Vec::new()
+            (None, Vec::new())
         };
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug {
             slots,
             scope_marks,
-            frame_register: None,
+            frame_register,
         });
         out.flush(&mut sink);
     }
@@ -811,6 +811,8 @@ struct FunctionCompiler<'a> {
     /// The register the fixed frame is addressed from: `sp`, or x19 in a
     /// function that moves `sp`.
     base: &'static str,
+    /// The slot alignment the prologue rounds `sp` down to, when above 16.
+    realign: Option<u32>,
     /// Offset from x29 of the first variadic argument: the next 8-byte slot
     /// after the named stack parameters.
     variadic_offset: usize,
@@ -875,14 +877,23 @@ impl<'a> FunctionCompiler<'a> {
     /// by the frame size; slots are at fixed offsets from that `sp`.
     /// Dynamic allocations move `sp` further, but `x29` stays put, which
     /// is why debuggers address variables from it.
-    fn slot_frame_offsets(&self) -> Vec<i64> {
-        let pairs = self.alloc.callee_saved_used.len().div_ceil(2)
-            + self.alloc.float_callee_saved_used.len().div_ceil(2);
-        let sp = -((16 * pairs + self.frame_size) as i64);
-        self.stack_slot_offsets
+    ///
+    /// A realigned frame has no fixed distance from `x29`, so its slots are
+    /// addressed from the base register instead, returned as a DWARF register.
+    fn slot_frame_offsets(&self) -> (Option<u8>, Vec<i64>) {
+        let (register, base) = if self.realign.is_some() {
+            (Some(if self.base == "x19" { 19 } else { 31 }), 0)
+        } else {
+            let pairs = self.alloc.callee_saved_used.len().div_ceil(2)
+                + self.alloc.float_callee_saved_used.len().div_ceil(2);
+            (None, -((16 * pairs + self.frame_size) as i64))
+        };
+        let offsets = self
+            .stack_slot_offsets
             .debug_offsets()
-            .map(|offset| sp + offset as i64)
-            .collect()
+            .map(|offset| base + offset as i64)
+            .collect();
+        (register, offsets)
     }
 
     fn new(
@@ -963,10 +974,12 @@ impl<'a> FunctionCompiler<'a> {
         } = asm;
         plan::add_saved_registers(&mut alloc, asm_saved, asm_float_saved, moves_sp);
         let spills = plan::SpillArea::plan(func, &alloc, calls.spill_base).map_err(err)?;
-        // `sp` is 16-byte aligned and slot alignment is at most 16, so an
-        // aligned offset gives an aligned address.
+        // Slot offsets are aligned, so an `sp` aligned to the largest slot
+        // alignment gives aligned addresses. `sp` is 16-byte aligned; the
+        // prologue rounds it down further for slots aligned above that.
         let (stack_slot_offsets, offset) =
             crate::stack_frame::SlotOffsets::layout(func, spills.end, !module.files.is_empty());
+        let realign = Some(stack_slot_offsets.align(func)).filter(|&align| align > 16);
         let frame_size = offset.next_multiple_of(16);
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
@@ -1037,6 +1050,7 @@ impl<'a> FunctionCompiler<'a> {
             vector_spills: spills.vector_spills,
             copy_temp: spills.copy_temp,
             base: if moves_sp { "x19" } else { "sp" },
+            realign,
             variadic_offset: 16 + (incoming as usize).next_multiple_of(8),
             frame_size,
             frameless,
@@ -1268,6 +1282,33 @@ impl<'a> FunctionCompiler<'a> {
         }
         if self.frame_size > 0 {
             self.sub_sp(self.frame_size);
+        }
+        if let Some(align) = self.realign {
+            // AND can write `sp` but not read it. x16 holds no value on entry.
+            // The epilogue restores `sp` from x29, which also drops the padding.
+            let plan = native::logical_immediate((align as u64).wrapping_neg(), 64)
+                .expect("a power-of-two mask");
+            self.native(
+                Opcode::ADD_64_addsub_imm,
+                [
+                    (FieldId::Rd, 16),
+                    (FieldId::Rn, 31),
+                    (FieldId::imm12, 0),
+                    (FieldId::sh, 0),
+                ],
+                |out| out.write_str("mov\tx16, sp"),
+            );
+            self.native(
+                Opcode::AND_64_log_imm,
+                [
+                    (FieldId::Rd, 31),
+                    (FieldId::Rn, 16),
+                    (FieldId::immr, plan.immr),
+                    (FieldId::imms, plan.imms),
+                    (FieldId::N, plan.n),
+                ],
+                |out| write!(out, "and\tsp, x16, #0x{:x}", plan.value),
+            );
         }
         if self.base != "sp" {
             self.mach("mov", [(self.base).into(), (Reg::SP).into()]);

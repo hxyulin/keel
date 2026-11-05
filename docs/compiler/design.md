@@ -205,7 +205,7 @@ they do not wrap at 65,536 entries.
 ## Memory
 
 - Stack memory is declared per function, not allocated by an instruction:
-  `ss0 = stack_slot 16, align 4` (alignment a power of two up to 16), and
+  `ss0 = stack_slot 16, align 4` (alignment a power of two up to 64), and
   `stack_addr ss0` gives its address. Sizes are fixed, so the frame layout is
   known before codegen. The C frontend implements object alignment above
   16 bytes by reserving extra space in a fixed slot and rounding the

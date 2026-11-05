@@ -76,6 +76,12 @@ not depend on the size of the rest of the frame. A function that uses
 `stack_alloc` addresses its fixed frame from x19, which dynamic allocation
 does not move. A function reads its own stack parameters at `x29 + 16`.
 
+When a used IR stack slot is aligned above 16, the prologue rounds `sp` down
+to that alignment after lowering it by the frame size (`mov x16, sp` then
+`and sp, x16, #-align`), so every slot offset gives an aligned address. The
+frame then has no fixed offset from x29, so debug information addresses its
+slots from `sp`, or from x19 with `stack_alloc`.
+
 Argument areas may be larger than 4,080 bytes for incoming parameters and for
 direct or indirect calls. Loads and stores use scaled immediate offsets when
 they fit and form a scratch address otherwise; aggregate copies follow the

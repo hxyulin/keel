@@ -35,6 +35,15 @@ impl SlotOffsets {
         (Self(offsets), offset)
     }
 
+    /// The largest alignment of any slot with frame storage, at least 1.
+    pub(crate) fn align(&self, func: &Function) -> u32 {
+        func.stack_slots()
+            .filter(|(id, _)| self.0[id.index()].is_some())
+            .map(|(_, slot)| slot.align)
+            .max()
+            .unwrap_or(1)
+    }
+
     /// Only debug frames have an observable home for every declared slot.
     pub(crate) fn debug_offsets(&self) -> impl Iterator<Item = usize> + '_ {
         self.0
