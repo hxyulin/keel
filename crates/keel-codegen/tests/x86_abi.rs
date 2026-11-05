@@ -36,3 +36,27 @@ mod x86_vector_wrappers;
 mod x86_wide_aggregate;
 #[path = "x86_abi/x86_wide_transport_native.rs"]
 mod x86_wide_transport_native;
+
+/// Call lowering moves only one result out of its register, so a call
+/// whose C signature has several must not compile.
+#[test]
+fn calls_with_multiple_c_results_are_rejected() {
+    for call in [
+        "v2, v3 = call @pair(v0)",
+        "v2, v3 = call_indirect v1(v0) : (i64) -> (i64, i64)",
+    ] {
+        let module = keel_ir::parse(&format!(
+            "decl @pair(i64) -> (i64, i64)\nfunc @f(i64, ptr) -> i64 {{\nblock0(v0: i64, v1: ptr):\n {call}\n v4 = iadd v2, v3\n return v4\n}}\n"
+        ))
+        .unwrap();
+        for target in keel_codegen::Target::NATIVE {
+            let error = keel_codegen::compile(&module, target)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("multiple return values are not supported"),
+                "{target:?} {call}: {error}"
+            );
+        }
+    }
+}

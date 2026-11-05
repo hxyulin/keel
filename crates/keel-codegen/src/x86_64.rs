@@ -516,6 +516,15 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
         }
     }
     let check = |name: &str, sig: &keel_ir::Signature, extra: &[&AbiParam]| {
+        // Call lowering moves only the first result out of its register.
+        if sig.returns.len() > 1 {
+            return Err(CodegenError {
+                func: name.into(),
+                message: format!(
+                    "{sig}: multiple return values are not supported by the C convention"
+                ),
+            });
+        }
         let params = || {
             sig.params
                 .iter()
