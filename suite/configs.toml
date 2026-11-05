@@ -80,7 +80,7 @@ flags = ["--link-intent", "executable", "-O", "--isel", "covers"]
 [[config]]
 name = "keel-basic"
 compiler = "keel"
-flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
+flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "covers", "--regalloc", "full"]
 
 [[config]]
 name = "keel-fast"
@@ -91,7 +91,7 @@ flags = ["--link-intent", "executable", "--opt-tier", "fast", "--isel-tier", "fu
 [[config]]
 name = "keel-basic-fast-alloc"
 compiler = "keel"
-flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
+flags = ["--link-intent", "executable", "--opt-tier", "basic", "--isel-tier", "covers", "--regalloc", "fast"]
 
 [[config]]
 name = "keel-full"
