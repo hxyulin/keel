@@ -17,7 +17,7 @@ Lhot32p_begin:
 	mov	x12, x3
 Lhot32p_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; v16 = imul v1, v2
 	mul	w11, w10, w11
 	; v8 = icmp.ugt v0, v4
@@ -70,11 +70,11 @@ Lhot32m_begin:
 	mov	x12, x3
 Lhot32m_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; v16 = imul v1, v2
 	mul	w11, w10, w11
 	; v17 = iconst.i32 -7
-	movn	x14, #0x6
+	movn	w14, #0x6
 	; v18 = imul v1, v17
 	mul	w10, w10, w14
 	; v8 = icmp.ugt v0, v4
@@ -127,7 +127,7 @@ Lhot32z_begin:
 	mov	x12, x3
 Lhot32z_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; v8 = icmp.ugt v0, v4
 	; brif v8, block2(v3, v4), block3(v3)
 	cmp	w9, #0
@@ -325,7 +325,7 @@ Loffset32_begin:
 	mov	x12, x3
 Loffset32_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; v5 = iconst.i64 17
 	movz	x14, #0x11
 	; v17 = iadd v2, v3

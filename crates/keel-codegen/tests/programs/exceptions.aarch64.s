@@ -46,7 +46,7 @@ Lk_catch_block4:
 	; call @__cxa_end_catch()
 	bl	___cxa_end_catch
 	; v15 = iconst.i32 -1
-	movn	x9, #0x0
+	movn	w9, #0x0
 	; return v15
 	mov	x0, x9
 	sub	sp, x29, #16
@@ -227,7 +227,7 @@ Lk_two_block3:
 	; call @__cxa_end_catch()
 	bl	___cxa_end_catch
 	; v11 = iconst.i32 100
-	movz	x9, #0x64
+	movz	w9, #0x64
 	; return v11
 	mov	x0, x9
 	sub	sp, x29, #32
@@ -258,7 +258,7 @@ Lk_two_block4:
 	; call @__cxa_end_catch()
 	bl	___cxa_end_catch
 	; v15 = iconst.i32 200
-	movz	x9, #0xc8
+	movz	w9, #0xc8
 	; return v15
 	mov	x0, x9
 	sub	sp, x29, #32

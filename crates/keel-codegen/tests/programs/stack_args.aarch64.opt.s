@@ -261,7 +261,7 @@ Lk_call_many_block0:
 	; v23 = shl v0, v22
 	lsl	x23, x9, #33
 	; v24 = iconst.i32 7
-	movz	x24, #0x7
+	movz	w24, #0x7
 	; v25 = isub v24, v20
 	sub	w24, w24, w21
 	; v26 = fptrunc.f32 v10
@@ -275,7 +275,7 @@ Lk_call_many_block0:
 	; v30 = fmul v10, v29
 	fmul	d19, d19, d29
 	; v31 = iconst.i32 1000
-	movz	x25, #0x3e8
+	movz	w25, #0x3e8
 	; v32 = imul v20, v31
 	mul	w21, w21, w25
 	; v33 = call_indirect v1(v0, v3, v4, v5, v6, v7, v8, v9, v12, v13, v14, v15, v16, v17, v18, v19, v21, v23, v25, v28, v30, v32) : (i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, i32, i64, i32, f32, f64, i32) -> f64 cc(c)
@@ -366,7 +366,7 @@ Lk_print_block0:
 	adrp	x9, _fmt@PAGE
 	add	x9, x9, _fmt@PAGEOFF
 	; v1 = iconst.i32 7
-	movz	x10, #0x7
+	movz	w10, #0x7
 	; v2 = fconst.f64 2.5
 	fmov	d19, #2.5
 	; v3 = symbol_addr @hi
@@ -377,19 +377,19 @@ Lk_print_block0:
 	movk	x12, #0xbe99, lsl #16
 	movk	x12, #0x1c, lsl #32
 	; v5 = iconst.i32 -1
-	movn	x13, #0x0
+	movn	w13, #0x0
 	; v6 = iconst.i32 2
-	movz	x14, #0x2
+	movz	w14, #0x2
 	; v7 = iconst.i32 3
-	movz	x15, #0x3
+	movz	w15, #0x3
 	; v8 = iconst.i32 4
-	movz	x19, #0x4
+	movz	w19, #0x4
 	; v9 = iconst.i32 5
-	movz	x20, #0x5
+	movz	w20, #0x5
 	; v10 = iconst.i32 6
-	movz	x21, #0x6
+	movz	w21, #0x6
 	; v12 = iconst.i32 8
-	movz	x22, #0x8
+	movz	w22, #0x8
 	; v13 = call @printf(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v1, v12)
 	str	w10, [sp, #0]
 	str	d19, [sp, #8]
@@ -439,13 +439,13 @@ Lk_vsum_block0:
 	adrp	x9, _types@PAGE
 	add	x9, x9, _types@PAGEOFF
 	; v1 = iconst.i32 1
-	movz	x10, #0x1
+	movz	w10, #0x1
 	; v2 = fconst.f64 2.5
 	fmov	d19, #2.5
 	; v3 = iconst.i64 3
 	movz	x11, #0x3
 	; v4 = iconst.i32 -4
-	movn	x12, #0x3
+	movn	w12, #0x3
 	; v5 = fconst.f64 0.25
 	fmov	d20, #0.25
 	; v6 = fconst.f64 -1.0
@@ -488,13 +488,13 @@ Lk_vtail_block0:
 	; v0 = iconst.i64 1
 	movz	x9, #0x1
 	; v1 = iconst.i32 -9
-	movn	x10, #0x8
+	movn	w10, #0x8
 	; v2 = iconst.i64 100
 	movz	x11, #0x64
 	; v3 = fconst.f64 0.5
 	fmov	d19, #0.5
 	; v4 = iconst.i32 3
-	movz	x12, #0x3
+	movz	w12, #0x3
 	; v5 = call @c_vtail(v0, v0, v0, v0, v0, v0, v0, v0, v1, v2, v3, v4)
 	str	w10, [sp, #0]
 	str	x11, [sp, #8]
@@ -587,11 +587,11 @@ Lk_call_small_begin:
 	mov	x9, x0
 Lk_call_small_block0:
 	; v1 = iconst.i8 -3
-	movn	x10, #0x2
+	movn	w10, #0x2
 	; v2 = iconst.i16 -300
-	movn	x11, #0x12b
+	movn	w11, #0x12b
 	; v3 = iconst.i8 5
-	movz	x12, #0x5
+	movz	w12, #0x5
 	; v4 = trunc.i32 v0
 	mov	x13, x9
 	; v5 = call @k_small(v0, v0, v0, v0, v0, v0, v0, v0, v1, v2, v3, v4)

@@ -153,7 +153,7 @@ Lcall_c_block0:
 	; v4 = fconst.f32 1.5
 	fmov	s19, #1.5
 	; v5 = iconst.i32 -2
-	movn	x10, #0x1
+	movn	w10, #0x1
 	; v6 = call @c_mix(v3, v0, v4, v5)
 	mov	x0, x9
 	fmov	d0, d8

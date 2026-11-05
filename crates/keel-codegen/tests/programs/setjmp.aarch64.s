@@ -230,7 +230,7 @@ Lk_setjmp_block1:
 	; store v85, v86
 	str	x9, [x10]
 	; v87 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; call @longjmp(v29, v87)
 	ldr	x0, [sp, #112]
 	mov	x1, x9
@@ -572,7 +572,7 @@ Lk_setjmp_swapped_block1:
 	; store v85, v86
 	str	x9, [x10]
 	; v87 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; call @longjmp(v29, v87)
 	ldr	x0, [sp, #112]
 	mov	x1, x9

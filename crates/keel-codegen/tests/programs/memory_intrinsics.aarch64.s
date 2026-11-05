@@ -25,7 +25,7 @@ Lmain_begin:
 	sub	sp, sp, #32
 Lmain_block0:
 	; v0 = iconst.i32 0
-	movz	x19, #0x0
+	movz	w19, #0x0
 	; v1 = stack_addr ss0
 	add	x20, sp, #0
 	; v2 = stack_addr ss1
@@ -37,14 +37,14 @@ Lmain_block0:
 	; v5 = iconst.i64 16
 	movz	x24, #0x10
 	; v6 = iconst.i8 7
-	movz	x9, #0x7
+	movz	w9, #0x7
 	; intrinsic memset(v1, v6, v5)
 	mov	x0, x20
 	mov	x1, x9
 	mov	x2, x24
 	bl	_memset
 	; v7 = iconst.i8 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; intrinsic memset(v1, v7, v3)
 	mov	x0, x20
 	mov	x1, x9
@@ -59,7 +59,7 @@ Lmain_block0:
 	movk	x10, #0x101, lsl #48
 	; v10 = icmp.ne v8, v9
 	; v11 = iconst.i32 1
-	movz	x11, #0x1
+	movz	w11, #0x1
 	; v12 = select v10, v11, v0
 	cmp	x9, x10
 	csel	w9, w11, w19, ne
@@ -72,7 +72,7 @@ Lmain_block0:
 	movk	x19, #0x707, lsl #48
 	; v15 = icmp.ne v13, v14
 	; v16 = iconst.i32 2
-	movz	x11, #0x2
+	movz	w11, #0x2
 	; v17 = select v15, v16, v12
 	cmp	x10, x19
 	csel	w25, w11, w9, ne
@@ -87,7 +87,7 @@ Lmain_block0:
 	ldr	x9, [x9]
 	; v20 = icmp.ne v19, v14
 	; v21 = iconst.i32 3
-	movz	x10, #0x3
+	movz	w10, #0x3
 	; v22 = select v20, v21, v17
 	cmp	x9, x19
 	csel	w19, w10, w25, ne
@@ -123,7 +123,7 @@ Lmain_block0:
 	movk	x10, #0x605, lsl #48
 	; v30 = icmp.ne v28, v29
 	; v31 = iconst.i32 4
-	movz	x11, #0x4
+	movz	w11, #0x4
 	; v32 = select v30, v31, v22
 	cmp	x9, x10
 	csel	w9, w11, w19, ne
@@ -136,7 +136,7 @@ Lmain_block0:
 	movk	x11, #0xe0d, lsl #48
 	; v35 = icmp.ne v33, v34
 	; v36 = iconst.i32 5
-	movz	x12, #0x5
+	movz	w12, #0x5
 	; v37 = select v35, v36, v32
 	cmp	x10, x11
 	csel	w9, w12, w9, ne
@@ -148,7 +148,7 @@ Lmain_block0:
 	sub	x12, x12, x10
 	; v41 = icmp.ne v40, v3
 	; v42 = iconst.i32 6
-	movz	x13, #0x6
+	movz	w13, #0x6
 	; v43 = select v41, v42, v37
 	cmp	x12, #8
 	csel	w9, w13, w9, ne
@@ -159,7 +159,7 @@ Lmain_block0:
 	ldr	x10, [x10]
 	; v47 = icmp.ne v46, v34
 	; v48 = iconst.i32 7
-	movz	x12, #0x7
+	movz	w12, #0x7
 	; v49 = select v47, v48, v43
 	cmp	x10, x11
 	csel	w9, w12, w9, ne

@@ -37,14 +37,14 @@ Lmain_block3:
 	; v14 = stack_addr ss1
 	add	x9, sp, #40
 	; v15 = iconst.i8 111
-	movz	x10, #0x6f
+	movz	w10, #0x6f
 	; store v15, v14
 	strb	w10, [sp, #40]
 	; v16 = iconst.i64 1
 	; v17 = ptradd v14, v16
 	add	x10, x9, #1
 	; v18 = iconst.i8 107
-	movz	x11, #0x6b
+	movz	w11, #0x6b
 	; store v18, v17
 	strb	w11, [x10]
 	; v19 = iconst.i64 2
@@ -60,9 +60,9 @@ Lmain_block3:
 	; v23 = iconst.i64 285
 	; v24 = icmp.ne v4, v23
 	; v25 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; v26 = iconst.i32 0
-	movz	x10, #0x0
+	movz	w10, #0x0
 	; v27 = select v24, v25, v26
 	cmp	x20, #285
 	csel	w9, w9, w10, ne

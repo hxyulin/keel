@@ -4021,6 +4021,9 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Loads the exact requested width without changing NZCV, including when
     /// rematerializing between a compare and its branch during parallel copies.
+    /// A W plan (`is64` false) writes the low 32 bits and zeroes the rest,
+    /// which defines every value of 32 bits or fewer. It is never longer than
+    /// the X plan of the same low bits.
     fn materialize(&mut self, reg: u8, bits: u64, is64: bool) {
         let plan = constant_plan::Plan::new(bits, is64);
         let class = if is64 { 'x' } else { 'w' };
@@ -4158,7 +4161,7 @@ impl<'a> FunctionCompiler<'a> {
         match regalloc::remat_recipe(self.func, value).expect("validated recipe") {
             RematRecipe::Iconst(bits) => {
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
-                self.materialize(scratch, bits, true);
+                self.materialize(scratch, bits, !fits_w(self.func.value_type(value)));
             }
             RematRecipe::NullPtr => {
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
@@ -4887,10 +4890,12 @@ fn return_loc(ty: Type) -> Loc {
 
 /// `w<n>` for types up to 32 bits, `x<n>` otherwise.
 fn reg(n: u8, ty: Type) -> Reg {
-    match ty.bytes() {
-        Some(bytes) if bytes <= 4 => Reg::w(n),
-        _ => Reg::x(n),
-    }
+    if fits_w(ty) { Reg::w(n) } else { Reg::x(n) }
+}
+
+/// Whether a `ty` value is held in a W register: types up to 32 bits.
+fn fits_w(ty: Type) -> bool {
+    ty.bytes().is_some_and(|bytes| bytes <= 4)
 }
 
 /// `s<n>` for f32, `d<n>` for f64, `q<n>` for vectors.

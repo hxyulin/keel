@@ -1464,7 +1464,7 @@ Lk_hi_begin:
 	mov	x10, x1
 Lk_hi_block0:
 	; v1 = iconst.i32 64
-	movz	x11, #0x40
+	movz	w11, #0x40
 	; v2 = ushr v0, v1
 	mov	x0, x9
 	mov	x1, x10

@@ -113,7 +113,7 @@ Lk_matmul_begin:
 	mov	x12, x3
 Lk_matmul_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; jump block1(v4)
 Lk_matmul_block1:
 	; v6 = icmp.sgt v3, v5
@@ -131,7 +131,7 @@ Lk_matmul_block2:
 	; v7 = imul v3, v5
 	mul	w14, w12, w13
 	; v8 = iconst.i32 0
-	movz	x15, #0x0
+	movz	w15, #0x0
 	; jump block5(v8)
 Lk_matmul_block5:
 	; v12 = icmp.sgt v3, v11
@@ -146,7 +146,7 @@ Lk_matmul_block3:
 	b	Lk_matmul_block1
 Lk_matmul_block6:
 	; v13 = iconst.i32 0
-	movz	x19, #0x0
+	movz	w19, #0x0
 	; jump block7(v13, v13)
 	mov	x20, x19
 Lk_matmul_block7:
@@ -218,7 +218,7 @@ Lsigned_dot32_begin:
 	mov	x12, x3
 Lsigned_dot32_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; jump block1(v4, v3)
 	mov	x16, x12
 	mov	x12, x13

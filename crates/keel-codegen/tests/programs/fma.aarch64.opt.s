@@ -157,8 +157,8 @@ Lk_const_copysign_f32_begin:
 	.cfi_offset x29, -16
 Lk_const_copysign_f32_block0:
 	; v3 = iconst.i32 2143289410
-	movz	x9, #0x42
-	movk	x9, #0x7fc0, lsl #16
+	movz	w9, #0x42
+	movk	w9, #0x7fc0, lsl #16
 	; return v3
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16

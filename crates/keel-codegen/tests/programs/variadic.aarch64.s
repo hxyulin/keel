@@ -22,7 +22,7 @@ Lk_sum_block0:
 	; v2 = iconst.i64 0
 	movz	x11, #0x0
 	; v3 = iconst.i32 0
-	movz	x12, #0x0
+	movz	w12, #0x0
 	; jump block1(v3, v2)
 	mov	x16, x11
 	mov	x11, x12
@@ -76,7 +76,7 @@ Lk_pairs_block0:
 	; v2 = fconst.f64 0.0
 	fmov	d19, xzr
 	; v3 = iconst.i32 0
-	movz	x11, #0x0
+	movz	w11, #0x0
 	; jump block1(v3, v2)
 Lk_pairs_block1:
 	; v6 = icmp.slt v4, v0
@@ -179,7 +179,7 @@ Lk_sum_three_begin:
 	mov	x11, x2
 Lk_sum_three_block0:
 	; v3 = iconst.i32 3
-	movz	x12, #0x3
+	movz	w12, #0x3
 	; v4 = call @k_sum(v3, v0, v1, v2)
 	str	x9, [sp, #0]
 	str	x10, [sp, #8]

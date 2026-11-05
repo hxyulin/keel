@@ -36,11 +36,11 @@ Lmain_block3:
 	b.lo	Lmain_block4
 Lmain_block5:
 	; v25 = iconst.i32 0
-	movz	x9, #0x0
+	movz	w9, #0x0
 	; v26 = iconst.i64 135
 	; v27 = icmp.ne v14, v26
 	; v28 = iconst.i32 1
-	movz	x10, #0x1
+	movz	w10, #0x1
 	; v29 = select v27, v28, v25
 	cmp	x11, #135
 	csel	w9, w10, w9, ne
@@ -58,7 +58,7 @@ Lmain_block5:
 	and	x12, x12, #0x7
 	; v36 = icmp.ne v35, v32
 	; v37 = iconst.i32 2
-	movz	x13, #0x2
+	movz	w13, #0x2
 	; v38 = select v36, v37, v29
 	cmp	x12, #0
 	csel	w9, w13, w9, ne
@@ -68,13 +68,13 @@ Lmain_block5:
 	and	x11, x11, #0xf
 	; v42 = icmp.ne v41, v32
 	; v43 = iconst.i32 3
-	movz	x12, #0x3
+	movz	w12, #0x3
 	; v44 = select v42, v43, v38
 	cmp	x11, #0
 	csel	w9, w12, w9, ne
 	; v45 = iconst.i32 287454020
-	movz	x11, #0x3344
-	movk	x11, #0x1122, lsl #16
+	movz	w11, #0x3344
+	movk	w11, #0x1122, lsl #16
 	; store v45, v30
 	str	w11, [sp, #5048]
 	; v46 = load.i8 v30
@@ -84,7 +84,7 @@ Lmain_block5:
 	cmp	w11, #68
 	cset	w11, ne
 	; v49 = iconst.i32 4
-	movz	x12, #0x4
+	movz	w12, #0x4
 	; v50 = select v48, v49, v44
 	tst	w11, #255
 	csel	w9, w12, w9, ne
@@ -94,18 +94,18 @@ Lmain_block5:
 	; v53 = load.i16 v52
 	ldrh	w11, [x11]
 	; v54 = iconst.i16 4386
-	movz	x12, #0x1122
+	movz	w12, #0x1122
 	; v55 = icmp.ne v53, v54
 	uxth	w17, w12
 	cmp	w11, w17
 	cset	w11, ne
 	; v56 = iconst.i32 5
-	movz	x12, #0x5
+	movz	w12, #0x5
 	; v57 = select v55, v56, v50
 	tst	w11, #255
 	csel	w9, w12, w9, ne
 	; v58 = iconst.i8 127
-	movz	x11, #0x7f
+	movz	w11, #0x7f
 	; v59 = stack_addr ss2
 	add	x12, sp, #944
 	add	x12, x12, #1, lsl #12
@@ -131,7 +131,7 @@ Lmain_block5:
 	cmp	w10, #127
 	cset	w10, ne
 	; v66 = iconst.i32 6
-	movz	x11, #0x6
+	movz	w11, #0x6
 	; v67 = select v65, v66, v57
 	tst	w10, #255
 	csel	w9, w11, w9, ne
@@ -150,7 +150,7 @@ Lmain_block5:
 	ldr	x10, [x10]
 	; v73 = icmp.ne v72, v71
 	; v74 = iconst.i32 7
-	movz	x12, #0x7
+	movz	w12, #0x7
 	; v75 = select v73, v74, v67
 	cmp	x10, x11
 	csel	w9, w12, w9, ne
@@ -167,7 +167,7 @@ Lmain_block5:
 	movz	x11, #0x1388
 	; v82 = icmp.ult v80, v81
 	; v83 = iconst.i32 8
-	movz	x12, #0x8
+	movz	w12, #0x8
 	; v84 = select v82, v83, v75
 	cmp	x10, x11
 	csel	w9, w12, w9, lo

@@ -97,6 +97,60 @@ fn emitted_constants_have_minimal_move_wide_counts_and_exact_x_width() {
     }
 }
 
+/// Narrow integer constants with the move-wide count of the best W plan.
+/// An X plan of the sign-extended immediate takes two instructions for
+/// 0xa000_0000, `i32::MIN`, 0xdac0_0000 and `i32::MAX`.
+fn narrow_constants() -> [(&'static str, i64, usize); 9] {
+    [
+        ("i32", 0xa000_0000_u32 as i32 as i64, 1),
+        ("i32", i32::MIN.into(), 1),
+        ("i32", 0xdac0_0000_u32 as i32 as i64, 1),
+        ("i32", 0xffff_1234_u32 as i32 as i64, 1),
+        ("i32", i32::MAX.into(), 1),
+        ("i32", 0x1234_5678, 2),
+        ("i32", -1, 1),
+        ("i16", -2, 1),
+        ("i8", -128, 1),
+    ]
+}
+
+fn narrow_constant(name: &str, ty: &str, imm: i64) -> String {
+    let abi_extension = if matches!(ty, "i8" | "i16") {
+        " sext"
+    } else {
+        ""
+    };
+    format!(
+        "func @{name}() -> {ty}{abi_extension} {{\nblock0:\n v0 = iconst.{ty} {imm}\n return v0\n}}\n"
+    )
+}
+
+#[test]
+fn narrow_constants_use_minimal_w_plans() {
+    for (ty, imm, count) in narrow_constants() {
+        let source = narrow_constant("constant", ty, imm);
+        for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+            for allocator in [
+                &AllocationTier::Full as &dyn RegisterAllocator,
+                &RecipeAllocator,
+            ] {
+                let (text, _) = compile(
+                    &source,
+                    selection,
+                    allocator,
+                    &keel_codegen::aarch64::REGISTERS,
+                );
+                let instructions = moves(&text);
+                assert_eq!(instructions.len(), count, "{ty} {imm}: {text}");
+                assert!(
+                    instructions.iter().all(|line| line.contains("\tw")),
+                    "{ty} {imm}: {text}"
+                );
+            }
+        }
+    }
+}
+
 fn fixture() -> (String, String) {
     let mut source = String::from("file f0 = \"arm_constants.keel\"\n");
     let mut declarations = String::from("#include <stdint.h>\n");
@@ -122,6 +176,12 @@ fn fixture() -> (String, String) {
         );
         declarations += &format!("extern {c_ty} signed_{ty}(void);\n");
         checks += &format!("if (signed_{ty}() != -1) return 2;\n");
+    }
+    for (index, (ty, imm, _)) in narrow_constants().into_iter().enumerate() {
+        source += &narrow_constant(&format!("narrow{index}"), ty, imm);
+        let c_ty = format!("int{}_t", &ty[1..]);
+        declarations += &format!("extern {c_ty} narrow{index}(void);\n");
+        checks += &format!("if (narrow{index}() != ({c_ty})INT64_C({imm})) return 6;\n");
     }
     for (index, bits) in [0xffff_abcd_ffff_ffff_u64, 0x8000_0000_1234_5678]
         .into_iter()

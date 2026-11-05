@@ -13,7 +13,7 @@ Lmain_begin:
 	.cfi_offset x29, -16
 Lmain_block0:
 	; v0 = iconst.i32 42
-	movz	x9, #0x2a
+	movz	w9, #0x2a
 	; return v0
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16

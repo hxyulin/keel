@@ -12,9 +12,9 @@ impl FunctionCompiler<'_> {
                     self.folded_values.contains(&r)
                         || matches!(self.defined(r), Some(Loc::Remat(_)))
                 }) => {}
-            InstData::Iconst { imm, .. } => {
+            InstData::Iconst { ty, imm } => {
                 let d = self.def_reg(result);
-                self.materialize(d, imm as u64, true);
+                self.materialize(d, imm as u64, !fits_w(ty));
                 self.def_done(result, d);
             }
             InstData::F80const { .. } => unreachable!("f80 rejected before lowering"),

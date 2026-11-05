@@ -14,7 +14,7 @@ Ldense_begin:
 	mov	x9, x0
 Ldense_block0:
 	; v1 = iconst.i32 100
-	movz	x10, #0x64
+	movz	w10, #0x64
 	; switch v0, block5, [0: block1, 1: block2, 2: block1, 4: block3(v0), 5: block4, 7: block2, 8: block3(v1)]
 	cmp	w9, #8
 	b.hi	Ldense_block5
@@ -37,7 +37,7 @@ Ldense_inst1_edge7:
 	b	Ldense_block3
 Ldense_block4:
 	; v7 = iconst.i32 50
-	movz	x9, #0x32
+	movz	w9, #0x32
 	; return v7
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
@@ -52,21 +52,21 @@ Ldense_block3:
 	ret
 Ldense_block2:
 	; v3 = iconst.i32 20
-	movz	x9, #0x14
+	movz	w9, #0x14
 	; return v3
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
 Ldense_block1:
 	; v2 = iconst.i32 10
-	movz	x9, #0xa
+	movz	w9, #0xa
 	; return v2
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
 Ldense_block5:
 	; v8 = iconst.i32 -1
-	movn	x9, #0x0
+	movn	w9, #0x0
 	; return v8
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
@@ -135,11 +135,11 @@ Ldense_big_begin:
 	mov	x9, x0
 Ldense_big_block0:
 	; v1 = iconst.i32 1
-	movz	x10, #0x1
+	movz	w10, #0x1
 	; v2 = iconst.i32 2
-	movz	x11, #0x2
+	movz	w11, #0x2
 	; v3 = iconst.i32 3
-	movz	x12, #0x3
+	movz	w12, #0x3
 	; switch v0, block2(v0), [70000: block2(v1), 70001: block2(v2), 70002: block2(v3), 70003: block1, 70004: block2(v1)]
 	movz	w17, #0x1170
 	movk	w17, #0x1, lsl #16
@@ -170,7 +170,7 @@ Ldense_big_inst3_edge5:
 	b	Ldense_big_block2
 Ldense_big_block1:
 	; v4 = iconst.i32 99
-	movz	x9, #0x63
+	movz	w9, #0x63
 	; return v4
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
@@ -268,21 +268,21 @@ Lnarrow_block0:
 	b	Lnarrow_block3
 Lnarrow_block2:
 	; v2 = iconst.i32 2
-	movz	x9, #0x2
+	movz	w9, #0x2
 	; return v2
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
 Lnarrow_block1:
 	; v1 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; return v1
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
 Lnarrow_block3:
 	; v3 = iconst.i32 3
-	movz	x9, #0x3
+	movz	w9, #0x3
 	; return v3
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
@@ -397,7 +397,7 @@ Lconstant_begin:
 	.cfi_offset x29, -16
 Lconstant_block0:
 	; v0 = iconst.i32 5
-	movz	x9, #0x5
+	movz	w9, #0x5
 	; switch v0, block1, [4: block1, 5: block2]
 	cmp	w9, #4
 	b.eq	Lconstant_block1
@@ -406,14 +406,14 @@ Lconstant_block0:
 	b	Lconstant_block1
 Lconstant_block2:
 	; v2 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; return v2
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
 Lconstant_block1:
 	; v1 = iconst.i32 0
-	movz	x9, #0x0
+	movz	w9, #0x0
 	; return v1
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16

@@ -68,7 +68,7 @@ Lmain_block5:
 	; v35 = and v33, v34
 	and	x12, x12, #0x7
 	; v37 = iconst.i32 2
-	movz	x13, #0x2
+	movz	w13, #0x2
 	; v38 = select v35, v37, v29
 	cmp	x12, #0
 	csel	w9, w13, w9, ne
@@ -78,13 +78,13 @@ Lmain_block5:
 	; v41 = and v39, v40
 	and	x12, x12, #0xf
 	; v43 = iconst.i32 3
-	movz	x13, #0x3
+	movz	w13, #0x3
 	; v44 = select v41, v43, v38
 	cmp	x12, #0
 	csel	w9, w13, w9, ne
 	; v45 = iconst.i32 287454020
-	movz	x12, #0x3344
-	movk	x12, #0x1122, lsl #16
+	movz	w12, #0x3344
+	movk	w12, #0x1122, lsl #16
 	; store v45, v30
 	str	w12, [sp, #5040]
 	; v46 = load.i8 v30
@@ -94,7 +94,7 @@ Lmain_block5:
 	cmp	w12, #68
 	cset	w12, ne
 	; v49 = iconst.i32 4
-	movz	x13, #0x4
+	movz	w13, #0x4
 	; v50 = select v48, v49, v44
 	tst	w12, #255
 	csel	w9, w13, w9, ne
@@ -103,13 +103,13 @@ Lmain_block5:
 	; v53 = load.i16 v52
 	ldrh	w12, [x10, #2]
 	; v54 = iconst.i16 4386
-	movz	x13, #0x1122
+	movz	w13, #0x1122
 	; v55 = icmp.ne v53, v54
 	uxth	w17, w13
 	cmp	w12, w17
 	cset	w12, ne
 	; v56 = iconst.i32 5
-	movz	x13, #0x5
+	movz	w13, #0x5
 	; v57 = select v55, v56, v50
 	tst	w12, #255
 	csel	w9, w13, w9, ne
@@ -138,7 +138,7 @@ Lmain_block5:
 	ldr	x11, [x11]
 	; v73 = icmp.ne v72, v71
 	; v74 = iconst.i32 7
-	movz	x13, #0x7
+	movz	w13, #0x7
 	; v75 = select v73, v74, v57
 	cmp	x11, x12
 	csel	w9, w13, w9, ne
@@ -153,7 +153,7 @@ Lmain_block5:
 	movz	x11, #0x1388
 	; v82 = icmp.ult v80, v81
 	; v83 = iconst.i32 8
-	movz	x12, #0x8
+	movz	w12, #0x8
 	; v84 = select v82, v83, v75
 	cmp	x10, x11
 	csel	w9, w12, w9, lo

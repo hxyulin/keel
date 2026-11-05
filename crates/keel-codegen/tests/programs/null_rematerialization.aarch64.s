@@ -206,7 +206,7 @@ Lnull_setjmp_block0:
 	cbnz	w9, Lnull_setjmp_block2
 Lnull_setjmp_block1:
 	; v4 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; call @longjmp(v0, v4)
 	mov	x0, x19
 	mov	x1, x9

@@ -841,7 +841,7 @@ Lk_pass_after8_block0:
 	; v10 = iconst.i64 8
 	movz	x22, #0x8
 	; v11 = iconst.i32 -9
-	movn	x23, #0x8
+	movn	w23, #0x8
 	; v12 = call @c_after8(v3, v4, v5, v6, v7, v8, v9, v10, v0, v1, v2, v11)
 	ldrh	w17, [x9, #0]
 	strh	w17, [sp, #0]

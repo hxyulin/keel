@@ -1295,9 +1295,9 @@ Lk_lock_begin:
 	mov	x9, x0
 Lk_lock_block0:
 	; v1 = iconst.i32 0
-	movz	x10, #0x0
+	movz	w10, #0x0
 	; v2 = iconst.i32 1
-	movz	x11, #0x1
+	movz	w11, #0x1
 	; jump block1
 Lk_lock_block1:
 	; v3 = atomic_cas acquire v0, v1, v2
@@ -1329,7 +1329,7 @@ Lk_unlock_begin:
 	mov	x9, x0
 Lk_unlock_block0:
 	; v1 = iconst.i32 0
-	movz	x10, #0x0
+	movz	w10, #0x0
 	; atomic_store release v1, v0
 	stlr	w10, [x9]
 	; return

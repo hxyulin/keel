@@ -52,13 +52,13 @@ Lmain_block3:
 	; v14 = stack_addr ss1
 	add	x9, sp, #40
 	; v15 = iconst.i8 111
-	movz	x10, #0x6f
+	movz	w10, #0x6f
 	; store v15, v14
 	strb	w10, [sp, #40]
 	; v16 = iconst.i64 1
 	; v17 = ptradd v14, v16
 	; v18 = iconst.i8 107
-	movz	x10, #0x6b
+	movz	w10, #0x6b
 	; store v18, v17
 	strb	w10, [x9, #1]
 	; v19 = iconst.i64 2

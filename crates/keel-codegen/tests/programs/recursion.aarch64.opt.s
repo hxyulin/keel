@@ -37,7 +37,7 @@ Lmain_block0:
 	movz	x10, #0x1a6d
 	; v10 = icmp.ne v8, v9
 	; v11 = iconst.i32 2
-	movz	x11, #0x2
+	movz	w11, #0x2
 	; v12 = select v10, v11, v6
 	cmp	x9, x10
 	csel	w19, w11, w19, ne
@@ -51,7 +51,7 @@ Lmain_block0:
 	movk	x10, #0x21c3, lsl #48
 	; v16 = icmp.ne v14, v15
 	; v17 = iconst.i32 3
-	movz	x11, #0x3
+	movz	w11, #0x3
 	; v18 = select v16, v17, v12
 	cmp	x9, x10
 	csel	w9, w11, w19, ne

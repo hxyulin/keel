@@ -66,7 +66,7 @@ Lk_even_block2:
 	b	_k_odd
 Lk_even_block1:
 	; v3 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; return v3
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
@@ -102,7 +102,7 @@ Lk_odd_block2:
 	b	_k_even
 Lk_odd_block1:
 	; v3 = iconst.i32 0
-	movz	x9, #0x0
+	movz	w9, #0x0
 	; return v3
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16

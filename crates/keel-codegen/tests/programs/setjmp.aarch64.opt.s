@@ -142,7 +142,7 @@ Lk_setjmp_block1:
 	; store v85, v86
 	str	x9, [x10]
 	; v87 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; v103 = stack_addr ss0
 	add	x10, sp, #32
 	; call @longjmp(v103, v87)
@@ -456,7 +456,7 @@ Lk_setjmp_swapped_block1:
 	; store v85, v86
 	str	x9, [x10]
 	; v87 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; v103 = stack_addr ss0
 	add	x10, sp, #32
 	; call @longjmp(v103, v87)

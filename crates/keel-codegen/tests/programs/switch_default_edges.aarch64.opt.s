@@ -16,9 +16,9 @@ Lsparse_default_begin:
 	mov	x11, x2
 Lsparse_default_block0:
 	; v3 = iconst.i32 17
-	movz	x12, #0x11
+	movz	w12, #0x11
 	; v4 = iconst.i32 29
-	movz	x13, #0x1d
+	movz	w13, #0x1d
 	; switch v0, block1, [259: block2(v3), 260: block2(v4), 288: block2(v0)]
 	cmp	w9, #259
 	b.eq	Lsparse_default_inst2_edge1
@@ -35,7 +35,7 @@ Lsparse_default_inst2_edge2:
 	b	Lsparse_default_block2
 Lsparse_default_block1:
 	; v5 = iconst.i32 41
-	movz	x9, #0x29
+	movz	w9, #0x29
 	; jump block2(v5)
 Lsparse_default_block2:
 	; store v6, v1
@@ -63,7 +63,7 @@ Ltrap_default_begin:
 	mov	x9, x0
 Ltrap_default_block0:
 	; v1 = iconst.i32 1
-	movz	x10, #0x1
+	movz	w10, #0x1
 	; switch v0, block1, [259: block2(v1), 288: block2(v1)]
 	cmp	w9, #259
 	b.eq	Ltrap_default_block2
@@ -71,7 +71,7 @@ Ltrap_default_block0:
 	b.eq	Ltrap_default_block2
 Ltrap_default_block1:
 	; v2 = iconst.i32 0
-	movz	x10, #0x0
+	movz	w10, #0x0
 	; jump block2(v2)
 Ltrap_default_block2:
 	; brif v3, block3, block4

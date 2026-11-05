@@ -24,7 +24,7 @@ Lmain_begin:
 	.cfi_offset x25, -80
 Lmain_block0:
 	; v0 = iconst.i32 0
-	movz	x19, #0x0
+	movz	w19, #0x0
 	; v1 = symbol_addr @greeting
 	adrp	x20, _greeting@PAGE
 	add	x20, x20, _greeting@PAGEOFF
@@ -65,7 +65,7 @@ Lmain_block0:
 	; v13 = iconst.i64 42
 	; v14 = icmp.ne v12, v13
 	; v15 = iconst.i32 3
-	movz	x10, #0x3
+	movz	w10, #0x3
 	; v16 = select v14, v15, v0
 	cmp	x9, #42
 	csel	w19, w10, w19, ne
@@ -90,7 +90,7 @@ Lmain_block0:
 	movz	x25, #0x7
 	; v25 = icmp.ne v23, v24
 	; v26 = iconst.i32 4
-	movz	x10, #0x4
+	movz	w10, #0x4
 	; v27 = select v25, v26, v16
 	cmp	x9, #7
 	csel	w19, w10, w19, ne
@@ -104,7 +104,7 @@ Lmain_block0:
 	; v30 = iconst.i64 13
 	; v31 = icmp.ne v29, v30
 	; v32 = iconst.i32 5
-	movz	x10, #0x5
+	movz	w10, #0x5
 	; v33 = select v31, v32, v27
 	cmp	x9, #13
 	csel	w9, w10, w19, ne
@@ -115,7 +115,7 @@ Lmain_block0:
 	ldr	x11, [x10]
 	; v36 = icmp.ne v35, v24
 	; v37 = iconst.i32 6
-	movz	x12, #0x6
+	movz	w12, #0x6
 	; v38 = select v36, v37, v33
 	cmp	x11, #7
 	csel	w19, w12, w9, ne
@@ -126,7 +126,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v40 = icmp.ne v39, v18
 	; v41 = iconst.i32 7
-	movz	x10, #0x7
+	movz	w10, #0x7
 	; v42 = select v40, v41, v38
 	cmp	x9, #8
 	csel	w19, w10, w19, ne
@@ -141,7 +141,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v46 = icmp.ne v45, v13
 	; v47 = iconst.i32 8
-	movz	x10, #0x8
+	movz	w10, #0x8
 	; v48 = select v46, v47, v42
 	cmp	x9, #42
 	csel	w19, w10, w19, ne
@@ -158,7 +158,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v52 = icmp.ne v51, v13
 	; v53 = iconst.i32 9
-	movz	x10, #0x9
+	movz	w10, #0x9
 	; v54 = select v52, v53, v48
 	cmp	x9, #42
 	csel	w19, w10, w19, ne
@@ -174,7 +174,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v58 = icmp.ne v57, v13
 	; v59 = iconst.i32 10
-	movz	x10, #0xa
+	movz	w10, #0xa
 	; v60 = select v58, v59, v54
 	cmp	x9, #42
 	csel	w9, w10, w19, ne
@@ -191,7 +191,7 @@ Lmain_block0:
 	; store v65, v63
 	str	x12, [x10]
 	; v69 = iconst.i32 11
-	movz	x10, #0xb
+	movz	w10, #0xb
 	; v70 = select v64, v69, v60
 	cmp	x11, #0
 	csel	w19, w10, w9, ne
@@ -201,7 +201,7 @@ Lmain_block0:
 	; v72 = iconst.i32 1
 	; v73 = icmp.ne v71, v72
 	; v74 = iconst.i32 12
-	movz	x10, #0xc
+	movz	w10, #0xc
 	; v75 = select v73, v74, v70
 	cmp	w9, #1
 	csel	w9, w10, w19, ne
@@ -216,7 +216,7 @@ Lmain_block0:
 	; v80 = iconst.i64 772
 	; v81 = icmp.ne v79, v80
 	; v82 = iconst.i32 13
-	movz	x12, #0xd
+	movz	w12, #0xd
 	; v83 = select v81, v82, v75
 	cmp	x11, #772
 	csel	w9, w12, w9, ne
@@ -229,7 +229,7 @@ Lmain_block0:
 	; v88 = iconst.i64 -2
 	; v89 = icmp.ne v87, v88
 	; v90 = iconst.i32 14
-	movz	x11, #0xe
+	movz	w11, #0xe
 	; v91 = select v89, v90, v83
 	cmn	x10, #2
 	csel	w19, w11, w9, ne
@@ -247,7 +247,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v96 = icmp.ne v95, v13
 	; v97 = iconst.i32 15
-	movz	x10, #0xf
+	movz	w10, #0xf
 	; v98 = select v96, v97, v91
 	cmp	x9, #42
 	csel	w19, w10, w19, ne
@@ -262,7 +262,7 @@ Lmain_block0:
 	mov	x9, x0
 	; v101 = icmp.ne v100, v13
 	; v102 = iconst.i32 16
-	movz	x10, #0x10
+	movz	w10, #0x10
 	; v103 = select v101, v102, v98
 	cmp	x9, #42
 	csel	w19, w10, w19, ne
@@ -277,7 +277,7 @@ Lmain_block0:
 	; v106 = iconst.i64 43
 	; v107 = icmp.ne v105, v106
 	; v108 = iconst.i32 17
-	movz	x10, #0x11
+	movz	w10, #0x11
 	; v109 = select v107, v108, v103
 	cmp	x9, #43
 	csel	w19, w10, w19, ne
@@ -288,7 +288,7 @@ Lmain_block0:
 	; v111 = iconst.i64 18
 	; v112 = icmp.ne v110, v111
 	; v113 = iconst.i32 18
-	movz	x10, #0x12
+	movz	w10, #0x12
 	; v114 = select v112, v113, v109
 	cmp	x9, #18
 	csel	w9, w10, w19, ne

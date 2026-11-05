@@ -160,7 +160,7 @@ Lmain_begin:
 	sub	sp, sp, #16
 Lmain_block0:
 	; v0 = iconst.i32 0
-	movz	x19, #0x0
+	movz	w19, #0x0
 	; v1 = iconst.i64 1
 	movz	x20, #0x1
 	; v2 = iconst.i64 2
@@ -191,7 +191,7 @@ Lmain_block0:
 	; v10 = iconst.i64 204
 	; v11 = icmp.ne v9, v10
 	; v12 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; v13 = select v11, v12, v0
 	cmp	x28, #204
 	csel	w19, w9, w19, ne
@@ -209,7 +209,7 @@ Lmain_block0:
 	; v15 = iconst.i64 120
 	; v16 = icmp.ne v14, v15
 	; v17 = iconst.i32 2
-	movz	x10, #0x2
+	movz	w10, #0x2
 	; v18 = select v16, v17, v13
 	cmp	x9, #120
 	csel	w19, w10, w19, ne
@@ -222,9 +222,9 @@ Lmain_block0:
 	mov	x1, x9
 	bl	_poke
 	; v21 = iconst.i32 -5
-	movn	x9, #0x4
+	movn	w9, #0x4
 	; v22 = iconst.i8 -3
-	movn	x10, #0x2
+	movn	w10, #0x2
 	; v23 = iconst.i64 100000
 	movz	x11, #0x86a0
 	movk	x11, #0x1, lsl #16
@@ -240,13 +240,13 @@ Lmain_block0:
 	movk	x10, #0x1, lsl #16
 	; v26 = icmp.ne v24, v25
 	; v27 = iconst.i32 4
-	movz	x11, #0x4
+	movz	w11, #0x4
 	; v28 = select v26, v27, v18
 	cmp	x9, x10
 	csel	w9, w11, w19, ne
 	; v29 = icmp.ne v9, v10
 	; v30 = iconst.i32 5
-	movz	x10, #0x5
+	movz	w10, #0x5
 	; v31 = select v29, v30, v28
 	cmp	x28, #204
 	csel	w9, w10, w9, ne

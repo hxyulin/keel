@@ -15,7 +15,7 @@ Lprivate_acc_begin:
 	mov	x10, x1
 Lprivate_acc_block0:
 	; v3 = iconst.i32 0
-	movz	x11, #0x0
+	movz	w11, #0x0
 	; v5 = iconst.i64 0
 	movz	x12, #0x0
 	; v12 = icmp.ugt v1, v5

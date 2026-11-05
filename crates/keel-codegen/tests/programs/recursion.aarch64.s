@@ -15,7 +15,7 @@ Lmain_begin:
 	.cfi_offset x19, -32
 Lmain_block0:
 	; v0 = iconst.i32 0
-	movz	x19, #0x0
+	movz	w19, #0x0
 	; v1 = iconst.i64 10
 	movz	x9, #0xa
 	; v2 = call @fib(v1)
@@ -25,7 +25,7 @@ Lmain_block0:
 	; v3 = iconst.i64 55
 	; v4 = icmp.ne v2, v3
 	; v5 = iconst.i32 1
-	movz	x10, #0x1
+	movz	w10, #0x1
 	; v6 = select v4, v5, v0
 	cmp	x9, #55
 	csel	w19, w10, w19, ne
@@ -39,7 +39,7 @@ Lmain_block0:
 	movz	x10, #0x1a6d
 	; v10 = icmp.ne v8, v9
 	; v11 = iconst.i32 2
-	movz	x11, #0x2
+	movz	w11, #0x2
 	; v12 = select v10, v11, v6
 	cmp	x9, x10
 	csel	w19, w11, w19, ne
@@ -55,7 +55,7 @@ Lmain_block0:
 	movk	x10, #0x21c3, lsl #48
 	; v16 = icmp.ne v14, v15
 	; v17 = iconst.i32 3
-	movz	x11, #0x3
+	movz	w11, #0x3
 	; v18 = select v16, v17, v12
 	cmp	x9, x10
 	csel	w9, w11, w19, ne

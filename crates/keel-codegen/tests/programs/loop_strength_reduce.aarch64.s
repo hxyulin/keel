@@ -17,7 +17,7 @@ Lhot32p_begin:
 	mov	x12, x3
 Lhot32p_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; jump block1(v2, v3, v4)
 Lhot32p_block1:
 	; v8 = icmp.ult v7, v0
@@ -63,7 +63,7 @@ Lhot32m_begin:
 	mov	x12, x3
 Lhot32m_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; jump block1(v2, v3, v4)
 Lhot32m_block1:
 	; v8 = icmp.ult v7, v0
@@ -109,7 +109,7 @@ Lhot32z_begin:
 	mov	x12, x3
 Lhot32z_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; jump block1(v2, v3, v4)
 Lhot32z_block1:
 	; v8 = icmp.ult v7, v0
@@ -293,7 +293,7 @@ Loffset32_begin:
 	mov	x12, x3
 Loffset32_block0:
 	; v4 = iconst.i32 0
-	movz	x13, #0x0
+	movz	w13, #0x0
 	; v5 = iconst.i64 17
 	movz	x14, #0x11
 	; jump block1(v2, v4, v5)

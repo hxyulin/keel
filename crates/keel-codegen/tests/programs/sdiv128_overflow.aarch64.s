@@ -18,7 +18,7 @@ Lmain_block0:
 	mov	x9, x4
 	mov	x10, x5
 	; v1 = iconst.i32 127
-	movz	x11, #0x7f
+	movz	w11, #0x7f
 	; v2 = shl v0, v1
 	mov	x0, x9
 	mov	x1, x10

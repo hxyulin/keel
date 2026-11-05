@@ -13,9 +13,9 @@ Lmain_begin:
 	.cfi_offset x29, -16
 Lmain_block0:
 	; v0 = iconst.i32 1
-	movz	x9, #0x1
+	movz	w9, #0x1
 	; v1 = iconst.i32 0
-	movz	x10, #0x0
+	movz	w10, #0x0
 	; v2 = udiv v0, v1
 	cbz	w10, Lmain_trap
 	udiv	w9, w9, w10
