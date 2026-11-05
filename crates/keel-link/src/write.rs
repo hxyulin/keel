@@ -1077,12 +1077,8 @@ impl Linker {
         Ok(())
     }
     fn exports(&self) -> Result<Vec<u8>> {
-        #[derive(Default)]
-        struct Node {
-            edges: BTreeMap<u8, usize>,
-            terminal: Vec<u8>,
-        }
-        let mut nodes = vec![Node::default()];
+        // `globals` iterates in byte order, which the trie construction needs.
+        let mut entries: Vec<(&[u8], Vec<u8>)> = Vec::new();
         for (symbol, &target) in &self.globals {
             if matches!(target, Target::Import(_) | Target::SectionBoundary(_, _)) {
                 continue;
@@ -1114,39 +1110,78 @@ impl Linker {
                 &mut term,
                 (self.address(target)? - if absolute { 0 } else { BASE }).into(),
             );
-            let mut at = 0;
-            for b in symbol.bytes() {
-                let next = if let Some(&id) = nodes[at].edges.get(&b) {
-                    id
-                } else {
-                    let id = nodes.len();
-                    nodes.push(Node::default());
-                    nodes[at].edges.insert(b, id);
-                    id
-                };
-                at = next;
-            }
-            nodes[at].terminal = term;
+            entries.push((symbol.as_bytes(), term));
         }
-        let mut offsets = vec![0; nodes.len()];
-        loop {
-            let mut out = Vec::new();
-            let mut new = Vec::new();
-            for n in &nodes {
-                new.push(out.len());
-                leb128::unsigned(&mut out, n.terminal.len() as u128);
-                out.extend_from_slice(&n.terminal);
-                out.push(n.edges.len() as u8);
-                for (&b, &id) in &n.edges {
-                    out.extend_from_slice(&[b, 0]);
-                    leb128::unsigned(&mut out, offsets[id] as u128);
-                }
-            }
-            if new == offsets {
-                return Ok(out);
-            }
-            offsets = new;
+        Ok(export_trie(&entries))
+    }
+}
+
+/// Encodes a dyld export trie for `entries`, sorted by name with no
+/// duplicates. Each edge carries the whole run of bytes up to the next branch
+/// or terminal, so the trie has at most two nodes per entry.
+fn export_trie(entries: &[(&[u8], Vec<u8>)]) -> Vec<u8> {
+    struct Node<'a> {
+        terminal: &'a [u8],
+        edges: Vec<(&'a [u8], usize)>,
+    }
+    let mut nodes = vec![Node {
+        terminal: &[],
+        edges: Vec::new(),
+    }];
+    // Each pending node owns the entries in `range`, which share their first
+    // `depth` bytes. An explicit stack avoids host recursion on long names.
+    let mut pending = vec![(0, 0..entries.len(), 0)];
+    while let Some((node, range, depth)) = pending.pop() {
+        let mut at = range.start;
+        if at < range.end && entries[at].0.len() == depth {
+            nodes[node].terminal = &entries[at].1;
+            at += 1;
         }
+        while at < range.end {
+            let name = entries[at].0;
+            let mut end = at + 1;
+            while end < range.end && entries[end].0[depth] == name[depth] {
+                end += 1;
+            }
+            // In sorted order the first and last names bound the group's
+            // common prefix.
+            let last = entries[end - 1].0;
+            let shared = depth
+                + name[depth..]
+                    .iter()
+                    .zip(&last[depth..])
+                    .take_while(|(a, b)| a == b)
+                    .count();
+            let child = nodes.len();
+            nodes.push(Node {
+                terminal: &[],
+                edges: Vec::new(),
+            });
+            nodes[node].edges.push((&name[depth..shared], child));
+            pending.push((child, at..end, shared));
+            at = end;
+        }
+    }
+    // Child offsets are ULEB128, so iterate until every node's offset is stable.
+    let mut offsets = vec![0; nodes.len()];
+    loop {
+        let mut out = Vec::new();
+        let mut new = Vec::with_capacity(nodes.len());
+        for n in &nodes {
+            new.push(out.len());
+            leb128::unsigned(&mut out, n.terminal.len() as u128);
+            out.extend_from_slice(n.terminal);
+            out.push(n.edges.len() as u8);
+            for &(label, id) in &n.edges {
+                out.extend_from_slice(label);
+                out.push(0);
+                leb128::unsigned(&mut out, offsets[id] as u128);
+            }
+        }
+        if new == offsets {
+            return out;
+        }
+        offsets = new;
     }
 }
 fn segment_offset(segments: &[Segment], addr: u64) -> Result<(u8, u64)> {
@@ -1177,6 +1212,67 @@ fn nlist(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_trie_round_trips_prefixes_branches_and_payloads() {
+        fn uleb(b: &[u8], at: &mut usize) -> usize {
+            let (mut value, mut shift) = (0, 0);
+            loop {
+                let byte = b[*at];
+                *at += 1;
+                value |= usize::from(byte & 127) << shift;
+                if byte & 128 == 0 {
+                    return value;
+                }
+                shift += 7;
+            }
+        }
+        fn visit(trie: &[u8], at: usize, name: Vec<u8>, out: &mut Vec<(Vec<u8>, Vec<u8>)>) {
+            let mut at = at;
+            let size = uleb(trie, &mut at);
+            if size != 0 {
+                out.push((name.clone(), trie[at..at + size].to_vec()));
+            }
+            at += size;
+            let count = trie[at];
+            at += 1;
+            for _ in 0..count {
+                let end = at + trie[at..].iter().position(|&b| b == 0).unwrap();
+                let mut child = name.clone();
+                child.extend_from_slice(&trie[at..end]);
+                at = end + 1;
+                let offset = uleb(trie, &mut at);
+                visit(trie, offset, child, out);
+            }
+        }
+        let names = [
+            "",
+            "_a",
+            "_ab",
+            "_abc",
+            "_abd",
+            "_b",
+            "_bcd",
+            "_bce_long_tail",
+        ];
+        let entries: Vec<(&[u8], Vec<u8>)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.as_bytes(), vec![0, 0x80 | i as u8, 1]))
+            .collect();
+        let trie = export_trie(&entries);
+        let mut decoded = Vec::new();
+        visit(&trie, 0, Vec::new(), &mut decoded);
+        decoded.sort();
+        let expected: Vec<_> = entries
+            .iter()
+            .map(|(n, t)| (n.to_vec(), t.clone()))
+            .collect();
+        assert_eq!(decoded, expected);
+        // A run without branches is one edge: "_bce_long_tail" adds one node.
+        assert_eq!(trie.windows(10).filter(|w| w == b"_long_tail").count(), 1);
+        assert!(export_trie(&[]).len() <= 2);
+    }
 
     #[test]
     fn relocation_intervals_match_byte_oracle_in_arbitrary_order() {
