@@ -103,6 +103,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
+| `stack-notrap` | Mark loads and stores proven inside a fixed stack slot `notrap`; see [memory passes](#memory-passes) |
 | `canonicalize` | Establish the [canonical form](#canonical-form) |
 | `simplify-cfg` | Fold constant `brif` and `switch`, compose arguments through jump-only blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | Evaluate instructions on constants with the machine's semantics; trapping divisions stay. Balanced and Full run it once, before the first inliner, whose admission counts instructions |
@@ -366,6 +367,18 @@ fill by the repeated 0x01 pattern. A zero length removes only the intrinsic.
 Variable and larger lengths stay. Balanced and Full run it before
 `stack-forward`.
 
+### stack-notrap
+
+`stack-notrap` sets `notrap` on a non-volatile load or store whose address is a
+slot's `stack_addr`, or a chain of constant non-negative `ptradd`s from it, when
+the access ends within the slot. A fixed slot stays mapped for the whole frame,
+so this holds even after its address escapes. Pointer accesses count as 8
+bytes. Slots with lifetime markers are skipped, because an access outside a
+slot's lifetime may trap. The pass infers no alignment. `dce` can then delete
+such loads when their results are unused. Every tier except None runs it before
+a `dce`: Fast and Basic once, Balanced after each round's `stack-forward`, and
+Full after each `FULL_ROUND` `stack-forward`.
+
 ### memory-forward
 
 `memory-forward` removes a same-type ordinary load when a load or store in the
@@ -466,7 +479,8 @@ implicitly. Full's reduction passes run it on a private copy to normalize
 
 ## Fast tier
 
-Fast runs `fast-cfg, fast-local, fast-cfg, dce, fast-loop-reduce`. Each CFG
+Fast runs `fast-cfg, fast-local, fast-cfg, stack-notrap, dce,
+fast-loop-reduce`. Each CFG
 pass folds branches, forwards one jump-only edge per destination, removes
 unreachable blocks and merges straight-line chains up to 64 instructions, with
 no fixed-point loop. `fast-local` makes one reverse-postorder pass with the

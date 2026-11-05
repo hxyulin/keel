@@ -95,6 +95,7 @@ mod small_memory;
 mod stack_address;
 mod stack_cache;
 mod stack_forward;
+mod stack_notrap;
 mod stack_promote;
 
 /// A replaceable optimization pass. Function passes implement `run`; module
@@ -263,6 +264,11 @@ pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
     "expand ordinary constant memory intrinsics of at most 32 bytes",
     |f, _| small_memory::run(f),
 );
+pub(crate) static STACK_NOTRAP: &dyn Pass = &BuiltinPass::new(
+    "stack-notrap",
+    "mark loads and stores inside a fixed stack slot as unable to fault",
+    |f, _| stack_notrap::run(f),
+);
 pub(crate) static CONST_FOLD: &dyn Pass = &BuiltinPass::new(
     "const-fold",
     "evaluate instructions whose operands are constants",
@@ -376,6 +382,7 @@ pub static PASSES: &[&dyn Pass] = &[
     FAST_CFG,
     FAST_LOCAL,
     SMALL_MEMORY,
+    STACK_NOTRAP,
     CONST_FOLD,
     SIMPLIFY_CFG,
     GVN,
@@ -567,6 +574,7 @@ impl OptimizationTier {
                 "fast-cfg",
                 "fast-local",
                 "fast-cfg",
+                "stack-notrap",
                 "dce",
                 "fast-loop-reduce",
             ],
@@ -576,6 +584,7 @@ impl OptimizationTier {
                 "instcombine",
                 "call-contracts",
                 "simplify-cfg",
+                "stack-notrap",
                 "dce",
             ],
             Self::Balanced => BALANCED_PIPELINE,
@@ -595,8 +604,9 @@ const RELEASE_ROUND_SCALAR: [&str; 6] = [
     "simplify-cfg",
     "gvn",
 ];
-const RELEASE_ROUND_MEMORY: [&str; 5] = [
+const RELEASE_ROUND_MEMORY: [&str; 6] = [
     "stack-forward",
+    "stack-notrap",
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -666,7 +676,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
     run_passes(module, tier.pipeline())
 }
 
-const FULL_ROUND: [&str; 16] = [
+const FULL_ROUND: [&str; 17] = [
     "inline-cheap-reserve",
     "simplify-cfg",
     "canonicalize",
@@ -676,6 +686,7 @@ const FULL_ROUND: [&str; 16] = [
     "gvn",
     "small-memory",
     "stack-forward",
+    "stack-notrap",
     "canonicalize",
     "instcombine",
     "dce",

@@ -19,7 +19,7 @@ Lk_printf_block0:
 	; intrinsic va_start(v1)
 	add	x16, x29, #16
 	str	x16, [x10]
-	; v2 = load.ptr v1
+	; v2 = load.ptr notrap v1
 	ldr	x10, [sp, #0]
 	; v3 = call @vprintf(v0, v2)
 	mov	x0, x9

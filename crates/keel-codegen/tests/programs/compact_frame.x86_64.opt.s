@@ -20,10 +20,10 @@
 	lea	rdi, [rbp + -48]
 	# v2 = stack_addr ss3
 	lea	r8, [rbp + -24]
-	# store v0, v1
+	# store notrap v0, v1
 	mov	qword ptr [rbp + -48], rsi
 	# v3 = iconst.i64 17
-	# store v3, v2
+	# store notrap v3, v2
 	mov	qword ptr [rbp + -24], 17
 	# v4 = iconst.i64 64
 	mov	esi, 64
@@ -38,9 +38,9 @@
 	mov	rsi, r8
 	call	"touch_frame"@PLT
 	mov	rsi, rax
-	# v8 = load.i64 v1
+	# v8 = load.i64 notrap v1
 	mov	rdi, qword ptr [rbp + -48]
-	# v9 = load.i64 v2
+	# v9 = load.i64 notrap v2
 	mov	r8, qword ptr [rbp + -24]
 	# v10 = load.i64 v5
 	mov	r9, qword ptr [rbx]

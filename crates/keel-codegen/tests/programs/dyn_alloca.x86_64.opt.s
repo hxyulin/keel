@@ -173,14 +173,14 @@
 	mov	r13, rax
 	# v19 = stack_addr ss0
 	lea	rsi, [rbp + -64]
-	# store v0, v19
+	# store notrap v0, v19
 	mov	qword ptr [rbp + -64], rbx
 	# v20 = ptradd v19, v88
 	lea	rdi, [rsi + 8]
-	# store v2, v20
+	# store notrap v2, v20
 	mov	qword ptr [rdi], r14
 	# v21 = ptradd v20, v88
-	# store v8, v21
+	# store notrap v8, v21
 	mov	qword ptr [rdi + 8], r12
 	# v22 = call @c_big(v19)
 	mov	rax, qword ptr [rsi]

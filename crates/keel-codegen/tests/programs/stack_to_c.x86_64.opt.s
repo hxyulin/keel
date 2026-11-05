@@ -53,17 +53,17 @@
 	# v14 = stack_addr ss1
 	lea	rsi, [rbp + -24]
 	# v15 = iconst.i8 111
-	# store v15, v14
+	# store notrap v15, v14
 	mov	byte ptr [rbp + -24], 111
 	# v16 = iconst.i64 1
 	# v17 = ptradd v14, v16
 	# v18 = iconst.i8 107
-	# store v18, v17
+	# store notrap v18, v17
 	mov	byte ptr [rsi + 1], 107
 	# v19 = iconst.i64 2
 	# v20 = ptradd v14, v19
 	# v21 = iconst.i8 0
-	# store v21, v20
+	# store notrap v21, v20
 	mov	byte ptr [rsi + 2], 0
 	# v22 = call @puts(v14)
 	mov	rdi, rsi

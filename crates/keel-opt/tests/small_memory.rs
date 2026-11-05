@@ -403,6 +403,7 @@ fn full_expands_small_memory_before_stack_forward_only() {
             "instcombine",
             "call-contracts",
             "simplify-cfg",
+            "stack-notrap",
             "dce",
         ]
     );

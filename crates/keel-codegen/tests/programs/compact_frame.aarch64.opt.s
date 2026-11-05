@@ -25,11 +25,11 @@ Lcompact_frame_block0:
 	add	x20, x19, #0
 	; v2 = stack_addr ss3
 	add	x21, x19, #24
-	; store v0, v1
+	; store notrap v0, v1
 	str	x9, [x19, #0]
 	; v3 = iconst.i64 17
 	movz	x9, #0x11
-	; store v3, v2
+	; store notrap v3, v2
 	str	x9, [x19, #24]
 	; v4 = iconst.i64 64
 	movz	x10, #0x40
@@ -45,9 +45,9 @@ Lcompact_frame_block0:
 	mov	x1, x21
 	bl	_touch_frame
 	mov	x9, x0
-	; v8 = load.i64 v1
+	; v8 = load.i64 notrap v1
 	ldr	x10, [x19, #0]
-	; v9 = load.i64 v2
+	; v9 = load.i64 notrap v2
 	ldr	x11, [x19, #24]
 	; v10 = load.i64 v5
 	ldr	x12, [x22]

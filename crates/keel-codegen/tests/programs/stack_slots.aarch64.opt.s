@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x11 v1=x9 v2=x9 v8=x11 v9=x11 v10=x11 v12=x9 v20=x11 v21=x11 v22=x10 v24=x9 v27=x9 v29=x9 v30=x10 v31=x11 v33=x12 v35=x12 v37=x13 v38=x9 v39=x12 v41=x12 v43=x13 v44=x9 v45=x12 v46=x12 v48=x12 v49=x13 v50=x9 v53=x12 v54=x13 v55=x12 v56=x13 v57=x9 v60=x12 v68=x10 v69=x11 v70=x11 v71=x12 v72=x11 v74=x13 v75=x9 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9 v89=x11 v90=x10 v94=x10 v95=x9 v96=x10 v98=x9
+	; regalloc: v0=x11 v1=x9 v2=x9 v8=x11 v9=x11 v10=x11 v12=x9 v20=x11 v21=x11 v22=x10 v24=x9 v27=x9 v29=x9 v30=x10 v31=x11 v33=x12 v35=x12 v37=x13 v38=x9 v39=x12 v41=x12 v43=x13 v44=x9 v45=x12 v46=x12 v48=x12 v49=x13 v50=x9 v53=x12 v54=x13 v55=x12 v56=x13 v57=x9 v60=x12 v68=x10 v71=x11 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9 v89=x11 v90=x10 v94=x10 v95=x9 v96=x10 v98=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -85,9 +85,9 @@ Lmain_block5:
 	; v45 = iconst.i32 287454020
 	movz	w12, #0x3344
 	movk	w12, #0x1122, lsl #16
-	; store v45, v30
+	; store notrap v45, v30
 	str	w12, [sp, #5040]
-	; v46 = load.i8 v30
+	; v46 = load.i8 notrap v30
 	ldrb	w12, [x10]
 	; v47 = iconst.i8 68
 	; v48 = icmp.ne v46, v47
@@ -100,7 +100,7 @@ Lmain_block5:
 	csel	w9, w13, w9, ne
 	; v51 = iconst.i64 2
 	; v52 = ptradd v30, v51
-	; v53 = load.i16 v52
+	; v53 = load.i16 notrap v52
 	ldrh	w12, [x10, #2]
 	; v54 = iconst.i16 4386
 	movz	w13, #0x1122
@@ -115,33 +115,23 @@ Lmain_block5:
 	csel	w9, w13, w9, ne
 	; v60 = iconst.i64 -1
 	movn	x12, #0x0
-	; store v60, v30
+	; store notrap v60, v30
 	str	x12, [sp, #5040]
-	; store v60, v31
+	; store notrap v60, v31
 	str	x12, [sp, #5056]
 	; v62 = iconst.i64 8
 	; v63 = ptradd v31, v62
-	; store v60, v63
+	; store notrap v60, v63
 	str	x12, [x11, #8]
 	; v68 = stack_addr ss0
 	add	x10, sp, #0
 	; v69 = iconst.i64 4992
-	movz	x11, #0x1380
 	; v70 = ptradd v68, v69
-	add	x11, x10, x11
 	; v71 = iconst.i64 123456789
-	movz	x12, #0xcd15
-	movk	x12, #0x75b, lsl #16
-	; store v71, v70
-	str	x12, [x11]
-	; v72 = load.i64 v70
-	ldr	x11, [x11]
-	; v73 = icmp.ne v72, v71
-	; v74 = iconst.i32 7
-	movz	w13, #0x7
-	; v75 = select v73, v74, v57
-	cmp	x11, x12
-	csel	w9, w13, w9, ne
+	movz	x11, #0xcd15
+	movk	x11, #0x75b, lsl #16
+	; store notrap v71, v70
+	str	x11, [x10, #4992]
 	; v78 = ptrtoint.i64 v68
 	; v0 = stack_addr ss1
 	add	x11, sp, #904
@@ -154,7 +144,7 @@ Lmain_block5:
 	; v82 = icmp.ult v80, v81
 	; v83 = iconst.i32 8
 	movz	w12, #0x8
-	; v84 = select v82, v83, v75
+	; v84 = select v82, v83, v57
 	cmp	x10, x11
 	csel	w9, w12, w9, lo
 	; return v84

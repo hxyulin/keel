@@ -36,7 +36,7 @@
 	# v6 = iconst.i64 65535
 	mov	r12d, 65535
 	# v7 = stack_addr ss1
-	# store v1, v7
+	# store notrap v1, v7
 	mov	rax, qword ptr [rbp + -56]
 	mov	qword ptr [rbp + -48], rax
 	# call @clobber()

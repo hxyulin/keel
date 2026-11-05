@@ -161,14 +161,14 @@ Lk_vla_block3:
 	mov	x22, x0
 	; v19 = stack_addr ss0
 	add	x9, x19, #56
-	; store v0, v19
+	; store notrap v0, v19
 	str	x20, [x19, #56]
 	; v20 = ptradd v19, v88
 	add	x10, x9, #8
-	; store v2, v20
+	; store notrap v2, v20
 	str	x23, [x10]
 	; v21 = ptradd v20, v88
-	; store v8, v21
+	; store notrap v8, v21
 	str	x21, [x10, #8]
 	; v22 = call @c_big(v19)
 	ldr	x17, [x9, #0]

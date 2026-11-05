@@ -30,85 +30,66 @@
 	lea	r8, [rsi + 8]
 	# v52 = iconst.i64 506381209866536711
 	movabs	r9, 506381209866536711
-	# store v52, v1
+	# store notrap v52, v1
 	mov	qword ptr [rbp + -64], r9
-	# store v52, v4
+	# store notrap v52, v4
 	mov	qword ptr [r8], r9
 	# v57 = iconst.i64 72340172838076673
 	movabs	rbx, 72340172838076673
-	# store v57, v1
+	# store notrap v57, v1
 	mov	qword ptr [rbp + -64], rbx
-	# v8 = load.i64 v1
-	mov	r12, qword ptr [rbp + -64]
-	# v10 = icmp.ne v8, v57
-	cmp	r12, rbx
-	setne	bl
-	# v12 = uext.i32 v10
-	movzx	ebx, bl
-	# v13 = load.i64 v4
-	mov	r12, qword ptr [r8]
-	# v15 = icmp.ne v13, v52
-	cmp	r12, r9
-	setne	r12b
-	# v16 = iconst.i32 2
-	mov	r13d, 2
-	# v17 = select v15, v16, v12
-	test	r12b, r12b
-	mov	rax, rbx
-	cmovne	rax, r13
-	mov	rbx, rax
-	# v58 = load.i8x16 v1
+	# v12 = iconst.i32 0
+	xor	ebx, ebx
+	# v58 = load.i8x16 notrap v1
 	movups	xmm0, xmmword ptr [rbp + -64]
-	# store v58, v2
+	# store notrap v58, v2
 	movups	xmmword ptr [rbp + -48], xmm0
 	# v18 = ptradd v2, v3
-	# v19 = load.i64 v18
+	# v19 = load.i64 notrap v18
 	mov	rdi, qword ptr [rdi + 8]
 	# v20 = icmp.ne v19, v52
 	cmp	rdi, r9
 	setne	dil
 	# v21 = iconst.i32 3
 	mov	r9d, 3
-	# v22 = select v20, v21, v17
+	# v22 = select v20, v21, v12
 	test	dil, dil
 	mov	rax, rbx
 	cmovne	rax, r9
 	mov	rdi, rax
 	# v23 = iconst.i64 506097522914230528
 	movabs	r9, 506097522914230528
-	# store v23, v1
+	# store notrap v23, v1
 	mov	qword ptr [rbp + -64], r9
 	# v24 = iconst.i64 1084818905618843912
-	movabs	r9, 1084818905618843912
-	# store v24, v4
-	mov	qword ptr [r8], r9
+	movabs	rbx, 1084818905618843912
+	# store notrap v24, v4
+	mov	qword ptr [r8], rbx
 	# v25 = iconst.i64 1
 	# v26 = ptradd v1, v25
-	lea	r9, [rsi + 1]
-	# v59 = load.i64 v1
-	mov	rbx, qword ptr [rbp + -64]
-	# v62 = load.i32 v4
+	lea	rbx, [rsi + 1]
+	# v62 = load.i32 notrap v4
 	mov	r12d, dword ptr [r8]
 	# v63 = iconst.i64 12
 	# v64 = ptradd v1, v63
-	# v65 = load.i16 v64
+	# v65 = load.i16 notrap v64
 	movzx	r13d, word ptr [rsi + 12]
 	# v66 = iconst.i64 14
 	# v67 = ptradd v1, v66
-	# v68 = load.i8 v67
+	# v68 = load.i8 notrap v67
 	movzx	r14d, byte ptr [rsi + 14]
-	# store v59, v26
-	mov	qword ptr [r9], rbx
+	# store notrap v23, v26
+	mov	qword ptr [rbx], r9
 	# v70 = ptradd v26, v3
-	# store v62, v70
-	mov	dword ptr [r9 + 8], r12d
+	# store notrap v62, v70
+	mov	dword ptr [rbx + 8], r12d
 	# v72 = ptradd v26, v63
-	# store v65, v72
-	mov	word ptr [r9 + 12], r13w
+	# store notrap v65, v72
+	mov	word ptr [rbx + 12], r13w
 	# v74 = ptradd v26, v66
-	# store v68, v74
-	mov	byte ptr [r9 + 14], r14b
-	# v28 = load.i64 v1
+	# store notrap v68, v74
+	mov	byte ptr [rbx + 14], r14b
+	# v28 = load.i64 notrap v1
 	mov	r9, qword ptr [rbp + -64]
 	# v29 = iconst.i64 433757350076153856
 	movabs	rbx, 433757350076153856
@@ -122,7 +103,7 @@
 	mov	rax, rdi
 	cmovne	rax, rbx
 	mov	rdi, rax
-	# v33 = load.i64 v4
+	# v33 = load.i64 notrap v4
 	mov	r9, qword ptr [r8]
 	# v34 = iconst.i64 1012478732780767239
 	movabs	rbx, 1012478732780767239

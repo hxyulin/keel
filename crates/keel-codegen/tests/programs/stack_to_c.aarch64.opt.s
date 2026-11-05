@@ -53,18 +53,18 @@ Lmain_block3:
 	add	x9, sp, #40
 	; v15 = iconst.i8 111
 	movz	w10, #0x6f
-	; store v15, v14
+	; store notrap v15, v14
 	strb	w10, [sp, #40]
 	; v16 = iconst.i64 1
 	; v17 = ptradd v14, v16
 	; v18 = iconst.i8 107
 	movz	w10, #0x6b
-	; store v18, v17
+	; store notrap v18, v17
 	strb	w10, [x9, #1]
 	; v19 = iconst.i64 2
 	; v20 = ptradd v14, v19
 	; v21 = iconst.i8 0
-	; store v21, v20
+	; store notrap v21, v20
 	strb	wzr, [x9, #2]
 	; v22 = call @puts(v14)
 	mov	x0, x9

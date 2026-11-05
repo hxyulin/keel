@@ -181,3 +181,75 @@ block2(v9: i64):
         }
     }
 }
+
+/// `stack-notrap` marks only accesses proven inside a fixed slot without
+/// lifetime markers. DCE then deletes the dead ones and keeps the rest.
+#[test]
+fn dead_loads_inside_fixed_stack_slots_are_deleted() {
+    let source = "decl @escape(ptr)
+func @f(i64) -> i64 {
+    ss0 = stack_slot 16, align 8
+    ss1 = stack_slot 8, align 8
+block0(v0: i64):
+    v1 = stack_addr ss0
+    call @escape(v1)
+    v2 = iconst.i64 8
+    v3 = ptradd v1, v2
+    v4 = load.i64 v3
+    v5 = iconst.i64 12
+    v6 = ptradd v1, v5
+    v7 = load.i64 v6
+    v8 = ptradd v1, v0
+    v9 = load.i64 v8
+    v10 = load.i64 volatile v1
+    v11 = stack_addr ss1
+    intrinsic lifetime_start(v11)
+    v12 = load.i64 v11
+    intrinsic lifetime_end(v11)
+    store v0, v3
+    v13 = load.i32 v1
+    return v0
+}
+";
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let f = &mut module.functions[0];
+    let pass = |name| keel_opt::find_pass(name).unwrap();
+    // Each load and store in layout order, with its notrap flag.
+    let accesses = |f: &Function| -> Vec<(bool, bool)> {
+        f.layout_insts()
+            .filter_map(|(_, i)| match *f.inst_data(i) {
+                InstData::Load { flags, .. } => Some((true, flags.notrap)),
+                InstData::Store { flags, .. } => Some((false, flags.notrap)),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(pass("stack-notrap").run(f, &Default::default()));
+    // In bounds, even after the slot escapes: offset 8, the store and offset 0.
+    // Past the end, dynamic, volatile or lifetime-marked accesses stay as is.
+    assert_eq!(
+        accesses(f),
+        [
+            (true, true),
+            (true, false),
+            (true, false),
+            (true, false),
+            (true, false),
+            (false, true),
+            (true, true),
+        ]
+    );
+    assert!(!pass("stack-notrap").run(f, &Default::default()));
+    assert!(pass("dce").run(f, &Default::default()));
+    assert_eq!(
+        accesses(f),
+        [
+            (true, false),
+            (true, false),
+            (true, false),
+            (true, false),
+            (false, true)
+        ]
+    );
+}

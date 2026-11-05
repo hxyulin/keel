@@ -345,7 +345,7 @@ Lk_invoke_storage_block0:
 	add	x12, sp, #64
 	; v4 = iconst.i64 1234
 	movz	x13, #0x4d2
-	; store v4, v3
+	; store notrap v4, v3
 	str	x13, [sp, #64]
 	; v5 = iconst.i64 1
 	movz	x13, #0x1
@@ -401,7 +401,7 @@ Lk_invoke_storage_block2:
 	; call @__cxa_end_catch()
 	bl	___cxa_end_catch
 	; v22 = stack_addr ss0
-	; v17 = load.i64 v22
+	; v17 = load.i64 notrap v22
 	ldr	x9, [sp, #64]
 	; return v17
 	mov	x0, x9
@@ -413,7 +413,7 @@ Lk_invoke_storage_block2:
 	ret
 Lk_invoke_storage_block1:
 	; v23 = stack_addr ss0
-	; v13 = load.i64 v23
+	; v13 = load.i64 notrap v23
 	ldr	x9, [sp, #64]
 	; return v13
 	mov	x0, x9

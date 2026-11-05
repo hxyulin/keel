@@ -38,7 +38,7 @@ Lremat_probe_block0:
 	; v6 = iconst.i64 65535
 	movz	x25, #0xffff
 	; v7 = stack_addr ss1
-	; store v1, v7
+	; store notrap v1, v7
 	str	x20, [sp, #16]
 	; call @clobber()
 	bl	_clobber

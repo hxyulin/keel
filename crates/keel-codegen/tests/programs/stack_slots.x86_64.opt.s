@@ -89,9 +89,9 @@
 	cmovne	rax, rbx
 	mov	rsi, rax
 	# v45 = iconst.i32 287454020
-	# store v45, v30
+	# store notrap v45, v30
 	mov	dword ptr [rbp + -48], 287454020
-	# v46 = load.i8 v30
+	# v46 = load.i8 notrap v30
 	movzx	r9d, byte ptr [rbp + -48]
 	# v47 = iconst.i8 68
 	# v48 = icmp.ne v46, v47
@@ -106,7 +106,7 @@
 	mov	rsi, rax
 	# v51 = iconst.i64 2
 	# v52 = ptradd v30, v51
-	# v53 = load.i16 v52
+	# v53 = load.i16 notrap v52
 	movzx	edi, word ptr [rdi + 2]
 	# v54 = iconst.i16 4386
 	# v55 = icmp.ne v53, v54
@@ -120,34 +120,21 @@
 	cmovne	rax, r9
 	mov	rsi, rax
 	# v60 = iconst.i64 -1
-	# store v60, v30
+	# store notrap v60, v30
 	mov	qword ptr [rbp + -48], -1
-	# store v60, v31
+	# store notrap v60, v31
 	mov	qword ptr [rbp + -32], -1
 	# v62 = iconst.i64 8
 	# v63 = ptradd v31, v62
-	# store v60, v63
+	# store notrap v60, v63
 	mov	qword ptr [r8 + 8], -1
 	# v68 = stack_addr ss0
 	lea	rdi, [rbp + -5088]
 	# v69 = iconst.i64 4992
 	# v70 = ptradd v68, v69
-	lea	r8, [rdi + 4992]
 	# v71 = iconst.i64 123456789
-	# store v71, v70
-	mov	qword ptr [r8], 123456789
-	# v72 = load.i64 v70
-	mov	r8, qword ptr [r8]
-	# v73 = icmp.ne v72, v71
-	cmp	r8, 123456789
-	setne	r8b
-	# v74 = iconst.i32 7
-	mov	r9d, 7
-	# v75 = select v73, v74, v57
-	test	r8b, r8b
-	mov	rax, rsi
-	cmovne	rax, r9
-	mov	rsi, rax
+	# store notrap v71, v70
+	mov	qword ptr [rdi + 4992], 123456789
 	# v78 = ptrtoint.i64 v68
 	# v0 = stack_addr ss1
 	lea	r8, [rbp + -88]
@@ -160,7 +147,7 @@
 	setb	dil
 	# v83 = iconst.i32 8
 	mov	r8d, 8
-	# v84 = select v82, v83, v75
+	# v84 = select v82, v83, v57
 	test	dil, dil
 	mov	rax, rsi
 	cmovne	rax, r8
