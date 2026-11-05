@@ -175,6 +175,9 @@ pub(crate) struct Linker {
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
     warnings: Vec<String>,
+    /// Each object symbol's target, indexed like `objects`, once `globals` is
+    /// final. `None` marks an undefined name. Empty until then.
+    resolved: Vec<Vec<Option<Target>>>,
 }
 
 // These names are assembler labels: no C ABI underscore is added.
@@ -306,6 +309,7 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
         binds: BTreeMap::new(),
         options,
         warnings: Vec::new(),
+        resolved: Vec::new(),
     };
     l.prepare()?;
     Ok(l)
@@ -568,6 +572,14 @@ impl Linker {
         }
         // Private extern definitions coalesce statically, never across images.
         self.weak_names.retain(|name| !matches!(self.globals.get(name), Some(Target::Definition(o,s)) if self.objects[*o].symbols[*s].kind & 0x10 != 0));
+        // `globals` is final. Relocations look symbols up by index from here on.
+        self.resolved = (0..self.objects.len())
+            .map(|oi| {
+                (0..self.objects[oi].symbols.len())
+                    .map(|si| self.lookup(oi, si))
+                    .collect()
+            })
+            .collect();
         for (oi, o) in self.objects.iter().enumerate() {
             for (si, s) in o.sections.iter().enumerate() {
                 if self.discarded.contains(&(oi, si)) || s.segment == "__DWARF" {
@@ -648,13 +660,19 @@ impl Linker {
             .symbols
             .get(si)
             .ok_or("relocation symbol index out of range")?;
+        let target = match self.resolved.get(oi) {
+            Some(table) => table[si],
+            None => self.lookup(oi, si),
+        };
+        target.ok_or_else(|| format!("undefined symbol `{}`", s.name).into())
+    }
+    /// The target `globals` gives symbol `si` of object `oi`; `None` if undefined.
+    fn lookup(&self, oi: usize, si: usize) -> Option<Target> {
+        let s = &self.objects[oi].symbols[si];
         if s.kind & 1 != 0 || s.kind & 0xe == 0 {
-            self.globals
-                .get(&s.name)
-                .copied()
-                .ok_or_else(|| format!("undefined symbol `{}`", s.name).into())
+            self.globals.get(&s.name).copied()
         } else {
-            Ok(Target::Definition(oi, si))
+            Some(Target::Definition(oi, si))
         }
     }
     fn symbol_address(&self, oi: usize, symbol: &Symbol) -> Result<u64> {
