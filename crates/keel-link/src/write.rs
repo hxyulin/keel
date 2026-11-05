@@ -265,6 +265,17 @@ impl Linker {
         let mut symbols = Vec::new();
         let debug_objects = self.debug_map(&mut symbols, &mut strings)?;
         let locals = (symbols.len() / 16) as u32;
+        // Only GOT and stub entries need symbol indices. Both lists are
+        // sorted, so a merge finds them without a lookup per global.
+        let mut wanted: Vec<&str> = self
+            .got
+            .keys()
+            .chain(self.stubs.keys())
+            .map(String::as_str)
+            .collect();
+        wanted.sort_unstable();
+        wanted.dedup();
+        let mut next_wanted = 0;
         let mut indices = BTreeMap::new();
         let mut defined = 0;
         for (symbol, &target) in &self.globals {
@@ -296,7 +307,15 @@ impl Linker {
                 Target::SectionBoundary(id, _) => (0x1f, self.outputs[id].ordinal),
                 Target::Import(_) => unreachable!(),
             };
-            indices.insert(symbol.clone(), locals + defined);
+            while wanted
+                .get(next_wanted)
+                .is_some_and(|w| *w < symbol.as_str())
+            {
+                next_wanted += 1;
+            }
+            if wanted.get(next_wanted) == Some(&symbol.as_str()) {
+                indices.insert(symbol.as_str(), locals + defined);
+            }
             defined += 1;
             let desc = match target {
                 Target::Definition(o, s) => self.objects[o].symbols[s].desc & 0x80,
@@ -305,7 +324,7 @@ impl Linker {
             nlist(&mut symbols, &mut strings, symbol, kind, sect, desc, addr);
         }
         for (i, (symbol, ordinal)) in self.imports.iter().enumerate() {
-            indices.insert(symbol.clone(), locals + defined + i as u32);
+            indices.insert(symbol.as_str(), locals + defined + i as u32);
             if *ordinal > 253 {
                 return fail("more than 253 dylib ordinals unsupported");
             }
@@ -335,7 +354,10 @@ impl Linker {
         let mut stubs: Vec<_> = self.stubs.iter().collect();
         stubs.sort_by_key(|(_, i)| **i);
         for (symbol, _) in got.into_iter().chain(stubs) {
-            u32le(&mut linkedit, *indices.get(symbol).unwrap_or(&0x80000000));
+            u32le(
+                &mut linkedit,
+                *indices.get(symbol.as_str()).unwrap_or(&0x80000000),
+            );
         }
         let indirectcount = (linkedit.len() + file - indirectoff) / 4;
         linkedit.resize(align(linkedit.len(), 16), 0);

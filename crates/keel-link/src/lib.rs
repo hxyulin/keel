@@ -367,17 +367,21 @@ impl Linker {
                 if s.desc & 0x80 != 0 {
                     self.weak_names.insert(s.name.clone());
                 }
-                if let Some(&previous) = self.globals.get(&s.name) {
-                    let weak = matches!(previous, Target::Definition(o, sym) if self.objects[o].symbols[sym].desc & 0x80 != 0);
-                    if s.desc & 0x80 != 0 {
-                        continue;
+                match self.globals.entry(s.name.clone()) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(Target::Definition(oi, si));
                     }
-                    if !weak {
-                        return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        let weak = matches!(*entry.get(), Target::Definition(o, sym) if self.objects[o].symbols[sym].desc & 0x80 != 0);
+                        if s.desc & 0x80 != 0 {
+                            continue;
+                        }
+                        if !weak {
+                            return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
+                        }
+                        entry.insert(Target::Definition(oi, si));
                     }
                 }
-                self.globals
-                    .insert(s.name.clone(), Target::Definition(oi, si));
             }
         }
         if self.options.dead_strip {
