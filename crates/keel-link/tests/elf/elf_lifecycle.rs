@@ -3,7 +3,7 @@ use keel_link::elf;
 use object::{Object, ObjectSection};
 use std::collections::BTreeMap;
 
-fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("lifecycle.o", inputs, Default::default())
 }
 fn u64at(b: &[u8], n: usize) -> u64 {

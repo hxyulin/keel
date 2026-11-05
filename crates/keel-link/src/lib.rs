@@ -17,9 +17,61 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 pub use tbd::Dylib;
 
-pub type Result<T> = std::result::Result<T, String>;
+/// A link failure. The message names the input, section or symbol involved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Error(String);
+
+impl Error {
+    pub fn message(&self) -> &str {
+        &self.0
+    }
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Error {}
+impl From<String> for Error {
+    fn from(message: String) -> Self {
+        Self(message)
+    }
+}
+impl From<&str> for Error {
+    fn from(message: &str) -> Self {
+        Self(message.into())
+    }
+}
+impl From<Error> for String {
+    fn from(error: Error) -> Self {
+        error.0
+    }
+}
+impl std::ops::Deref for Error {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl PartialEq<str> for Error {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+impl PartialEq<String> for Error {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<&str> for Error {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 pub(crate) fn fail<T>(s: impl Into<String>) -> Result<T> {
-    Err(s.into())
+    Err(Error(s.into()))
 }
 pub(crate) const BASE: u64 = 0x1_0000_0000;
 pub(crate) const PAGE: usize = 0x4000;
@@ -600,7 +652,7 @@ impl Linker {
             self.globals
                 .get(&s.name)
                 .copied()
-                .ok_or_else(|| format!("undefined symbol `{}`", s.name))
+                .ok_or_else(|| format!("undefined symbol `{}`", s.name).into())
         } else {
             Ok(Target::Definition(oi, si))
         }
@@ -654,7 +706,8 @@ pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
     use std::io::Write;
     write_debug_objects(&executable.debug_objects)?;
     install_output(path, true, |file| {
-        file.write_all(&executable.bytes).map_err(|e| e.to_string())
+        file.write_all(&executable.bytes)
+            .map_err(|e| e.to_string().into())
     })
 }
 
@@ -671,7 +724,8 @@ fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
         // Atomic replacement keeps the old inode stable until maps are dropped.
         install_output(&object.path, false, |file| {
             use std::io::Write;
-            file.write_all(&object.bytes).map_err(|e| e.to_string())
+            file.write_all(&object.bytes)
+                .map_err(|e| e.to_string().into())
         })
         .map_err(|e| format!("debug object {}: {e}", object.path.display()))?;
     }
@@ -695,5 +749,5 @@ fn install_output(
         }
         Ok(())
     })
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string().into())
 }

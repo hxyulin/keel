@@ -88,7 +88,7 @@ struct Layout<'a> {
 
 fn address_align(n: u64, alignment: u64) -> Result<u64> {
     if !alignment.is_power_of_two() {
-        return Err(format!("invalid script alignment {alignment}"));
+        return Err(format!("invalid script alignment {alignment}").into());
     }
     n.checked_add(alignment - 1)
         .map(|v| v & !(alignment - 1))
@@ -124,7 +124,8 @@ impl Layout<'_> {
             return Err(format!(
                 "cyclic script symbol expression involving `{}`",
                 symbol.name
-            ));
+            )
+            .into());
         }
         if symbol.global() {
             if self.definitions.contains_key(&symbol.name) {
@@ -160,14 +161,12 @@ impl Layout<'_> {
                 })
             }
             SymbolSection::Undefined if symbol.weak() => Ok(Value::absolute(0)),
-            _ => Err(format!("unresolved script symbol `{}`", symbol.name)),
+            _ => Err(format!("unresolved script symbol `{}`", symbol.name).into()),
         }
     }
     fn named(&self, name: &str, depth: usize) -> Result<Value> {
         if depth > 128 {
-            return Err(format!(
-                "cyclic script symbol expression involving `{name}`"
-            ));
+            return Err(format!("cyclic script symbol expression involving `{name}`").into());
         }
         if self.definitions.get(name).is_some_and(Definition::provide) {
             self.used_provides.borrow_mut().insert(name.to_owned());
@@ -275,7 +274,7 @@ impl Layout<'_> {
             }
             Expr::Call(name, args) if matches!(name.as_str(), "ADDR" | "LOADADDR" | "SIZEOF") => {
                 let Expr::Name(section) = &args[0] else {
-                    return Err(format!("{name} requires an output section name"));
+                    return Err(format!("{name} requires an output section name").into());
                 };
                 let out = self
                     .outputs
@@ -321,7 +320,7 @@ impl Layout<'_> {
             }
             Expr::Assert(condition, message) => {
                 if self.eval(condition, dot, depth + 1)?.n == 0 {
-                    Err(format!("linker script assertion failed: {message}"))
+                    Err(format!("linker script assertion failed: {message}").into())
                 } else {
                     Ok(Value::number(1))
                 }
@@ -461,7 +460,7 @@ impl Layout<'_> {
             return Ok(());
         }
         if self.outputs.iter().any(|o| o.name == command.name) {
-            return Err(format!("duplicate output section {}", command.name));
+            return Err(format!("duplicate output section {}", command.name).into());
         }
         let used = &self.used;
         let alignment = command
@@ -704,7 +703,8 @@ pub(in crate::elf) fn link(
             return Err(format!(
                 "script leaves orphan input section `{}`; explicit placement is required",
                 input.name
-            ));
+            )
+            .into());
         }
     }
     for (expr, dot, _) in &layout.assertions {
@@ -883,7 +883,8 @@ fn emit(
                 return Err(format!(
                     "{}: relocation {} requires unsupported script GOT/dynamic layout",
                     unit.name, r.kind
-                ));
+                )
+                .into());
             }
             let field = x86_64::encode(r.kind, i128::from(s) + i128::from(r.addend), p).map_err(
                 |e| match e {

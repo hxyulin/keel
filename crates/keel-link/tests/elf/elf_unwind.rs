@@ -7,7 +7,7 @@ fn fixture(name: &str) -> Vec<u8> {
         ".text\n.p2align 4\n.globl {name}\n.type {name},@function\n{name}:\n.cfi_startproc\npush rbp\n.cfi_def_cfa_offset 16\n.cfi_offset rbp,-16\nmov rbp,rsp\n.cfi_def_cfa_register rbp\npop rbp\n.cfi_def_cfa rsp,8\nret\n.cfi_endproc\n"
     ))
 }
-fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("unwind.o", objects, Default::default())
 }
 fn u32_at(data: &[u8], at: usize) -> u32 {

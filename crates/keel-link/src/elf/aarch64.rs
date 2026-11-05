@@ -5,7 +5,7 @@ pub(crate) fn width(kind: u32) -> Result<u64> {
     match kind {
         257 | 260 => Ok(8),
         258 | 261 | 273..=280 | 282..=286 | 299 | 311 | 312 => Ok(4),
-        _ => Err(format!("unsupported AArch64 relocation {kind}")),
+        _ => Err(format!("unsupported AArch64 relocation {kind}").into()),
     }
 }
 pub(super) fn got(kind: u32) -> bool {
@@ -13,7 +13,11 @@ pub(super) fn got(kind: u32) -> bool {
 }
 
 pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result<Vec<u8>> {
-    let overflow = || format!("AArch64 relocation {kind} overflow or misalignment");
+    let overflow = || {
+        crate::Error::from(format!(
+            "AArch64 relocation {kind} overflow or misalignment"
+        ))
+    };
     let signed = |n: i128, bits: u32, scale: u32| -> Result<u32> {
         if n % (1i128 << scale) != 0
             || n < -(1i128 << (bits + scale - 1))
@@ -51,9 +55,7 @@ pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result
         if valid {
             Ok(())
         } else {
-            Err(format!(
-                "AArch64 relocation {kind} does not match instruction"
-            ))
+            Err(format!("AArch64 relocation {kind} does not match instruction").into())
         }
     };
     match kind {
@@ -113,7 +115,7 @@ pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result
             }
             word = (word & !(4095 << 10)) | ((low >> scale) as u32) << 10;
         }
-        _ => return Err(format!("unsupported AArch64 relocation {kind}")),
+        _ => return Err(format!("unsupported AArch64 relocation {kind}").into()),
     }
     Ok(word.to_le_bytes().to_vec())
 }

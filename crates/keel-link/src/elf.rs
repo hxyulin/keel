@@ -194,7 +194,7 @@ struct Segment {
 }
 fn align(n: u64, a: u64) -> Result<u64> {
     if !a.is_power_of_two() || a > LIMIT {
-        return Err(format!("unsupported alignment {a}"));
+        return Err(format!("unsupported alignment {a}").into());
     }
     n.checked_add(a - 1)
         .map(|v| v & !(a - 1))
@@ -240,7 +240,8 @@ fn resolve_options(mut options: Options) -> Result<ResolvedOptions> {
     if !page.is_power_of_two() || !(PAGE..=LIMIT).contains(&page) {
         return Err(format!(
             "invalid ELF maximum page size {page}: expected a power of two between 4096 and {LIMIT}"
-        ));
+        )
+        .into());
     }
     if script.is_none() && !BASE.is_multiple_of(page) {
         return Err("maximum page size is incompatible with the default ELF base address".into());
@@ -491,7 +492,8 @@ impl Parsed {
             return Err(format!(
                 "expected a little-endian {} ELF64 relocatable object",
                 if arm { "AArch64" } else { "x86-64" }
-            ));
+            )
+            .into());
         }
         let header = file.elf_header();
         if !matches!(header.e_ident().os_abi, 0 | 3) || header.e_flags(file.endian()) != 0 {
@@ -505,7 +507,7 @@ impl Parsed {
             return Err(format!(
                 "TLS symbol {} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported",
                 symbol.name().unwrap_or("?")
-            ));
+            ).into());
         }
         // object ignores REL/RELA tables not linked to its chosen symbol
         // table (and sh_info=0). Validate every association before consuming
@@ -523,7 +525,7 @@ impl Parsed {
             if link == 0 || link as usize != file.elf_symbol_table().section().0 {
                 return Err(format!(
                     "unsupported relocation table {name} sh_link {link}: expected the selected SHT_SYMTAB"
-                ));
+                ).into());
             }
             let info = raw.sh_info(file.endian());
             let target = file
@@ -535,9 +537,7 @@ impl Parsed {
                     object::elf::SHT_REL | object::elf::SHT_RELA
                 )
             {
-                return Err(format!(
-                    "unsupported relocation table {name} sh_info {info}"
-                ));
+                return Err(format!("unsupported relocation table {name} sh_info {info}").into());
             }
         }
         let mut unit = Unit {
@@ -561,7 +561,7 @@ impl Parsed {
                     let name = section.name().map_err(|e| e.to_string())?;
                     return Err(format!(
                         "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
-                    ));
+                    ).into());
                 }
                 continue;
             }
@@ -584,7 +584,7 @@ impl Parsed {
                 object::elf::SHT_RELA | object::elf::SHT_SYMTAB
                     if raw.sh_entsize(file.endian()) != 24 || !data.len().is_multiple_of(24) =>
                 {
-                    return Err(format!("malformed ELF record table {name}"));
+                    return Err(format!("malformed ELF record table {name}").into());
                 }
                 _ => {}
             }
@@ -602,9 +602,9 @@ impl Parsed {
                     || name == ".note.ABI-tag"
                     || matches!(kind, 14..=16 | 0x70000001))
             {
-                return Err(format!(
-                    "AArch64 ELF input section {name} is not yet supported"
-                ));
+                return Err(
+                    format!("AArch64 ELF input section {name} is not yet supported").into(),
+                );
             }
             let sframe = sframe::validate_section(
                 &name,
@@ -635,11 +635,11 @@ impl Parsed {
             if let Some(note) = note {
                 end(0, section.size())?;
                 if data.len() as u64 != section.size() {
-                    return Err(format!("invalid section size for {name}"));
+                    return Err(format!("invalid section size for {name}").into());
                 }
                 section.elf_linked_rela().map_err(|e| e.to_string())?;
                 if section.relocations().next().is_some() {
-                    return Err(format!("relocations into {name} are unsupported"));
+                    return Err(format!("relocations into {name} are unsupported").into());
                 }
                 match note {
                     notes::Kind::Property => {
@@ -688,13 +688,13 @@ impl Parsed {
             if sh_flags & u64::from(object::elf::SHF_TLS) != 0 {
                 return Err(format!(
                     "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
-                ));
+                ).into());
             }
             // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS/GNU_RETAIN. In particular,
             // TLS, compression and link-order semantics are rejected.
             // Group membership was validated and selected before parsing.
             if sh_flags & !0x200237 != 0 || sh_flags & 5 == 5 {
-                return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
+                return Err(format!("unsupported flags {sh_flags:#x} on {name}").into());
             }
             let bss = section.kind() == object::SectionKind::UninitializedData;
             if !lifecycle
@@ -714,13 +714,14 @@ impl Parsed {
                 return Err(format!(
                     "unsupported allocated section {name} ({:?})",
                     section.kind()
-                ));
+                )
+                .into());
             }
             let size = end(0, input_size)?;
             let alignment = section.align().max(1);
             align(0, alignment)?;
             if !bss && data.len() as u64 != size {
-                return Err(format!("invalid section size for {name}"));
+                return Err(format!("invalid section size for {name}").into());
             }
             if frame {
                 if size != 0 && alignment < 4 {
@@ -835,7 +836,8 @@ impl Parsed {
                     return Err(format!(
                         "reference to discarded COMDAT local `{}` is unsupported",
                         s.name().unwrap_or("?")
-                    ));
+                    )
+                    .into());
                 }
             }
             let SymbolFlags::Elf {
@@ -849,7 +851,8 @@ impl Parsed {
                 return Err(format!(
                     "unsupported symbol binding/type for {}",
                     s.name().unwrap_or("?")
-                ));
+                )
+                .into());
             }
             let mut symbol = Symbol {
                 name: s.name().map_err(|e| e.to_string())?.into(),
@@ -870,10 +873,9 @@ impl Parsed {
                     .checked_add(symbol.size)
                     .is_none_or(|e| e > section.size())
                 {
-                    return Err(format!(
-                        "symbol {} extends outside its section",
-                        symbol.name
-                    ));
+                    return Err(
+                        format!("symbol {} extends outside its section", symbol.name).into(),
+                    );
                 }
             }
             if let SymbolSection::Section(index) = symbol.section
@@ -915,7 +917,8 @@ fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
                 return Err(format!(
                     "{}: input defines reserved linker-owned symbol `{}`",
                     u.name, s.name
-                ));
+                )
+                .into());
             }
             if s.section == SymbolSection::Common {
                 align(0, s.value.max(1))?;
@@ -929,7 +932,8 @@ fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
                     return Err(format!(
                         "{}: duplicate definition `{}` (also in {})",
                         u.name, s.name, units[prev_u].name
-                    ));
+                    )
+                    .into());
                 }
                 if previous.rank() >= s.rank() {
                     continue;
@@ -1101,7 +1105,8 @@ fn plan_imports(
                     return Err(format!(
                         "{}: `_DYNAMIC` requires dynamically linked output",
                         u.name
-                    ));
+                    )
+                    .into());
                 }
                 continue;
             }
@@ -1110,7 +1115,7 @@ fn plan_imports(
                 .enumerate()
                 .find_map(|(i, l)| l.exports.get(s.name.as_str()).map(|e| (i, e)));
             if export.is_none() && !s.weak() {
-                return Err(format!("{}: undefined symbol `{}`", u.name, s.name));
+                return Err(format!("{}: undefined symbol `{}`", u.name, s.name).into());
             }
             if libraries.is_empty() {
                 continue;
@@ -1119,7 +1124,8 @@ fn plan_imports(
                 return Err(format!(
                     "{}: non-default visibility undefined symbol `{}` cannot be imported",
                     u.name, s.name
-                ));
+                )
+                .into());
             }
             let (library, kind, version) = match export {
                 Some((i, e)) => (Some(i), e.kind, e.version.map(str::to_owned)),
@@ -1129,7 +1135,8 @@ fn plan_imports(
                 return Err(format!(
                     "unsupported shared-library symbol type {kind} for `{}`",
                     s.name
-                ));
+                )
+                .into());
             }
             imports
                 .entry(s.name.clone())
@@ -1168,7 +1175,8 @@ fn check_property_references(
                 return Err(format!(
                     "{}: reference into consumed GNU property section for `{}` is unsupported",
                     u.name, target.name
-                ));
+                )
+                .into());
             }
         }
     }
@@ -1189,7 +1197,7 @@ fn check_property_references(
                     return Err(format!(
                         "{}: reference into consumed GNU property section for `{name}` is unsupported (provider {})",
                         library.needed, units[ui].name
-                    ));
+                    ).into());
                 }
             }
         }
@@ -1284,7 +1292,7 @@ fn absolute_imports(
                         return Err(format!(
                             "{}: relocation {} against import `{name}` requires writable 64-bit data, a PLT32 call, or GOT addressing; use PIC (copy/text relocations are unsupported)",
                             u.name, r.kind
-                        ));
+                        ).into());
                     }
                 }
             }
@@ -1383,10 +1391,7 @@ impl Placed<'_> {
                 })?;
                 Ok(BASE + sections[*out].offset + s.value)
             }
-            _ => Err(format!(
-                "{}: unresolved symbol `{}`",
-                units[ui].name, s.name
-            )),
+            _ => Err(format!("{}: unresolved symbol `{}`", units[ui].name, s.name).into()),
         }
     }
 

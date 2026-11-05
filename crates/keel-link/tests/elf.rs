@@ -29,7 +29,7 @@ use object::{Object, ObjectSection, ObjectSymbol};
 fn object(source: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(source).unwrap()
 }
-fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     link_with("fixture.o", objects, elf::Options::default())
 }
 /// Links `objects`, each named `name` in diagnostics.
@@ -37,7 +37,7 @@ fn link_with(
     name: &str,
     objects: &[Vec<u8>],
     options: elf::Options,
-) -> Result<elf::Executable, String> {
+) -> Result<elf::Executable, keel_link::Error> {
     elf::link(
         &objects
             .iter()

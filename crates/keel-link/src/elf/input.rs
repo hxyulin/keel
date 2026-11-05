@@ -248,7 +248,7 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
                             continue;
                         };
                         if let Err(error) = member.prepare(&signatures) {
-                            return Err(format!("{}: {error}", member.name));
+                            return Err(format!("{}: {error}", member.name).into());
                         }
                         let summary = member
                             .selection
@@ -296,14 +296,16 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
                             return Err(format!(
                                 "conflicting interfaces for shared-library SONAME `{}`",
                                 library.needed
-                            ));
+                            )
+                            .into());
                         }
                         return Ok(());
                     }
                     if let Some(name) = library.required.iter().find(|n| super::linker_owned(n)) {
                         return Err(format!(
                             "shared library requires reserved linker-owned symbol `{name}`"
-                        ));
+                        )
+                        .into());
                     }
                     required.extend(library.required.iter().copied());
                     for name in library.exports.keys() {

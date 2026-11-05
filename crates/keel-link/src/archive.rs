@@ -72,10 +72,7 @@ pub fn build(inputs: &[Input<'_>], target: Target) -> Result<Vec<u8>> {
             || name.starts_with("__.SYMDEF")
             || matches!(name, "/" | "//")
         {
-            return Err(format!(
-                "{}: reserved or invalid archive member name",
-                input.name
-            ));
+            return Err(format!("{}: reserved or invalid archive member name", input.name).into());
         }
         names.push(name);
         let mut validate = || -> Result<()> {
@@ -98,9 +95,9 @@ pub fn build(inputs: &[Input<'_>], target: Target) -> Result<Vec<u8>> {
                 || !file.is_64()
                 || !file.is_little_endian()
             {
-                return Err(format!(
-                    "expected {target:?} little-endian 64-bit relocatable object"
-                ));
+                return Err(
+                    format!("expected {target:?} little-endian 64-bit relocatable object").into(),
+                );
             }
             validate_raw(&file, input.bytes)?;
             // Parsing is lazy: force section payload and symbol/name bounds checks.
@@ -271,7 +268,7 @@ pub fn write(inputs: &[Input<'_>], target: Target, output: &Path) -> Result<()> 
     use std::io::Write;
     let bytes = build(inputs, target)?;
     keel_util::fs::replace(output, None, |file| file.write_all(&bytes))
-        .map_err(|e| format!("{}: {e}", output.display()))
+        .map_err(|e| format!("{}: {e}", output.display()).into())
 }
 
 // Generic ObjectSymbol::section() deliberately maps malformed references and

@@ -44,6 +44,7 @@ impl fmt::Display for ParseError {
         write!(f, "{}:{}: {}", self.line, self.col, self.message)
     }
 }
+impl std::error::Error for ParseError {}
 
 /// Parses a module: declarations, data and functions.
 pub fn parse(src: &str) -> Result<Module, ParseError> {

@@ -811,6 +811,7 @@ impl fmt::Display for OptError {
         }
     }
 }
+impl std::error::Error for OptError {}
 
 /// One optimizer invocation: the passes, their target context, scoped
 /// options and an optional report. [`Pipeline::run`] is the single entry

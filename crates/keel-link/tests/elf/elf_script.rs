@@ -2,11 +2,11 @@ use super::value;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn link(source: &str, script: &str) -> Result<elf::Executable, String> {
+fn link(source: &str, script: &str) -> Result<elf::Executable, keel_link::Error> {
     let bytes = keel_asm::x86::assemble_object(source).unwrap();
     link_bytes(&bytes, script)
 }
-fn link_bytes(bytes: &[u8], script: &str) -> Result<elf::Executable, String> {
+fn link_bytes(bytes: &[u8], script: &str) -> Result<elf::Executable, keel_link::Error> {
     elf::link(
         &[Input {
             name: "script-fixture.o",

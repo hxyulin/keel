@@ -60,7 +60,8 @@ pub(super) fn symbols(
             return Err(format!(
                 "incompatible registration section contributions for {}",
                 s.name
-            ));
+            )
+            .into());
         }
         span.1 = i;
     }

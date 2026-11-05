@@ -1,7 +1,7 @@
 use super::object;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
-fn link(objects: &[Vec<u8>], gc: bool) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>], gc: bool) -> Result<elf::Executable, keel_link::Error> {
     super::link_with(
         "gc.o",
         objects,

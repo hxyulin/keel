@@ -487,7 +487,8 @@ impl Table {
                     return Err(format!(
                         ".sframe: undefined or imported code target `{}` is unsupported",
                         symbol.name
-                    ));
+                    )
+                    .into());
                 }
                 let out = symbol
                     .section

@@ -4,7 +4,7 @@ use object::{Object, ObjectSection, ObjectSymbol};
 fn assemble(source: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(source).unwrap()
 }
-fn partial(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn partial(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     elf::relocatable::link(
         &objects
             .iter()

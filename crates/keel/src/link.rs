@@ -228,7 +228,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             macos_sdk().ok_or("SDK discovery failed; pass --sysroot")?
         }
     };
-    let dylibs = load_dylibs(&root, &libraries, keel_link::Dylib::from_tbd)?;
+    let dylibs = load_dylibs(&root, &libraries, |path, root| {
+        keel_link::Dylib::from_tbd(path, root).map_err(String::from)
+    })?;
     let owned: Vec<_> = inputs
         .iter()
         .map(|p| {
@@ -647,7 +649,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
                     if metadata.len() > 512 * 1024 * 1024 {
                         return Err("thin archive member exceeds 512 MiB limit".into());
                     }
-                    std::fs::read(&member).map_err(|e| format!("{}: {e}", member.display()))
+                    std::fs::read(&member).map_err(|e| format!("{}: {e}", member.display()).into())
                 })
                 .map_err(|e| format!("{}: {e}", path.display()))?;
             *source = Source::Read(regular);
@@ -740,7 +742,7 @@ mod tbd_tests {
             let libraries = names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
             let dylibs = load_dylibs(&self.0, &libraries, |path, root| {
                 reads.push(path.to_owned());
-                keel_link::Dylib::from_tbd(path, root)
+                keel_link::Dylib::from_tbd(path, root).map_err(String::from)
             })?;
             Ok((dylibs, reads))
         }
@@ -819,7 +821,9 @@ mod tbd_tests {
             "--- !tapi-tbd\ntbd-version: 3\ninstall-name: '/usr/lib/libsame.dylib'\n",
         ] {
             std::fs::write(sdk.path("second"), text).unwrap();
-            let expected = keel_link::Dylib::from_tbd(&sdk.path("second"), &sdk.0).unwrap_err();
+            let expected = keel_link::Dylib::from_tbd(&sdk.path("second"), &sdk.0)
+                .unwrap_err()
+                .to_string();
             assert_eq!(sdk.load(&["first", "second"]).unwrap_err(), expected);
         }
     }
@@ -833,7 +837,9 @@ mod tbd_tests {
         std::os::unix::fs::symlink("libabsent.tbd", sdk.path("dangling")).unwrap();
         for name in ["alias", "missing", "dangling"] {
             let path = sdk.path(name);
-            let expected = keel_link::Dylib::from_tbd(&path, &sdk.0).unwrap_err();
+            let expected = keel_link::Dylib::from_tbd(&path, &sdk.0)
+                .unwrap_err()
+                .to_string();
             assert!(expected.starts_with(&format!("{}:", path.display())));
             assert_eq!(sdk.load(&[name]).unwrap_err(), expected);
         }
@@ -925,7 +931,9 @@ exports:
                     .unwrap();
                 writeln!(child, "reexported-libraries:\n  - targets: [arm64-macos]\n    libraries: ['/usr/lib/libparent.dylib']").unwrap();
             }
-            let expected = keel_link::Dylib::from_tbd(&sdk.path("parent"), &sdk.0).unwrap_err();
+            let expected = keel_link::Dylib::from_tbd(&sdk.path("parent"), &sdk.0)
+                .unwrap_err()
+                .to_string();
             assert_eq!(sdk.load(&["parent", "parent"]).unwrap_err(), expected);
         }
     }

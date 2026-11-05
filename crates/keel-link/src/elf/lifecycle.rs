@@ -38,7 +38,7 @@ fn priority(name: &str, g: usize) -> Result<(u16, bool)> {
     }
     let suffix = &name[base.len() + 1..];
     if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("invalid initialization priority on {name}"));
+        return Err(format!("invalid initialization priority on {name}").into());
     }
     Ok((
         suffix
@@ -60,7 +60,7 @@ pub(super) fn validate(
     let array_kind = ARRAYS.iter().any(|(_, k, ..)| *k == kind);
     let Some(g) = g else {
         if array_kind {
-            return Err(format!("unsupported initialization array name {name}"));
+            return Err(format!("unsupported initialization array name {name}").into());
         }
         return Ok(false);
     };
@@ -75,7 +75,7 @@ pub(super) fn validate(
     }
     if g < 2 {
         if kind != 1 || flags != 6 || entsize != 0 {
-            return Err(format!("{name} requires executable, read-only PROGBITS"));
+            return Err(format!("{name} requires executable, read-only PROGBITS").into());
         }
     } else {
         priority(name, g)?;
@@ -87,7 +87,8 @@ pub(super) fn validate(
         {
             return Err(format!(
                 "{name} requires its matching array type, WRITE/ALLOC, 8-byte entries and alignment"
-            ));
+            )
+            .into());
         }
     }
     Ok(true)
@@ -148,7 +149,7 @@ impl Plan {
             }
             .ok_or_else(|| format!("{name} must be defined in executable code"))?;
             if sections[*section].permissions() != 5 || symbol.value >= sections[*section].size {
-                return Err(format!("{name} must be inside executable code"));
+                return Err(format!("{name} must be inside executable code").into());
             }
             functions.push((tag, *section, symbol.value));
         }

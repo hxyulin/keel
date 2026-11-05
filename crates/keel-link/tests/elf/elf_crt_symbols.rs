@@ -2,7 +2,7 @@ use super::{object as obj, value};
 use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("crt.o", objects, Default::default())
 }
 fn word(bytes: &[u8], at: usize) -> u64 {

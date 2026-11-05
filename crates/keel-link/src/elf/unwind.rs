@@ -15,7 +15,7 @@ impl Pointer {
             0 | 4 | 12 => Ok(8),
             2 | 10 => Ok(2),
             3 | 11 => Ok(4),
-            _ => Err(format!("unsupported encoded pointer {:#x}", self.encoding)),
+            _ => Err(format!("unsupported encoded pointer {:#x}", self.encoding).into()),
         }
     }
     fn value(self, data: &[u8], address: u64) -> Result<u64> {
@@ -87,7 +87,7 @@ impl Reader<'_> {
     }
     fn pointer(&mut self, encoding: u8, indirect: bool) -> Result<Pointer> {
         if !matches!(encoding & 0x70, 0 | 0x10) || (!indirect && encoding & 0x80 != 0) {
-            return Err(format!("unsupported encoded pointer {encoding:#x}"));
+            return Err(format!("unsupported encoded pointer {encoding:#x}").into());
         }
         let pointer = Pointer {
             offset: self.at,
@@ -147,7 +147,7 @@ impl Frames {
             if id == 0 {
                 let version = r.byte()?;
                 if !matches!(version, 1 | 3 | 4) {
-                    return Err(format!("unsupported unwind CIE version {version}"));
+                    return Err(format!("unsupported unwind CIE version {version}").into());
                 }
                 let start = r.at;
                 while r.byte()? != 0 {}

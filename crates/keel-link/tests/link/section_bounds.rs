@@ -18,10 +18,10 @@ fn inputs(objects: &[Vec<u8>]) -> Vec<Input<'_>> {
         })
         .collect()
 }
-fn elf_link(objects: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+fn elf_link(objects: &[Vec<u8>]) -> Result<Vec<u8>, keel_link::Error> {
     elf::link(&inputs(objects), Default::default()).map(|e| e.bytes)
 }
-fn macho_link(objects: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+fn macho_link(objects: &[Vec<u8>]) -> Result<Vec<u8>, keel_link::Error> {
     keel_link::link(
         &inputs(objects),
         Options {

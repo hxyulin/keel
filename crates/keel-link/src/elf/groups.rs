@@ -71,17 +71,17 @@ impl<'a> Metadata<'a> {
                 || data.len() % 4 != 0
                 || raw.sh_link(file.endian()) as usize != file.elf_symbol_table().section().0
             {
-                return Err(malformed());
+                return Err(malformed().into());
             }
             let flags = u32::from_le_bytes(data[..4].try_into().unwrap());
             if flags != object::elf::GRP_COMDAT {
-                return Err(format!(
-                    "unsupported ELF group flags {flags:#x}: expected GRP_COMDAT"
-                ));
+                return Err(
+                    format!("unsupported ELF group flags {flags:#x}: expected GRP_COMDAT").into(),
+                );
             }
             let index = raw.sh_info(file.endian()) as usize;
             if index == 0 {
-                return Err(malformed());
+                return Err(malformed().into());
             }
             signature_symbols.insert(index);
             let signature = file
@@ -92,7 +92,7 @@ impl<'a> Metadata<'a> {
             // names are the signature (GNU ld and LLD convention).
             if name.is_empty() && signature.kind() == object::SymbolKind::Section {
                 let SymbolSection::Section(i) = signature.section() else {
-                    return Err(malformed());
+                    return Err(malformed().into());
                 };
                 name = file
                     .section_by_index(i)
@@ -116,7 +116,7 @@ impl<'a> Metadata<'a> {
                     || header.sh_flags(file.endian()) & u64::from(object::elf::SHF_GROUP) == 0
                     || membership.insert(member, section.index().0).is_some()
                 {
-                    return Err(malformed());
+                    return Err(malformed().into());
                 }
                 match header.sh_type(file.endian()) {
                     object::elf::SHT_PROGBITS
@@ -132,13 +132,15 @@ impl<'a> Metadata<'a> {
                             return Err("malformed ELF group relocation table".into());
                         }
                     }
-                    kind => return Err(format!("unsupported ELF group member type {kind:#x}")),
+                    kind => {
+                        return Err(format!("unsupported ELF group member type {kind:#x}").into());
+                    }
                 }
                 // Special metadata has additional whole-object contracts. Do
                 // not let selection silently weaken any of those contracts.
                 let name = member_section.name().map_err(|e| e.to_string())?;
                 if name == ".sframe" || name.starts_with(".note") {
-                    return Err(format!("ELF group member {name} is unsupported"));
+                    return Err(format!("ELF group member {name} is unsupported").into());
                 }
                 members.push(member);
             }
@@ -150,7 +152,7 @@ impl<'a> Metadata<'a> {
             if raw.sh_flags(file.endian()) & u64::from(object::elf::SHF_GROUP) != 0
                 && group.is_none()
             {
-                return Err(format!("orphan SHF_GROUP section {}", section.index().0));
+                return Err(format!("orphan SHF_GROUP section {}", section.index().0).into());
             }
             if matches!(
                 raw.sh_type(file.endian()),
@@ -170,7 +172,9 @@ impl<'a> Metadata<'a> {
         let mut references = Vec::new();
         let mut section_names = Vec::new();
         for section in file.sections() {
-            let name = section.name().map_err(|e| e.to_string());
+            let name = section
+                .name()
+                .map_err(|e| crate::Error::from(e.to_string()));
             section_names.resize_with(section.index().0 + 1, || None);
             section_names[section.index().0] = Some(name.clone());
             if section.elf_section_header().sh_flags(file.endian())
@@ -212,7 +216,7 @@ impl<'a> Metadata<'a> {
                 section: symbol.section(),
                 // Local symbol names do not participate in archive demand.
                 name: if global || weak {
-                    symbol.name().map(Some).map_err(|e| e.to_string())
+                    symbol.name().map(Some).map_err(|e| e.to_string().into())
                 } else {
                     Ok(None)
                 },

@@ -11,7 +11,7 @@ const START: &str = ".text\n.globl _start\n_start: ret\n";
 const ABI: &[u8] = include_bytes!("../fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
 const SPLIT: &[u8] = include_bytes!("../fixtures/gnu-notes/split.o.note.gnu.property.bin");
 
-fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(inputs: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("notes.o", inputs, Default::default())
 }
 fn u32at(data: &[u8], at: usize) -> u32 {

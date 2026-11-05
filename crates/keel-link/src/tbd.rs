@@ -16,7 +16,7 @@ fn scalar(v: &Value, key: &str) -> Result<String> {
     v[key]
         .as_str()
         .map(str::to_owned)
-        .ok_or_else(|| format!("TBD missing string `{key}`"))
+        .ok_or_else(|| format!("TBD missing string `{key}`").into())
 }
 fn sequence<'a>(v: &'a Value, key: &str) -> Result<&'a [Value]> {
     if v[key].is_null() {
@@ -25,7 +25,7 @@ fn sequence<'a>(v: &'a Value, key: &str) -> Result<&'a [Value]> {
         v[key]
             .as_sequence()
             .map(Vec::as_slice)
-            .ok_or_else(|| format!("TBD `{key}` must be a list"))
+            .ok_or_else(|| format!("TBD `{key}` must be a list").into())
     }
 }
 fn list<'a>(v: &'a Value, key: &str) -> Result<impl Iterator<Item = &'a str>> {

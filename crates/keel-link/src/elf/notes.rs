@@ -45,7 +45,7 @@ pub(super) fn validate(
         ".note.ABI-tag" => Kind::Abi,
         _ => {
             if flags & 2 != 0 && (kind == object::elf::SHT_NOTE || name.starts_with(".note.")) {
-                return Err(format!("unsupported allocated note {name}"));
+                return Err(format!("unsupported allocated note {name}").into());
             }
             return Ok(None);
         }
@@ -60,7 +60,7 @@ pub(super) fn validate(
     {
         return Err(format!(
             "{name} requires SHT_NOTE, SHF_ALLOC only, alignment {expected_alignment}, and zero entsize/link/info"
-        ));
+        ).into());
     }
     Ok(Some(note))
 }
@@ -142,16 +142,14 @@ pub(super) fn properties(data: &[u8], out: &mut Properties) -> Result<()> {
                 ISA_1_NEEDED | ISA_1_USED => 0xf,
                 FEATURE_2_USED => 0xfff,
                 0xc0008001 => return Err("GNU FEATURE_2_NEEDED is unsupported".into()),
-                _ => return Err(format!("unsupported GNU property {id:#x}")),
+                _ => return Err(format!("unsupported GNU property {id:#x}").into()),
             };
             if size != 4 {
-                return Err(format!("GNU property {id:#x} requires a 4-byte payload"));
+                return Err(format!("GNU property {id:#x} requires a 4-byte payload").into());
             }
             let value = word(descriptor, p + 8)?;
             if value & !mask != 0 {
-                return Err(format!(
-                    "unsupported bits {value:#x} in GNU property {id:#x}"
-                ));
+                return Err(format!("unsupported bits {value:#x} in GNU property {id:#x}").into());
             }
             // A known u32 property occupies 16 bytes including four padding bytes.
             let next = p.checked_add(16).ok_or("GNU property offset overflow")?;

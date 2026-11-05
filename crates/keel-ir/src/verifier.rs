@@ -32,6 +32,7 @@ impl fmt::Display for VerifierError {
         write!(f, "{}: {}", self.location, self.message)
     }
 }
+impl std::error::Error for VerifierError {}
 
 /// Module name lookups for verification, built once. Each lookup answers
 /// exactly as the corresponding linear `Module` method does, including for

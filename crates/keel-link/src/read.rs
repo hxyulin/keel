@@ -185,7 +185,7 @@ impl Object {
     }
 
     pub fn parse(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
-        Self::read(name, bytes, retain_debug, true).map_err(|e| format!("{name}: {e}"))
+        Self::read(name, bytes, retain_debug, true).map_err(|e| format!("{name}: {e}").into())
     }
     fn read(name: &str, bytes: &[u8], retain_debug: bool, materialize: bool) -> Result<Self> {
         let r = Reader(bytes);

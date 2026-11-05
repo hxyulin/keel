@@ -111,7 +111,9 @@ impl<'data> Library<'data> {
                     | object::elf::STB_GNU_UNIQUE => {
                         references.insert(s.name().map_err(|e| e.to_string())?);
                     }
-                    binding => return Err(format!("unsupported dynamic lookup binding {binding}")),
+                    binding => {
+                        return Err(format!("unsupported dynamic lookup binding {binding}").into());
+                    }
                 }
             }
             if s.is_undefined() && (s.is_global() || s.is_weak()) {
@@ -199,7 +201,7 @@ fn relocation_symbols(
                     | DT_SYMBOLIC
             ) && tags.insert(tag, entry.d_val(endian)).is_some()
             {
-                return Err(format!("duplicate dynamic relocation/symbol tag {tag}"));
+                return Err(format!("duplicate dynamic relocation/symbol tag {tag}").into());
             }
         }
     }
@@ -605,7 +607,7 @@ impl Dynamic {
         })
     }
     pub fn stub(&self, name: &str, sections: &[Section]) -> Result<u64> {
-        self.stubs.get(name).map(|o|BASE+sections[self.plt].offset+o).ok_or_else(||format!("imported data `{name}` needs a GOT relocation; copy relocations are unsupported"))
+        self.stubs.get(name).map(|o|BASE+sections[self.plt].offset+o).ok_or_else(||format!("imported data `{name}` needs a GOT relocation; copy relocations are unsupported").into())
     }
     pub fn slot(&self, name: &str, sections: &[Section]) -> u64 {
         BASE + sections[self.got].offset + self.slots[name]

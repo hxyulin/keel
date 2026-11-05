@@ -943,3 +943,22 @@ fn debug_map_function_ends_use_the_next_symbol_by_address() {
     sizes.sort();
     assert_eq!(sizes, [("_asecond", 4), ("_main", 12), ("_zfirst", 8)]);
 }
+
+/// Link failures convert into boxed errors, so `?` works in callers that
+/// return `Box<dyn Error>` or another error type built on it.
+#[test]
+fn link_errors_are_std_errors() {
+    fn link(bytes: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        keel_link::link(
+            &[keel_link::Input {
+                name: "bad.o",
+                bytes,
+            }],
+            keel_link::Options::default(),
+        )?;
+        Ok(())
+    }
+    let error = link(&[0; 4]).unwrap_err();
+    let error = error.downcast_ref::<keel_link::Error>().unwrap();
+    assert_eq!(*error, "explicit libSystem TBD interface is required");
+}

@@ -22,7 +22,7 @@ pub(super) mod x86_64 {
             | R_X86_64_32S
             | R_X86_64_GOTPCRELX
             | R_X86_64_REX_GOTPCRELX => Ok(4),
-            _ => Err(format!("unsupported x86-64 relocation {kind}")),
+            _ => Err(format!("unsupported x86-64 relocation {kind}").into()),
         }
     }
 

@@ -184,7 +184,7 @@ impl UnwindRelocations {
 /// targets first referenced after the error must report the error instead.
 struct ReferenceTargets {
     sections: BTreeSet<usize>,
-    error: Option<String>,
+    error: Option<crate::Error>,
 }
 impl ReferenceTargets {
     fn new(targets: impl Iterator<Item = Result<Option<usize>>>) -> Self {
@@ -419,7 +419,8 @@ pub(super) fn collect(
             return Err(format!(
                 "--gc-sections exports into rewritten {} are unsupported",
                 sections[section].name
-            ));
+            )
+            .into());
         }
         // Input references to rewritten records require addend translation as
         // well as symbol translation. Keep this existing bounded limitation.
@@ -458,7 +459,8 @@ pub(super) fn collect(
             return Err(format!(
                 "--gc-sections references into rewritten {} are unsupported",
                 sections[section].name
-            ));
+            )
+            .into());
         }
     }
     // Release symbol borrows before metadata mutates/removes input symbols.

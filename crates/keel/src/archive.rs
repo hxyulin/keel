@@ -53,5 +53,5 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|(name, bytes)| keel_link::Input { name, bytes })
         .collect::<Vec<_>>();
-    write(&inputs, target, &output)
+    write(&inputs, target, &output).map_err(String::from)
 }

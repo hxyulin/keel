@@ -44,7 +44,7 @@ impl Symbol {
 }
 fn aligned(value: u64, alignment: u64) -> Result<u64> {
     if !alignment.is_power_of_two() {
-        return Err(format!("invalid ELF section alignment {alignment}"));
+        return Err(format!("invalid ELF section alignment {alignment}").into());
     }
     value
         .checked_add(alignment - 1)
@@ -112,14 +112,12 @@ fn link_prepared(prepared: &super::Prepared<'_>, machine: Machine) -> Result<Exe
             return Err(format!(
                 "{}: expected a little-endian {architecture:?} ELF64 relocatable object",
                 input.name
-            ));
+            )
+            .into());
         }
         let header = file.elf_header();
         if !matches!(header.e_ident().os_abi, 0 | 3) || header.e_flags(file.endian()) != 0 {
-            return Err(format!(
-                "{}: unsupported ELF OS ABI or machine flags",
-                input.name
-            ));
+            return Err(format!("{}: unsupported ELF OS ABI or machine flags", input.name).into());
         }
         let symbol_table = file.elf_symbol_table().section().0;
         let symbol_strings = if symbol_table == 0 {
@@ -173,7 +171,7 @@ fn link_prepared(prepared: &super::Prepared<'_>, machine: Machine) -> Result<Exe
                     | object::elf::SHT_PREINIT_ARRAY
                     | object::elf::SHT_X86_64_UNWIND
             ) {
-                return Err(format!("unsupported partial-link section type {kind:#x}"));
+                return Err(format!("unsupported partial-link section type {kind:#x}").into());
             }
             if kind == object::elf::SHT_RELA
                 && (raw.sh_link(file.endian()) as usize != file.elf_symbol_table().section().0
@@ -274,7 +272,8 @@ fn link_prepared(prepared: &super::Prepared<'_>, machine: Machine) -> Result<Exe
                         return Err(format!(
                             "duplicate strong symbol `{}`",
                             String::from_utf8_lossy(&candidate.name)
-                        ));
+                        )
+                        .into());
                     }
                     let visibility_rank = |v: u8| match v & 3 {
                         1 => 3,

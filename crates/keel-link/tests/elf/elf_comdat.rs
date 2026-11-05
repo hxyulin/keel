@@ -1,7 +1,7 @@
 use super::{object, value};
 use keel_link::elf;
 use object::{Object, ObjectSection, ObjectSymbol};
-fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("comdat.o", objects, Default::default())
 }
 fn word(exe: &elf::Executable, name: &str) -> u64 {

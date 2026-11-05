@@ -3,7 +3,7 @@ use super::object;
 use keel_link::{Input, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
 
-fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     super::link_with("sframe.o", objects, Default::default())
 }
 fn u32_at(b: &[u8], at: usize) -> u32 {
@@ -572,7 +572,7 @@ fn registration_code_grouping_still_checks_final_sframe_order() {
     assert!(link(&objects).is_ok());
 }
 
-fn gc_link(objects: &[Vec<u8>]) -> Result<elf::Executable, String> {
+fn gc_link(objects: &[Vec<u8>]) -> Result<elf::Executable, keel_link::Error> {
     elf::link(
         &objects
             .iter()

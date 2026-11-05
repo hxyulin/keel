@@ -64,12 +64,13 @@ struct Parser {
     expression_nodes: usize,
 }
 impl Parser {
-    fn error(&self, message: &str) -> String {
+    fn error(&self, message: &str) -> crate::Error {
         format!(
             "linker script token {} ({:?}): {message}",
             self.at,
             self.tokens.get(self.at)
         )
+        .into()
     }
     fn peek(&self) -> &str {
         self.tokens.get(self.at).map_or("", String::as_str)

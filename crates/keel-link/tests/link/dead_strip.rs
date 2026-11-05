@@ -16,7 +16,7 @@ fn options(gc: bool) -> Options {
         ..Default::default()
     }
 }
-fn link(objects: &[Vec<u8>], opts: Options) -> Result<Executable, String> {
+fn link(objects: &[Vec<u8>], opts: Options) -> Result<Executable, keel_link::Error> {
     keel_link::link(
         &objects
             .iter()
