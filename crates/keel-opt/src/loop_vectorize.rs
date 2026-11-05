@@ -671,23 +671,26 @@ fn analyze(
             a.allowed.insert(def(f, update)?);
             a.c.vectors.insert(update);
         }
-        // Widening A then B across several iterations could fault at A[1]
-        // before the scalar loop's B[0]. With at most one potentially faulting
-        // read, and no writes/other traps, lane grouping preserves first-fault
-        // order. Distinct streams require explicit nontrapping promises.
-        let trapping_reads = a
-            .allowed
-            .iter()
-            .filter(|&&i| matches!(f.inst_data(i), D::Load { flags, .. } if !flags.notrap))
-            .count();
-        if trapping_reads > 1 {
-            return None;
-        }
         // No point vectorizing an entirely invariant expression here. Keep
         // this initial reduction support tied to actual contiguous reads.
         if a.c.addresses.is_empty() {
             return None;
         }
+    }
+    // Reading A then B a vector at a time could fault at A[1] before the
+    // scalar loop's B[0], in sums and maps alike. With at most one read
+    // whose fault is observable, lane grouping keeps the first fault on the
+    // access the scalar loop faults on. Other streams need `notrap`, or
+    // `trap_ub` where a fault is undefined behavior anyway.
+    let trapping_reads = a
+        .allowed
+        .iter()
+        .filter(|&&i| {
+            matches!(f.inst_data(i), D::Load { flags, .. } if !flags.notrap && !flags.trap_ub)
+        })
+        .count();
+    if trapping_reads > 1 {
+        return None;
     }
     if a.c
         .addresses

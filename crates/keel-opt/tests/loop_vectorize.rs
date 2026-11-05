@@ -12,6 +12,7 @@ mod loop_reduce_multi;
 mod packed_clamp;
 
 use keel_ir::{InstData, Type, VectorType};
+use keel_ir_interp::{Interpreter, Outcome, Trap, Val};
 use keel_opt::VectorTarget;
 
 fn kernel(ty: Type, index: Type, op: &str, signed: bool) -> String {
@@ -28,6 +29,8 @@ fn kernel(ty: Type, index: Type, op: &str, signed: bool) -> String {
         format!(" v10 = iconst.i64 {bytes}\n v11 = imul {idx},v10\n")
     };
     let offset = if bytes == 1 { idx } else { "v11" };
+    // Only the first stream may fault, so the vector loop faults where the
+    // scalar loop does; see map_loops_with_two_faulting_streams_stay_scalar.
     format!(
         "func @map(ptr,ptr,ptr,{index}) {{
 block0(v0: ptr,v1: ptr,v2: ptr,v3: {index}):
@@ -41,7 +44,7 @@ block2:
  v13 = ptradd v1,{offset}
  v14 = ptradd v2,{offset}
  v15 = load.{ty} v13
- v16 = load.{ty} v14
+ v16 = load.{ty} notrap v14
  v17 = {op} v15,v16
  store v17,v12
  v18 = iconst.{index} 1
@@ -53,6 +56,65 @@ block3:
         if signed { "slt" } else { "ult" }
     )
 }
+/// Runs `@map(c, a, b, n)` over `n` i32 lanes with `b` holding only
+/// `short` of them, and gives the outcome and the bytes of `c`.
+fn run_short_map(m: &keel_ir::Module, n: u64, short: u64) -> (Outcome, Vec<u8>) {
+    let mut interp = Interpreter::new(m);
+    let memory = interp.memory_mut();
+    let c = memory.alloc(4 * n, 16);
+    let a = memory.alloc_bytes(
+        &(1..=n as u32)
+            .flat_map(u32::to_le_bytes)
+            .collect::<Vec<_>>(),
+        16,
+    );
+    let b = memory.alloc(4 * short, 16);
+    let outcome = interp.call("map", &[Val::Ptr(c), Val::Ptr(a), Val::Ptr(b), Val::I64(n)]);
+    (outcome, interp.memory().read(c, 4 * n).unwrap().to_vec())
+}
+
+#[test]
+fn map_loops_with_two_faulting_streams_stay_scalar() {
+    // The scalar loop stores c[0..37] and then faults on b[37], just past
+    // the end of b. A vector loop would load b[36..40] before storing c[36].
+    let source = kernel(Type::I32, Type::I64, "iadd", false).replace("load.i32 notrap", "load.i32");
+    let before = keel_ir::parse(&source).unwrap();
+    let (expected, stored) = run_short_map(&before, 64, 37);
+    let Outcome::Trap(Trap::OutOfBounds { size: 4, .. }) = expected else {
+        panic!("{expected:?}");
+    };
+    assert_eq!(stored.chunks(4).filter(|lane| lane != &[0; 4]).count(), 37);
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::Aarch64Neon,
+        VectorTarget::X86Sse2,
+    ] {
+        let after = optimize(&source, target);
+        assert_eq!(packed(&after), 0, "{after}");
+        assert_eq!(
+            run_short_map(&after, 64, 37),
+            (expected.clone(), stored.clone())
+        );
+    }
+}
+
+#[test]
+fn map_loops_whose_faults_are_undefined_vectorize() {
+    // C and LLVM IR make a faulting read undefined behavior, so which
+    // stream faults first does not matter.
+    let source = kernel(Type::I32, Type::I64, "iadd", false)
+        .replace("load.i32 notrap", "load.i32")
+        .replace("load.i32 v", "load.i32 trap_ub v");
+    assert_eq!(source.matches("trap_ub").count(), 2);
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::Aarch64Neon,
+        VectorTarget::X86Sse2,
+    ] {
+        assert!(packed(&optimize(&source, target)) > 0);
+    }
+}
+
 fn optimize(source: &str, target: VectorTarget) -> keel_ir::Module {
     let mut m = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&m).unwrap();
@@ -378,6 +440,7 @@ fn sum_preserves_fault_order_unless_other_reads_explicitly_cannot_fault() {
         for marked in [
             src.replace("load.i32 v13", "load.i32 notrap v13"),
             src.replace("load.i32 v20", "load.i32 notrap v20"),
+            src.replace("load.i32 v", "load.i32 trap_ub v"),
         ] {
             assert!(packed(&reduce_sum(&marked, target)) > 0);
         }

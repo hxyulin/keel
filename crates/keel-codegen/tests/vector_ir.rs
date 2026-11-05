@@ -76,7 +76,7 @@ block2:
  v9 = ptradd v0,v8
  v10 = ptradd v1,v8
  v11 = load.i32 v9
- v12 = load.i32 v10
+ v12 = load.i32 notrap v10
  v13 = iadd v11,v12
  v14 = xor v13,v5
  store v14,v9
