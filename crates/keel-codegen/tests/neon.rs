@@ -40,6 +40,8 @@ mod neon_recipes;
 mod neon_reductions;
 #[path = "neon/neon_scalar.rs"]
 mod neon_scalar;
+#[path = "neon/neon_sha256.rs"]
+mod neon_sha256;
 #[path = "neon/neon_single_lane.rs"]
 mod neon_single_lane;
 #[path = "neon/neon_structured.rs"]

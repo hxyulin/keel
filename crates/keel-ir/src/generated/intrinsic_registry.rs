@@ -3794,10 +3794,18 @@ pub enum Intrinsic {
     X86Avx512VlExtractf32x4256 = 2233,
     #[doc = "Masked VL scalar/block broadcast or 128-bit lane extraction/insertion. Pure bit transport with independent merge; lane indices are zero or one."]
     X86Avx512VlInsertf32x4256 = 2234,
+    #[doc = "AArch64 SHA256H: four SHA-256 rounds producing the new first state half."]
+    Aarch64Sha256h = 2235,
+    #[doc = "AArch64 SHA256H2: four SHA-256 rounds producing the new second state half."]
+    Aarch64Sha256h2 = 2236,
+    #[doc = "AArch64 SHA256SU0: first SHA-256 message schedule update."]
+    Aarch64Sha256su0 = 2237,
+    #[doc = "AArch64 SHA256SU1: second SHA-256 message schedule update."]
+    Aarch64Sha256su1 = 2238,
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 2235] = [
+    pub const ALL: [Intrinsic; 2239] = [
         Intrinsic::X86Sse41Blendvps128,
         Intrinsic::X86Sse41Blendvpd128,
         Intrinsic::X86Sse41Pblendvb128,
@@ -6033,6 +6041,10 @@ impl Intrinsic {
         Intrinsic::X86Avx512VlBroadcastf32x4256,
         Intrinsic::X86Avx512VlExtractf32x4256,
         Intrinsic::X86Avx512VlInsertf32x4256,
+        Intrinsic::Aarch64Sha256h,
+        Intrinsic::Aarch64Sha256h2,
+        Intrinsic::Aarch64Sha256su0,
+        Intrinsic::Aarch64Sha256su1,
     ];
 }
 
@@ -8378,7 +8390,7 @@ use X86Family as F;
 
 /// Indexed by intrinsic ID.
 #[rustfmt::skip]
-static FACTS: [Facts; 2235] = [
+static FACTS: [Facts; 2239] = [
     f(M::None, false, true, Some(F::SignBlend)), // X86Sse41Blendvps128
     f(M::None, false, true, Some(F::SignBlend)), // X86Sse41Blendvpd128
     f(M::None, false, true, Some(F::SignBlend)), // X86Sse41Pblendvb128
@@ -10614,6 +10626,10 @@ static FACTS: [Facts; 2235] = [
     f(M::None, false, true, Some(F::Avx512VlLane)), // X86Avx512VlBroadcastf32x4256
     f(M::None, false, true, Some(F::Avx512VlLane)), // X86Avx512VlExtractf32x4256
     f(M::None, false, true, Some(F::Avx512VlLane)), // X86Avx512VlInsertf32x4256
+    f(M::None, false, true, None), // Aarch64Sha256h
+    f(M::None, false, true, None), // Aarch64Sha256h2
+    f(M::None, false, true, None), // Aarch64Sha256su0
+    f(M::None, false, true, None), // Aarch64Sha256su1
 ];
 
 impl Intrinsic {

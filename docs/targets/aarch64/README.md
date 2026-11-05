@@ -257,6 +257,28 @@ FPSR for the integer operations whose instruction definitions leave it alone.
 
 Optional FP16 arithmetic, crypto, SVE and SME are separate from baseline NEON.
 
+## SHA-256 intrinsics
+
+The SHA-256 instructions are pure `intrinsic` calls rather than NEON
+operations. They have no memory or FPSR effects, so the optimizer may combine
+or delete them.
+
+| IR intrinsic | Instruction | Operands → result |
+| --- | --- | --- |
+| `aarch64_sha256h` | `sha256h` | `abcd, efgh, wk → abcd` |
+| `aarch64_sha256h2` | `sha256h2` | `efgh, abcd, wk → efgh` |
+| `aarch64_sha256su0` | `sha256su0` | `w0_3, w4_7 → w` |
+| `aarch64_sha256su1` | `sha256su1` | `w, w8_11, w12_15 → w` |
+
+Every operand and result is `i32x4`. The order matches ACLE's `vsha256hq_u32`
+family. `abcd` is the state from before the matching `sha256h`. Lane 0 holds
+the first word, as `ld1 {v.4s}` loads it.
+
+They require FEAT_SHA256. Every Apple arm64 CPU has it, so Apple targets accept
+them, and the integrated assembler permits these instructions in Apple
+objects. AArch64 Linux targets do not assume the feature and reject the
+intrinsics. x86-64 rejects them. The interpreter does not implement them.
+
 ## Assembly, archives and native linking
 
 The assembler uses the existing A64 encoder with GNU ELF names and relocation

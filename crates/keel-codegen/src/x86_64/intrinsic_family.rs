@@ -524,6 +524,10 @@ impl FunctionCompiler<'_> {
         }
         match id {
             keel_ir::x86_intrinsics!() => unreachable!("dispatched x86 intrinsic"),
+            Intrinsic::Aarch64Sha256h
+            | Intrinsic::Aarch64Sha256h2
+            | Intrinsic::Aarch64Sha256su0
+            | Intrinsic::Aarch64Sha256su1 => unreachable!("rejected AArch64 intrinsic"),
             // The libc functions take the same arguments in the same
             // order. memset's `int c` only uses its low byte, so the
             // unspecified upper bits of the i8 are harmless.

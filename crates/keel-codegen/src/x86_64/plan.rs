@@ -153,10 +153,15 @@ pub(super) fn preflight(
                 return Err("FLAGS region exact I64 capture/result signature mismatch".into());
             }
         }
-        if let InstData::Intrinsic { id, args } = func.inst_data(inst)
-            && let Some(family) = id.x86_family()
-        {
-            intrinsic_family::validate(family, func, *id, args, features)?;
+        if let InstData::Intrinsic { id, args } = func.inst_data(inst) {
+            if id.is_aarch64_target() {
+                return Err(format!(
+                    "{id} is an AArch64 intrinsic, not supported on x86-64"
+                ));
+            }
+            if let Some(family) = id.x86_family() {
+                intrinsic_family::validate(family, func, *id, args, features)?;
+            }
         }
         if let Some(what) = unsupported(func, inst) {
             return Err(format!(

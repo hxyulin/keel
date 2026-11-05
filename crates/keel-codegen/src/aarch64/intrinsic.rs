@@ -1,6 +1,6 @@
 //! Lowering of the target-independent intrinsics: libc memory calls,
-//! `va_start`, and stack and frame access. x86 intrinsics are rejected
-//! before lowering.
+//! `va_start`, and stack and frame access, plus the AArch64 SHA-256
+//! intrinsics. x86 intrinsics are rejected before lowering.
 use super::*;
 
 impl FunctionCompiler<'_> {
@@ -67,6 +67,10 @@ impl FunctionCompiler<'_> {
                 self.mach("mov", [(Reg::SP).into(), (Reg::x(mark)).into()]);
             }
             keel_ir::x86_intrinsics!() => unreachable!("rejected x86 intrinsic"),
+            Intrinsic::Aarch64Sha256h
+            | Intrinsic::Aarch64Sha256h2
+            | Intrinsic::Aarch64Sha256su0
+            | Intrinsic::Aarch64Sha256su1 => self.sha256(id, args, result),
 
             Intrinsic::FrameAddress => {
                 let d = self.def_reg(result);
@@ -74,5 +78,39 @@ impl FunctionCompiler<'_> {
                 self.def_done(result, d);
             }
         }
+    }
+
+    /// The destination register is also the first input. Every input is
+    /// captured in scratch before the instruction, so a result that shares a
+    /// register with an input cannot clobber it.
+    fn sha256(&mut self, id: Intrinsic, args: &[Value], result: Option<Value>) {
+        for (&arg, scratch) in args.iter().zip([FS0, FS1, FS2]) {
+            let source = self.use_freg(arg, scratch);
+            self.move_vector(scratch, source);
+        }
+        let (opcode, name) = match id {
+            Intrinsic::Aarch64Sha256h => (Opcode::SHA256H_QQV_cryptosha3, "sha256h"),
+            Intrinsic::Aarch64Sha256h2 => (Opcode::SHA256H2_QQV_cryptosha3, "sha256h2"),
+            Intrinsic::Aarch64Sha256su0 => (Opcode::SHA256SU0_VV_cryptosha2, "sha256su0"),
+            Intrinsic::Aarch64Sha256su1 => (Opcode::SHA256SU1_VVV_cryptosha3, "sha256su1"),
+            _ => unreachable!("an AArch64 SHA-256 intrinsic"),
+        };
+        let mut fields = vec![(FieldId::Rd, FS0.into()), (FieldId::Rn, FS1.into())];
+        if args.len() == 3 {
+            fields.push((FieldId::Rm, FS2.into()));
+        }
+        self.out.native(
+            || keel_asm_ir::Instruction::new(opcode, fields),
+            |out| match id {
+                Intrinsic::Aarch64Sha256su0 => write!(out, "{name}\tv{FS0}.4s, v{FS1}.4s"),
+                Intrinsic::Aarch64Sha256su1 => {
+                    write!(out, "{name}\tv{FS0}.4s, v{FS1}.4s, v{FS2}.4s")
+                }
+                _ => write!(out, "{name}\tq{FS0}, q{FS1}, v{FS2}.4s"),
+            },
+        );
+        let d = self.def_freg(result);
+        self.move_vector(d, FS0);
+        self.def_done(result, d);
     }
 }

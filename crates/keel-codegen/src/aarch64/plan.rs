@@ -21,6 +21,19 @@ pub(super) fn preflight(
     if linux && func.personality.is_some() {
         return Err("exception handling on AArch64 Linux is not supported yet".into());
     }
+    // Every Apple arm64 CPU has FEAT_SHA256. Linux AArch64 does not assume it.
+    if linux
+        && let Some(id) = func
+            .layout_insts()
+            .find_map(|(_, i)| match func.inst_data(i) {
+                InstData::Intrinsic { id, .. } if id.is_aarch64_target() => Some(*id),
+                _ => None,
+            })
+    {
+        return Err(format!(
+            "{id} requires FEAT_SHA256, which AArch64 Linux targets do not assume"
+        ));
+    }
     let (CallConv::C | CallConv::Fast) = func.sig.cc;
     match func.sig.returns.as_slice() {
         [] => {}

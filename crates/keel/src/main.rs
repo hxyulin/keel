@@ -1163,12 +1163,16 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         } else {
             opts.x86_features
         };
-        let mut assembler = keel_asm::ObjectAssembler::with_features(
-            target,
-            keel_asm::TargetFeatures::default(),
-            encoding_features,
-        )
-        .map_err(|e| e.to_string())?;
+        // Every Apple arm64 CPU has FEAT_SHA256; codegen rejects the SHA-256
+        // intrinsics on AArch64 Linux.
+        let aarch64_features = if target == Target::Aarch64AppleDarwin {
+            keel_asm::TargetFeatures::default().with_sha256()
+        } else {
+            keel_asm::TargetFeatures::default()
+        };
+        let mut assembler =
+            keel_asm::ObjectAssembler::with_features(target, aarch64_features, encoding_features)
+                .map_err(|e| e.to_string())?;
         let mut sink = |program| {
             profiling::scope!("integrated-assembly");
             assembler.push_with_binary_inputs(program, &mut input::binary_input)

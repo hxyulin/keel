@@ -11914,6 +11914,30 @@ impl Intrinsic {
             Intrinsic::LifetimeStart => ("lifetime_start", &[Type::Ptr], &[], false),
             Intrinsic::LifetimeEnd => ("lifetime_end", &[Type::Ptr], &[], false),
             Intrinsic::FrameAddress => ("frame_address", &[], &[Type::Ptr], false),
+            Intrinsic::Aarch64Sha256h => (
+                "aarch64_sha256h",
+                &[Type::Vector(VectorType::I32x4); 3],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::Aarch64Sha256h2 => (
+                "aarch64_sha256h2",
+                &[Type::Vector(VectorType::I32x4); 3],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::Aarch64Sha256su0 => (
+                "aarch64_sha256su0",
+                &[Type::Vector(VectorType::I32x4); 2],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
+            Intrinsic::Aarch64Sha256su1 => (
+                "aarch64_sha256su1",
+                &[Type::Vector(VectorType::I32x4); 3],
+                &[Type::Vector(VectorType::I32x4)],
+                true,
+            ),
             Intrinsic::X86F16cPhToPs128 => (
                 "x86_f16c_ph_to_ps128",
                 &[Type::I64],
@@ -15256,6 +15280,17 @@ impl Intrinsic {
 
     pub fn is_x86_target(self) -> bool {
         self.x86_family().is_some()
+    }
+
+    /// Whether only the AArch64 backend lowers the intrinsic.
+    pub fn is_aarch64_target(self) -> bool {
+        matches!(
+            self,
+            Intrinsic::Aarch64Sha256h
+                | Intrinsic::Aarch64Sha256h2
+                | Intrinsic::Aarch64Sha256su0
+                | Intrinsic::Aarch64Sha256su1
+        )
     }
 
     /// Inactive sign-mask lanes do not access memory. Active lanes read exactly
