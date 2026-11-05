@@ -53,6 +53,10 @@ completed read across a call only when the contracts promise no accessible
 writes, `nofree`, `nosync`, `nocallback` and `preserves_access`, and the call is
 not returns-twice. The read and the call stay pinned.
 
+A fault on an ordinary LLVM load or store is undefined behavior, so import
+marks those accesses `trap_ub`. Volatile accesses keep observable faults.
+Export writes `trap_ub` accesses as ordinary accesses, which is exact.
+
 Whole fixed-stack `lifetime_start(ptr)` and `lifetime_end(ptr)` survive import
 and export as memory barriers. Native lowering emits nothing, and there is no
 stack-slot reuse or lifetime-based DCE.

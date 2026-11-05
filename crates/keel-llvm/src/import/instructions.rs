@@ -286,10 +286,14 @@ impl Translation<'_> {
                 if l.get_ordering(inst) != 0 {
                     return Err("atomic memory access".into());
                 }
+                // LLVM makes a fault on an ordinary access undefined behavior.
+                // Volatile accesses may trap observably.
+                let volatile = l.get_volatile(inst) != 0;
                 let flags = keel_ir::MemoryFlags {
-                    volatile: l.get_volatile(inst) != 0,
+                    volatile,
                     align: l.get_alignment(inst).max(1),
                     notrap: false,
+                    trap_ub: !volatile,
                 };
                 if op == 27 {
                     let ty = self.ty(l.type_of(inst))?;

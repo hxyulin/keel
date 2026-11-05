@@ -732,7 +732,9 @@ impl<'p> Gen<'p> {
     /// Preserve proven address alignment on every emitted access, including
     /// byte copies and initializer chunks. No pointee-type inference: packed
     /// members and pointers cast from byte buffers may be unaligned.
-    fn preserve_access_alignment(&mut self, func: &mut Function, seeds: HashMap<Value, u32>) {
+    /// A fault on a non-volatile C access is undefined behavior, so every
+    /// such access is marked `trap_ub`.
+    fn finish_access_flags(&mut self, func: &mut Function, seeds: HashMap<Value, u32>) {
         // StackSlot, DataRef and Value are append-only dense arena indices.
         // Memoized results (including seeds) are kept by value index.
         let mut known = vec![None; func.num_values()];
@@ -798,7 +800,8 @@ impl<'p> Gen<'p> {
             let align = alignment(func, addr, &mut known, &slots, &symbols, 0);
             match func.inst_data_mut(inst) {
                 InstData::Load { flags, .. } | InstData::Store { flags, .. } => {
-                    flags.align = flags.align.max(align)
+                    flags.align = flags.align.max(align);
+                    flags.trap_ub = !flags.volatile;
                 }
                 _ => unreachable!(),
             }
@@ -1026,7 +1029,7 @@ impl<'p> Gen<'p> {
         fg.b.seal_all_blocks();
         let alignments = std::mem::take(&mut fg.alignments);
         fg.g.context.ssa = fg.b.finalize_with_context();
-        self.preserve_access_alignment(&mut func, alignments);
+        self.finish_access_flags(&mut func, alignments);
         Ok(func)
     }
 }
@@ -1565,16 +1568,20 @@ mod alignment_tests {
         }
         f.ins(keel_ir::InsertPoint::End(entry))
             .return_(&[result.unwrap()]);
-        g.preserve_access_alignment(&mut f, HashMap::default());
+        g.finish_access_flags(&mut f, HashMap::default());
         keel_ir::verify(&f).unwrap();
         let alignments: Vec<_> = f
             .layout_insts()
             .filter_map(|(_, inst)| match f.inst_data(inst) {
-                InstData::Load { flags, .. } => Some(flags.align),
+                InstData::Load { flags, .. } => Some((flags.align, flags.trap_ub)),
                 _ => None,
             })
             .collect();
-        assert_eq!(alignments, [16, 8, 8, 1, 2]);
+        assert_eq!(
+            alignments,
+            [16, 8, 8, 1, 2].map(|align| (align, true)),
+            "C accesses carry their alignment and an undefined fault"
+        );
     }
 
     /// The previous map-memoized walk, kept verbatim as the reference for
@@ -1700,7 +1707,7 @@ mod alignment_tests {
             .map(|(_, name)| g.symbol_alignment(name))
             .collect();
         let expected = old_alignments(&f, seeds.clone(), &slots, &symbols);
-        g.preserve_access_alignment(&mut f, seeds);
+        g.finish_access_flags(&mut f, seeds);
         let got = access_alignments(&f);
         assert_eq!(got, expected);
         // Sanity: the cases above really differ from one another.

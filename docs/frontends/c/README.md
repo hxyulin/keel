@@ -158,6 +158,9 @@ target SDK. Keel does not ship a libc.
   offset. Unknown pointers and unresolved block parameters have alignment one,
   and packed accesses are not strengthened. Alignment never implies `notrap`,
   immutability or alias freedom.
+- **Faults.** A faulting non-volatile access is undefined behavior in C, so
+  every non-volatile load and store carries `trap_ub`. Volatile accesses keep
+  observable faults.
 
 Target facts come from `Options::target`. All native targets are LP64.
 
