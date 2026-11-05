@@ -89,10 +89,8 @@
 	mov	rsi, rax
 	# v31 = iconst.i32 0
 	# v32 = icmp.ne v30, v31
-	cmp	esi, 0
-	setne	sil
 	# brif v32, block2, block1
-	test	sil, sil
+	cmp	esi, 0
 	jne	".Lk_setjmp_block2"
 .Lk_setjmp_block1:
 	# v33 = iconst.i64 101
@@ -360,11 +358,9 @@
 	mov	rsi, rax
 	# v31 = iconst.i32 0
 	# v32 = icmp.eq v30, v31
-	cmp	esi, 0
-	sete	sil
 	# brif v32, block1, block2
-	test	sil, sil
-	jne	".Lk_setjmp_swapped_block1"
+	cmp	esi, 0
+	je	".Lk_setjmp_swapped_block1"
 .Lk_setjmp_swapped_block2:
 	# v88 = iadd v2, v4
 	mov	rax, qword ptr [rbp + -448]

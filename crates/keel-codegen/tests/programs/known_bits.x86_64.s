@@ -26,11 +26,9 @@
 	and	r8, 255
 	# v5 = iconst.i64 256
 	# v6 = icmp.ult v4, v5
-	cmp	r8, 256
-	setb	r9b
 	# brif v6, block1, block4
-	test	r9b, r9b
-	je	".Lknown_bits_block4"
+	cmp	r8, 256
+	jae	".Lknown_bits_block4"
 .Lknown_bits_block1:
 	# v7 = uext.i128 v1
 	movzx	eax, dil
@@ -61,11 +59,9 @@
 	# v14 = ushr v13, v12
 	shr	rsi, 60
 	# v15 = icmp.ule v14, v10
-	cmp	rsi, 15
-	setbe	sil
 	# brif v15, block3, block4
-	test	sil, sil
-	jne	".Lknown_bits_block3"
+	cmp	rsi, 15
+	jbe	".Lknown_bits_block3"
 .Lknown_bits_block4:
 	# trap
 	ud2

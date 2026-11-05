@@ -4,7 +4,7 @@
 	.p2align	2
 _constant_loop:
 Lconstant_loop_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x10 v4=x11 v5=x12 v6=x13 v7=x13 v8=x11 v9=x13 v10=x10 v11=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x10 v4=x11 v5=x12 v7=x13 v8=x11 v9=x13 v10=x10 v11=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -22,11 +22,9 @@ Lconstant_loop_block0:
 	mov	x11, x10
 Lconstant_loop_block1:
 	; v6 = icmp.ult v3, v0
-	cmp	x10, x9
-	cset	w13, lo
 	; brif v6, block2, block3(v4)
-	tst	w13, #255
-	b.ne	Lconstant_loop_block2
+	cmp	x10, x9
+	b.lo	Lconstant_loop_block2
 	mov	x9, x11
 Lconstant_loop_block3:
 	; return v11

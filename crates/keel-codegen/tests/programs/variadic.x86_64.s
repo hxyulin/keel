@@ -52,11 +52,9 @@
 	mov	r9, r11
 .Lk_sum_block1:
 	# v6 = icmp.slt v4, v0
-	cmp	r8d, esi
-	setl	bl
 	# brif v6, block2, block3
-	test	bl, bl
-	jne	".Lk_sum_block2"
+	cmp	r8d, esi
+	jl	".Lk_sum_block2"
 .Lk_sum_block3:
 	# return v5
 	mov	rax, r9
@@ -138,11 +136,9 @@
 	# jump block1(v3, v2)
 .Lk_pairs_block1:
 	# v6 = icmp.slt v4, v0
-	cmp	r8d, esi
-	setl	r9b
 	# brif v6, block2, block3
-	test	r9b, r9b
-	jne	".Lk_pairs_block2"
+	cmp	r8d, esi
+	jl	".Lk_pairs_block2"
 .Lk_pairs_block3:
 	# return v5
 	mov	rsp, rbp

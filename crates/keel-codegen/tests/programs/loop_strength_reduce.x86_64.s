@@ -26,11 +26,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot32p_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	ebx, esi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot32p_block2"
+	cmp	ebx, esi
+	jb	".Lhot32p_block2"
 	mov	rsi, r9
 .Lhot32p_block3:
 	# return v15
@@ -84,11 +82,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot32m_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	ebx, esi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot32m_block2"
+	cmp	ebx, esi
+	jb	".Lhot32m_block2"
 	mov	rsi, r9
 .Lhot32m_block3:
 	# return v15
@@ -142,11 +138,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot32z_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	ebx, esi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot32z_block2"
+	cmp	ebx, esi
+	jb	".Lhot32z_block2"
 	mov	rsi, r9
 .Lhot32z_block3:
 	# return v15
@@ -200,11 +194,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot64p_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	rbx, rsi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot64p_block2"
+	cmp	rbx, rsi
+	jb	".Lhot64p_block2"
 	mov	rsi, r9
 .Lhot64p_block3:
 	# return v15
@@ -258,11 +250,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot64m_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	rbx, rsi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot64m_block2"
+	cmp	rbx, rsi
+	jb	".Lhot64m_block2"
 	mov	rsi, r9
 .Lhot64m_block3:
 	# return v15
@@ -316,11 +306,9 @@
 	# jump block1(v2, v3, v4)
 .Lhot64z_block1:
 	# v8 = icmp.ult v7, v0
-	cmp	rbx, rsi
-	setb	r12b
 	# brif v8, block2, block3(v6)
-	test	r12b, r12b
-	jne	".Lhot64z_block2"
+	cmp	rbx, rsi
+	jb	".Lhot64z_block2"
 	mov	rsi, r9
 .Lhot64z_block3:
 	# return v15
@@ -379,11 +367,9 @@
 	# jump block1(v2, v4, v5)
 .Loffset32_block1:
 	# v9 = icmp.ult v7, v0
-	cmp	ebx, esi
-	setb	r13b
 	# brif v9, block2, block3(v8)
-	test	r13b, r13b
-	jne	".Loffset32_block2"
+	cmp	ebx, esi
+	jb	".Loffset32_block2"
 	mov	rsi, r12
 .Loffset32_block3:
 	# return v16
@@ -443,11 +429,9 @@
 	# jump block1(v2, v4, v5)
 .Loffset64_block1:
 	# v9 = icmp.ult v7, v0
-	cmp	rbx, rsi
-	setb	r13b
 	# brif v9, block2, block3(v8)
-	test	r13b, r13b
-	jne	".Loffset64_block2"
+	cmp	rbx, rsi
+	jb	".Loffset64_block2"
 	mov	rsi, r12
 .Loffset64_block3:
 	# return v15

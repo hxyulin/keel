@@ -2,10 +2,11 @@
 //! macOS and x86-64 Linux, and the assembly (or the error) is compared with
 //! a file next to the program:
 //!
-//! - `<stem>.<target>.s`: baseline selection, no IR optimization.
+//! - `<stem>.<target>.s`: the default (`-O0`) covers selection, no IR
+//!   optimization.
 //! - `<stem>.<target>.opt.s`: the program's `; opt-passes:` list or the
 //!   default optimization pipeline, then every selection pass. These are the
-//!   unspilled baseline and optimized configurations that `run.rs` executes.
+//!   unspilled default and optimized configurations that `run.rs` executes.
 //!
 //! `<target>` is `aarch64` or `x86_64`. A `; target:` line limits a program to
 //! that target. The DWARF compilation directory is written as `<cwd>`. Nothing

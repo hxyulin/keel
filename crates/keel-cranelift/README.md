@@ -197,7 +197,7 @@ in-process. No IR passes run inside the harness.
 These use the driver's `--emit-object` composition: `TunedSelector`
 generic, `AllocationTier::Full`, then `assemble_program_object`.
 
-- `keel-baseline`: baseline selection, as in `keel compile`.
+- `keel-baseline`: the default covers selection, as in `keel compile`.
 - `keel-full`: all selection passes, which `-O` adds.
 
 **Cranelift configurations**

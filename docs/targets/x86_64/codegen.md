@@ -244,7 +244,7 @@ the load's byte width and its position in the IR effect order. None assumes
 alignment, `notrap` or dereferenceability, and none crosses another
 instruction with effects. Volatile and atomic accesses, shared results,
 cross-block pairs and functions with source locations or debug variables keep
-the separate load. Baseline selection and AArch64 are unchanged. Each fold is
+the separate load. Selection without trees and AArch64 are unchanged. Each fold is
 a named [cover](../../compiler/design.md) that `--isel all,-<name>` turns off:
 `x86-compare-memory`, `x86-binary-memory`, `indexed-address`,
 `offset-address`, `x86-packed-wide-load`, `x86-mask-test`,
@@ -290,7 +290,8 @@ a named [cover](../../compiler/design.md) that `--isel all,-<name>` turns off:
 
 ## Covers
 
-Every cover is off at Baseline selection and on at Trees and Full; see
+Every cover is off at Baseline selection and on at Covers (the `-O0`
+default), Trees and Full; selection-stage covers also need tree selection. See
 [covers](../../compiler/design.md#covers) for the registry and `--isel`
 toggles. `--isel all,-<name>` drops one, and `--codegen-report` counts the
 roots each one claimed. x86 runs the shared covers `offset-address`,

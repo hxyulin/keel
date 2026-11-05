@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x11 v5=x10 v6=x11 v7=x10 v8=x11 v9=x9 v10=x10 v11=x10 v12=x11 v13=x11 v14=x10 v15=x11 v16=x10 v17=x11 v18=x9 v19=x10 v20=x10 v21=x11 v22=x11 v23=x10 v24=x11 v25=x10 v26=x11 v27=x9 v28=x10 v29=x10 v30=x11 v31=x11 v32=x10 v33=x11 v34=x10 v35=x11 v36=x9 v37=x10 v38=x10 v39=x11 v40=x11 v41=x10 v42=x11 v43=x10 v44=x11 v45=x9 v46=x10 v47=x10 v48=x11 v49=x11 v50=x10 v51=x11 v52=x10 v53=x11 v54=x9 v55=x10 v56=x10 v57=x11 v58=x11 v59=x10 v60=x11 v61=x10 v62=x11 v63=x9 v64=x10 v65=x10 v66=x11 v67=x11 v68=x10 v69=x11 v70=x10 v71=x11 v72=x9 v73=x10 v74=x10 v75=x11 v76=x11 v77=x10 v78=x11 v79=x10 v80=x11 v81=x9 v82=x10 v83=x10 v84=x11 v85=x11 v86=x10 v87=x11 v88=x10 v89=x11 v90=x9 v91=x10 v92=x10 v93=x11 v94=x11 v95=x10 v96=x11 v97=x10 v98=x11 v99=x9 v100=x10 v101=x10 v102=x11 v103=x11 v104=x10 v105=x11 v106=x10 v107=x11 v108=x9 v109=x10 v110=x10 v111=x11 v112=x11 v113=x10 v114=x11 v115=x10 v116=x11 v117=x9 v118=x10 v119=x10 v120=x11 v121=x11 v122=x10 v123=x11 v124=x10 v125=x11 v126=x9 v127=x10 v128=x10 v129=x11 v130=x11 v131=x10 v132=x11 v133=x10 v134=x11 v135=x9 v136=x10 v137=x10 v138=x11 v139=x11 v140=x10 v141=x11 v142=x10 v143=x11 v144=x9 v145=x10 v146=x10 v147=x11 v148=x11 v149=x10 v150=x11 v151=x10 v152=x11 v153=x9 v154=x10 v155=x10 v156=x11 v157=x11 v158=x10 v159=x11 v160=x10 v161=x11 v162=x9 v163=x10 v164=x10 v165=x11 v166=x11 v167=x10 v168=x11 v169=x10 v170=x11 v171=x9 v172=x10 v173=x10 v174=x11 v175=x11 v176=x10 v177=x11 v178=x10 v179=x11 v180=x9 v181=x10 v182=x10 v183=x11 v184=x11 v185=x10 v186=x11 v187=x10 v188=x11 v189=x9 v190=x10 v191=x10 v192=x11 v193=x11 v194=x10 v195=x11 v196=x10 v197=x11 v198=x9 v199=x10 v200=x10 v201=x11 v202=x11 v203=x10 v204=x11 v205=x10 v206=x11 v207=x9 v208=x10 v209=x10 v210=x11 v211=x11 v212=x10 v213=x11 v214=x10 v215=x11 v216=x9 v217=x10 v218=x10 v219=x11 v220=x11 v221=x10 v222=x11 v223=x10 v224=x11 v225=x9 v226=x10 v227=x10 v228=x11 v229=x11 v230=x10 v231=x11 v232=x10 v233=x11 v234=x9 v235=x10 v236=x10 v237=x11 v238=x11 v239=x10 v240=x11 v241=x10 v242=x11 v243=x9 v244=x10 v245=x10 v246=x11 v247=x11 v248=x10 v249=x11 v250=x10 v251=x11 v252=x9 v253=x10 v254=x10 v255=x11 v256=x11 v257=x10 v258=x11 v259=x10 v260=x11 v261=x9 v262=x10 v263=x10 v264=x11 v265=x11 v266=x10 v267=x11 v268=x10 v269=x11 v270=x9 v271=x10 v272=x10 v273=x11 v274=x11 v275=x10 v276=x11 v277=x10 v278=x11 v279=x9 v280=x10 v281=x10 v282=x11 v283=x11 v284=x10 v285=x11 v286=x10 v287=x11 v288=x9 v289=x10 v290=x10 v291=x11 v292=x11 v293=x10 v294=x11 v295=x10 v296=x11 v297=x9 v298=x10 v299=x10 v300=x11 v301=x11 v302=x10 v303=x11 v304=x10 v305=x11 v306=x9 v307=x10 v308=x10 v309=x11 v310=x11 v311=x10 v312=x11 v313=x10 v314=x11 v315=x9 v316=x10 v317=x10 v318=x11 v319=x11 v320=x10 v321=x11 v322=x10 v323=x11 v324=x9 v325=x10 v326=x11 v327=x10 v328=x11 v329=x10 v330=x11 v331=x9 v332=x10 v333=x11 v334=x10 v335=x11 v336=x10 v337=x11 v338=x9 v339=x10 v340=x11 v341=x10 v342=x11 v343=x10 v344=x11 v345=x9 v346=x10 v347=x11 v348=x10 v349=x11 v350=x10 v351=x11 v352=x9 v353=x10 v354=x11 v355=x10 v356=x11 v357=x10 v358=x11 v359=x9 v360=x10 v361=x11 v362=x10 v363=x11 v364=x10 v365=x11 v366=x9 v367=x10 v368=x11 v369=x10 v370=x11 v371=x10 v372=x11 v373=x9 v374=x10 v375=x11 v376=x10 v377=x11 v378=x10 v379=x11 v380=x9 v381=x10 v382=x11 v383=x10 v384=x11 v385=x10 v386=x11 v387=x9 v388=x10 v389=x11 v390=x10 v391=x11 v392=x10 v393=x11 v394=x9 v395=x10 v396=x11 v397=x10 v398=x11 v399=x10 v400=x11 v401=x9 v402=x10 v403=x11 v404=x10 v405=x11 v406=x10 v407=x11 v408=x9 v409=x10 v410=x11 v411=x11 v412=x10 v413=x11 v414=x10 v415=x11 v416=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x11 v5=x10 v6=x11 v7=x10 v8=x11 v9=x9 v10=x10 v11=x10 v12=x11 v13=x11 v14=x10 v15=x11 v16=x10 v17=x11 v18=x9 v19=x10 v20=x10 v21=x11 v22=x11 v23=x10 v24=x11 v25=x10 v26=x11 v27=x9 v28=x10 v29=x10 v30=x11 v31=x11 v32=x10 v33=x11 v34=x10 v35=x11 v36=x9 v37=x10 v38=x10 v39=x11 v40=x11 v41=x10 v42=x11 v43=x10 v44=x11 v45=x9 v46=x10 v47=x10 v48=x11 v49=x11 v50=x10 v51=x11 v52=x10 v53=x11 v54=x9 v55=x10 v56=x10 v57=x11 v58=x11 v59=x10 v60=x11 v61=x10 v62=x11 v63=x9 v64=x10 v65=x10 v66=x11 v67=x11 v68=x10 v69=x11 v70=x10 v71=x11 v72=x9 v73=x10 v74=x10 v75=x11 v76=x11 v77=x10 v78=x11 v79=x10 v80=x11 v81=x9 v82=x10 v83=x10 v84=x11 v85=x11 v86=x10 v87=x11 v88=x10 v89=x11 v90=x9 v91=x10 v92=x10 v93=x11 v94=x11 v95=x10 v96=x11 v97=x10 v98=x11 v99=x9 v100=x10 v101=x10 v102=x11 v103=x11 v104=x10 v105=x11 v106=x10 v107=x11 v108=x9 v109=x10 v110=x10 v111=x11 v112=x11 v113=x10 v114=x11 v115=x10 v116=x11 v117=x9 v118=x10 v119=x10 v120=x11 v121=x11 v122=x10 v123=x11 v124=x10 v125=x11 v126=x9 v127=x10 v128=x10 v129=x11 v130=x11 v131=x10 v132=x11 v133=x10 v134=x11 v135=x9 v136=x10 v137=x10 v138=x11 v139=x11 v140=x10 v141=x11 v142=x10 v143=x11 v144=x9 v145=x10 v146=x10 v147=x11 v148=x11 v149=x10 v150=x11 v151=x10 v152=x11 v153=x9 v154=x10 v155=x10 v156=x11 v157=x11 v158=x10 v159=x11 v160=x10 v161=x11 v162=x9 v163=x10 v164=x10 v165=x11 v166=x11 v167=x10 v168=x11 v169=x10 v170=x11 v171=x9 v172=x10 v173=x10 v174=x11 v175=x11 v176=x10 v177=x11 v178=x10 v179=x11 v180=x9 v181=x10 v182=x10 v183=x11 v184=x11 v185=x10 v186=x11 v187=x10 v188=x11 v189=x9 v190=x10 v191=x10 v192=x11 v193=x11 v194=x10 v195=x11 v196=x10 v197=x11 v198=x9 v199=x10 v200=x10 v201=x11 v202=x11 v203=x10 v204=x11 v205=x10 v206=x11 v207=x9 v208=x10 v209=x10 v210=x11 v211=x11 v212=x10 v213=x11 v214=x10 v215=x11 v216=x9 v217=x10 v218=x10 v219=x11 v220=x11 v221=x10 v222=x11 v224=x12 v225=x9 v226=x10 v227=x10 v228=x11 v229=x11 v230=x10 v231=x11 v233=x12 v234=x9 v235=x10 v236=x10 v237=x11 v238=x11 v239=x10 v240=x11 v242=x12 v243=x9 v244=x10 v245=x10 v246=x11 v247=x11 v248=x10 v249=x11 v251=x12 v252=x9 v253=x10 v254=x10 v255=x11 v256=x11 v257=x10 v258=x11 v260=x12 v261=x9 v262=x10 v263=x10 v264=x11 v265=x11 v266=x10 v267=x11 v269=x12 v270=x9 v271=x10 v272=x10 v273=x11 v274=x11 v275=x10 v276=x11 v278=x12 v279=x9 v280=x10 v281=x10 v282=x11 v283=x11 v284=x10 v285=x11 v287=x12 v288=x9 v289=x10 v290=x10 v291=x11 v292=x11 v293=x10 v294=x11 v296=x12 v297=x9 v298=x10 v299=x10 v300=x11 v301=x11 v302=x10 v303=x11 v305=x12 v306=x9 v307=x10 v308=x10 v309=x11 v310=x11 v311=x10 v312=x11 v314=x12 v315=x9 v316=x10 v317=x10 v318=x11 v319=x11 v320=x10 v321=x11 v323=x12 v324=x9 v325=x10 v326=x11 v327=x10 v328=x11 v330=x12 v331=x9 v332=x10 v333=x11 v334=x10 v335=x11 v337=x12 v338=x9 v339=x10 v340=x11 v341=x10 v342=x11 v344=x12 v345=x9 v346=x10 v347=x11 v348=x10 v349=x11 v351=x12 v352=x9 v353=x10 v354=x11 v355=x10 v356=x11 v358=x12 v359=x9 v360=x10 v361=x11 v362=x10 v363=x11 v365=x12 v366=x9 v367=x10 v368=x11 v369=x10 v370=x11 v372=x12 v373=x9 v374=x10 v375=x11 v376=x10 v377=x11 v379=x12 v380=x9 v381=x10 v382=x11 v383=x10 v384=x11 v386=x12 v387=x9 v388=x10 v389=x11 v390=x10 v391=x11 v393=x12 v394=x9 v395=x10 v396=x11 v397=x10 v398=x11 v400=x12 v401=x9 v402=x10 v403=x11 v404=x10 v405=x11 v407=x12 v408=x9 v409=x10 v410=x11 v411=x11 v412=x10 v413=x11 v415=x11 v416=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -793,13 +793,11 @@ Lmain_block0:
 	movn	x11, #0x3210
 	movk	x11, #0x89ab, lsl #16
 	; v223 = icmp.ne v221, v222
-	cmp	w10, w11
-	cset	w10, ne
 	; v224 = iconst.i32 25
-	movz	x11, #0x19
+	movz	x12, #0x19
 	; v225 = select v223, v224, v216
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v226 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -816,13 +814,11 @@ Lmain_block0:
 	movn	x11, #0x3210
 	movk	x11, #0x89ab, lsl #16
 	; v232 = icmp.ne v230, v231
-	cmp	w10, w11
-	cset	w10, ne
 	; v233 = iconst.i32 26
-	movz	x11, #0x1a
+	movz	x12, #0x1a
 	; v234 = select v232, v233, v225
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v235 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -841,13 +837,11 @@ Lmain_block0:
 	movz	x11, #0x9bdf
 	movk	x11, #0x1357, lsl #16
 	; v241 = icmp.ne v239, v240
-	cmp	w10, w11
-	cset	w10, ne
 	; v242 = iconst.i32 27
-	movz	x11, #0x1b
+	movz	x12, #0x1b
 	; v243 = select v241, v242, v234
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v244 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -865,13 +859,11 @@ Lmain_block0:
 	movn	x11, #0x1908
 	movk	x11, #0xc4d5, lsl #16
 	; v250 = icmp.ne v248, v249
-	cmp	w10, w11
-	cset	w10, ne
 	; v251 = iconst.i32 28
-	movz	x11, #0x1c
+	movz	x12, #0x1c
 	; v252 = select v250, v251, v243
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v253 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -890,13 +882,11 @@ Lmain_block0:
 	movz	x11, #0x6f7c
 	movk	x11, #0x4d5e, lsl #16
 	; v259 = icmp.ne v257, v258
-	cmp	w10, w11
-	cset	w10, ne
 	; v260 = iconst.i32 29
-	movz	x11, #0x1d
+	movz	x12, #0x1d
 	; v261 = select v259, v260, v252
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v262 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -914,13 +904,11 @@ Lmain_block0:
 	movn	x11, #0x8642
 	movk	x11, #0xf135, lsl #16
 	; v268 = icmp.ne v266, v267
-	cmp	w10, w11
-	cset	w10, ne
 	; v269 = iconst.i32 30
-	movz	x11, #0x1e
+	movz	x12, #0x1e
 	; v270 = select v268, v269, v261
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v271 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -939,13 +927,11 @@ Lmain_block0:
 	movn	x11, #0x1908
 	movk	x11, #0xc4d5, lsl #16
 	; v277 = icmp.ne v275, v276
-	cmp	w10, w11
-	cset	w10, ne
 	; v278 = iconst.i32 31
-	movz	x11, #0x1f
+	movz	x12, #0x1f
 	; v279 = select v277, v278, v270
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v280 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -963,13 +949,11 @@ Lmain_block0:
 	movz	x11, #0x9bdf
 	movk	x11, #0x1357, lsl #16
 	; v286 = icmp.ne v284, v285
-	cmp	w10, w11
-	cset	w10, ne
 	; v287 = iconst.i32 32
-	movz	x11, #0x20
+	movz	x12, #0x20
 	; v288 = select v286, v287, v279
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v289 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -988,13 +972,11 @@ Lmain_block0:
 	movn	x11, #0x3210
 	movk	x11, #0x89ab, lsl #16
 	; v295 = icmp.ne v293, v294
-	cmp	w10, w11
-	cset	w10, ne
 	; v296 = iconst.i32 33
-	movz	x11, #0x21
+	movz	x12, #0x21
 	; v297 = select v295, v296, v288
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v298 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1012,13 +994,11 @@ Lmain_block0:
 	movn	x11, #0x3210
 	movk	x11, #0x89ab, lsl #16
 	; v304 = icmp.ne v302, v303
-	cmp	w10, w11
-	cset	w10, ne
 	; v305 = iconst.i32 34
-	movz	x11, #0x22
+	movz	x12, #0x22
 	; v306 = select v304, v305, v297
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v307 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1037,13 +1017,11 @@ Lmain_block0:
 	movz	x11, #0x6f7c
 	movk	x11, #0x4d5e, lsl #16
 	; v313 = icmp.ne v311, v312
-	cmp	w10, w11
-	cset	w10, ne
 	; v314 = iconst.i32 35
-	movz	x11, #0x23
+	movz	x12, #0x23
 	; v315 = select v313, v314, v306
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v316 = iconst.i64 -6502179613061689873
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1061,13 +1039,11 @@ Lmain_block0:
 	movn	x11, #0x8642
 	movk	x11, #0xf135, lsl #16
 	; v322 = icmp.ne v320, v321
-	cmp	w10, w11
-	cset	w10, ne
 	; v323 = iconst.i32 36
-	movz	x11, #0x24
+	movz	x12, #0x24
 	; v324 = select v322, v323, v315
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	w10, w11
+	csel	w9, w12, w9, ne
 	; v325 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1084,13 +1060,11 @@ Lmain_block0:
 	movk	x11, #0x4567, lsl #32
 	movk	x11, #0x123, lsl #48
 	; v329 = icmp.ne v327, v328
-	cmp	x10, x11
-	cset	w10, ne
 	; v330 = iconst.i32 37
-	movz	x11, #0x25
+	movz	x12, #0x25
 	; v331 = select v329, v330, v324
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v332 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1106,13 +1080,11 @@ Lmain_block0:
 	movk	x11, #0x4567, lsl #32
 	movk	x11, #0x123, lsl #48
 	; v336 = icmp.ne v334, v335
-	cmp	x10, x11
-	cset	w10, ne
 	; v337 = iconst.i32 38
-	movz	x11, #0x26
+	movz	x12, #0x26
 	; v338 = select v336, v337, v331
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v339 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1129,13 +1101,11 @@ Lmain_block0:
 	movk	x11, #0x8acf, lsl #32
 	movk	x11, #0x246, lsl #48
 	; v343 = icmp.ne v341, v342
-	cmp	x10, x11
-	cset	w10, ne
 	; v344 = iconst.i32 39
-	movz	x11, #0x27
+	movz	x12, #0x27
 	; v345 = select v343, v344, v338
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v346 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1151,13 +1121,11 @@ Lmain_block0:
 	movk	x11, #0xa2b3, lsl #32
 	movk	x11, #0x8091, lsl #48
 	; v350 = icmp.ne v348, v349
-	cmp	x10, x11
-	cset	w10, ne
 	; v351 = iconst.i32 40
-	movz	x11, #0x28
+	movz	x12, #0x28
 	; v352 = select v350, v351, v345
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v353 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1174,13 +1142,11 @@ Lmain_block0:
 	movk	x11, #0x2b3c, lsl #32
 	movk	x11, #0x91a, lsl #48
 	; v357 = icmp.ne v355, v356
-	cmp	x10, x11
-	cset	w10, ne
 	; v358 = iconst.i32 41
-	movz	x11, #0x29
+	movz	x12, #0x29
 	; v359 = select v357, v358, v352
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v360 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1196,13 +1162,11 @@ Lmain_block0:
 	movk	x11, #0x68ac, lsl #32
 	movk	x11, #0xe024, lsl #48
 	; v364 = icmp.ne v362, v363
-	cmp	x10, x11
-	cset	w10, ne
 	; v365 = iconst.i32 42
-	movz	x11, #0x2a
+	movz	x12, #0x2a
 	; v366 = select v364, v365, v359
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v367 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1219,13 +1183,11 @@ Lmain_block0:
 	movk	x11, #0xa2b3, lsl #32
 	movk	x11, #0x8091, lsl #48
 	; v371 = icmp.ne v369, v370
-	cmp	x10, x11
-	cset	w10, ne
 	; v372 = iconst.i32 43
-	movz	x11, #0x2b
+	movz	x12, #0x2b
 	; v373 = select v371, v372, v366
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v374 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1241,13 +1203,11 @@ Lmain_block0:
 	movk	x11, #0x8acf, lsl #32
 	movk	x11, #0x246, lsl #48
 	; v378 = icmp.ne v376, v377
-	cmp	x10, x11
-	cset	w10, ne
 	; v379 = iconst.i32 44
-	movz	x11, #0x2c
+	movz	x12, #0x2c
 	; v380 = select v378, v379, v373
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v381 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1264,13 +1224,11 @@ Lmain_block0:
 	movk	x11, #0x4567, lsl #32
 	movk	x11, #0x123, lsl #48
 	; v385 = icmp.ne v383, v384
-	cmp	x10, x11
-	cset	w10, ne
 	; v386 = iconst.i32 45
-	movz	x11, #0x2d
+	movz	x12, #0x2d
 	; v387 = select v385, v386, v380
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v388 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1286,13 +1244,11 @@ Lmain_block0:
 	movk	x11, #0x4567, lsl #32
 	movk	x11, #0x123, lsl #48
 	; v392 = icmp.ne v390, v391
-	cmp	x10, x11
-	cset	w10, ne
 	; v393 = iconst.i32 46
-	movz	x11, #0x2e
+	movz	x12, #0x2e
 	; v394 = select v392, v393, v387
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v395 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1309,13 +1265,11 @@ Lmain_block0:
 	movk	x11, #0x2b3c, lsl #32
 	movk	x11, #0x91a, lsl #48
 	; v399 = icmp.ne v397, v398
-	cmp	x10, x11
-	cset	w10, ne
 	; v400 = iconst.i32 47
-	movz	x11, #0x2f
+	movz	x12, #0x2f
 	; v401 = select v399, v400, v394
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v402 = iconst.i64 81985529216486895
 	movz	x10, #0xcdef
 	movk	x10, #0x89ab, lsl #16
@@ -1331,13 +1285,11 @@ Lmain_block0:
 	movk	x11, #0x68ac, lsl #32
 	movk	x11, #0xe024, lsl #48
 	; v406 = icmp.ne v404, v405
-	cmp	x10, x11
-	cset	w10, ne
 	; v407 = iconst.i32 48
-	movz	x11, #0x30
+	movz	x12, #0x30
 	; v408 = select v406, v407, v401
-	tst	w10, #255
-	csel	w9, w11, w9, ne
+	cmp	x10, x11
+	csel	w9, w12, w9, ne
 	; v409 = iconst.i64 -9223372036854775807
 	movz	x10, #0x1
 	movk	x10, #0x8000, lsl #48
@@ -1352,12 +1304,10 @@ Lmain_block0:
 	ror	x10, x10, x17
 	; v413 = iconst.i64 3
 	; v414 = icmp.ne v412, v413
-	cmp	x10, #3
-	cset	w10, ne
 	; v415 = iconst.i32 49
 	movz	x11, #0x31
 	; v416 = select v414, v415, v408
-	tst	w10, #255
+	cmp	x10, #3
 	csel	w9, w11, w9, ne
 	; return v416
 	mov	x0, x9

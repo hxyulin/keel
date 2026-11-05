@@ -82,10 +82,16 @@ impl SelectionOptions {
         register_hints: false,
         covers: cover::CoverSet::NONE,
     };
+    /// The options of [`SelectionTier::Covers`], the `-O0` default:
+    /// Baseline plus every cover.
+    pub const COVERS: Self = Self {
+        covers: cover::CoverSet::ALL,
+        ..Self::BASELINE
+    };
 }
 impl Default for SelectionOptions {
     fn default() -> Self {
-        Self::BASELINE
+        Self::COVERS
     }
 }
 
@@ -268,21 +274,27 @@ impl InstructionSelector for OptionsSelector {
     }
 }
 
+/// Selection presets. Each tier adds to the one before it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SelectionTier {
-    #[default]
+    /// No optional pass and no cover: the reference for every cover.
     Baseline,
+    /// Baseline plus every cover; the `-O0` and library default.
+    #[default]
+    Covers,
+    /// Covers plus tree selection.
     Trees,
+    /// Trees plus folded operands and register hints.
     Full,
 }
 impl SelectionTier {
     pub fn options(self) -> SelectionOptions {
         match self {
-            Self::Baseline => SelectionOptions::default(),
+            Self::Baseline => SelectionOptions::BASELINE,
+            Self::Covers => SelectionOptions::COVERS,
             Self::Trees => SelectionOptions {
                 trees: true,
-                covers: cover::CoverSet::ALL,
-                ..SelectionOptions::default()
+                ..SelectionOptions::COVERS
             },
             Self::Full => SelectionOptions::ALL,
         }
@@ -292,6 +304,7 @@ impl InstructionSelector for SelectionTier {
     fn name(&self) -> &'static str {
         match self {
             Self::Baseline => "baseline",
+            Self::Covers => "covers",
             Self::Trees => "trees",
             Self::Full => "full",
         }
@@ -475,7 +488,7 @@ pub fn compile_program(
         module,
         target,
         &CodegenPipeline {
-            selector: &SelectionTier::Baseline,
+            selector: &SelectionTier::Covers,
             allocator: &regalloc::AllocationTier::Full,
         },
     )

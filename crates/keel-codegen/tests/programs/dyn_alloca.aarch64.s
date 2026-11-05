@@ -4,7 +4,7 @@
 	.p2align	2
 _k_vla:
 Lk_vla_begin:
-	; regalloc: v0=x20 v1=x21 v2=x22 v3=x23 v4=x9 v5=x24 v6=x9 v7=x10 v8=x25 v9=x11 v10=x11 v11=x11 v12=x11 v13=x11 v14=x12 v15=x10 v16=x10 v17=x11 v18=x21 v19=x9 v20=x10 v21=x10 v22=x9 v23=x10 v24=x9 v25=x9
+	; regalloc: v0=x20 v1=x21 v2=x22 v3=x23 v4=x9 v5=x24 v6=x9 v7=x10 v8=x25 v10=x11 v11=x11 v12=x11 v13=x11 v14=x12 v15=x10 v16=x10 v17=x11 v18=x21 v19=x9 v20=x10 v21=x10 v22=x9 v23=x10 v24=x9 v25=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -50,11 +50,9 @@ Lk_vla_block0:
 	mov	x25, x9
 Lk_vla_block1:
 	; v9 = icmp.ult v7, v0
-	cmp	x10, x20
-	cset	w11, lo
 	; brif v9, block2, block3
-	tst	w11, #255
-	b.ne	Lk_vla_block2
+	cmp	x10, x20
+	b.lo	Lk_vla_block2
 Lk_vla_block3:
 	; v16 = iconst.i64 2
 	movz	x10, #0x2
@@ -132,7 +130,7 @@ Lk_vla_end:
 	.p2align	2
 _k_loop:
 Lk_loop_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x12 v5=x12 v6=x13 v7=x13 v8=x13 v9=x11 v10=x12 v11=x10
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v5=x12 v6=x13 v7=x13 v8=x13 v9=x11 v10=x12 v11=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -150,11 +148,9 @@ Lk_loop_block0:
 	mov	x11, x10
 Lk_loop_block1:
 	; v4 = icmp.ult v2, v0
-	cmp	x10, x9
-	cset	w12, lo
 	; brif v4, block2, block3
-	tst	w12, #255
-	b.ne	Lk_loop_block2
+	cmp	x10, x9
+	b.lo	Lk_loop_block2
 Lk_loop_block3:
 	; return v3
 	mov	x0, x11

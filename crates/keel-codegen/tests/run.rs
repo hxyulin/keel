@@ -97,7 +97,7 @@ const CONFIGS: [(
         REGISTERS,
         false,
         "",
-        keel_codegen::SelectionOptions::BASELINE,
+        keel_codegen::SelectionOptions::COVERS,
         AllocationTier::Full,
     ),
     (
@@ -476,7 +476,7 @@ fn optimized_regressions_spills() {
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
         let program = PreparedProgram::load(&path);
         for (selection, selection_name) in [
-            (keel_codegen::SelectionOptions::default(), "baseline"),
+            (keel_codegen::SelectionOptions::default(), "covers"),
             (keel_codegen::SelectionOptions::ALL, "all"),
         ] {
             for (allocation, allocation_name) in [

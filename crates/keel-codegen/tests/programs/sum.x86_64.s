@@ -24,11 +24,9 @@
 	mov	r9, r8
 .Lsum_block1:
 	# v5 = icmp.ult v3, v1
-	cmp	r8, rdi
-	setb	bl
 	# brif v5, block2, block3(v4)
-	test	bl, bl
-	jne	".Lsum_block2"
+	cmp	r8, rdi
+	jb	".Lsum_block2"
 	mov	rsi, r9
 .Lsum_block3:
 	# return v14

@@ -15,35 +15,30 @@
 	.cfi_offset 3, -24
 	push	r12
 	.cfi_offset 12, -32
-	push	r13
-	.cfi_offset 13, -40
-	sub	rsp, 56
+	sub	rsp, 48
 .Lmain_block0:
 	# v0 = stack_addr ss0
-	lea	rbx, [rbp + -80]
+	lea	rbx, [rbp + -64]
 	# v1 = iconst.i64 10
-	mov	r12d, 10
+	mov	esi, 10
 	# call @fill_squares(v0, v1)
 	mov	rdi, rbx
-	mov	rsi, r12
 	call	"fill_squares"@PLT
 	# v2 = iconst.i64 0
 	xor	esi, esi
 	# jump block1(v2, v2)
-	mov	r13, rsi
+	mov	r12, rsi
 .Lmain_block1:
 	# v5 = icmp.ult v3, v1
-	cmp	rsi, 10
-	setb	dil
 	# brif v5, block2, block3
-	test	dil, dil
-	jne	".Lmain_block2"
+	cmp	rsi, 10
+	jb	".Lmain_block2"
 .Lmain_block3:
 	# v14 = stack_addr ss1
-	lea	rsi, [rbp + -40]
+	lea	rsi, [rbp + -24]
 	# v15 = iconst.i8 111
 	# store v15, v14
-	mov	byte ptr [rbp + -40], 111
+	mov	byte ptr [rbp + -24], 111
 	# v16 = iconst.i64 1
 	# v17 = ptradd v14, v16
 	lea	rdi, [rsi + 1]
@@ -62,7 +57,7 @@
 	mov	rsi, rax
 	# v23 = iconst.i64 285
 	# v24 = icmp.ne v4, v23
-	cmp	r13, 285
+	cmp	r12, 285
 	setne	sil
 	# v25 = iconst.i32 1
 	mov	edi, 1
@@ -75,8 +70,7 @@
 	mov	rsi, rax
 	# return v27
 	mov	rax, rsi
-	lea	rsp, [rbp + -24]
-	pop	r13
+	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx
 	pop	rbp
@@ -92,12 +86,12 @@
 	# v10 = sext.i64 v9
 	movsxd	rdi, edi
 	# v11 = iadd v4, v10
-	add	rdi, r13
+	add	rdi, r12
 	# v12 = iconst.i64 1
 	# v13 = iadd v3, v12
 	add	rsi, 1
 	# jump block1(v13, v11)
-	mov	r13, rdi
+	mov	r12, rdi
 	jmp	".Lmain_block1"
 .Lmain_end:
 	.cfi_endproc

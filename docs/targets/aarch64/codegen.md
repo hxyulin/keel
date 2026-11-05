@@ -103,7 +103,8 @@ allocation.
 
 ### Covers
 
-Every cover is off at Baseline selection and on at Trees and Full; see
+Every cover is off at Baseline selection and on at Covers (the `-O0`
+default), Trees and Full; selection-stage covers also need tree selection. See
 [covers](../../compiler/design.md#covers) for the registry and
 `--isel` toggles. `--isel all,-<name>` drops one, and `--codegen-report`
 counts the roots each one claimed.

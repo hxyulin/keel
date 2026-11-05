@@ -68,6 +68,7 @@ const USAGE: &str = "usage:
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
   --isel / --isel-tier and --regalloc override preset stages in either order.
+  --isel-tier baseline|covers|trees|full: baseline runs no optional pass or cover; -O0 uses covers.
   --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
   Repeated explicit stage options use the last value.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
@@ -551,9 +552,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "--isel-tier" => {
                 let tier = match args.next().map(String::as_str) {
                     Some("baseline") => keel_codegen::SelectionTier::Baseline,
+                    Some("covers") => keel_codegen::SelectionTier::Covers,
                     Some("trees") => keel_codegen::SelectionTier::Trees,
                     Some("full") => keel_codegen::SelectionTier::Full,
-                    _ => return Err("`--isel-tier` needs baseline, trees, or full".into()),
+                    _ => return Err("`--isel-tier` needs baseline, covers, trees, or full".into()),
                 };
                 opts.selection = tier.options();
                 explicit_selection = true;
@@ -721,12 +723,12 @@ fn write_new_report(label: &str, path: &str, text: &str) -> Result<(), String> {
 
 const ISEL_PASSES: &str = "`--isel` needs none, all, or a list of trees, folds, hints, covers and cover names, each optionally prefixed with `-`";
 
-/// Parses an `--isel` list. Terms apply left to right on top of the default
-/// selection: `all` turns everything on, `covers` every cover, and a
-/// leading `-` turns a term off.
+/// Parses an `--isel` list. Terms apply left to right on top of Baseline
+/// selection, which runs nothing optional: `all` turns everything on,
+/// `covers` every cover, and a leading `-` turns a term off.
 fn selection_passes(passes: &str) -> Result<keel_codegen::SelectionOptions, String> {
     use keel_codegen::cover::{Cover, CoverSet};
-    let mut selection = keel_codegen::SelectionOptions::default();
+    let mut selection = keel_codegen::SelectionOptions::BASELINE;
     if passes == "none" {
         return Ok(selection);
     }
@@ -1434,7 +1436,7 @@ mod tests {
                 vec!["--isel-tier", "baseline", "--regalloc", "full", level],
             ] {
                 let opts = options(&flags).unwrap();
-                assert_eq!(opts.selection, SelectionOptions::default(), "{flags:?}");
+                assert_eq!(opts.selection, SelectionOptions::BASELINE, "{flags:?}");
                 assert_eq!(opts.allocation, AllocationTier::Full, "{flags:?}");
             }
         }
@@ -1450,7 +1452,11 @@ mod tests {
     fn default_tiers_and_invalid_values() {
         let opts = options(&[]).unwrap();
         assert_eq!(opts.optimization, keel_opt::OptimizationTier::None);
-        assert_eq!(opts.selection, keel_codegen::SelectionOptions::default());
+        assert_eq!(opts.selection, keel_codegen::SelectionOptions::COVERS);
+        assert_eq!(
+            options(&["-O0"]).unwrap().selection,
+            keel_codegen::SelectionOptions::COVERS
+        );
         assert_eq!(
             opts.allocation,
             keel_codegen::regalloc::AllocationTier::Full
@@ -1468,7 +1474,7 @@ mod tests {
         use keel_opt::OptimizationTier;
         for tier in ["none", "fast", "basic", "full"] {
             let standalone = options(&["--opt-tier", tier]).unwrap();
-            assert_eq!(standalone.selection, SelectionOptions::default());
+            assert_eq!(standalone.selection, SelectionOptions::COVERS);
             assert_eq!(
                 standalone.allocation,
                 keel_codegen::regalloc::AllocationTier::Full
@@ -1493,22 +1499,19 @@ mod tests {
                 assert_eq!(opts.optimization, expected);
             }
         }
-        assert_eq!(options(&[]).unwrap().selection, SelectionOptions::default());
+        assert_eq!(options(&[]).unwrap().selection, SelectionOptions::COVERS);
         assert_eq!(
             options(&["-O", "-O"]).unwrap().selection,
             SelectionOptions::ALL
         );
         for (flag, value, expected) in [
-            ("--isel", "none", SelectionOptions::default()),
+            ("--isel", "none", SelectionOptions::BASELINE),
             ("--isel", "all", SelectionOptions::ALL),
             ("--isel", "trees,covers", SelectionTier::Trees.options()),
             (
                 "--isel",
                 "covers,-x86-mask-test,x86-mask-test",
-                SelectionOptions {
-                    covers: CoverSet::ALL,
-                    ..SelectionOptions::default()
-                },
+                SelectionOptions::COVERS,
             ),
             (
                 "--isel",
@@ -1517,7 +1520,7 @@ mod tests {
                     trees: false,
                     folded_operands: true,
                     register_hints: true,
-                    ..SelectionOptions::default()
+                    ..SelectionOptions::BASELINE
                 },
             ),
             ("--isel", "all,-x86-mask-test", {
@@ -1531,10 +1534,11 @@ mod tests {
                 SelectionOptions {
                     trees: true,
                     covers,
-                    ..SelectionOptions::default()
+                    ..SelectionOptions::BASELINE
                 }
             }),
-            ("--isel-tier", "baseline", SelectionOptions::default()),
+            ("--isel-tier", "baseline", SelectionOptions::BASELINE),
+            ("--isel-tier", "covers", SelectionOptions::COVERS),
             ("--isel-tier", "trees", SelectionTier::Trees.options()),
             ("--isel-tier", "full", SelectionOptions::ALL),
         ] {
@@ -1552,7 +1556,7 @@ mod tests {
         ] {
             assert_eq!(
                 options(&flags).unwrap().selection,
-                SelectionOptions::default()
+                SelectionOptions::BASELINE
             );
         }
         assert_eq!(
@@ -1606,7 +1610,12 @@ mod tests {
                             "{command} {target} object={object} {flags:?}"
                         );
                     }
-                    let baseline = invoke(&["--opt-tier", "full"]);
+                    assert_eq!(
+                        invoke(&["--opt-tier", "full"]),
+                        invoke(&["--isel-tier", "covers", "-O"]),
+                        "{command} {target} object={object}: default selection"
+                    );
+                    let baseline = invoke(&["--opt-tier", "full", "--isel-tier", "baseline"]);
                     for flags in [
                         vec!["--isel", "none", "-O"],
                         vec!["-O", "--isel", "none"],
@@ -1672,14 +1681,17 @@ mod tuning_tests {
             assert_eq!(opts.tuning, keel_codegen::tuning::TuningCpu::AppleM5);
             assert_eq!(opts.selection, keel_codegen::SelectionOptions::ALL);
         }
+        assert_eq!(
+            parse(&["--tune", "apple-m5"]).unwrap().selection,
+            keel_codegen::SelectionOptions::COVERS
+        );
         for args in [
-            vec!["--tune", "apple-m5"],
             vec!["--tune", "apple-m5", "--isel-tier", "baseline", "-O"],
             vec!["-O", "--tune", "apple-m5", "--isel-tier", "baseline"],
         ] {
             assert_eq!(
                 parse(&args).unwrap().selection,
-                keel_codegen::SelectionOptions::default()
+                keel_codegen::SelectionOptions::BASELINE
             );
         }
         assert!(parse(&["--tune", "unrecognized"]).is_err());

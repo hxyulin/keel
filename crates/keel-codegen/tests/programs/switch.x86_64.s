@@ -333,11 +333,9 @@
 	mov	r9, rdi
 .Lmachine_block1:
 	# v5 = icmp.ult v2, v0
-	cmp	rdi, rsi
-	setb	bl
 	# brif v5, block2, block7(v4)
-	test	bl, bl
-	jne	".Lmachine_block2"
+	cmp	rdi, rsi
+	jb	".Lmachine_block2"
 	mov	rsi, r9
 	jmp	".Lmachine_block7"
 .Lmachine_block2:

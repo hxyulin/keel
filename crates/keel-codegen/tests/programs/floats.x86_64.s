@@ -1283,11 +1283,9 @@
 	mov	r8, rdi
 .Lharmonic_block1:
 	# v5 = icmp.sle v3, v0
-	cmp	r8, rsi
-	setle	r9b
 	# brif v5, block2, block3
-	test	r9b, r9b
-	jne	".Lharmonic_block2"
+	cmp	r8, rsi
+	jle	".Lharmonic_block2"
 .Lharmonic_block3:
 	# return v4
 	mov	rsp, rbp
@@ -1332,11 +1330,9 @@
 	# jump block1(v0, v1, v3)
 .Lswaps_block1:
 	# v7 = icmp.ult v6, v2
-	cmp	rdi, rsi
-	setb	r8b
 	# brif v7, block2, block3
-	test	r8b, r8b
-	jne	".Lswaps_block2"
+	cmp	rdi, rsi
+	jb	".Lswaps_block2"
 .Lswaps_block3:
 	# v10 = fconst.f64 10.0
 	movabs	rax, 4621819117588971520

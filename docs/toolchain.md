@@ -71,7 +71,7 @@ Each stage has its own effort setting:
 | Flag | Values | Default | With `-O` |
 | --- | --- | --- | --- |
 | `--opt-tier` | `none`, `fast`, `basic`, `balanced`, `size`, `full` | `none` | `full` |
-| `--isel-tier` | `baseline`, `trees`, `full` | `baseline` | `full` |
+| `--isel-tier` | `baseline`, `covers`, `trees`, `full` | `covers` | `full` |
 | `--regalloc` | `fast`, `full` | `full` | `full` |
 | `-p` | explicit pass list, e.g. `gvn,dce` | | overrides the IR tier |
 
@@ -81,11 +81,12 @@ Each stage has its own effort setting:
   then memory reuse, [stack promotion](compiler/optimizer.md#stack-promote) and bounded loop
   transforms.
 - **Instruction selection.** `baseline` runs no optional pass and no
-  [cover](compiler/design.md#covers); `trees` enables generated tree patterns and the
-  covers; `full` adds folded operands and register hints. `--isel` takes `all`,
-  `none`, or a list of `trees`, `folds`, `hints`, `covers` and cover names, and
-  `-<term>` turns one off: `--isel all,-x86-mask-test`. The last explicit
-  selector wins over `-O`.
+  [cover](compiler/design.md#covers), and is the reference for measuring one;
+  `covers` enables the covers; `trees` adds generated tree patterns; `full`
+  adds folded operands and register hints. `--isel` takes `all`, `none`, or a
+  list of `trees`, `folds`, `hints`, `covers` and cover names on top of
+  `baseline`, and `-<term>` turns one off: `--isel all,-x86-mask-test`. The
+  last explicit selector wins over `-O`.
 - **Register allocation.** Both allocators are linear scan. `full` keeps
   lifetime holes and register affinities; `fast` uses contiguous intervals.
   A build with the `experimental-regalloc` feature also accepts `local`,

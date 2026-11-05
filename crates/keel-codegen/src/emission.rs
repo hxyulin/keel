@@ -105,7 +105,7 @@ impl FunctionSelector<'_> {
         use keel_ir::FunctionOptLevel;
         let policy = keel_ir::FunctionPolicy::resolve(&function.attrs).ok()?;
         Some(match policy.level? {
-            FunctionOptLevel::None => crate::SelectionTier::Baseline.options(),
+            FunctionOptLevel::None => crate::SelectionTier::Covers.options(),
             FunctionOptLevel::Fast => crate::SelectionTier::Trees.options(),
             _ => crate::SelectionOptions::ALL,
         })

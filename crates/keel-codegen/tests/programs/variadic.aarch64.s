@@ -4,7 +4,7 @@
 	.p2align	2
 _k_sum:
 Lk_sum_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x11 v5=x12 v6=x13 v7=x13 v8=x12 v9=x13 v10=x11
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x11 v5=x12 v7=x13 v8=x12 v9=x13 v10=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -29,11 +29,9 @@ Lk_sum_block0:
 	mov	x12, x16
 Lk_sum_block1:
 	; v6 = icmp.slt v4, v0
-	cmp	w11, w9
-	cset	w13, lt
 	; brif v6, block2, block3
-	tst	w13, #255
-	b.ne	Lk_sum_block2
+	cmp	w11, w9
+	b.lt	Lk_sum_block2
 Lk_sum_block3:
 	; return v5
 	mov	x0, x12
@@ -60,7 +58,7 @@ Lk_sum_end:
 	.p2align	2
 _k_pairs:
 Lk_pairs_begin:
-	; regalloc: v0=x9 v1=x10 v2=d19 v3=x11 v4=x11 v5=d19 v6=x12 v7=x12 v8=d20 v9=d21 v10=d20 v11=d19 v12=x12 v13=x11
+	; regalloc: v0=x9 v1=x10 v2=d19 v3=x11 v4=x11 v5=d19 v7=x12 v8=d20 v9=d21 v10=d20 v11=d19 v12=x12 v13=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -82,11 +80,9 @@ Lk_pairs_block0:
 	; jump block1(v3, v2)
 Lk_pairs_block1:
 	; v6 = icmp.slt v4, v0
-	cmp	w11, w9
-	cset	w12, lt
 	; brif v6, block2, block3
-	tst	w12, #255
-	b.ne	Lk_pairs_block2
+	cmp	w11, w9
+	b.lt	Lk_pairs_block2
 Lk_pairs_block3:
 	; return v5
 	fmov	d0, d19

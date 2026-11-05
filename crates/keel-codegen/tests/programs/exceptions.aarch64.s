@@ -4,7 +4,7 @@
 	.p2align	2
 _k_catch:
 Lk_catch_begin:
-	; regalloc: v0=x9 v1=x10 v2=x19 v3=x9 v4=x10 v5=x9 v6=x9 v7=x20 v8=x9 v9=x10 v10=x10 v11=x20 v12=x9 v13=x9 v14=x9 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x19 v3=x9 v4=x10 v5=x9 v6=x9 v7=x20 v8=x9 v9=x10 v11=x20 v12=x9 v13=x9 v14=x9 v15=x9
 	.cfi_startproc
 	.cfi_personality 155, ___gxx_personality_v0
 	.cfi_lsda 16, Lk_catch_lsda
@@ -39,11 +39,9 @@ Lk_catch_block2:
 	; v9 = eh_typeid @_ZTIi
 	movz	w10, #0x1
 	; v10 = icmp.eq v7, v9
-	cmp	w20, w10
-	cset	w10, eq
 	; brif v10, block3, block4
-	tst	w10, #255
-	b.ne	Lk_catch_block3
+	cmp	w20, w10
+	b.eq	Lk_catch_block3
 Lk_catch_block4:
 	; call @__cxa_end_catch()
 	bl	___cxa_end_catch

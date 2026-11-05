@@ -96,7 +96,7 @@ Commonly used configurations:
 
 | Configuration | Meaning |
 |---------------|---------|
-| `keel` | Default unoptimized Keel with baseline instruction selection |
+| `keel` | Default unoptimized Keel with covers selection, the `-O0` default |
 | `keel-O` | The CLI `-O` preset; enables all selection passes |
 | `keel-select`, `keel-O-select` | Explicit `--isel all` |
 | `keel-g` | Keel with debug info |
@@ -107,12 +107,14 @@ Commonly used configurations:
 | `keel-basic-fast-alloc` | Historical Basic IR with Fast allocation, kept so allocation experiments do not stand in for the Fast IR profile |
 | `clang-O0` ... `clang-O3` | Clang references |
 
-Selection flags interact as follows. Ordinary `keel` keeps baseline selection;
-`-O` enables all selection passes. To compare optimized IR with baseline
-selection, use `-O --isel none` (either order). Explicit selection selectors
-override the preset, and the last explicit selector wins. `--opt-tier` and
-`-p` control IR independently and do not reset selection. Baseline selection
-runs no [cover](../docs/compiler/design.md#covers); a config with
+Selection flags interact as follows. Ordinary `keel` uses covers selection,
+which enables every [cover](../docs/compiler/design.md#covers) and no other
+optional pass;
+`-O` enables all selection passes. To compare optimized IR with Baseline
+selection, which runs no optional pass and no cover, use `-O --isel none`
+(either order). Explicit selection selectors override the preset, and the last
+explicit selector wins. `--opt-tier` and `-p` control IR independently and do
+not reset selection. A config with
 `-O --isel all,-<cover>` drops one cover, so one binary can compare a cover
 against `keel-O`.
 

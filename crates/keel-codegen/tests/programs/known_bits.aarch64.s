@@ -4,7 +4,7 @@
 	.p2align	2
 _known_bits:
 Lknown_bits_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x11 v5=x12 v6=x12 v7=x10:x12 v8=x13:x14 v9=x10 v10=x10 v11=x9 v12=x12 v13=x9 v14=x9 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x11 v5=x12 v7=x10:x12 v8=x13:x14 v9=x10 v10=x10 v11=x9 v12=x10 v13=x9 v14=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -22,11 +22,9 @@ Lknown_bits_block0:
 	and	x11, x11, #0xff
 	; v5 = iconst.i64 256
 	; v6 = icmp.ult v4, v5
-	cmp	x11, #256
-	cset	w12, lo
 	; brif v6, block1, block4
-	tst	w12, #255
-	b.eq	Lknown_bits_block4
+	cmp	x11, #256
+	b.hs	Lknown_bits_block4
 Lknown_bits_block1:
 	; v7 = uext.i128 v1
 	mov	x0, x10
@@ -60,11 +58,9 @@ Lknown_bits_block2:
 	; v14 = ushr v13, v12
 	lsr	x9, x9, #60
 	; v15 = icmp.ule v14, v10
-	cmp	x9, #15
-	cset	w9, ls
 	; brif v15, block3, block4
-	tst	w9, #255
-	b.ne	Lknown_bits_block3
+	cmp	x9, #15
+	b.ls	Lknown_bits_block3
 Lknown_bits_block4:
 	; trap
 	brk	#1

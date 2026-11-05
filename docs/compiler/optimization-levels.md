@@ -9,7 +9,7 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 
 | Flag | IR policy | Selection | Allocation | Intended use |
 |---|---|---|---|---|
-| `-O0` | None | Baseline | Full | Inspect unoptimized IR and debug. |
+| `-O0` | None | Covers | Full | Inspect unoptimized IR and debug. |
 | `-O1` | Fast | Trees | Fast | Short builds with bounded cleanup. |
 | `-O2` | Balanced | Full | Full | Three bounded inlining rounds and scalar/memory optimization, without GCM. |
 | `-O3`, `-O` | Full | Full | Full | Three inlining rounds and guarded loop transformations. |

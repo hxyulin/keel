@@ -114,7 +114,7 @@ Lnested_end:
 	.p2align	2
 _call_loop:
 Lcall_loop_begin:
-	; regalloc: v0=x19 v1=x9 v2=x10 v3=x11 v4=x20 v5=x21 v6=x22 v7=x9 v8=x9 v9=x9 v10=x9 v11=x10 v12=x10
+	; regalloc: v0=x19 v1=x9 v2=x10 v3=x11 v4=x20 v5=x21 v6=x22 v8=x9 v9=x9 v10=x9 v11=x10 v12=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -141,11 +141,9 @@ Lcall_loop_block0:
 	mov	x22, x10
 Lcall_loop_block1:
 	; v7 = icmp.ult v5, v0
-	cmp	x21, x19
-	cset	w9, lo
 	; brif v7, block2, block3
-	tst	w9, #255
-	b.ne	Lcall_loop_block2
+	cmp	x21, x19
+	b.lo	Lcall_loop_block2
 Lcall_loop_block3:
 	; return v6
 	mov	x0, x22
@@ -177,7 +175,7 @@ Lcall_loop_end:
 	.p2align	2
 _memset_loop:
 Lmemset_loop_begin:
-	; regalloc: v0=x19 v1=x20 v2=x21 v3=x9 v4=x22 v5=x23 v6=x9 v7=x9 v8=x9 v9=x9 v10=x10 v11=x10
+	; regalloc: v0=x19 v1=x20 v2=x21 v3=x9 v4=x22 v5=x23 v7=x9 v8=x9 v9=x9 v10=x10 v11=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -206,11 +204,9 @@ Lmemset_loop_block0:
 	mov	x23, x9
 Lmemset_loop_block1:
 	; v6 = icmp.ult v4, v0
-	cmp	x22, x19
-	cset	w9, lo
 	; brif v6, block2, block3
-	tst	w9, #255
-	b.ne	Lmemset_loop_block2
+	cmp	x22, x19
+	b.lo	Lmemset_loop_block2
 Lmemset_loop_block3:
 	; return v5
 	mov	x0, x23

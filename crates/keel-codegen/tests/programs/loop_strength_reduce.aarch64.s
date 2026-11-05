@@ -4,7 +4,7 @@
 	.p2align	2
 _hot32p:
 Lhot32p_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -21,11 +21,9 @@ Lhot32p_block0:
 	; jump block1(v2, v3, v4)
 Lhot32p_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	w13, w9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot32p_block2
+	cmp	w13, w9
+	b.lo	Lhot32p_block2
 	mov	x9, x12
 Lhot32p_block3:
 	; return v15
@@ -52,7 +50,7 @@ Lhot32p_end:
 	.p2align	2
 _hot32m:
 Lhot32m_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -69,11 +67,9 @@ Lhot32m_block0:
 	; jump block1(v2, v3, v4)
 Lhot32m_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	w13, w9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot32m_block2
+	cmp	w13, w9
+	b.lo	Lhot32m_block2
 	mov	x9, x12
 Lhot32m_block3:
 	; return v15
@@ -100,7 +96,7 @@ Lhot32m_end:
 	.p2align	2
 _hot32z:
 Lhot32z_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -117,11 +113,9 @@ Lhot32z_block0:
 	; jump block1(v2, v3, v4)
 Lhot32z_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	w13, w9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot32z_block2
+	cmp	w13, w9
+	b.lo	Lhot32z_block2
 	mov	x9, x12
 Lhot32z_block3:
 	; return v15
@@ -148,7 +142,7 @@ Lhot32z_end:
 	.p2align	2
 _hot64p:
 Lhot64p_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -165,11 +159,9 @@ Lhot64p_block0:
 	; jump block1(v2, v3, v4)
 Lhot64p_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	x13, x9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot64p_block2
+	cmp	x13, x9
+	b.lo	Lhot64p_block2
 	mov	x9, x12
 Lhot64p_block3:
 	; return v15
@@ -196,7 +188,7 @@ Lhot64p_end:
 	.p2align	2
 _hot64m:
 Lhot64m_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -213,11 +205,9 @@ Lhot64m_block0:
 	; jump block1(v2, v3, v4)
 Lhot64m_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	x13, x9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot64m_block2
+	cmp	x13, x9
+	b.lo	Lhot64m_block2
 	mov	x9, x12
 Lhot64m_block3:
 	; return v15
@@ -244,7 +234,7 @@ Lhot64m_end:
 	.p2align	2
 _hot64z:
 Lhot64z_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v8=x14 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x11 v6=x12 v7=x13 v9=x14 v10=x12 v11=x14 v12=x11 v13=x14 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -261,11 +251,9 @@ Lhot64z_block0:
 	; jump block1(v2, v3, v4)
 Lhot64z_block1:
 	; v8 = icmp.ult v7, v0
-	cmp	x13, x9
-	cset	w14, lo
 	; brif v8, block2, block3(v6)
-	tst	w14, #255
-	b.ne	Lhot64z_block2
+	cmp	x13, x9
+	b.lo	Lhot64z_block2
 	mov	x9, x12
 Lhot64z_block3:
 	; return v15
@@ -292,7 +280,7 @@ Lhot64z_end:
 	.p2align	2
 _offset32:
 Loffset32_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x14 v6=x11 v7=x13 v8=x14 v9=x15 v10=x15 v11=x15 v12=x14 v13=x11 v14=x15 v15=x13 v16=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x14 v6=x11 v7=x13 v8=x14 v10=x15 v11=x15 v12=x14 v13=x11 v14=x15 v15=x13 v16=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -311,11 +299,9 @@ Loffset32_block0:
 	; jump block1(v2, v4, v5)
 Loffset32_block1:
 	; v9 = icmp.ult v7, v0
-	cmp	w13, w9
-	cset	w15, lo
 	; brif v9, block2, block3(v8)
-	tst	w15, #255
-	b.ne	Loffset32_block2
+	cmp	w13, w9
+	b.lo	Loffset32_block2
 	mov	x9, x14
 Loffset32_block3:
 	; return v16
@@ -343,7 +329,7 @@ Loffset32_end:
 	.p2align	2
 _offset64:
 Loffset64_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x14 v6=x11 v7=x13 v8=x14 v9=x15 v10=x15 v11=x14 v12=x11 v13=x15 v14=x13 v15=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x14 v6=x11 v7=x13 v8=x14 v10=x15 v11=x14 v12=x11 v13=x15 v14=x13 v15=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -362,11 +348,9 @@ Loffset64_block0:
 	; jump block1(v2, v4, v5)
 Loffset64_block1:
 	; v9 = icmp.ult v7, v0
-	cmp	x13, x9
-	cset	w15, lo
 	; brif v9, block2, block3(v8)
-	tst	w15, #255
-	b.ne	Loffset64_block2
+	cmp	x13, x9
+	b.lo	Loffset64_block2
 	mov	x9, x14
 Loffset64_block3:
 	; return v15

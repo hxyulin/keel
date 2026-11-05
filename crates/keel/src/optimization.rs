@@ -35,7 +35,7 @@ impl Level {
 
     pub(crate) fn selection(self) -> SelectionTier {
         match self {
-            Self::O0 => SelectionTier::Baseline,
+            Self::O0 => SelectionTier::Covers,
             Self::O1 => SelectionTier::Trees,
             Self::O2 | Self::O3 | Self::Size => SelectionTier::Full,
         }

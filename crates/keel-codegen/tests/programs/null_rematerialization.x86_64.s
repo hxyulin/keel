@@ -177,11 +177,9 @@
 	xor	edi, edi
 	# v2 = inttoptr.ptr v1
 	# v3 = icmp.eq v0, v2
-	cmp	rsi, rdi
-	sete	sil
 	# brif v3, block1, block2
-	test	sil, sil
-	jne	".Lnull_branch_block1"
+	cmp	rsi, rdi
+	je	".Lnull_branch_block1"
 .Lnull_branch_block2:
 	# v5 = iconst.i64 91
 	mov	esi, 91

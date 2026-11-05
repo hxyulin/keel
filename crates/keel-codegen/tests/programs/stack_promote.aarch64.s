@@ -4,7 +4,7 @@
 	.p2align	2
 _private_acc:
 Lprivate_acc_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v6=x14 v7=x14 v8=x13 v9=x11 v10=x11 v11=x11 v12=x12 v13=x12 v14=x12 v15=x12 v16=x12 v17=x13 v18=x13 v19=x9 v20=x10 v21=x11 v22=x10 v23=x11 v24=x11 v25=x11 v26=x10 v27=x11 v28=x9 v29=x9 v30=x9 v31=x9 v32=x13 v33=x14 v34=x13 v35=x14 v36=x12 v37=x13 v38=x14 v39=x12 v40=x12 v41=x13 v42=x12 v43=x13 v44=x14 v45=x13 v46=x12 v47=x11
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v6=x14 v7=x14 v8=x13 v9=x11 v10=x11 v11=x11 v13=x12 v14=x12 v15=x12 v16=x12 v17=x13 v19=x9 v20=x10 v21=x11 v22=x10 v23=x11 v24=x11 v25=x11 v26=x10 v27=x11 v28=x9 v29=x9 v30=x9 v31=x9 v32=x13 v33=x14 v34=x13 v35=x14 v36=x12 v37=x13 v38=x14 v39=x12 v40=x12 v41=x13 v42=x12 v43=x13 v44=x14 v45=x13 v46=x12 v47=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -37,11 +37,9 @@ Lprivate_acc_block0:
 	; jump block1(v10)
 Lprivate_acc_block1:
 	; v12 = icmp.ugt v1, v11
-	cmp	x10, x11
-	cset	w12, hi
 	; brif v12, block2, block3
-	tst	w12, #255
-	b.ne	Lprivate_acc_block2
+	cmp	x10, x11
+	b.hi	Lprivate_acc_block2
 Lprivate_acc_block3:
 	; v19 = stack_addr ss0
 	add	x9, sp, #0
@@ -82,11 +80,9 @@ Lprivate_acc_block2:
 	ldr	x12, [x12]
 	; v17 = iconst.i64 0
 	; v18 = icmp.slt v16, v17
-	cmp	x12, #0
-	cset	w13, lt
 	; brif v18, block5, block4
-	tst	w13, #255
-	b.ne	Lprivate_acc_block5
+	cmp	x12, #0
+	b.lt	Lprivate_acc_block5
 Lprivate_acc_block4:
 	; v32 = iconst.i64 8
 	; v33 = stack_addr ss0

@@ -317,7 +317,7 @@ Lrotate_many_end:
 	.p2align	2
 _invariant:
 Linvariant_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x12 v5=x9 v6=x12 v7=x10 v8=x12 v9=x13 v10=x13 v11=x12 v12=x12 v13=x13 v14=x10 v15=x13 v16=x13 v17=x14 v18=x13 v19=x14 v20=x14 v21=x13 v22=x12
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x11 v4=x12 v5=x9 v6=x12 v7=x10 v8=x12 v9=x13 v11=x12 v12=x12 v13=x13 v14=x10 v15=x13 v16=x13 v17=x14 v18=x13 v19=x14 v20=x14 v21=x13 v22=x12
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -340,11 +340,9 @@ Linvariant_block0:
 Linvariant_block1:
 	; v9 = iconst.i64 0
 	; v10 = icmp.eq v7, v9
-	cmp	x10, #0
-	cset	w13, eq
 	; brif v10, block3, block2
-	tst	w13, #255
-	b.ne	Linvariant_block3
+	cmp	x10, #0
+	b.eq	Linvariant_block3
 Linvariant_block2:
 	; v11 = iadd v8, v3
 	add	x12, x12, x11

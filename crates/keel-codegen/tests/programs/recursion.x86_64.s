@@ -101,11 +101,9 @@
 .Lfib_block0:
 	# v1 = iconst.i64 2
 	# v2 = icmp.ult v0, v1
-	cmp	rbx, 2
-	setb	sil
 	# brif v2, block2(v0), block1
-	test	sil, sil
-	je	".Lfib_block1"
+	cmp	rbx, 2
+	jae	".Lfib_block1"
 	mov	rsi, rbx
 	jmp	".Lfib_block2"
 .Lfib_block1:

@@ -151,11 +151,9 @@
 	mov	r14, rdi
 .Lcall_loop_block1:
 	# v7 = icmp.ult v5, v0
-	cmp	r13, rbx
-	setb	sil
 	# brif v7, block2, block3
-	test	sil, sil
-	jne	".Lcall_loop_block2"
+	cmp	r13, rbx
+	jb	".Lcall_loop_block2"
 .Lcall_loop_block3:
 	# return v6
 	mov	rax, r14
@@ -221,11 +219,9 @@
 	mov	r15, rsi
 .Lmemset_loop_block1:
 	# v6 = icmp.ult v4, v0
-	cmp	r14, rbx
-	setb	sil
 	# brif v6, block2, block3
-	test	sil, sil
-	jne	".Lmemset_loop_block2"
+	cmp	r14, rbx
+	jb	".Lmemset_loop_block2"
 .Lmemset_loop_block3:
 	# return v5
 	mov	rax, r15

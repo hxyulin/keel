@@ -692,14 +692,16 @@ the AArch64 indirect call must read its target as part of the argument copy.
 
 **Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
 binary root/child patterns and register affinities; `build.rs` generates
-the rule table and affinity matcher. Selection has three tiers
-(`SelectionTier`, or `--isel-tier`): Baseline runs none of the passes below,
-Trees runs tree selection and every cover, and Full also folds immediate
-operands and adds register hints. `-O0` uses Baseline, `-O1` Trees and the
-other `-O` levels Full. `--isel trees,folds,hints,covers` chooses passes
-independently and `--isel all` enables all of them; explicit selectors override
-`-O` in either order, with the last selector winning. Without `-O`, and in the
-library API, selection defaults to Baseline (`--isel none`). They run after any IR
+the rule table and affinity matcher. Selection has four tiers
+(`SelectionTier`, or `--isel-tier`), each adding to the one before: Baseline
+runs none of the passes below and no cover, Covers enables every cover, Trees
+adds tree selection, and Full also folds immediate operands and adds register
+hints. `-O0` uses Covers, `-O1` Trees and the other `-O` levels Full. Without
+`-O`, and in the library API, selection defaults to Covers. `--isel
+trees,folds,hints,covers` chooses passes on top of Baseline, so `--isel none`
+is Baseline and `--isel covers` is Covers; `--isel all` enables everything.
+Explicit selectors override `-O` in either order, with the last selector
+winning. They run after any IR
 optimization and before allocation,
 visiting consumers first. A rule consumes a pure, single-use child in the
 same block, preserving distinct source lines when debug locations exist.
@@ -739,8 +741,8 @@ depending on the cover. Each backend's `cover()` lowers a claimed root with one
 exhaustive `match` on the owner.
 
 `SelectionOptions::covers` lists the covers that may run. Baseline selection
-runs none, so it is the reference for every cover; Trees and Full run all of
-them. The [x86-64](../targets/x86_64/codegen.md#covers) and
+runs none, so it is the reference for every cover; Covers, Trees and Full
+enable all of them, and selection-stage covers fire only with tree selection. The [x86-64](../targets/x86_64/codegen.md#covers) and
 [AArch64](../targets/aarch64/codegen.md#covers) references list each target's
 covers. `--isel all,-x86-mask-test` drops one cover, and `--isel covers` or a
 cover name adds them. `--codegen-report` counts the roots each cover claimed

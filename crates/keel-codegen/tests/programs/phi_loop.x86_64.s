@@ -11,9 +11,6 @@
 	.cfi_offset 6, -16
 	mov	rbp, rsp
 	.cfi_def_cfa_register 6
-	push	rbx
-	.cfi_offset 3, -24
-	sub	rsp, 8
 	mov	r11, rsi
 	mov	rsi, rdi
 	mov	rdi, r11
@@ -24,16 +21,13 @@
 	# jump block1(v0, v2)
 .Lphi_loop_block1:
 	# v6 = icmp.ult v5, v1
-	cmp	r8, rdi
-	setb	bl
 	# brif v6, block2, block3(v4)
-	test	bl, bl
-	jne	".Lphi_loop_block2"
+	cmp	r8, rdi
+	jb	".Lphi_loop_block2"
 .Lphi_loop_block3:
 	# return v8
 	mov	rax, rsi
-	lea	rsp, [rbp + -8]
-	pop	rbx
+	mov	rsp, rbp
 	pop	rbp
 	ret
 .Lphi_loop_block2:

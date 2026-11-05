@@ -1,6 +1,6 @@
 //! In-process stage timings on preprocessed C. Build before collecting samples.
 //! Usage: profile_compile ROUNDS none|fast|basic|balanced|full|size text|object
-//! [--isel-tier baseline|trees|full] [--regalloc fast|full] INPUT.i ...
+//! [--isel-tier baseline|covers|trees|full] [--regalloc fast|full] INPUT.i ...
 use std::{hint::black_box, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,9 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--isel-tier" => {
                 selection = match remaining.next().map(String::as_str) {
                     Some("baseline") => keel_codegen::SelectionTier::Baseline,
+                    Some("covers") => keel_codegen::SelectionTier::Covers,
                     Some("trees") => keel_codegen::SelectionTier::Trees,
                     Some("full") => keel_codegen::SelectionTier::Full,
-                    _ => return Err("expected baseline|trees|full".into()),
+                    _ => return Err("expected baseline|covers|trees|full".into()),
                 }
             }
             "--regalloc" => {

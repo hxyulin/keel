@@ -42,11 +42,9 @@
 	# jump block1(v10)
 .Lprivate_acc_block1:
 	# v12 = icmp.ugt v1, v11
-	cmp	rdi, r8
-	seta	r9b
 	# brif v12, block2, block3
-	test	r9b, r9b
-	jne	".Lprivate_acc_block2"
+	cmp	rdi, r8
+	ja	".Lprivate_acc_block2"
 .Lprivate_acc_block3:
 	# v19 = stack_addr ss0
 	lea	rsi, [rbp + -48]
@@ -88,11 +86,9 @@
 	mov	r9, qword ptr [r9]
 	# v17 = iconst.i64 0
 	# v18 = icmp.slt v16, v17
-	cmp	r9, 0
-	setl	bl
 	# brif v18, block5, block4
-	test	bl, bl
-	jne	".Lprivate_acc_block5"
+	cmp	r9, 0
+	jl	".Lprivate_acc_block5"
 .Lprivate_acc_block4:
 	# v32 = iconst.i64 8
 	# v33 = stack_addr ss0

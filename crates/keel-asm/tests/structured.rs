@@ -399,7 +399,7 @@ fn incremental_assembly_matches_whole_programs_and_diagnostics() {
         let whole = keel_asm::assemble_program_for(target, &program).unwrap();
         let mut streamed = Vec::new();
         let pipeline = keel_codegen::CodegenPipeline {
-            selector: &keel_codegen::SelectionTier::Baseline,
+            selector: &keel_codegen::SelectionTier::Covers,
             allocator: &keel_codegen::regalloc::AllocationTier::Full,
         };
         keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, &mut |p| {

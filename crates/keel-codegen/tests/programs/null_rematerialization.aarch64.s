@@ -145,7 +145,7 @@ Lnull_cycle_end:
 	.p2align	2
 _null_branch:
 Lnull_branch_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x9 v4=x9 v5=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v4=x9 v5=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -158,11 +158,9 @@ Lnull_branch_block0:
 	movz	x10, #0x0
 	; v2 = inttoptr.ptr v1
 	; v3 = icmp.eq v0, v2
-	cmp	x9, x10
-	cset	w9, eq
 	; brif v3, block1, block2
-	tst	w9, #255
-	b.ne	Lnull_branch_block1
+	cmp	x9, x10
+	b.eq	Lnull_branch_block1
 Lnull_branch_block2:
 	; v5 = iconst.i64 91
 	movz	x9, #0x5b

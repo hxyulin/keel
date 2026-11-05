@@ -28,11 +28,9 @@
 	# jump block1(v2)
 .Lk_isort_block1:
 	# v4 = icmp.ugt v1, v3
-	cmp	rdi, r8
-	seta	r9b
 	# brif v4, block2, block3
-	test	r9b, r9b
-	jne	".Lk_isort_block2"
+	cmp	rdi, r8
+	ja	".Lk_isort_block2"
 .Lk_isort_block3:
 	# return
 	lea	rsp, [rbp + -32]
@@ -56,10 +54,8 @@
 .Lk_isort_block4:
 	# v10 = iconst.i64 0
 	# v11 = icmp.ne v9, v10
-	cmp	rbx, 0
-	setne	r12b
 	# brif v11, block7, block6
-	test	r12b, r12b
+	cmp	rbx, 0
 	je	".Lk_isort_block6"
 .Lk_isort_block7:
 	# v21 = iconst.i64 1
@@ -75,11 +71,9 @@
 	# v26 = load.i32 v25
 	mov	r14d, dword ptr [r13]
 	# v27 = icmp.slt v8, v26
-	cmp	r9d, r14d
-	setl	r14b
 	# brif v27, block5, block6
-	test	r14b, r14b
-	jne	".Lk_isort_block5"
+	cmp	r9d, r14d
+	jl	".Lk_isort_block5"
 .Lk_isort_block6:
 	# v16 = iconst.i64 2
 	# v17 = shl v9, v16
@@ -143,12 +137,10 @@
 	mov	qword ptr [rbp + -48], rbx
 .Lk_matmul_block1:
 	# v6 = icmp.sgt v3, v5
+	# brif v6, block2, block4
 	mov	rcx, qword ptr [rbp + -48]
 	cmp	r9d, ecx
-	setg	r12b
-	# brif v6, block2, block4
-	test	r12b, r12b
-	jne	".Lk_matmul_block2"
+	jg	".Lk_matmul_block2"
 .Lk_matmul_block4:
 	# return
 	lea	rsp, [rbp + -40]
@@ -169,11 +161,9 @@
 	# jump block5(v8)
 .Lk_matmul_block5:
 	# v12 = icmp.sgt v3, v11
-	cmp	r9d, r13d
-	setg	r14b
 	# brif v12, block6, block3
-	test	r14b, r14b
-	jne	".Lk_matmul_block6"
+	cmp	r9d, r13d
+	jg	".Lk_matmul_block6"
 .Lk_matmul_block3:
 	# v9 = iconst.i32 1
 	# v10 = iadd v5, v9
@@ -189,18 +179,17 @@
 	mov	r15, r14
 .Lk_matmul_block7:
 	# v16 = icmp.sgt v3, v14
-	cmp	r9d, r14d
-	setg	bl
 	# brif v16, block8, block9
-	test	bl, bl
-	jne	".Lk_matmul_block8"
+	cmp	r9d, r14d
+	jg	".Lk_matmul_block8"
 .Lk_matmul_block9:
 	# v33 = iadd v11, v7
-	lea	ebx, [r13 + r12 * 1]
+	lea	r14d, [r13 + r12 * 1]
 	# v34 = sext.i64 v33
-	movsxd	rbx, ebx
+	movsxd	r14, r14d
 	# v35 = iconst.i64 2
 	# v36 = shl v34, v35
+	mov	rbx, r14
 	shl	rbx, 2
 	# v37 = ptradd v2, v36
 	mov	rax, qword ptr [rbp + -56]
@@ -286,11 +275,9 @@
 	mov	rbx, r11
 .Lsigned_dot32_block1:
 	# v7 = icmp.slt v5, v2
-	cmp	r9d, r8d
-	setl	r12b
 	# brif v7, block2, block3
-	test	r12b, r12b
-	jne	".Lsigned_dot32_block2"
+	cmp	r9d, r8d
+	jl	".Lsigned_dot32_block2"
 .Lsigned_dot32_block3:
 	# return v6
 	mov	rax, rbx
@@ -359,11 +346,9 @@
 	mov	rbx, r11
 .Lsigned_dot64_block1:
 	# v7 = icmp.slt v5, v2
-	cmp	r9, r8
-	setl	r12b
 	# brif v7, block2, block3
-	test	r12b, r12b
-	jne	".Lsigned_dot64_block2"
+	cmp	r9, r8
+	jl	".Lsigned_dot64_block2"
 .Lsigned_dot64_block3:
 	# return v6
 	mov	rax, rbx
@@ -430,11 +415,9 @@
 	mov	r12, rbx
 .Ldiv_loop_block1:
 	# v7 = icmp.slt v5, v2
-	cmp	rbx, r8
-	setl	r13b
 	# brif v7, block2, block3
-	test	r13b, r13b
-	jne	".Ldiv_loop_block2"
+	cmp	rbx, r8
+	jl	".Ldiv_loop_block2"
 .Ldiv_loop_block3:
 	# return v6
 	mov	rax, r12
