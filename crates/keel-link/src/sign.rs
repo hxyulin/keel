@@ -41,9 +41,52 @@ fn sizes(code_limit: u64) -> Result<(u32, u32)> {
     Ok((slots as u32, size as u32))
 }
 
+/// SHA-256 of each 4 KiB page of a stream, the last page unpadded, as the
+/// code directory stores them.
+#[derive(Default)]
+pub(crate) struct PageHashes {
+    hashes: Vec<[u8; 32]>,
+    page: Sha256,
+    filled: usize,
+}
+impl PageHashes {
+    pub(crate) fn update(&mut self, mut data: &[u8]) {
+        while !data.is_empty() {
+            let take = data.len().min(BLOCK - self.filled);
+            self.page.update(&data[..take]);
+            self.filled += take;
+            data = &data[take..];
+            if self.filled == BLOCK {
+                self.hashes.push(self.page.finalize_reset().into());
+                self.filled = 0;
+            }
+        }
+    }
+    pub(crate) fn finish(mut self) -> Vec<[u8; 32]> {
+        if self.filled != 0 {
+            self.hashes.push(self.page.finalize().into());
+        }
+        self.hashes
+    }
+}
+
+/// Signs an unsigned Keel image, reading it back to hash every page.
 pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
+    sign_hashed(image, None)
+}
+
+/// Signs an unsigned Keel image. `pages`, if given, must be the page hashes
+/// of the image as written. Signing rewrites the header page, so its hashes
+/// are always recomputed; the others are trusted.
+pub(crate) fn sign_hashed<W: Read + Write + Seek>(
+    image: &mut W,
+    pages: Option<&[[u8; 32]]>,
+) -> Result<()> {
     let code_limit = image.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
     let (slots, signature_size) = sizes(code_limit)?;
+    if pages.is_some_and(|pages| pages.len() != slots as usize) {
+        return fail("page hashes do not match the unsigned image");
+    }
     if code_limit < PAGE as u64 || code_limit % 16 != 0 {
         return fail("signing requires a Keel unsigned Mach-O image");
     }
@@ -165,20 +208,25 @@ pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
         .map_err(|e| e.to_string())?;
     image.write_all(&signature).map_err(|e| e.to_string())?;
     // Bounded reads and hash storage: batch 16 pages, including the final
-    // short page without zero padding. No full-image or hash-table buffer.
-    let mut pages = [0; BLOCK * 16];
+    // short page without zero padding. With precomputed hashes, only the
+    // rewritten header page is read back.
+    let mut buffer = [0; BLOCK * 16];
     let mut hashes = [0; 32 * 16];
     let mut position = 0;
-    while position < code_limit {
-        let len = (code_limit - position).min(pages.len() as u64) as usize;
+    let reread = match pages {
+        Some(_) => code_limit.min(PAGE as u64),
+        None => code_limit,
+    };
+    while position < reread {
+        let len = (reread - position).min(buffer.len() as u64) as usize;
         image
             .seek(SeekFrom::Start(position))
             .map_err(|e| e.to_string())?;
         image
-            .read_exact(&mut pages[..len])
+            .read_exact(&mut buffer[..len])
             .map_err(|e| e.to_string())?;
         let mut hash_len = 0;
-        for page in pages[..len].chunks(BLOCK) {
+        for page in buffer[..len].chunks(BLOCK) {
             hashes[hash_len..hash_len + 32].copy_from_slice(&Sha256::digest(page));
             hash_len += 32;
         }
@@ -191,6 +239,15 @@ pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
             .write_all(&hashes[..hash_len])
             .map_err(|e| e.to_string())?;
         position += len as u64;
+    }
+    if let Some(pages) = pages {
+        let rest = pages[(reread / BLOCK as u64) as usize..].as_flattened();
+        image
+            .seek(SeekFrom::Start(
+                code_limit + HASH_START as u64 + reread / BLOCK as u64 * 32,
+            ))
+            .map_err(|e| e.to_string())?;
+        image.write_all(rest).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -205,6 +262,32 @@ mod tests {
         for limit in [0, u32::MAX as u64, u64::MAX] {
             assert!(sizes(limit).is_err());
         }
+    }
+    #[test]
+    fn precomputed_page_hashes_sign_like_reading_back() {
+        let image = unsigned();
+        assert!(image.len() > PAGE, "needs pages past the header page");
+        let mut pages = PageHashes::default();
+        // Uneven writes still hash whole 4 KiB pages.
+        for chunk in image.chunks(1000) {
+            pages.update(chunk);
+        }
+        let mut pages = pages.finish();
+        let expected: Vec<[u8; 32]> = image
+            .chunks(BLOCK)
+            .map(|page| Sha256::digest(page).into())
+            .collect();
+        assert_eq!(pages, expected);
+        let mut read_back = std::io::Cursor::new(image.clone());
+        sign(&mut read_back).unwrap();
+        // Signing rewrites the header page, so its stale hashes are ignored.
+        pages[0] = [0xff; 32];
+        let mut hashed = std::io::Cursor::new(image.clone());
+        sign_hashed(&mut hashed, Some(&pages)).unwrap();
+        assert_eq!(hashed.into_inner(), read_back.into_inner());
+        pages.pop();
+        let error = sign_hashed(&mut std::io::Cursor::new(image), Some(&pages)).unwrap_err();
+        assert!(error.contains("page hashes"), "{error}");
     }
     fn unsigned() -> Vec<u8> {
         let object = keel_asm::assemble_object(".text\n.globl _main\n_main:\nret\n").unwrap();

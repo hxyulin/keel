@@ -13,6 +13,8 @@ const PAGE: usize = 0x4000;
 fn fail<T>(s: impl Into<String>) -> Result<T> {
     Err(s.into())
 }
+// The benchmark signs by reading back, so the page-hash writer is unused.
+#[allow(dead_code)]
 #[path = "../src/sign.rs"]
 mod sign;
 // The included source's existing unit tests refer to these crate-root names.

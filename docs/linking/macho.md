@@ -67,11 +67,15 @@ chain or timestamp. This supports local execution and integrity checking; it
 provides no Developer ID identity, notarization or Gatekeeper trust, and it is
 not a general-purpose signer for arbitrary Mach-O files.
 
-The writer finalizes its content-derived UUID before signing; the signer then
-finalizes the signature load command and `__LINKEDIT` sizes before hashing any
-page. The code limit excludes the signature itself. Signed files are limited to
-32-bit Mach-O file bounds, with overflow rejected before patching. Signing reads
-at most 64 KiB at a time and keeps at most 16 page hashes in memory.
+The writer hashes each 4 KiB page as it writes the image. It derives the UUID
+from those page hashes and then patches it into the header page. The signer
+finalizes the signature load command and `__LINKEDIT` sizes, then rehashes the
+16 KiB header page it rewrote. `link_signed` reuses the writer's hashes for
+every other page, which costs 32 bytes of memory per page. `write_signed`
+instead reads the image back, at most 64 KiB at a time, keeping at most 16 page
+hashes in memory. The code limit excludes the signature itself. Signed files
+are limited to 32-bit Mach-O file bounds, with overflow rejected before
+patching.
 
 Output is never memory mapped while being written or signed. A fresh temporary
 inode is closed before atomic replacement, avoiding premature Darwin signature

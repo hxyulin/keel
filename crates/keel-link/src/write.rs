@@ -152,7 +152,7 @@ impl Linker {
         mut self,
         output: &mut W,
         reserve: impl FnOnce(&mut W, usize),
-    ) -> Result<LinkArtifacts> {
+    ) -> Result<(LinkArtifacts, Vec<[u8; 32]>)> {
         // Plan before committing any relocations. Gap entries can change when
         // later sections move as unwind shrinks. Iterate provisional layouts,
         // with a bounded fallback for unusual address-dependent inputs.
@@ -494,14 +494,15 @@ impl Linker {
             u32le(&mut bytes, n);
         }
         bytes.extend_from_slice(&commands);
-        // Serialize and hash in file order. Padding is emitted in bounded
-        // chunks, so file output never allocates another complete image.
+        // Serialize and hash each page in file order. Padding is emitted in
+        // bounded chunks, so file output never allocates another complete
+        // image. The code signature reuses these page hashes.
         use sha2::{Digest, Sha256};
-        let mut hash = Sha256::new();
+        let mut pages = crate::sign::PageHashes::default();
         let mut position = 0;
         let mut write = |data: &[u8]| -> Result<()> {
             output.write_all(data).map_err(|e| e.to_string())?;
-            hash.update(data);
+            pages.update(data);
             position += data.len();
             Ok(())
         };
@@ -538,7 +539,10 @@ impl Linker {
             gap -= count;
         }
         write(&linkedit)?;
-        let digest = hash.finalize();
+        let pages = pages.finish();
+        // The page hashes cover the image with a zero UUID, so they
+        // determine it.
+        let digest = Sha256::digest(pages.as_flattened());
         let mut uuid = [0u8; 16];
         uuid.copy_from_slice(&digest[..16]);
         uuid[6] = (uuid[6] & 15) | 0x80; // UUID version 8
@@ -550,10 +554,13 @@ impl Linker {
         output
             .seek(std::io::SeekFrom::Start(position as u64))
             .map_err(|e| e.to_string())?;
-        Ok(LinkArtifacts {
-            debug_objects,
-            warnings: self.warnings,
-        })
+        Ok((
+            LinkArtifacts {
+                debug_objects,
+                warnings: self.warnings,
+            },
+            pages,
+        ))
     }
 
     /// Darwin's debug map relocates object DWARF via N_OSO/N_FUN/N_GSYM

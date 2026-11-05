@@ -205,7 +205,7 @@ fn section_boundary(name: &str) -> Result<Option<(&str, &str, bool)>> {
 
 pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut image = std::io::Cursor::new(Vec::new());
-    let artifacts = prepare_linker(inputs, options)?.emit_to(&mut image, |image, size| {
+    let (artifacts, _) = prepare_linker(inputs, options)?.emit_to(&mut image, |image, size| {
         image.get_mut().reserve(size);
     })?;
     Ok(Executable {
@@ -224,6 +224,15 @@ pub fn link_to<W: std::io::Write + std::io::Seek>(
     options: Options,
     output: &mut W,
 ) -> Result<LinkArtifacts> {
+    link_to_hashed(inputs, options, output).map(|(artifacts, _)| artifacts)
+}
+
+/// [`link_to`], also returning the image's code-signature page hashes.
+fn link_to_hashed<W: std::io::Write + std::io::Seek>(
+    inputs: &[Input<'_>],
+    options: Options,
+    output: &mut W,
+) -> Result<(LinkArtifacts, Vec<[u8; 32]>)> {
     if output
         .seek(std::io::SeekFrom::End(0))
         .map_err(|e| e.to_string())?
@@ -712,10 +721,10 @@ impl Linker {
 pub fn link_signed(inputs: &[Input<'_>], options: Options, path: &Path) -> Result<Vec<String>> {
     let mut warnings = Vec::new();
     install_output(path, true, |file| {
-        let artifacts = link_to(inputs, options, file)?;
+        let (artifacts, pages) = link_to_hashed(inputs, options, file)?;
         write_debug_objects(&artifacts.debug_objects)?;
         warnings = artifacts.warnings;
-        Ok(())
+        Ok(Some(pages))
     })?;
     Ok(warnings)
 }
@@ -729,7 +738,8 @@ pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
     write_debug_objects(&executable.debug_objects)?;
     install_output(path, true, |file| {
         file.write_all(&executable.bytes)
-            .map_err(|e| e.to_string().into())
+            .map_err(|e| e.to_string())?;
+        Ok(None)
     })
 }
 
@@ -746,8 +756,8 @@ fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
         // Atomic replacement keeps the old inode stable until maps are dropped.
         install_output(&object.path, false, |file| {
             use std::io::Write;
-            file.write_all(&object.bytes)
-                .map_err(|e| e.to_string().into())
+            file.write_all(&object.bytes).map_err(|e| e.to_string())?;
+            Ok(None)
         })
         .map_err(|e| format!("debug object {}: {e}", object.path.display()))?;
     }
@@ -756,18 +766,24 @@ fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
 
 /// Write `path` through a fresh temporary file. A signed output is an
 /// executable, so it also gets mode 0755.
+/// `write` may return the page hashes of the image it wrote, which signing
+/// then reuses instead of reading the image back.
 fn install_output(
     path: &Path,
     sign: bool,
-    write: impl FnOnce(&mut std::fs::File) -> Result<()>,
+    write: impl FnOnce(&mut std::fs::File) -> Result<Option<Vec<[u8; 32]>>>,
 ) -> Result<()> {
     // Never mmap the output: Darwin can cache a signature at mmap time. The
     // helper closes this fully signed inode before it replaces the
     // destination, so a running executable keeps its previous inode intact.
     keel_util::fs::replace(path, sign.then_some(0o755), |file| {
-        write(file).map_err(std::io::Error::other)?;
+        let pages = write(file).map_err(std::io::Error::other)?;
         if sign {
-            sign::sign(file).map_err(std::io::Error::other)?;
+            match pages {
+                Some(pages) => sign::sign_hashed(file, Some(&pages)),
+                None => sign::sign(file),
+            }
+            .map_err(std::io::Error::other)?;
         }
         Ok(())
     })
