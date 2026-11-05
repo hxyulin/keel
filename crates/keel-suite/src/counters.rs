@@ -52,8 +52,13 @@ pub fn parse(text: &str) -> Counts {
         if running < 100.0 {
             continue;
         }
+        // `cycles:u`, or `cpu_core/cycles/u` on a hybrid CPU, where the core
+        // the run was pinned to counts and the other PMU reports none.
         let event = fields[2].trim();
-        let event = event.split_once(':').map_or(event, |(name, _)| name);
+        let event = match event.split('/').collect::<Vec<_>>()[..] {
+            [_, name, _] => name,
+            _ => event.split_once(':').map_or(event, |(name, _)| name),
+        };
         counts.insert(event.into(), value);
     }
     counts
@@ -75,6 +80,19 @@ mod tests {
         assert_eq!(counts["cycles"], 1_234_567_890);
         assert_eq!(counts.len(), 2);
         assert!(parse("keel: error\n").is_empty());
+    }
+
+    #[test]
+    fn parses_hybrid_cpu_event_names() {
+        let perf = "375428,,cpu_core/cycles/u,401177,100.00,,
+<not counted>,,cpu_atom/cycles/u,0,0.00,,
+135667,,cpu_core/instructions/u,401177,100.00,,
+<not counted>,,cpu_atom/instructions/u,0,0.00,,
+";
+        let counts = parse(perf);
+        assert_eq!(counts["cycles"], 375_428);
+        assert_eq!(counts["instructions"], 135_667);
+        assert_eq!(counts.len(), 2);
     }
 
     #[test]
