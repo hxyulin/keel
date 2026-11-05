@@ -12,9 +12,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// sharing it. The file is opened for reading and writing, so `write` can
 /// read back what it wrote. On Unix, `mode` sets its permission bits; `None`
 /// keeps the default the process umask gives. After `write` returns, the file
-/// is flushed to disk, renamed over `path`, and on Unix the directory is
-/// flushed so the rename survives a crash. Any failure removes the temporary
-/// file and leaves an existing `path` unchanged.
+/// is renamed over `path`, so readers see either the old or the new file.
+/// It is not flushed to disk: like other compilers and linkers, a crash can
+/// lose the new output, and on macOS a full flush doubled link wall time. Any
+/// failure removes the temporary file and leaves an existing `path`
+/// unchanged.
 ///
 /// The file is closed before the rename, so a running executable at `path`
 /// keeps its old inode.
@@ -60,7 +62,6 @@ pub fn replace(
         #[cfg(not(unix))]
         let _ = mode;
         write(&mut file)?;
-        file.sync_all()?;
         drop(file);
         std::fs::rename(&temporary, path)
     })();
@@ -68,8 +69,6 @@ pub fn replace(
         let _ = std::fs::remove_file(&temporary);
         return result;
     }
-    #[cfg(unix)]
-    File::open(parent)?.sync_all()?;
     Ok(())
 }
 
