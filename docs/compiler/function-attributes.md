@@ -208,16 +208,25 @@ these three soft thresholds, but cannot bypass legality or the hard safeguards:
   for policies other than Full. Full shares the greater of 196,608 and one half
   of pipeline-entry layout instructions across all its inlining rounds. A separate
   cheap-helper reserve allows 4,096 instructions and 256 sites across those rounds.
+  `alwaysinline` sites are neither checked nor charged against this budget.
 - At most 65,536 bytes of callee stack slots, and at most 65,536 bytes of added
   summed slot/snapshot sizes per caller per invocation (excluding backend frame
   alignment and spills).
 
 The IR estimate includes two glue instructions and a conservative byte-based
-by-value copy allowance. Bounds cap expansion, not the original module's size
-or existing caller frame. Templates and callsite lists are frozen at pass entry;
-cloned calls are not revisited in the same invocation. Budgets are consumed in
-module/function layout order outside Full. Full keeps its tiny-helper priority
-phase, then takes one original site per caller per sweep within each phase.
+by-value copy allowance. A callee that costs no more than its call, five
+instructions plus one per argument and result, adds no growth and counts
+against none of the three instruction limits. Bounds cap expansion, not the
+original module's size or existing caller frame. Callsite lists are frozen at
+pass entry; cloned calls are not revisited in the same invocation. Budgets are
+consumed in module/function layout order outside the binding-aware policies.
+Those first inline tiny `alwaysinline` leaves (in Full, tiny `inlinehint`
+leaves too), then the remaining `alwaysinline` sites with callees before
+callers, using the current bodies; templates freeze before the ordinary sites.
+A tiny leaf has at most 32 instructions, 64 stack bytes and four acyclic
+blocks, and no calls; a memory intrinsic that small-memory expands counts as
+its loads and stores, and any other memory intrinsic counts as a call. Full
+takes one original site per caller per sweep within each phase.
 This is deterministic for a given input. A new pipeline execution receives a
 fresh Full allowance; repeated Full passes inside it share charges. Cleanup
 never refunds charges, and cloned IR never enlarges the allowance. Caller

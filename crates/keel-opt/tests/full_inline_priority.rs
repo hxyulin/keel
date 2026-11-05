@@ -3,6 +3,8 @@ use keel_ir::{InstData, Module};
 use keel_opt::{InlineSite, OptimizationReport};
 
 const FULL: &str = "inline-noninterposable";
+// Full's own inliner, which also gives tiny hinted leaves priority.
+const RESERVE: &str = "inline-cheap-reserve";
 const CONSTRUCTORS: &str = include_str!("fixtures/full-inline-priority-constructors.keel");
 
 fn optimize(m: &mut Module, pass: &str) -> Vec<InlineSite> {
@@ -106,14 +108,17 @@ fn retained_constructors_precede_scc_growth_in_full_only() {
 
 #[test]
 fn priority_is_bounded_by_cost_stack_and_explicit_request() {
-    for (cost, stack, attrs, priority) in [
-        (32, 64, "alwaysinline local", true),
-        (33, 64, "alwaysinline local", false),
-        (32, 65, "alwaysinline local", false),
-        (8, 0, "inlinehint local", false),
-        (8, 0, "local", false),
+    for (cost, stack, attrs, pass, priority) in [
+        (32, 64, "inlinehint local", RESERVE, true),
+        (33, 64, "inlinehint local", RESERVE, false),
+        (32, 65, "inlinehint local", RESERVE, false),
+        (8, 0, "inlinehint local", FULL, false),
+        (8, 0, "local", RESERVE, false),
+        // Every alwaysinline site precedes the ordinary sites.
+        (33, 64, "alwaysinline local", FULL, true),
+        (32, 65, "alwaysinline local", FULL, true),
     ] {
-        let (_, sites) = run(&saturated(cost, stack, attrs), FULL);
+        let (_, sites) = run(&saturated(cost, stack, attrs), pass);
         assert_eq!(
             outcomes(&sites, "caller", "tiny"),
             [if priority {
@@ -130,37 +135,40 @@ fn priority_is_bounded_by_cost_stack_and_explicit_request() {
             if priority { 31 } else { 32 }
         );
     }
-    // A nonleaf alwaysinline wrapper is not part of the priority class.
-    let s = saturated(8, 0, "alwaysinline local")
+    // A nonleaf hinted wrapper is not part of the priority class.
+    let s = saturated(8, 0, "inlinehint local")
         .replace(
-            "func @tiny() alwaysinline local {",
-            "decl @external()\nfunc @tiny() alwaysinline local {",
+            "func @tiny() inlinehint local {",
+            "decl @external()\nfunc @tiny() inlinehint local {",
         )
         .replace(
-            "func @tiny() alwaysinline local {\nblock0:\n v1 = iconst.i64 1",
-            "func @tiny() alwaysinline local {\nblock0:\n call @external()",
+            "func @tiny() inlinehint local {\nblock0:\n v1 = iconst.i64 1",
+            "func @tiny() inlinehint local {\nblock0:\n call @external()",
         );
     assert_eq!(
-        outcomes(&run(&s, FULL).1, "caller", "tiny"),
+        outcomes(&run(&s, RESERVE).1, "caller", "tiny"),
         ["caller_instruction_growth_budget"]
     );
 }
 
 #[test]
-fn priority_is_module_wide_and_spends_the_same_module_budget() {
+fn priority_is_module_wide_and_alwaysinline_spends_no_module_budget() {
     let mut s = wrappers() + &leaf("tiny", 8, 0, "alwaysinline local");
     for i in 0..8 {
         s += &caller(&format!("early{i}"), "wrap", 32);
     }
     s += &caller("late", "tiny", 1);
+    s += &caller("last", "wrap", 1);
     let (m, sites) = run(&s, FULL);
     assert_eq!(outcomes(&sites, "late", "tiny"), ["inlined"]);
     assert_eq!(sites[0].caller, "late");
+    // 256 wrappers of 64 instructions fill the module budget exactly.
+    assert_eq!(outcomes(&sites, "early7", "wrap").last(), Some(&"inlined"));
     assert_eq!(
-        outcomes(&sites, "early7", "wrap").last(),
-        Some(&"module_instruction_growth_budget")
+        outcomes(&sites, "last", "wrap"),
+        ["module_instruction_growth_budget"]
     );
-    assert_eq!(calls(&m, "early7", "slow"), 31);
+    assert_eq!(calls(&m, "early7", "slow"), 32);
     let before = keel_ir::parse(&s).unwrap();
     let count = |m: &Module| {
         m.functions
@@ -168,8 +176,7 @@ fn priority_is_module_wide_and_spends_the_same_module_budget() {
             .map(|f| f.layout_insts().count())
             .sum::<usize>()
     };
-    assert_eq!(count(&m) - count(&before), 255 * 64 + 8);
-    assert!(count(&m) - count(&before) <= 16_384);
+    assert_eq!(count(&m) - count(&before), 256 * 64 + 8);
 }
 
 #[test]
@@ -189,11 +196,12 @@ fn caller_growth_and_call_count_remain_hard_for_priority_sites() {
     for i in 0..9 {
         s += &caller(&format!("caller{i}"), "tiny", 64);
     }
+    // The module budget does not apply to alwaysinline sites.
     let (_, sites) = run(&s, FULL);
     assert!(
         outcomes(&sites, "caller8", "tiny")
             .iter()
-            .all(|&s| s == "module_instruction_growth_budget")
+            .all(|&s| s == "inlined")
     );
 }
 
@@ -293,7 +301,9 @@ fn wrapper_body_and_initial_caller_size_stay_frozen_across_phases() {
     let (m, sites) = run(&s, FULL);
     assert_eq!(m.functions[0].to_string(), original); // SCC body stays frozen
     assert_eq!(calls(&m, "middle", "tiny"), 0);
-    assert_eq!(calls(&m, "caller", "tiny"), 1); // frozen template, not a new site
+    // The priority phase inlines tiny into middle before templates freeze, so
+    // the clone in caller has no call to tiny, and no new site was reported.
+    assert_eq!(calls(&m, "caller", "tiny"), 0);
     assert!(outcomes(&sites, "caller", "tiny").is_empty());
 }
 
@@ -342,7 +352,7 @@ fn snapshots_count_toward_priority_cost_and_stack_boundaries() {
         // load + store + return + padding + three snapshot instructions.
         // One padding instruction roots the local stack object.
         let mut tiny = format!(
-            "func @tiny(ptr byval {{i64}}) alwaysinline local {{\n ss0 = stack_slot {stack}, align 1\nblock0(v0: ptr):\n v1 = load.i64 v0\n store v1, v0\n v100 = stack_addr ss0\n"
+            "func @tiny(ptr byval {{i64}}) inlinehint local {{\n ss0 = stack_slot {stack}, align 1\nblock0(v0: ptr):\n v1 = load.i64 v0\n store v1, v0\n v100 = stack_addr ss0\n"
         );
         for i in 0..padding - 1 {
             tiny += &format!(" v{} = iconst.i64 0\n", i + 2);
@@ -353,7 +363,7 @@ fn snapshots_count_toward_priority_cost_and_stack_boundaries() {
             + "func @caller(ptr) {\nblock0(v0: ptr):\n"
             + &" call @wrap()\n".repeat(32)
             + " call @tiny(v0)\n return\n}\n";
-        let (m, sites) = run(&s, FULL);
+        let (m, sites) = run(&s, RESERVE);
         assert_eq!(
             outcomes(&sites, "caller", "tiny"),
             [if priority {
@@ -457,9 +467,14 @@ fn priority_cfg_domain_is_small_and_acyclic() {
         (5, false, "caller_instruction_growth_budget"),
         (2, true, "caller_instruction_growth_budget"),
     ] {
-        let mut tiny = "func @tiny() alwaysinline local {\n".to_owned();
+        let mut tiny = "func @tiny() inlinehint local {\n".to_owned();
+        // Two constants per block keep the leaf larger than its call.
         for i in 0..blocks {
-            tiny += &format!("block{i}:\n");
+            tiny += &format!(
+                "block{i}:\n v{} = iconst.i64 0\n v{} = iconst.i64 1\n",
+                2 * i,
+                2 * i + 1
+            );
             if i + 1 < blocks {
                 tiny += &format!(" jump block{}\n", i + 1);
             } else if cyclic {
@@ -472,6 +487,101 @@ fn priority_cfg_domain_is_small_and_acyclic() {
         let s = wrappers()
             + &tiny
             + &caller("caller", "wrap", 32).replace(" return\n}", " call @tiny()\n return\n}");
-        assert_eq!(outcomes(&run(&s, FULL).1, "caller", "tiny"), [expected]);
+        assert_eq!(outcomes(&run(&s, RESERVE).1, "caller", "tiny"), [expected]);
+    }
+}
+
+// Leaves of 40 instructions are too large for the priority class.
+fn chain(wrapper_attrs: &str) -> String {
+    let mut s = String::new();
+    for name in ["get", "copied"] {
+        s += &format!("func @{name}() alwaysinline local {{\nblock0:\n");
+        for i in 0..39 {
+            s += &format!(" v{i} = iconst.i64 {i}\n");
+        }
+        s += " return\n}\n";
+    }
+    s += &format!(
+        "func @entry() {wrapper_attrs} local {{\nblock0:\n call @get()\n call @copied()\n return\n}}\n"
+    );
+    s + "func @caller() {\nblock0:\n call @entry()\n return\n}\n"
+}
+
+#[test]
+fn alwaysinline_callees_are_inlined_before_their_callers() {
+    // Layout puts the callers last; the required phase still visits entry
+    // before caller, so caller clones entry with both leaves already inlined.
+    for (attrs, pass) in [
+        ("alwaysinline", FULL),
+        ("", FULL),
+        ("alwaysinline", RESERVE),
+        ("", RESERVE),
+    ] {
+        let source = chain(attrs);
+        let (m, sites) = run(&source, pass);
+        assert_eq!(
+            outcomes(&sites, "caller", "entry"),
+            ["inlined"],
+            "{attrs} {pass}"
+        );
+        for callee in ["get", "copied"] {
+            assert_eq!(outcomes(&sites, "entry", callee), ["inlined"]);
+            assert_eq!(calls(&m, "caller", callee), 0, "{attrs} {pass}");
+        }
+        let mut functions: Vec<_> = source.split_inclusive("}\n").collect();
+        functions.reverse();
+        let reversed = functions.concat();
+        let (m, _) = run(&reversed, pass);
+        assert_eq!(
+            calls(&m, "caller", "get") + calls(&m, "caller", "copied"),
+            0
+        );
+    }
+}
+
+#[test]
+fn a_site_no_larger_than_its_call_ignores_exhausted_growth_budgets() {
+    // 32 wrappers spend the caller's whole growth budget; the accessor costs
+    // 5 instructions, no more than a zero-argument call.
+    let s = wrappers()
+        + &leaf("accessor", 5, 0, "local")
+        + &caller("caller", "wrap", 32).replace(" return\n}", " call @accessor()\n return\n}");
+    let (_, sites) = run(&s, FULL);
+    assert_eq!(outcomes(&sites, "caller", "accessor"), ["inlined"]);
+    assert_eq!(
+        outcomes(&sites, "caller", "wrap")
+            .iter()
+            .filter(|&&s| s == "inlined")
+            .count(),
+        32
+    );
+}
+
+#[test]
+fn small_memory_intrinsics_stay_in_the_priority_class() {
+    // A 16-byte memmove is charged 8 instructions, like a 16-byte by-value
+    // snapshot, against the class's 32; a 33-byte one stays a call.
+    for (bytes, padding, expected) in [
+        (16, 21, "inlined"),
+        (16, 22, "caller_instruction_growth_budget"),
+        (33, 10, "caller_instruction_growth_budget"),
+    ] {
+        let mut tiny = format!(
+            "func @tiny(ptr, ptr) inlinehint local {{\nblock0(v0: ptr, v1: ptr):\n v2 = iconst.i64 {bytes}\n intrinsic memmove(v0, v1, v2)\n"
+        );
+        for i in 0..padding {
+            tiny += &format!(" v{} = iconst.i64 0\n", i + 3);
+        }
+        tiny += " return\n}\n";
+        let s = wrappers()
+            + &tiny
+            + "func @caller(ptr, ptr) {\nblock0(v0: ptr, v1: ptr):\n"
+            + &" call @wrap()\n".repeat(32)
+            + " call @tiny(v0, v1)\n return\n}\n";
+        assert_eq!(
+            outcomes(&run(&s, RESERVE).1, "caller", "tiny"),
+            [expected],
+            "{bytes} {padding}"
+        );
     }
 }

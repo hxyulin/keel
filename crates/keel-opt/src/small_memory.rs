@@ -7,6 +7,31 @@ use keel_ir::{
 
 const MAX_BYTES: i64 = 32;
 
+/// The length of a memcpy, memmove or memset that [`run`] replaces with
+/// loads and stores: a constant from 0 to 32 bytes.
+pub(crate) fn expanded_length(f: &Function, inst: Inst) -> Option<u64> {
+    let InstData::Intrinsic { id, args } = f.inst_data(inst) else {
+        return None;
+    };
+    if !matches!(
+        id,
+        Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset
+    ) {
+        return None;
+    }
+    let ValueDef::Result(length, _) = f.value_def(f.resolve(args[2])) else {
+        return None;
+    };
+    match *f.inst_data(length) {
+        // Negative/wrapping lengths are deliberately not interpreted as small.
+        InstData::Iconst {
+            ty: Type::I64,
+            imm: size,
+        } if (0..=MAX_BYTES).contains(&size) => Some(size as u64),
+        _ => None,
+    }
+}
+
 pub fn run(f: &mut Function) -> bool {
     // Expansion only replaces the intrinsic it visits.
     let work: Vec<_> = f
@@ -26,27 +51,11 @@ pub fn run(f: &mut Function) -> bool {
             changed |= expand_memcmp_equality(f, at, &args);
             continue;
         }
-        if !matches!(
-            id,
-            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset
-        ) {
-            continue;
-        }
         let (id, args) = (*id, args.clone());
-        let ValueDef::Result(length, _) = f.value_def(f.resolve(args[2])) else {
+        let Some(size) = expanded_length(f, at) else {
             continue;
         };
-        let InstData::Iconst {
-            ty: Type::I64,
-            imm: size,
-        } = *f.inst_data(length)
-        else {
-            continue;
-        };
-        // Negative/wrapping lengths are deliberately not interpreted as small.
-        if !(0..=MAX_BYTES).contains(&size) {
-            continue;
-        }
+        let size = size as i64;
         let mut chunks = Vec::new();
         let mut offset = 0;
         // Only builtin memcpy proves the complete source/destination ranges

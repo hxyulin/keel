@@ -85,7 +85,7 @@ pub fn required_inline_asm_with_c_definitions(
                 .collect()
         })
         .collect();
-    let recursive = recursive_definitions(module, &sites);
+    let (recursive, _) = recursive_definitions(module, &sites);
     let recursive: FxHashSet<String> = module
         .functions
         .iter()

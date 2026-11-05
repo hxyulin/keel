@@ -34,7 +34,7 @@ fn caller(name: &str, callee: &str, count: usize) -> String {
     )
 }
 fn saturated() -> String {
-    let mut s = leaf("constructor", 16, "alwaysinline local", false);
+    let mut s = leaf("constructor", 16, "inlinehint local", false);
     for i in 0..96 {
         s += &caller(&format!("budget{i}"), "constructor", 128);
     }
@@ -82,7 +82,8 @@ fn module_growth_is_exactly_bounded_and_late_callers_get_a_turn() {
 
 #[test]
 fn module_site_count_is_a_separate_exact_bound() {
-    let mut source = saturated() + &leaf("predicate", 3, "local", true);
+    // Six instructions: more than the call, so each site grows the module.
+    let mut source = saturated() + &leaf("predicate", 6, "local", true);
     for i in 0..257 {
         source += &caller(&format!("late{i}"), "predicate", 1);
     }
@@ -171,7 +172,7 @@ fn full_uses_the_reserve_and_smaller_tiers_keep_their_pipelines() {
 #[test]
 fn deferred_clones_resolve_api_aliases_and_keep_definitions() {
     let source = saturated()
-        + "func @helper(i64, i64) -> i64 local {\nblock0(v0: i64, v1: i64):\n v2 = icmp.eq v0, v1\n v3 = iadd v0, v1\n return v3\n}\nfunc @late(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = call @helper(v0, v1)\n return v2\n}\n";
+        + "func @helper(i64, i64) -> i64 local {\nblock0(v0: i64, v1: i64):\n v2 = icmp.eq v0, v1\n v3 = iadd v0, v1\n v4 = iconst.i64 4\n v5 = iconst.i64 5\n v6 = iconst.i64 6\n v7 = iconst.i64 7\n v8 = iconst.i64 8\n v9 = iconst.i64 9\n v10 = iconst.i64 10\n return v3\n}\nfunc @late(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = call @helper(v0, v1)\n return v2\n}\n";
     let mut m = keel_ir::parse(&source).unwrap();
     let helper = m.functions.len() - 2;
     let late = helper + 1;
@@ -266,7 +267,7 @@ fn snapshot_cost_stack_and_scc_caller_guard_remain_bounded() {
 fn guarded_hinted_leaves_precede_ordinary_growth_without_expanding_budgets() {
     let helper = "func @value_helper(ptr) inlinehint local {\nblock0(v0: ptr):\n v1 = load.i32 v0\n v2 = iconst.i32 1\n v3 = icmp.ne v1, v2\n brif v3, block1, block2\nblock1:\n v4 = iadd v1, v2\n store v4, v0\n jump block2\nblock2:\n return\n}\n";
     let late = "func @late(ptr) {\nblock0(v0: ptr):\n call @value_helper(v0)\n return\n}\n";
-    let source = saturated().replace("alwaysinline local", "local") + helper + late;
+    let source = saturated().replace("inlinehint local", "local") + helper + late;
     let before = keel_ir::parse(&source).unwrap();
     let (_, baseline_sites) = run(&source, "inline-noninterposable");
     assert_eq!(
@@ -304,7 +305,7 @@ fn run_pipeline(source: &str, passes: &[&str]) -> (Module, OptimizationReport) {
 
 #[test]
 fn ordinary_full_sites_take_turns_before_module_exhaustion() {
-    let source = saturated().replace("alwaysinline local", "local")
+    let source = saturated().replace("inlinehint local", "local")
         + &leaf("late_helper", 16, "local", false)
         + &caller("late_user", "late_helper", 1);
     let (_, sites) = run(&source, PASS);
@@ -323,7 +324,16 @@ fn ordinary_full_sites_take_turns_before_module_exhaustion() {
 
 #[test]
 fn full_rounds_share_charges_even_when_cleanup_removes_cloned_ir() {
-    let source = saturated() + &caller("overflow", "constructor", 128);
+    // The stores keep the denied callee larger than its call after cleanup.
+    let mut sink = "func @sink(ptr) inlinehint local {\nblock0(v0: ptr):\n".to_owned();
+    for i in 1..9 {
+        sink += &format!(" v{i} = iconst.i64 {i}\n store v{i}, v0\n");
+    }
+    let source = saturated()
+        + &sink
+        + " return\n}\nfunc @overflow(ptr) {\nblock0(v0: ptr):\n"
+        + &" call @sink(v0)\n".repeat(128)
+        + " return\n}\n";
     let (expanded, once) = run_pipeline(&source, &[PASS]);
     let (module, repeated) = run_pipeline(&source, &[PASS, "dce", PASS, "dce", PASS]);
     let first = once.inline_budget.unwrap();

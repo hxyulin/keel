@@ -106,7 +106,7 @@ pub(super) fn run_observed_policy_budgeted(
                 .collect()
         })
         .collect();
-    let recursive = recursive_definitions(module, &original_sites);
+    let (recursive, callee_first) = recursive_definitions(module, &original_sites);
     // Use the entire structural candidate set for edge checks, including
     // candidates outside an SCC or without legal binding. Binding changes must
     // not turn a formerly opaque small wrapper into a second expansion level.
@@ -208,14 +208,37 @@ pub(super) fn run_observed_policy_budgeted(
                             let f = &module.functions[index];
                             (decl.attrs.alwaysinline
                                 || f.attrs.alwaysinline
-                                || (cheap_reserve
-                                    && (decl.attrs.inlinehint || f.attrs.inlinehint)
-                                    && f.blocks().count() > 1
-                                    && f.layout_insts().any(|(_, i)| {
-                                        matches!(f.inst_data(i), InstData::Store { .. })
-                                    })))
+                                || (cheap_reserve && (decl.attrs.inlinehint || f.attrs.inlinehint)))
                                 && tiny_templates.contains(f.name.as_str())
                         })
+                })
+                .collect()
+        })
+        .collect();
+    // The remaining alwaysinline sites, which run after the priority sites
+    // with callees before callers.
+    let required_sites: Vec<FxHashSet<_>> = module
+        .functions
+        .iter()
+        .zip(&original_sites)
+        .zip(&priority_sites)
+        .map(|((caller, calls), priority)| {
+            if !admit_noninterposable {
+                return FxHashSet::default();
+            }
+            calls
+                .iter()
+                .copied()
+                .filter(|call| {
+                    let InstData::Call { func, .. } = caller.inst_data(*call) else {
+                        return false;
+                    };
+                    let decl = caller.callee(*func);
+                    !priority.contains(call)
+                        && (decl.attrs.alwaysinline
+                            || templates
+                                .get(&decl.name)
+                                .is_some_and(|&index| module.functions[index].attrs.alwaysinline))
                 })
                 .collect()
         })
@@ -228,16 +251,31 @@ pub(super) fn run_observed_policy_budgeted(
         })
         .collect();
     let mut ledgers = vec![CallerLedger::default(); module.functions.len()];
-    // Preserve the ordinary two phases exactly. Only sites denied solely by
-    // module growth enter the separate retry queue; cloned calls never enter it.
+    // Priority sites, then the remaining alwaysinline sites, then ordinary
+    // ones. Only sites denied solely by module growth enter the separate retry
+    // queue; cloned calls never enter it.
+    let scheduled =
+        |index: usize| callers.is_none_or(|names| names.contains(&module.functions[index].name));
     let mut schedule = Vec::new();
+    let mut ordinary_start = 0;
     for phase in 0..if admit_noninterposable { 2 } else { 1 } {
+        if phase == 1 {
+            for &index in &callee_first {
+                if scheduled(index) {
+                    schedule.extend(
+                        original_sites[index]
+                            .iter()
+                            .filter(|call| required_sites[index].contains(call))
+                            .map(|&call| (index, call, false)),
+                    );
+                }
+            }
+            ordinary_start = schedule.len();
+        }
         let mut queues: std::collections::VecDeque<_> = original_sites
             .iter()
             .enumerate()
-            .filter(|(index, _)| {
-                callers.is_none_or(|names| names.contains(&module.functions[*index].name))
-            })
+            .filter(|(index, _)| scheduled(*index))
             .map(|(index, calls)| {
                 (
                     index,
@@ -246,7 +284,8 @@ pub(super) fn run_observed_policy_budgeted(
                         .copied()
                         .filter(|call| {
                             !admit_noninterposable
-                                || priority_sites[index].contains(call) == (phase == 0)
+                                || (priority_sites[index].contains(call) == (phase == 0)
+                                    && !required_sites[index].contains(call))
                         })
                         .collect::<std::collections::VecDeque<_>>(),
                 )
@@ -286,7 +325,29 @@ pub(super) fn run_observed_policy_budgeted(
         }
     };
     let mut cursor = 0;
+    // Before the ordinary sites, templates are the live bodies: a priority
+    // callee has no calls, and a required callee precedes its callers. Then
+    // the callers changed so far get fresh legality and costs, and templates
+    // freeze.
+    let mut live_templates = true;
     loop {
+        if live_templates && cursor == ordinary_start {
+            live_templates = false;
+            let mut changed = vec![false; module.functions.len()];
+            for &index in &report.callers {
+                if std::mem::replace(&mut changed[index], true) {
+                    continue;
+                }
+                let f = &module.functions[index];
+                template_costs[index] = None;
+                if templates.get(&f.name) == Some(&index)
+                    && let Some(reason) = eligibility_reason(f, admit_noninterposable)
+                {
+                    templates.remove(&f.name);
+                    rejected.insert(f.name.clone(), reason);
+                }
+            }
+        }
         if cheap_reserve && cursor == ordinary_end {
             // One site per caller per sweep, so a high-fanout early caller
             // cannot spend the entire reserve ahead of late callers.
@@ -457,6 +518,7 @@ pub(super) fn run_observed_policy_budgeted(
             cheap_helper: cheap_reserve
                 && !wrappers.contains(&callee.name)
                 && cheap_helper(callee, cost, stack_cost),
+            requested,
         };
         let use_cheap = match budget_verdict(&site, &ledgers[index], &module_ledger, retry) {
             Verdict::Inline { reserve } => reserve,
@@ -502,7 +564,8 @@ pub(super) fn run_observed_policy_budgeted(
             ));
         }
         let before = use_cheap.then(|| caller.layout_insts().count());
-        if templates.get(&caller.name) == Some(&index) && frozen[index].is_none() {
+        if !live_templates && templates.get(&caller.name) == Some(&index) && frozen[index].is_none()
+        {
             frozen[index] = Some(Box::new(caller.clone()));
         }
         // A recursive call was rejected above, so the callee is another function.

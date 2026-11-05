@@ -280,7 +280,9 @@ last in each round.
 ## Inlining
 
 `inline` expands direct calls to same-module `local` definitions present at
-pass entry, from frozen templates; cloned calls wait for the next invocation.
+pass entry; cloned calls wait for the next invocation. The binding-aware
+variants inline `alwaysinline` callees before their callers, so a cloned
+wrapper already contains them, and freeze templates before the ordinary sites.
 Template instruction and stack costs are cached within that invocation.
 Caller stack checks and growth ledgers still use the current caller state.
 Full fixes its module allowance from pipeline-entry IR and shares conservative

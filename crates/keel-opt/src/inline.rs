@@ -1,10 +1,12 @@
-//! Bounded direct-call inlining of definitions with proven binding. Templates
-//! are frozen at
-//! pass entry: newly cloned calls are not reconsidered, so growth and recursion
-//! cannot recursively reconsider cloned sites. Full schedules bounded tiny
-//! alwaysinline and guarded, writing hinted leaves first. Each phase otherwise
-//! takes turns across callers. Other
-//! policies consume budgets in layout order. ABI by-value arguments get a fresh snapshot.
+//! Bounded direct-call inlining of definitions with proven binding. Newly
+//! cloned calls are not reconsidered, so growth and recursion cannot
+//! recursively reconsider cloned sites. The binding-aware policies first
+//! inline bounded tiny alwaysinline leaves (in Full, also tiny hinted leaves),
+//! then the remaining alwaysinline sites with callees before callers, so a
+//! cloned wrapper already contains its requested callees. Templates are frozen
+//! when the ordinary sites start. Each priority and ordinary phase takes turns
+//! across callers. Other policies consume budgets in layout order. ABI
+//! by-value arguments get a fresh snapshot.
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
 mod clone;
@@ -238,7 +240,9 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
 // become templates. A cycle can pass through a noinline, public, tail-calling,
 // or exception-handling function. External and indirect calls add no edges.
 // `sites` holds each function's direct call instructions in layout order.
-fn recursive_definitions(module: &Module, sites: &[Vec<Inst>]) -> Vec<bool> {
+// Also returns every definition with callees before callers, except within a
+// cycle.
+fn recursive_definitions(module: &Module, sites: &[Vec<Inst>]) -> (Vec<bool>, Vec<usize>) {
     let definitions: FxHashMap<_, _> = module
         .functions
         .iter()
@@ -269,7 +273,8 @@ fn recursive_definitions(module: &Module, sites: &[Vec<Inst>]) -> Vec<bool> {
 
 // Iterative Kosaraju traversal: no host recursion, even on deep call chains.
 // Only SCC members are recursive; an acyclic caller reaching a cycle is not.
-fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
+// The second result is the first traversal's finish order: callees first.
+fn recursive_members(graph: &[Vec<usize>]) -> (Vec<bool>, Vec<usize>) {
     let n = graph.len();
     let mut reverse = vec![Vec::new(); n];
     for (from, tos) in graph.iter().enumerate() {
@@ -303,7 +308,7 @@ fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
     let mut recursive = vec![false; n];
     let mut pending = Vec::new();
     let mut component = Vec::new();
-    for root in order.into_iter().rev() {
+    for &root in order.iter().rev() {
         if seen[root] {
             continue;
         }
@@ -325,7 +330,7 @@ fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
             }
         }
     }
-    recursive
+    (recursive, order)
 }
 
 #[cfg(test)]
@@ -338,9 +343,11 @@ mod recursion_tests {
         let mut graph: Vec<Vec<_>> = (0..n)
             .map(|i| if i + 1 < n { vec![i + 1] } else { vec![] })
             .collect();
-        assert!(recursive_members(&graph).iter().all(|&r| !r));
+        let (recursive, order) = recursive_members(&graph);
+        assert!(recursive.iter().all(|&r| !r));
+        assert!(order.iter().copied().eq((0..n).rev()));
         graph[n - 1].push(1);
-        let recursive = recursive_members(&graph);
+        let (recursive, _) = recursive_members(&graph);
         assert!(!recursive[0]);
         assert!(recursive[1..].iter().all(|&r| r));
     }

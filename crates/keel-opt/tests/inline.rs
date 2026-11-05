@@ -379,24 +379,26 @@ fn explicit_requests_report_unsupported_recursion_and_external_sites() {
 }
 
 #[test]
-fn alwaysinline_obeys_call_and_module_growth_safeguards() {
+fn alwaysinline_obeys_the_call_count_but_not_the_module_budget() {
     // Cost 8 is above the call's own cost of 7, so the call-count cap applies.
-    let m = run(&large_helper(8, "alwaysinline", 1, 140), &["inline"]);
-    assert_eq!(calls(&m, "f0"), 12);
-    let mut m = keel_ir::parse(&large_helper(254, "alwaysinline", 9, 8)).unwrap();
+    let mut m = keel_ir::parse(&large_helper(8, "alwaysinline", 1, 140)).unwrap();
     let report = keel_opt::inline_with_report(&mut m);
-    keel_ir::verify_module(&m).unwrap();
-    for n in 0..8 {
-        assert_eq!(calls(&m, &format!("f{n}")), 0);
-    }
-    assert_eq!(calls(&m, "f8"), 8);
-    assert_eq!(report.skipped.len(), 8);
+    assert_eq!(calls(&m, "f0"), 12);
+    assert_eq!(report.skipped.len(), 12);
     assert!(
         report
             .skipped
             .iter()
             .all(|s| s.reason == "hard growth safeguard")
     );
+    // 18,288 instructions, more than the module budget of 16,384.
+    let mut m = keel_ir::parse(&large_helper(254, "alwaysinline", 9, 8)).unwrap();
+    let report = keel_opt::inline_with_report(&mut m);
+    keel_ir::verify_module(&m).unwrap();
+    for n in 0..9 {
+        assert_eq!(calls(&m, &format!("f{n}")), 0);
+    }
+    assert!(report.skipped.is_empty());
 }
 
 #[test]
@@ -689,7 +691,7 @@ fn detailed_reports_identify_each_budget_without_changing_decisions() {
         (large_helper(8, "alwaysinline", 1, 140), "caller_call_count_budget", 12),
         (large_helper(64, "", 1, 33), "caller_instruction_growth_budget", 1),
         (large_helper(2049, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
-        (large_helper(254, "alwaysinline", 9, 8), "module_instruction_growth_budget", 8),
+        (large_helper(64, "", 9, 32), "module_instruction_growth_budget", 32),
         ("func @h() alwaysinline local {\n ss0 = stack_slot 32769, align 1\nblock0:\n v0 = stack_addr ss0\n return\n}\nfunc @f() {\nblock0:\n call @h()\n call @h()\n return\n}".into(), "caller_stack_growth_budget", 1),
     ] {
         let report = detailed_report(&source);
@@ -748,7 +750,7 @@ fn growth_budget_counts_emitted_instructions_at_the_boundary() {
 
 #[test]
 fn module_growth_budget_remains_bounded_before_cleanup() {
-    let source = large_helper(256, "alwaysinline", 9, 8);
+    let source = large_helper(64, "", 9, 32);
     let before = keel_ir::parse(&source).unwrap();
     let before_count: usize = before
         .functions
@@ -761,7 +763,7 @@ fn module_growth_budget_remains_bounded_before_cleanup() {
     for n in 0..8 {
         assert_eq!(calls(&m, &format!("f{n}")), 0);
     }
-    assert_eq!(calls(&m, "f8"), 8);
+    assert_eq!(calls(&m, "f8"), 32);
 }
 
 #[test]
