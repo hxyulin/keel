@@ -31,6 +31,41 @@ block0(v0: ptr, v1: i32):
 }
 
 #[test]
+fn trap_ub_roundtrips_and_keeps_the_access_trapping() {
+    let source = "func @f(ptr, i32) -> i32 {
+block0(v0: ptr, v1: i32):
+    v2 = load.i32 trap_ub align 4 v0
+    store trap_ub notrap v1, v0
+    return v2
+}";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let printed = module.to_string();
+    assert!(printed.contains("load.i32 align 4 trap_ub v0"), "{printed}");
+    assert!(printed.contains("store notrap trap_ub v1, v0"), "{printed}");
+    assert_eq!(printed, keel_ir::parse(&printed).unwrap().to_string());
+    let f = &module.functions[0];
+    let load = f
+        .layout_insts()
+        .map(|(_, i)| f.inst_data(i))
+        .next()
+        .unwrap();
+    let InstData::Load { flags, .. } = load else {
+        panic!("{load:?}");
+    };
+    assert!(flags.trap_ub && !flags.notrap);
+    // An undefined fault still forbids deletion and speculation.
+    assert!(load.may_trap());
+    assert!(keel_ir::parse(&source.replace("align 4", "trap_ub")).is_err());
+    let volatile = keel_ir::parse(&source.replace("align 4", "volatile")).unwrap();
+    let errors = keel_ir::verify_module(&volatile).unwrap_err();
+    assert!(
+        errors.iter().any(|e| e.message.contains("volatile")),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn malformed_flags_are_rejected() {
     for flag in [
         "volatile volatile",

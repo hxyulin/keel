@@ -1068,6 +1068,15 @@ impl Verifier<'_> {
                 ),
             );
         }
+        if let InstData::Load { flags, .. } | InstData::Store { flags, .. } = func.inst_data(inst)
+            && flags.volatile
+            && flags.trap_ub
+        {
+            self.inst_error(
+                inst,
+                "a volatile access cannot make its fault undefined behavior".into(),
+            );
+        }
         match func.inst_data(inst) {
             InstData::VectorSplat { ty: to, arg } => {
                 if to.vector().is_none_or(|v| v.lane_type() != ty(*arg)) {

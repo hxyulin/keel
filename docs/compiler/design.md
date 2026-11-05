@@ -231,6 +231,16 @@ they do not wrap at 65,536 entries.
   of two. `notrap` promises only that this access cannot fault, not that
   it can cross a write or an object-lifetime change. Volatile accesses
   must execute as written; they are neither atomic nor hardware fences.
+- A fault on an access without flags is observable: the program stops at
+  the first faulting access, with every earlier store done. `trap_ub`
+  (`load.i32 align 4 trap_ub v0`) makes a fault on that access undefined
+  behavior instead, as C and LLVM IR do for ordinary accesses. A pass may
+  then reorder the access against other accesses the program executes
+  anyway, so a different access can fault first. Unlike `notrap`, it
+  permits neither speculation nor deletion, and `may_trap()` stays true.
+  The verifier rejects `volatile trap_ub`. The C frontend and the LLVM
+  importer mark every non-volatile load and store `trap_ub`; IR from other
+  producers keeps observable faults.
 - `memory_effects()` distinguishes reads, writes, read/write operations and
   conservative barriers; `may_trap()` separately describes exceptional exits.
   Unknown calls, inline assembly, atomic operations and stack-lifetime

@@ -2319,7 +2319,7 @@ impl Parser {
         let mut flags = crate::MemoryFlags::default();
         let mut seen = std::collections::HashSet::new();
         while let Tok::Ident(word) = self.peek() {
-            if !matches!(word.as_str(), "volatile" | "align" | "notrap") {
+            if !matches!(word.as_str(), "volatile" | "align" | "notrap" | "trap_ub") {
                 break;
             }
             let (word, loc) = self.ident("memory flag")?;
@@ -2329,6 +2329,7 @@ impl Parser {
             match word.as_str() {
                 "volatile" => flags.volatile = true,
                 "notrap" => flags.notrap = true,
+                "trap_ub" => flags.trap_ub = true,
                 _ => {
                     let loc = self.loc();
                     let n = self.int("memory alignment")?;

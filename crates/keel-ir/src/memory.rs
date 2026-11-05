@@ -13,6 +13,12 @@ pub struct MemoryFlags {
     /// The producer guarantees this particular access cannot fault. This
     /// does not establish alias freedom, immutable memory or safe hoisting.
     pub notrap: bool,
+    /// A fault on this access is undefined behavior, as in C and LLVM IR.
+    /// Passes may reorder it against other accesses the program executes
+    /// anyway, so the first fault need not be this one. Unlike `notrap` it
+    /// permits neither speculation nor deletion. Volatile accesses cannot
+    /// carry it.
+    pub trap_ub: bool,
 }
 
 impl Default for MemoryFlags {
@@ -21,6 +27,7 @@ impl Default for MemoryFlags {
             volatile: false,
             align: 1,
             notrap: false,
+            trap_ub: false,
         }
     }
 }
@@ -35,6 +42,9 @@ impl fmt::Display for MemoryFlags {
         }
         if self.notrap {
             write!(f, "notrap ")?;
+        }
+        if self.trap_ub {
+            write!(f, "trap_ub ")?;
         }
         Ok(())
     }
