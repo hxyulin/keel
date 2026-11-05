@@ -102,6 +102,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `inline` (opt-in) | Bounded private direct-call expansion; see [inlining](#inlining) |
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
+| `memory-expand` | Expand constant memory intrinsics of 0 to 128 bytes in Fast and Basic; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
 | `stack-notrap` | Mark loads and stores proven inside a fixed stack slot `notrap`; see [memory passes](#memory-passes) |
 | `canonicalize` | Establish the [canonical form](#canonical-form) |
@@ -360,12 +361,29 @@ other expressions and mixed widths stay in memory.
 ### small-memory
 
 `small-memory` expands `memcpy`, `memmove` and `memset` intrinsics with constant
-i64 lengths from 0 to 32 bytes into at most six exact 8, 4, 2 and 1-byte
-accesses with alignment 1. Every source chunk is loaded before any store, so
-overlap in either direction works. `memset` multiplies its unsigned-extended
-fill by the repeated 0x01 pattern. A zero length removes only the intrinsic.
-Variable and larger lengths stay. Balanced and Full run it before
-`stack-forward`.
+i64 lengths from 0 to 32 bytes into exact accesses with alignment 1. `memcpy`
+uses 16-byte `i8x16` chunks, then 8, 4, 2 and 1-byte chunks. `memmove` and
+`memset` use only the scalar chunks, because `stack-forward` and
+`stack-promote` see through scalar stores only. Every source chunk is loaded
+before any store, so overlap in either direction works. `memset` multiplies
+its unsigned-extended fill by the repeated 0x01 pattern. A zero
+length removes only the intrinsic. Each operation is expanded alone, never
+merged with a neighbouring one. Variable and larger lengths stay. It also
+replaces a `memcmp` of at most 32 bytes whose result is only compared with
+zero by chunked loads and compares. Balanced and Full run it before
+`stack-forward` in the inlining rounds, and the inliner charges an expandable
+copy as its loads and stores.
+
+### memory-expand
+
+`memory-expand` is `small-memory` with a 128-byte limit for `memcpy`,
+`memmove` and `memset`; the `memcmp` limit stays 32. A `memmove` longer than
+32 bytes uses 16-byte chunks, so its snapshot needs at most 11 registers.
+Fast and Basic run it before `stack-notrap`. They do not inline, so no inliner
+prices the larger copies. Balanced and Full keep `small-memory`: the 128-byte
+limit after their last inlining round gave no gain on the acceptance hosts and
+slowed x86-64 by 0.17%. Size and None run neither pass, and longer or variable
+copies call the C library.
 
 ### stack-notrap
 
@@ -479,7 +497,7 @@ implicitly. Full's reduction passes run it on a private copy to normalize
 
 ## Fast tier
 
-Fast runs `fast-cfg, fast-local, fast-cfg, stack-notrap, dce,
+Fast runs `fast-cfg, fast-local, fast-cfg, memory-expand, stack-notrap, dce,
 fast-loop-reduce`. Each CFG
 pass folds branches, forwards one jump-only edge per destination, removes
 unreachable blocks and merges straight-line chains up to 64 instructions, with

@@ -10,7 +10,7 @@ fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
             fs::write(dir.join("copy.c"), format!(
                 "void copy(char *d, char *s, unsigned long n) {{ __builtin_memcpy(d, s, {length}); }}"
             )).unwrap();
-            // keel-opt small_memory::full_expands_small_memory_before_stack_forward_only
+            // keel-opt small_memory::tiers_expand_memory_by_their_inlining
             // checks every tier and length on IR; this checks the -O driver path.
             for emit in ["--emit-ir", "asm"] {
                 let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));

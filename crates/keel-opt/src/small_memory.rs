@@ -5,11 +5,16 @@ use keel_ir::{
     Type, Value, ValueDef, VectorType,
 };
 
-const MAX_BYTES: i64 = 32;
+/// The limit inside the inlining rounds, where the inliner prices each
+/// expanded copy.
+pub(crate) const MAX_BYTES: i64 = 32;
+/// The limit in tiers that do not inline. Balanced and Full measured no
+/// gain from it.
+pub(crate) const LATE_MAX_BYTES: i64 = 128;
 
-/// The length of a memcpy, memmove or memset that [`run`] replaces with
-/// loads and stores: a constant from 0 to 32 bytes.
-pub(crate) fn expanded_length(f: &Function, inst: Inst) -> Option<u64> {
+/// The length of a memcpy, memmove or memset that [`run`] with this `limit`
+/// replaces with loads and stores: a constant from 0 to `limit` bytes.
+pub(crate) fn expanded_length(f: &Function, inst: Inst, limit: i64) -> Option<u64> {
     let InstData::Intrinsic { id, args } = f.inst_data(inst) else {
         return None;
     };
@@ -27,12 +32,14 @@ pub(crate) fn expanded_length(f: &Function, inst: Inst) -> Option<u64> {
         InstData::Iconst {
             ty: Type::I64,
             imm: size,
-        } if (0..=MAX_BYTES).contains(&size) => Some(size as u64),
+        } if (0..=limit).contains(&size) => Some(size as u64),
         _ => None,
     }
 }
 
-pub fn run(f: &mut Function) -> bool {
+/// Expands memcpy, memmove and memset of at most `limit` bytes, and memcmp
+/// equality tests of at most [`MAX_BYTES`].
+pub fn run(f: &mut Function, limit: i64) -> bool {
     // Expansion only replaces the intrinsic it visits.
     let work: Vec<_> = f
         .layout_insts()
@@ -52,32 +59,38 @@ pub fn run(f: &mut Function) -> bool {
             continue;
         }
         let (id, args) = (*id, args.clone());
-        let Some(size) = expanded_length(f, at) else {
+        let Some(size) = expanded_length(f, at, limit) else {
             continue;
         };
         let size = size as i64;
         let mut chunks = Vec::new();
         let mut offset = 0;
-        // Only builtin memcpy proves the complete source/destination ranges
-        // nonoverlapping. Use exact 16-byte chunks within that one operation;
-        // never combine neighboring copies (LZ4 uses successive 8-byte copies
-        // to propagate overlapping matches). Leave memmove's scalar snapshot
-        // and memset's fill construction unchanged.
-        if id == Intrinsic::Memcpy {
-            while offset + 16 <= size {
-                let addr = address(f, at, args[1], offset);
-                let value = emit(
-                    f,
-                    at,
-                    InstData::Load {
-                        ty: Type::Vector(VectorType::I8x16),
-                        addr,
-                        flags: MemoryFlags::default(),
-                    },
-                );
-                chunks.push((offset, value));
-                offset += 16;
-            }
+        // Each operation is expanded alone: never combine neighboring copies
+        // (LZ4 uses successive 8-byte copies to propagate overlapping
+        // matches). Within one operation, 16-byte chunks and then exact
+        // scalar chunks cover [0, size). Every source chunk is loaded before
+        // any store, so memmove holds for either overlap direction.
+        // stack-forward and stack-promote see through scalar stores only, so
+        // memset stays scalar, and memmove too while its snapshot fits in
+        // four registers.
+        let vectors = match id {
+            Intrinsic::Memcpy => true,
+            Intrinsic::Memmove => size > MAX_BYTES,
+            _ => false,
+        };
+        while vectors && offset + 16 <= size {
+            let addr = address(f, at, args[1], offset);
+            let value = emit(
+                f,
+                at,
+                InstData::Load {
+                    ty: Type::Vector(VectorType::I8x16),
+                    addr,
+                    flags: MemoryFlags::default(),
+                },
+            );
+            chunks.push((offset, value));
+            offset += 16;
         }
         for (width, ty) in [
             (8, Type::I64),
@@ -396,7 +409,7 @@ mod memcmp_tests {
         let m = candidate("v3 = iconst.i64 16", "v6 = icmp.eq v4, v5\nreturn v6");
         let mut m = keel_ir::parse(&m.to_string().replace("proven_builtin", "memcmp")).unwrap();
         let before = m.to_string();
-        assert!(!run(&mut m.functions[0]));
+        assert!(!run(&mut m.functions[0], LATE_MAX_BYTES));
         assert_eq!(m.to_string(), before);
     }
 }

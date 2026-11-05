@@ -262,7 +262,12 @@ pub(crate) static FAST_LOCAL: &dyn Pass = &fast::Local;
 pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
     "small-memory",
     "expand ordinary constant memory intrinsics of at most 32 bytes",
-    |f, _| small_memory::run(f),
+    |f, _| small_memory::run(f, small_memory::MAX_BYTES),
+);
+pub(crate) static MEMORY_EXPAND: &dyn Pass = &BuiltinPass::new(
+    "memory-expand",
+    "expand ordinary constant memory intrinsics of at most 128 bytes, for tiers without inlining",
+    |f, _| small_memory::run(f, small_memory::LATE_MAX_BYTES),
 );
 pub(crate) static STACK_NOTRAP: &dyn Pass = &BuiltinPass::new(
     "stack-notrap",
@@ -382,6 +387,7 @@ pub static PASSES: &[&dyn Pass] = &[
     FAST_CFG,
     FAST_LOCAL,
     SMALL_MEMORY,
+    MEMORY_EXPAND,
     STACK_NOTRAP,
     CONST_FOLD,
     SIMPLIFY_CFG,
@@ -574,6 +580,7 @@ impl OptimizationTier {
                 "fast-cfg",
                 "fast-local",
                 "fast-cfg",
+                "memory-expand",
                 "stack-notrap",
                 "dce",
                 "fast-loop-reduce",
@@ -584,6 +591,7 @@ impl OptimizationTier {
                 "instcombine",
                 "call-contracts",
                 "simplify-cfg",
+                "memory-expand",
                 "stack-notrap",
                 "dce",
             ],

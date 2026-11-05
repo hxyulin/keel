@@ -15,11 +15,16 @@ fn source(op: &str, length: &str) -> String {
 }
 
 fn expand(source: &str) -> Module {
+    expand_with(source, "small-memory")
+}
+
+fn expand_with(source: &str, pass: &str) -> Module {
     let mut m = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    keel_opt::run_passes(&mut m, &["small-memory"]).unwrap();
+    keel_opt::run_passes(&mut m, &[pass]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
     assert!(
-        !keel_opt::find_pass("small-memory")
+        !keel_opt::find_pass(pass)
             .unwrap()
             .run(&mut m.functions[0], &Default::default())
     );
@@ -28,42 +33,64 @@ fn expand(source: &str) -> Module {
 
 #[test]
 fn all_small_lengths_have_exact_bounded_accesses_and_snapshot_order() {
-    for op in ["memcpy", "memmove", "memset"] {
-        for size in 0..=32 {
-            let m = expand(&source(op, &size.to_string()));
-            let f = &m.functions[0];
-            let mut read = 0;
-            let mut written = 0;
-            let mut stores = 0;
-            let mut vector_loads = 0;
-            for (_, i) in f.layout_insts() {
-                match f.inst_data(i) {
-                    InstData::Load { ty, flags, .. } => {
-                        assert_eq!(stores, 0, "all loads must precede stores");
-                        assert_eq!(*flags, MemoryFlags::default());
-                        read += bytes(*ty);
-                        vector_loads += usize::from(ty.is_vector());
-                    }
-                    InstData::Store { value, flags, .. } => {
-                        assert_eq!(*flags, MemoryFlags::default());
-                        written += bytes(f.value_type(*value));
-                        stores += 1;
-                    }
-                    InstData::Intrinsic { .. } => panic!("intrinsic remains"),
-                    _ => {}
-                }
+    for (pass, limit) in [("small-memory", 32), ("memory-expand", 128)] {
+        for op in ["memcpy", "memmove", "memset"] {
+            for size in 0..=limit + 1 {
+                check_expansion(pass, op, size, limit);
             }
-            assert_eq!(vector_loads, if op == "memcpy" { size / 16 } else { 0 });
-            assert_eq!(written, size);
-            assert_eq!(read, if op == "memset" { 0 } else { size });
-            assert!(stores <= 6);
-            assert!(f.layout_insts().count() <= 50);
-            assert_eq!(
-                m.to_string(),
-                expand(&source(op, &size.to_string())).to_string()
-            );
         }
     }
+}
+
+fn check_expansion(pass: &str, op: &str, size: usize, limit: usize) {
+    let m = expand_with(&source(op, &size.to_string()), pass);
+    if size > limit {
+        assert_eq!(
+            m.to_string(),
+            keel_ir::parse(&source(op, &size.to_string()))
+                .unwrap()
+                .to_string()
+        );
+        return;
+    }
+    let f = &m.functions[0];
+    let mut read = 0;
+    let mut written = 0;
+    let mut stores = 0;
+    let mut vector_loads = 0;
+    for (_, i) in f.layout_insts() {
+        match f.inst_data(i) {
+            InstData::Load { ty, flags, .. } => {
+                assert_eq!(stores, 0, "all loads must precede stores");
+                assert_eq!(*flags, MemoryFlags::default());
+                read += bytes(*ty);
+                vector_loads += usize::from(ty.is_vector());
+            }
+            InstData::Store { value, flags, .. } => {
+                assert_eq!(*flags, MemoryFlags::default());
+                written += bytes(f.value_type(*value));
+                stores += 1;
+            }
+            InstData::Intrinsic { .. } => panic!("intrinsic remains"),
+            _ => {}
+        }
+    }
+    let vectors = op == "memcpy" || op == "memmove" && size > 32;
+    assert_eq!(vector_loads, if vectors { size / 16 } else { 0 });
+    assert_eq!(written, size);
+    assert_eq!(read, if op == "memset" { 0 } else { size });
+    let stores_expected = if vectors {
+        size / 16 + (size % 16).count_ones() as usize
+    } else {
+        size / 8 + (size % 8).count_ones() as usize
+    };
+    assert_eq!(stores, stores_expected);
+    // A chunk is a load, a store and two addresses, plus memset's fills.
+    assert!(f.layout_insts().count() <= 6 * stores + 16);
+    assert_eq!(
+        m.to_string(),
+        expand_with(&source(op, &size.to_string()), pass).to_string()
+    );
 }
 
 fn bytes(ty: Type) -> usize {
@@ -117,7 +144,7 @@ fn variable_large_negative_and_wrapping_lengths_are_unchanged() {
         for length in [
             "variable",
             "33",
-            "64",
+            "129",
             "4096",
             "9223372036854775807",
             "-1",
@@ -195,7 +222,7 @@ fn native_clang_differential() {
     let mut declarations = String::new();
     let mut checks = String::new();
     let mut guards = String::new();
-    for n in 0..=33 {
+    for n in 0..=129 {
         for (op, tag, arg) in [
             ("memcpy", "cpy", "s"),
             ("memmove", "mov", "s"),
@@ -252,18 +279,18 @@ fn native_clang_differential() {
 int zero(void);
 typedef void (*Fn)(unsigned char*,unsigned char*,int);
 static void check(Fn k, Fn r, int n, int mode) {{
- unsigned char a[192],b[192],s[192],t[192];
+ unsigned char a[512],b[512],s[512],t[512];
  int fills[]={{0,1,127,128,255,256,257,511,-1,-257}};
  for(int da=0;da<8;da++) for(int sa=0;sa<8;sa++)
  for(int fi=0;fi<10;fi++) {{
-  for(int i=0;i<192;i++) a[i]=b[i]=(unsigned char)(i*37+19),s[i]=t[i]=(unsigned char)(i*23+7);
-  k(a+64+da,s+64+sa,fills[fi]);r(b+64+da,t+64+sa,fills[fi]);
-  if(memcmp(a,b,192)||memcmp(s,t,192))abort();
+  for(int i=0;i<512;i++) a[i]=b[i]=(unsigned char)(i*37+19),s[i]=t[i]=(unsigned char)(i*23+7);
+  k(a+192+da,s+192+sa,fills[fi]);r(b+192+da,t+192+sa,fills[fi]);
+  if(memcmp(a,b,512)||memcmp(s,t,512))abort();
  }}
- if(mode==1) for(int delta=-33;delta<=33;delta++) for(int sa=0;sa<8;sa++) {{
-  for(int i=0;i<192;i++) a[i]=b[i]=(unsigned char)(i*37+19);
-  k(a+64+sa+delta,a+64+sa,0);r(b+64+sa+delta,b+64+sa,0);
-  if(memcmp(a,b,192))abort();
+ if(mode==1) for(int delta=-130;delta<=130;delta++) for(int sa=0;sa<8;sa++) {{
+  for(int i=0;i<512;i++) a[i]=b[i]=(unsigned char)(i*37+19);
+  k(a+192+sa+delta,a+192+sa,0);r(b+192+sa+delta,b+192+sa,0);
+  if(memcmp(a,b,512))abort();
  }}
  (void)n;
 }}
@@ -326,7 +353,7 @@ int main(void) {{
         "cc",
         "-O",
         "-p",
-        "canonicalize,instcombine,small-memory,dce",
+        "canonicalize,instcombine,memory-expand,dce",
         "impl.c",
         "-o",
         "impl.s",
@@ -356,7 +383,7 @@ int main(void) {{
         "cc",
         "-O",
         "-p",
-        "canonicalize,instcombine,small-memory,dce",
+        "canonicalize,instcombine,memory-expand,dce",
         "--target",
         "x86_64-unknown-linux-gnu",
         "impl.c",
@@ -364,7 +391,7 @@ int main(void) {{
         "x86.s",
     ]));
     let asm = fs::read_to_string(dir.join("impl.s")).unwrap();
-    // Keep 33-byte fallbacks elsewhere, but require the mandatory 16B route
+    // Keep 129-byte fallbacks elsewhere, but require the mandatory 16B route
     // to contain no libc call. Labels delimit the next generated function.
     let body = asm
         .split("_kcpy16:")
@@ -381,17 +408,21 @@ int main(void) {{
 }
 
 #[test]
-fn full_expands_small_memory_before_stack_forward_only() {
-    use keel_opt::{DEFAULT_PIPELINE, OptimizationTier};
+fn tiers_expand_memory_by_their_inlining() {
+    use keel_opt::{BALANCED_PIPELINE, DEFAULT_PIPELINE, OptimizationTier};
     assert_eq!(OptimizationTier::Full.pipeline(), DEFAULT_PIPELINE);
-    let positions: Vec<_> = DEFAULT_PIPELINE
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| (*p == "small-memory").then_some(i))
-        .collect();
-    assert_eq!(positions.len(), 3);
-    for at in positions {
-        assert_eq!(DEFAULT_PIPELINE[at + 1], "stack-forward");
+    assert_eq!(OptimizationTier::Balanced.pipeline(), BALANCED_PIPELINE);
+    for (pipeline, small) in [(DEFAULT_PIPELINE, 3), (BALANCED_PIPELINE, 1)] {
+        let positions: Vec<_> = pipeline
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| (*p == "small-memory").then_some(i))
+            .collect();
+        assert_eq!(positions.len(), small);
+        for at in positions {
+            assert_eq!(pipeline[at + 1], "stack-forward");
+        }
+        assert!(!pipeline.contains(&"memory-expand"));
     }
     assert!(!DEFAULT_PIPELINE.contains(&"memory-forward"));
     assert!(OptimizationTier::None.pipeline().is_empty());
@@ -403,22 +434,32 @@ fn full_expands_small_memory_before_stack_forward_only() {
             "instcombine",
             "call-contracts",
             "simplify-cfg",
+            "memory-expand",
             "stack-notrap",
             "dce",
         ]
     );
     for tier in [
         OptimizationTier::None,
+        OptimizationTier::Fast,
         OptimizationTier::Basic,
+        OptimizationTier::Balanced,
+        OptimizationTier::Size,
         OptimizationTier::Full,
     ] {
-        for length in ["16", "33", "variable"] {
+        let limit = match tier {
+            OptimizationTier::None | OptimizationTier::Size => 0,
+            OptimizationTier::Fast | OptimizationTier::Basic => 128,
+            _ => 32,
+        };
+        for length in ["16", "32", "33", "128", "129", "variable"] {
             let mut module = keel_ir::parse(&source("memcpy", length)).unwrap();
             keel_opt::optimize_with_tier(&mut module, tier).unwrap();
             let retains = module.functions[0].layout_insts().any(|(_, i)| {
                 matches!(module.functions[0].inst_data(i), InstData::Intrinsic { .. })
             });
-            assert_eq!(retains, tier != OptimizationTier::Full || length != "16");
+            let expands = length.parse::<usize>().is_ok_and(|n| n <= limit);
+            assert_eq!(retains, !expands, "{tier:?} {length}");
         }
     }
 }

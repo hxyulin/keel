@@ -13,7 +13,8 @@ fn call_free_intrinsic_cost(f: &Function, inst: Inst) -> Option<usize> {
         InstData::Intrinsic {
             id: Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp,
             ..
-        } => crate::small_memory::expanded_length(f, inst).map(byval_copy_cost),
+        } => crate::small_memory::expanded_length(f, inst, crate::small_memory::MAX_BYTES)
+            .map(byval_copy_cost),
         _ => Some(0),
     }
 }

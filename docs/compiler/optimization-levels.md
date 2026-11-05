@@ -20,7 +20,9 @@ dispatch. The exact pass lists are `OptimizationTier::pipeline`,
 `BALANCED_PIPELINE`, `SIZE_PIPELINE`, `FULL_ROUND` and `FULL_EPILOGUE` in
 `crates/keel-opt/src/lib.rs`; the [optimizer reference](optimizer.md) gives
 each pass's contract. The Basic tier, available through `--opt-tier basic`,
-runs scalar CFG and combining cleanup without inlining.
+runs scalar CFG and combining cleanup without inlining. Fast and Basic expand
+constant memory copies and fills of at most 128 bytes into loads and stores;
+Balanced and Full expand at most 32 bytes, and None and Size none.
 
 These are Keel policies, not the GCC or Clang pass lists, and more effort does
 not guarantee a faster executable. Inlining and loop expansion remove call and
