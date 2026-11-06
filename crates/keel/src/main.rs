@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
-//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
 //! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
@@ -45,7 +45,7 @@ mod x86_options;
 
 const USAGE: &str = "usage:
   keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
-  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
   keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
@@ -73,6 +73,7 @@ const USAGE: &str = "usage:
   Repeated explicit stage options use the last value.
   compile merges several inputs into one module, as a linker would combine their objects;
   --internalize then makes every other global definition local, so the optimizer sees the whole program.
+  cc -flto compiles several C files the same way: each to unoptimized IR, then merged into one output.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier.
   --opt-bisect-limit n runs only the first n pass invocations (one per function, or one per module pass);
@@ -116,6 +117,8 @@ struct Options {
     more_inputs: Vec<String>,
     /// `--internalize`: after merging, only these symbols stay global.
     internalize: Option<Vec<String>>,
+    /// `cc -flto`: compile every input C file as one module.
+    lto: bool,
     output: Option<String>,
     opt_report: Option<String>,
     codegen_report: Option<String>,
@@ -577,6 +580,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             | "-fasynchronous-unwind-tables"
             | "-fno-asynchronous-unwind-tables" => opts.unwind.set(flag),
             "-ffunction-sections" => opts.function_sections = true,
+            "-flto" => opts.lto = true,
             "-fdata-sections" => opts.data_sections = true,
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
@@ -715,7 +719,11 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             return Err(format!("{label} {report}: file already exists"));
         }
         let resolved_report = report_destination(path)?;
-        for other in [&opts.input, &opts.output].into_iter().flatten() {
+        for other in [&opts.input, &opts.output]
+            .into_iter()
+            .flatten()
+            .chain(&opts.more_inputs)
+        {
             if report_destination(std::path::Path::new(other))? == resolved_report {
                 return Err(format!("{label} path conflicts with input or output"));
             }
@@ -900,6 +908,8 @@ const COMPILE_FLAGS: &[&str] = &[
 ];
 const CC_FLAGS: &[&str] = &[
     "-o",
+    "-flto",
+    "--internalize",
     "-O",
     "-p",
     "-g",
@@ -1052,18 +1062,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 for path in &opts.more_inputs {
                     modules.push(load_path(path, opts.ir_lines)?);
                 }
-                module =
-                    keel_ir::merge_modules(modules).map_err(|e| format!("merging inputs: {e}"))?;
-                if let Some(keep) = &opts.internalize {
-                    keel_ir::internalize(&mut module, |name| keep.iter().any(|k| k == name));
-                }
-                if let Err(errors) = keel_ir::verify_module(&module) {
-                    let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
-                    return Err(format!(
-                        "merged module: verifier errors:\n{}",
-                        lines.join("\n")
-                    ));
-                }
+                module = merge_inputs(&opts, modules)?;
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
@@ -1076,71 +1075,44 @@ fn run(args: Vec<String>) -> Result<(), String> {
             {
                 return Err("C function binding modes require a native target".into());
             }
+            if let Some(extra) = opts.more_inputs.first().filter(|_| !opts.lto) {
+                return Err(format!(
+                    "unexpected argument `{extra}`: compiling several files at once needs `-flto`"
+                ));
+            }
+            if opts.internalize.is_some() && !opts.lto {
+                return Err("`--internalize` needs `-flto`".into());
+            }
+            if opts.lto
+                && (opts.emit_wasm
+                    || opts.preprocess_only
+                    || opts.target == Some(Target::Wasm32UnknownUnknown))
+            {
+                return Err(
+                    "`-flto` compiles native code; it does not preprocess or emit Wasm".into(),
+                );
+            }
             if opts.emit_wasm {
                 return wasm::compile_c(&opts);
             }
             let input = opts.input.clone().ok_or(USAGE)?;
-            let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
-            let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-            let target = opts.target()?;
             if opts.preprocess_only && (opts.emit_ir || opts.emit_object) {
                 return Err("preprocessing (`-E`/`-dM`) and `--emit-ir`/`--emit-object` cannot be used together".into());
             }
-            let preprocessed = if opts.preprocess_only || !input.ends_with(".i") {
-                profiling::scope!("c-preprocessing");
-                Some(
-                    keel_c::preprocess(
-                        text,
-                        &input,
-                        &keel_c::PreprocessOptions {
-                            include_dirs: opts.include_dirs.clone(),
-                            system_include_dirs: opts.system_include_dirs.clone(),
-                            sysroot: opts.preprocessing_sysroot(target)?,
-                            darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
-                                (target == Target::Aarch64AppleDarwin)
-                                    .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
-                                    .flatten()
-                            }),
-                            defines: opts.preprocessing_defines(),
-                            target,
-                            x86_baseline: Some(opts.x86_features),
-                            dump_macros: opts.dump_macros,
-                        },
-                    )
-                    .map_err(|e| e.to_string())?,
-                )
-            } else {
-                None
-            };
             if opts.preprocess_only {
+                let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
+                let text = src.text().map_err(|e| format!("{input}: {e}"))?;
+                let preprocessed = preprocess_c(&opts, &input, text)?;
                 drop(src);
-                return write_output(&opts, &preprocessed.unwrap());
+                return write_output(&opts, &preprocessed);
             }
-            let c_opts = keel_c::Options {
-                debug_info: opts.ir_lines,
-                target,
-                // Code generation rejects the same calls without a C location.
-                x86_features: (!opts.optimizes()).then_some(opts.x86_features),
-                x86_baseline: Some(opts.x86_features),
-            };
-            let mut module = {
-                profiling::scope!("c-frontend");
-                keel_c::compile_with_policies(
-                    preprocessed.as_deref().unwrap_or(text),
-                    &input,
-                    c_opts,
-                    opts.c_function_binding(),
-                    opts.library_builtins(),
-                )
-                .map_err(|e| e.to_string())?
-            };
-            drop(src);
-            if let Err(errors) = keel_ir::verify_module(&module) {
-                let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
-                return Err(format!(
-                    "{input}: internal error, invalid IR:\n{}",
-                    lines.join("\n")
-                ));
+            let mut module = c_module(&opts, &input)?;
+            if opts.lto {
+                let mut modules = vec![module];
+                for path in &opts.more_inputs {
+                    modules.push(c_module(&opts, path)?);
+                }
+                module = merge_inputs(&opts, modules)?;
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
@@ -1266,6 +1238,87 @@ fn with_codegen_report<T>(
         &codegen_report_json(target, &report),
     )?;
     Ok(result)
+}
+
+/// Preprocesses one C file.
+fn preprocess_c(opts: &Options, input: &str, text: &str) -> Result<String, String> {
+    profiling::scope!("c-preprocessing");
+    let target = opts.target()?;
+    keel_c::preprocess(
+        text,
+        input,
+        &keel_c::PreprocessOptions {
+            include_dirs: opts.include_dirs.clone(),
+            system_include_dirs: opts.system_include_dirs.clone(),
+            sysroot: opts.preprocessing_sysroot(target)?,
+            darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
+                (target == Target::Aarch64AppleDarwin)
+                    .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
+                    .flatten()
+            }),
+            defines: opts.preprocessing_defines(),
+            target,
+            x86_baseline: Some(opts.x86_features),
+            dump_macros: opts.dump_macros,
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Preprocesses one C file unless it is a `.i` file, compiles it to IR and
+/// verifies the result. The source is released before it returns.
+fn c_module(opts: &Options, input: &str) -> Result<Module, String> {
+    let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
+    let text = src.text().map_err(|e| format!("{input}: {e}"))?;
+    let preprocessed = if input.ends_with(".i") {
+        None
+    } else {
+        Some(preprocess_c(opts, input, text)?)
+    };
+    let c_opts = keel_c::Options {
+        debug_info: opts.ir_lines,
+        target: opts.target()?,
+        // Code generation rejects the same calls without a C location.
+        x86_features: (!opts.optimizes()).then_some(opts.x86_features),
+        x86_baseline: Some(opts.x86_features),
+    };
+    let module = {
+        profiling::scope!("c-frontend");
+        keel_c::compile_with_policies(
+            preprocessed.as_deref().unwrap_or(text),
+            input,
+            c_opts,
+            opts.c_function_binding(),
+            opts.library_builtins(),
+        )
+        .map_err(|e| e.to_string())?
+    };
+    drop(src);
+    if let Err(errors) = keel_ir::verify_module(&module) {
+        let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+        return Err(format!(
+            "{input}: internal error, invalid IR:\n{}",
+            lines.join("\n")
+        ));
+    }
+    Ok(module)
+}
+
+/// Merges `modules` into one, internalizes it as `--internalize` asks, and
+/// verifies the result.
+fn merge_inputs(opts: &Options, modules: Vec<Module>) -> Result<Module, String> {
+    let mut module = keel_ir::merge_modules(modules).map_err(|e| format!("merging inputs: {e}"))?;
+    if let Some(keep) = &opts.internalize {
+        keel_ir::internalize(&mut module, |name| keep.iter().any(|k| k == name));
+    }
+    if let Err(errors) = keel_ir::verify_module(&module) {
+        let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+        return Err(format!(
+            "merged module: verifier errors:\n{}",
+            lines.join("\n")
+        ));
+    }
+    Ok(module)
 }
 
 /// Reads, parses and verifies the input.

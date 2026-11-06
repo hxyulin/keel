@@ -196,10 +196,40 @@ fn compile_merges_units_and_inlines_across_them() {
                 &asm,
             ],
         );
+        let lto = [
+            "cc",
+            "--target",
+            target,
+            "-O",
+            "-flto",
+            "--internalize",
+            "main",
+        ];
+        let from_c = keel(&dir, &[&lto[..], &["a.c", "b.c"]].concat());
         // `twice` became local, was inlined into `main` and then removed.
-        let whole = fs::read_to_string(dir.join(&asm)).unwrap();
-        assert!(!whole.contains("twice"), "{whole}");
-        assert!(whole.contains("main"), "{whole}");
+        for whole in [fs::read_to_string(dir.join(&asm)).unwrap(), from_c] {
+            assert!(!whole.contains("twice"), "{whole}");
+            assert!(whole.contains("main"), "{whole}");
+        }
+    }
+    for (args, error) in [
+        (&["cc", "a.c", "b.c"][..], "needs `-flto`"),
+        (
+            &["cc", "--internalize", "main", "a.c"],
+            "`--internalize` needs `-flto`",
+        ),
+        (&["cc", "-flto", "-E", "a.c", "b.c"], "does not preprocess"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains(error),
+            "{args:?}: {stderr}"
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -243,5 +273,20 @@ fn merged_units_keep_their_own_static_helpers_natively() {
         );
         command(&mut Command::new(dir.join("whole")));
     }
+    let lto = [
+        "cc",
+        "-O",
+        "-flto",
+        "--internalize",
+        "main",
+        "--emit-object",
+    ];
+    keel(&dir, &[&lto[..], &["a.c", "b.c", "-o", "lto.o"]].concat());
+    command(
+        Command::new("clang")
+            .current_dir(&dir)
+            .args(["lto.o", "-o", "lto"]),
+    );
+    command(&mut Command::new(dir.join("lto")));
     fs::remove_dir_all(dir).unwrap();
 }

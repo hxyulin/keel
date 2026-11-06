@@ -20,8 +20,8 @@ too.
 
 | Command | Input | Output |
 | --- | --- | --- |
-| `keel cc` | `.c`, `.i` | assembly, object (`--emit-object`), IR (`--emit-ir`), preprocessed text (`-E`) |
-| `keel compile` | `.keel` IR | assembly or object |
+| `keel cc` | `.c`, `.i`; several with `-flto` | assembly, object (`--emit-object`), IR (`--emit-ir`), preprocessed text (`-E`) |
+| `keel compile` | `.keel` IR, one or several | assembly or object |
 | `keel opt` | `.keel` IR | optimized IR |
 | `keel passes` | | list of optimizer passes |
 | `keel asm` | `.s` | object file(s) |
@@ -43,6 +43,7 @@ keel cc --emit-ir hello.c                      # print Keel IR
 keel cc -E -Iinclude -DDEBUG=1 hello.c -o hello.i
 keel cc -E -dM hello.c                         # dump the final macro set
 keel cc hello.i -o hello.s                     # .i skips preprocessing
+keel cc -O -flto --internalize main a.c b.c -o prog.s  # one program
 ```
 
 Keel has its own preprocessor. It derives predefined macros from the target
@@ -51,6 +52,7 @@ ABI, answers feature queries itself and embeds its compiler headers
 `stdalign.h`, `stdnoreturn.h`, `stdatomic.h`). It defines `__KEEL__` along
 with GCC/Clang compatibility macros such as `__GNUC__` and `__clang__`.
 libc headers (`stdio.h`, `stdlib.h`, ...) come from the target SDK or sysroot.
+`-flto` is described under [whole-program compilation](#whole-program-compilation).
 
 | Flag | Meaning |
 | --- | --- |
@@ -127,11 +129,21 @@ keel cc -O --codegen-report spills.json --emit-object input.c -o input.o
 
 ### Whole-program compilation
 
-`keel compile` with several IR inputs merges them into one module before it
-optimizes, the way a linker combines objects. `--internalize main` then makes
-every other global definition local, so the inliner, the module cleanup passes
-and [internal fast calls](compiler/optimizer.md#internal-fast-calls) see the
-whole program. Give each unit to it unoptimized:
+`keel cc -flto` takes several C files, compiles each to unoptimized IR, and
+merges them into one module before it optimizes, the way a linker combines
+objects. `--internalize main` then makes every other global definition local,
+so the inliner, the module cleanup passes and
+[internal fast calls](compiler/optimizer.md#internal-fast-calls) see the whole
+program. The result is one assembly, object or IR file, linked as usual:
+
+```sh
+keel cc -O -flto --internalize main --emit-object a.c b.c -o prog.o
+clang prog.o -o prog
+```
+
+Without `--internalize`, every global definition stays global, so objects
+compiled separately can still use them. `-flto` does not preprocess only and
+does not emit Wasm. `keel compile` merges several IR inputs the same way:
 
 ```sh
 keel cc --opt-tier none --emit-ir a.c -o a.keel
