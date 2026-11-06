@@ -420,12 +420,15 @@ impl Covers {
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
-        let fused_compares = if present.compare && present.brif && compare_branch {
+        let mut fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
             selection.fuse_compares(func, |data| folds(func, data), uses)
         } else {
             HashSet::default()
         };
+        if present.atomic_cas && present.brif && compare_branch {
+            fused_compares.extend(selection.fuse_cas_branches(func, uses));
+        }
         if present.select && select_compare {
             selection.fuse_x86_selects(func, |data| folds(func, data), uses, present.inline_asm);
         }

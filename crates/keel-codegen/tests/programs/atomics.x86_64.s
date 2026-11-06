@@ -1648,9 +1648,6 @@
 	.cfi_offset 6, -16
 	mov	rbp, rsp
 	.cfi_def_cfa_register 6
-	push	rbx
-	.cfi_offset 3, -24
-	sub	rsp, 8
 	mov	rsi, rdi
 .Lk_lock_flag_block0:
 	# v1 = iconst.i32 0
@@ -1662,16 +1659,12 @@
 	# v3, v4 = atomic_cas weak acquire relaxed v0, v1, v2
 	mov	rax, rdi
 	lock cmpxchg	dword ptr [rsi], r8d
-	sete	cl
 	mov	r9, rax
-	mov	rbx, rcx
 	# brif v4, block2, block1
-	test	bl, bl
-	je	".Lk_lock_flag_block1"
+	jne	".Lk_lock_flag_block1"
 .Lk_lock_flag_block2:
 	# return
-	lea	rsp, [rbp + -8]
-	pop	rbx
+	mov	rsp, rbp
 	pop	rbp
 	ret
 .Lk_lock_flag_end:

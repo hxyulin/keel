@@ -212,16 +212,21 @@ impl FunctionCompiler<'_> {
                     ty,
                     [rs.into(), rt.into(), Address::base(Reg::x(a)).into()],
                 );
-                // An unused flag has no location (`omit_unused_cas_flags`).
-                let flag = self.defined(self.func.inst_results(inst)[1]);
+                // An unused or fused flag has no location. A fused one
+                // leaves the compare's flags for the next `brif`.
+                let flag = self.func.inst_results(inst)[1];
+                let fused = self.fused_compares.contains(&flag);
+                let flag = self.defined(flag);
                 // The flag compares before the old value moves out, which
                 // may overwrite the expected value's register. `cas` zero
                 // extends a narrow old value; the expected value's upper
                 // bits are unspecified.
-                if flag.is_some() {
+                if flag.is_some() || fused {
                     let expected = self.use_reg(args[1], S1);
                     let expected = self.extend(S0, expected, ty, false);
                     self.mach("cmp", [reg(S2, ty).into(), reg(expected, ty).into()]);
+                }
+                if flag.is_some() {
                     self.mach("cset", [Reg::w(S0).into(), "eq".into()]);
                 }
                 if let Some(loc) = result.and_then(|r| self.defined(r)) {

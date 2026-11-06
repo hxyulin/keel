@@ -89,7 +89,8 @@ impl InstKinds {
     }
 }
 
-/// The flags of compare-and-swaps that nothing uses, given `facts`.
+/// The flags of compare-and-swaps that nothing uses, given `facts`. They
+/// get no location: a lowering computes a flag only when it has one.
 pub(crate) fn unused_cas_flags(facts: &FunctionFacts<'_>) -> FxHashSet<Value> {
     if !facts.kinds.atomic_cas {
         return FxHashSet::default();

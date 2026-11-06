@@ -101,7 +101,8 @@ impl FunctionCompiler<'_> {
                 );
                 // ZF is set when it stored. The address is dead now, so the
                 // flag takes its scratch register.
-                // An unused flag has no location (`omit_unused_cas_flags`).
+                // An unused or fused flag has no location; a fused one
+                // leaves ZF for the next `brif`.
                 let flag = self.defined(self.func.inst_results(inst)[1]);
                 if flag.is_some() {
                     self.emit(Opcode::Setcc(condition("e")), [asm_arg(r8(S1))]);

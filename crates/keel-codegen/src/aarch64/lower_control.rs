@@ -127,6 +127,13 @@ impl FunctionCompiler<'_> {
                 // Take the same false edge, with the same landing pads and
                 // edge copies, whether testing a register or a comparison.
                 let test = match func.value_def(func.resolve(cond)) {
+                    // A fused compare-and-swap left eq when it stored.
+                    ValueDef::Result(cas, _)
+                        if self.fused_compares.contains(&func.resolve(cond))
+                            && matches!(func.inst_data(cas), InstData::AtomicCas { .. }) =>
+                    {
+                        BrifTest::Flags("ne")
+                    }
                     ValueDef::Result(compare, _)
                         if self.fused_compares.contains(&func.resolve(cond)) =>
                     {

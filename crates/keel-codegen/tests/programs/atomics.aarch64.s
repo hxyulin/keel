@@ -1319,7 +1319,7 @@ Lk_lock_end:
 	.p2align	2
 _k_lock_flag:
 Lk_lock_flag_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -1338,12 +1338,9 @@ Lk_lock_flag_block1:
 	mov	x8, x10
 	casa	w8, w11, [x9]
 	cmp	w8, w10
-	cset	w16, eq
 	mov	x12, x8
-	mov	x13, x16
 	; brif v4, block2, block1
-	tst	w13, #255
-	b.eq	Lk_lock_flag_block1
+	b.ne	Lk_lock_flag_block1
 Lk_lock_flag_block2:
 	; return
 	ldp	x29, x30, [sp], #16

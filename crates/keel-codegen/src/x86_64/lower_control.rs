@@ -57,6 +57,13 @@ impl FunctionCompiler<'_> {
                 // To the else-branch when the condition is zero, or when a
                 // fused compare's condition does not hold.
                 let not = match func.value_def(func.resolve(cond)) {
+                    // A fused compare-and-swap left ZF set when it stored.
+                    ValueDef::Result(cas, _)
+                        if self.fused_compares.contains(&func.resolve(cond))
+                            && matches!(func.inst_data(cas), InstData::AtomicCas { .. }) =>
+                    {
+                        "ne"
+                    }
                     ValueDef::Result(compare, _)
                         if self.fused_compares.contains(&func.resolve(cond)) =>
                     {

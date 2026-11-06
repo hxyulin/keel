@@ -126,7 +126,7 @@ counts the roots each one claimed.
 | `zero-test` | selection | Zero test of an extended compare reuses the compare |
 | `aarch64-ubfx` | selection | Shifted low-bit mask as UBFX |
 | `aarch64-multiply-shift` | selection | Multiply by a tuned constant as shift and add (see [M5 tuning](#apple-m5-tuning)) |
-| `compare-branch` | backend | Single-use compare re-emitted at its branch |
+| `compare-branch` | backend | Single-use compare re-emitted at its branch; a compare-and-swap flag used only by the next `brif` becomes a branch on the flags the `cas` compare or the LL/SC loop leaves |
 | `aarch64-select-compare` | backend | Single-use integer compare delayed to its select |
 | `aarch64-abs`, `packed-abs` | backend | Scalar CMP and CSNEG; packed absolute value |
 | `aarch64-abs-diff` | backend | Widened absolute difference accumulated as SABAL |

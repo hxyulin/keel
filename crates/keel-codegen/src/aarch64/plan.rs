@@ -523,7 +523,7 @@ impl Covers {
         } else {
             HashMap::default()
         };
-        let fused_compares = if present.compare && present.brif && compare_branch {
+        let mut fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(
                 func,
@@ -533,6 +533,9 @@ impl Covers {
         } else {
             HashSet::default()
         };
+        if present.atomic_cas && present.brif && compare_branch {
+            fused_compares.extend(selection.fuse_cas_branches(func, uses));
+        }
         let calls = present.call && !leaf_summaries.is_empty();
         for (_, inst) in func.layout_insts().filter(|_| calls) {
             if let InstData::Call { func: callee, .. } = func.inst_data(inst) {

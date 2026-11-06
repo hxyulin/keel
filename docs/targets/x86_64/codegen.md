@@ -296,7 +296,9 @@ default), Trees and Full; selection-stage covers also need tree selection. See
 [covers](../../compiler/design.md#covers) for the registry and `--isel`
 toggles. `--isel all,-<name>` drops one, and `--codegen-report` counts the
 roots each one claimed. x86 runs the shared covers `offset-address`,
-`indexed-address`, `zero-test`, `compare-branch` and `packed-abs`, and these:
+`indexed-address`, `zero-test`, `compare-branch` and `packed-abs`, and these.
+On x86, `compare-branch` also turns a compare-and-swap flag used only by the
+next `brif` into a `jne` on the ZF that `lock cmpxchg` leaves.
 
 | Cover | Stage | Pattern |
 |---|---|---|

@@ -1655,12 +1655,9 @@
 	# v3, v4 = atomic_cas weak acquire relaxed v0, v1, v2
 	mov	rax, r8
 	lock cmpxchg	dword ptr [rsi], edi
-	sete	cl
 	mov	rdi, rax
-	mov	r8, rcx
 	# brif v4, block2, block1
-	test	r8b, r8b
-	je	".Lk_lock_flag_block1"
+	jne	".Lk_lock_flag_block1"
 .Lk_lock_flag_block2:
 	# return
 	mov	rsp, rbp

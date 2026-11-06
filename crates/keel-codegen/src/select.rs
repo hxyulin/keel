@@ -612,6 +612,44 @@ impl Selection {
         fused
     }
 
+    /// A compare-and-swap's flag whose only use is the `brif` right after
+    /// it: the branch tests the flags the compare-and-swap leaves, eq when
+    /// it stored, and the flag gets no register. Allocator moves between the
+    /// two keep the flags, as for a fused compare. `uses` are
+    /// `crate::fold::use_counts` of `func`.
+    pub(crate) fn fuse_cas_branches(&mut self, func: &Function, uses: &[u8]) -> HashSet<Value> {
+        let mut fused = HashSet::default();
+        for block in func.blocks() {
+            for pair in func.block_insts(block).windows(2) {
+                let (cas, branch) = (pair[0], pair[1]);
+                let (InstData::AtomicCas { .. }, &InstData::Brif { cond, .. }) =
+                    (func.inst_data(cas), func.inst_data(branch))
+                else {
+                    continue;
+                };
+                let flag = func.inst_results(cas)[1];
+                if func.resolve(cond) != flag
+                    || uses[flag.index()] != 1
+                    || self.covered(cas)
+                    || self.covered(branch)
+                    || self.has_constraint(branch)
+                {
+                    continue;
+                }
+                let mut args = self.operands(func, branch);
+                let Some(i) = args.iter().position(|&v| v == flag) else {
+                    continue;
+                };
+                args.remove(i);
+                self.claim(Cover::CompareBranch, branch);
+                self.set_operands(branch, args);
+                self.omitted_defs.insert(flag);
+                fused.insert(flag);
+            }
+        }
+        fused
+    }
+
     /// Choose only measured same-block scalar multiply alternatives.
     pub(crate) fn tune_multiplications(&mut self, func: &Function, cpu: crate::tuning::TuningCpu) {
         for (_, inst) in func.layout_insts() {
