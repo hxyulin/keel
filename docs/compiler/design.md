@@ -257,13 +257,18 @@ they do not wrap at 65,536 entries.
 - **Atomics** follow the C11/C++11 memory model, with the ordering written
   after the opcode: `atomic_load.i32 acquire v0`, `atomic_store release v1,
   v0`, `atomic_rmw.add seq_cst v0, v1` (also `sub and or xor xchg umin umax
-  smin smax`; each gives the old value), `atomic_cas acq_rel v0, v1, v2`
-  (gives the old value; the frontend compares it with the expected one) and
-  `fence acquire`. Types are integers up to `i64`, and `ptr` for loads,
-  stores, `xchg` and `cas`; memory must be naturally aligned. A load cannot
-  be `release`, a store cannot be `acquire`, and a fence cannot be
-  `relaxed`. `cas` has one ordering for success and failure, the stronger
-  of C11's pair.
+  smin smax`; each gives the old value), `v3, v4 = atomic_cas acq_rel
+  acquire v0, v1, v2` and `fence acquire`. Types are integers up to `i64`,
+  and `ptr` for loads, stores, `xchg` and `cas`; memory must be naturally
+  aligned. A load cannot be `release`, a store cannot be `acquire`, and a
+  fence cannot be `relaxed`.
+- **Compare and swap** gives the old value and an `i8` flag, 1 if it
+  stored. It takes a success ordering, then a failure ordering. The failure
+  ordering cannot be `release` or `acq_rel`, because a failed one stores
+  nothing. It may be stronger than the success ordering, as in C++17 and
+  LLVM. `atomic_cas weak` may fail while memory holds the expected value; it
+  never stores when the values differ. A lowering computes the flag only
+  when something uses it.
 
 ## Modules and calls
 

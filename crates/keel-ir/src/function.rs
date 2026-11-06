@@ -880,9 +880,7 @@ impl Function {
             | InstData::AtomicLoad { ty, .. }
             | InstData::VaArg { ty, .. } => visit(*ty),
             InstData::AtomicRmw { args, .. } => visit(self.value_type(args[1])),
-            InstData::AtomicCas { args, .. } | InstData::Select { args } => {
-                visit(self.value_type(args[1]))
-            }
+            InstData::Select { args } => visit(self.value_type(args[1])),
             InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::AggregateVaArg { .. } => visit(Type::Ptr),
@@ -912,6 +910,10 @@ impl Function {
             InstData::Fma { args } => visit(self.value_type(args[0])),
             InstData::Overflow { args, .. } => {
                 visit(self.value_type(args[0]));
+                visit(Type::I8);
+            }
+            InstData::AtomicCas { args, .. } => {
+                visit(self.value_type(args[1]));
                 visit(Type::I8);
             }
             InstData::Icmp { .. } | InstData::Fcmp { .. } => visit(Type::I8),
@@ -2160,9 +2162,15 @@ impl Function {
             } => {
                 write!(f, "atomic_rmw.{op} {ordering} {}, {}", v(a[0]), v(a[1]))
             }
-            InstData::AtomicCas { ordering, args: a } => write!(
+            InstData::AtomicCas {
+                success,
+                failure,
+                weak,
+                args: a,
+            } => write!(
                 f,
-                "atomic_cas {ordering} {}, {}, {}",
+                "atomic_cas {}{success} {failure} {}, {}, {}",
+                if *weak { "weak " } else { "" },
                 v(a[0]),
                 v(a[1]),
                 v(a[2])

@@ -219,7 +219,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     let old = self
                         .b
                         .ins()
-                        .atomic_cas(ordering, vals[0], expected, desired);
+                        .atomic_cas(ordering, ordering.cas_failure(), vals[0], expected, desired)
+                        .0;
                     return Ok(Some(self.atomic_expected(
                         old,
                         expected,
@@ -266,7 +267,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             let found = self
                 .b
                 .ins()
-                .atomic_cas(Ordering::SeqCst, vals[0], expected, desired);
+                .atomic_cas(
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                    vals[0],
+                    expected,
+                    desired,
+                )
+                .0;
             let success = self.b.ins().icmp(IntCC::Eq, found, expected);
             self.b.ins().brif(success, done, &[], retry, &[found]);
             self.b.seal_block(retry);
@@ -564,7 +572,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         self.b.ins().binary(bin, old, vals[1])
                     }
                     Builtin::AtomicCas => {
-                        let v = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
+                        let v = ins
+                            .atomic_cas(ordering, ordering.cas_failure(), vals[0], vals[1], vals[2])
+                            .0;
                         if float {
                             self.b.ins().convert(
                                 ConvertOp::Bitcast,
@@ -576,7 +586,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         }
                     }
                     Builtin::AtomicCasBool => {
-                        let old = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
+                        let old = ins
+                            .atomic_cas(ordering, ordering.cas_failure(), vals[0], vals[1], vals[2])
+                            .0;
                         self.b.ins().icmp(IntCC::Eq, old, vals[1])
                     }
                     Builtin::AtomicCompareExchange => {
@@ -596,7 +608,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         let old = self
                             .b
                             .ins()
-                            .atomic_cas(ordering, vals[0], expected, vals[2]);
+                            .atomic_cas(
+                                ordering,
+                                ordering.cas_failure(),
+                                vals[0],
+                                expected,
+                                vals[2],
+                            )
+                            .0;
                         self.atomic_expected(old, expected, vals[1], flags)
                     }
                     _ => {

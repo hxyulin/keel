@@ -4,9 +4,11 @@ block0(v0: ptr, v1: i32, v2: i64, v3: f64):
     atomic_store acq_rel v1, v0
     v5 = atomic_rmw.add seq_cst v0, v3
     v6 = atomic_rmw.add seq_cst v0, v0
-    v7 = atomic_cas seq_cst v0, v1, v2
+    v7, v10 = atomic_cas seq_cst seq_cst v0, v1, v2
     v8 = atomic_load.i128 seq_cst v0
     v9 = atomic_rmw.or relaxed v1, v1
+    v11, v12 = atomic_cas acq_rel release v0, v1, v1
+    v13, v14 = atomic_cas seq_cst acq_rel v0, v1, v1
     fence relaxed
     return
 }

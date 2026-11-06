@@ -155,9 +155,14 @@ pub enum InstData {
         args: [Value; 2],
     },
     /// Compare and swap: if the memory at `args[0]` holds `args[1]`,
-    /// replaces it with `args[2]`. Gives the old value either way.
+    /// replaces it with `args[2]`. Gives the old value and an `i8` flag, 1 if
+    /// it stored. `success` orders the access when it stores and `failure`
+    /// when it does not. A weak one may fail while the memory holds
+    /// `args[1]`.
     AtomicCas {
-        ordering: Ordering,
+        success: Ordering,
+        failure: Ordering,
+        weak: bool,
         args: [Value; 3],
     },
     Fence {
@@ -408,8 +413,15 @@ const _: () = {
                 copy(ordering);
                 copy(args);
             }
-            InstData::AtomicCas { ordering, args } => {
-                copy(ordering);
+            InstData::AtomicCas {
+                success,
+                failure,
+                weak,
+                args,
+            } => {
+                copy(success);
+                copy(failure);
+                copy(weak);
                 copy(args);
             }
             InstData::Fence { ordering } => {
@@ -649,6 +661,36 @@ pub enum Ordering {
     Release,
     AcqRel,
     SeqCst,
+}
+
+impl Ordering {
+    /// One ordering for a compare-and-swap's two: the weakest that is at
+    /// least as strong as either, as LLVM merges them. A lowering whose
+    /// failure path runs only the load uses this for both paths.
+    pub fn merge(success: Ordering, failure: Ordering) -> Ordering {
+        use Ordering::*;
+        if success == SeqCst || failure == SeqCst {
+            return SeqCst;
+        }
+        let acquires = matches!(success, Acquire | AcqRel) || failure == Acquire;
+        let releases = matches!(success, Release | AcqRel);
+        match (acquires, releases) {
+            (true, true) => AcqRel,
+            (true, false) => Acquire,
+            (false, true) => Release,
+            (false, false) => Relaxed,
+        }
+    }
+
+    /// The strongest failure ordering C allows with this success ordering:
+    /// the success ordering without its release half.
+    pub fn cas_failure(self) -> Ordering {
+        match self {
+            Ordering::Release => Ordering::Relaxed,
+            Ordering::AcqRel => Ordering::Acquire,
+            other => other,
+        }
+    }
 }
 
 /// The operation of an `atomic_rmw`.

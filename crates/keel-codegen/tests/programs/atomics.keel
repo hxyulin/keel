@@ -67,7 +67,7 @@ block0(v0: ptr, v1: i8):
 
 func @k_cas_i8(ptr, i8 uext, i8 uext) -> i8 uext cc(c) {
 block0(v0: ptr, v1: i8, v2: i8):
-    v3 = atomic_cas relaxed v0, v1, v2
+    v3, ok = atomic_cas relaxed relaxed v0, v1, v2
     return v3
 }
 
@@ -143,7 +143,7 @@ block0(v0: ptr, v1: i16):
 
 func @k_cas_i16(ptr, i16 uext, i16 uext) -> i16 uext cc(c) {
 block0(v0: ptr, v1: i16, v2: i16):
-    v3 = atomic_cas release v0, v1, v2
+    v3, ok = atomic_cas release relaxed v0, v1, v2
     return v3
 }
 
@@ -219,7 +219,7 @@ block0(v0: ptr, v1: i32):
 
 func @k_cas_i32(ptr, i32, i32) -> i32 cc(c) {
 block0(v0: ptr, v1: i32, v2: i32):
-    v3 = atomic_cas seq_cst v0, v1, v2
+    v3, ok = atomic_cas seq_cst seq_cst v0, v1, v2
     return v3
 }
 
@@ -295,7 +295,7 @@ block0(v0: ptr, v1: i64):
 
 func @k_cas_i64(ptr, i64, i64) -> i64 cc(c) {
 block0(v0: ptr, v1: i64, v2: i64):
-    v3 = atomic_cas acquire v0, v1, v2
+    v3, ok = atomic_cas acquire acquire v0, v1, v2
     return v3
 }
 
@@ -313,7 +313,7 @@ func @k_xchg_ptr(ptr, ptr) -> ptr cc(c) {
 block0(v0: ptr, v1: ptr):
     v2 = atomic_rmw.xchg seq_cst v0, v1
     v3 = atomic_load.ptr acquire v0
-    v4 = atomic_cas acq_rel v0, v3, v2
+    v4, ok = atomic_cas acq_rel acquire v0, v3, v2
     return v4
 }
 
@@ -341,11 +341,65 @@ block0(v0: ptr):
     v2 = iconst.i32 1
     jump block1
 block1:
-    v3 = atomic_cas acquire v0, v1, v2
+    v3, ok = atomic_cas acquire acquire v0, v1, v2
     v4 = icmp.eq v3, v1
     brif v4, block2, block1
 block2:
     return
+}
+
+; Spins on a weak compare-and-swap's flag.
+func @k_lock_flag(ptr) cc(c) {
+block0(v0: ptr):
+    v1 = iconst.i32 0
+    v2 = iconst.i32 1
+    jump block1
+block1:
+    v3, ok = atomic_cas weak acquire relaxed v0, v1, v2
+    brif ok, block2, block1
+block2:
+    return
+}
+
+; The flag of each width, with the old value stored through the last
+; argument. A narrow expected value is truncated from an i32, so its upper
+; bits are not zero. The orderings include pairs only C++17 allows, with a
+; failure ordering stronger than the success one.
+func @k_cas_flag_i8(ptr, i32, i8 uext, ptr) -> i8 uext cc(c) {
+block0(v0: ptr, v1: i32, v2: i8, v3: ptr):
+    v4 = trunc.i8 v1
+    v5, v6 = atomic_cas acquire relaxed v0, v4, v2
+    store v5, v3
+    return v6
+}
+
+func @k_cas_flag_i16(ptr, i32, i16 uext, ptr) -> i8 uext cc(c) {
+block0(v0: ptr, v1: i32, v2: i16, v3: ptr):
+    v4 = trunc.i16 v1
+    v5, v6 = atomic_cas weak release acquire v0, v4, v2
+    store v5, v3
+    return v6
+}
+
+func @k_cas_flag_i32(ptr, i32, i32, ptr) -> i8 uext cc(c) {
+block0(v0: ptr, v1: i32, v2: i32, v3: ptr):
+    v5, v6 = atomic_cas relaxed seq_cst v0, v1, v2
+    store v5, v3
+    return v6
+}
+
+func @k_cas_flag_i64(ptr, i64, i64, ptr) -> i8 uext cc(c) {
+block0(v0: ptr, v1: i64, v2: i64, v3: ptr):
+    v5, v6 = atomic_cas weak acq_rel acquire v0, v1, v2
+    store v5, v3
+    return v6
+}
+
+func @k_cas_flag_ptr(ptr, ptr, ptr, ptr) -> i8 uext cc(c) {
+block0(v0: ptr, v1: ptr, v2: ptr, v3: ptr):
+    v5, v6 = atomic_cas seq_cst seq_cst v0, v1, v2
+    store v5, v3
+    return v6
 }
 
 func @k_unlock(ptr) cc(c) {

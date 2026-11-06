@@ -192,6 +192,8 @@ parse, but values are errors. On x86-64 Linux `__float128` and
   read-modify-writes, all seq_cst. GCC's `__atomic_*` and `__sync_*` and
   Clang's `__c11_atomic_*` builtins become IR atomic instructions;
   `compare_exchange` stores the old value back to `*expected` only on failure.
+  It passes the success ordering, with the strongest failure ordering C
+  allows for it, and lowers the weak form as strong.
   Float and double operations use integer representations and CAS loops.
   Generic buffer operations support naturally aligned 1, 2, 4 and 8-byte
   objects. Atomic pointer `++` and `--` scale by the pointee size; pointer

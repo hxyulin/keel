@@ -339,7 +339,7 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Lk_cas_i8_block0:
-	# v3 = atomic_cas relaxed v0, v1, v2
+	# v3, v4 = atomic_cas relaxed relaxed v0, v1, v2
 	mov	rax, rdi
 	lock cmpxchg	byte ptr [rsi], r8b
 	mov	rsi, rax
@@ -725,7 +725,7 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Lk_cas_i16_block0:
-	# v3 = atomic_cas release v0, v1, v2
+	# v3, v4 = atomic_cas release relaxed v0, v1, v2
 	mov	rax, rdi
 	lock cmpxchg	word ptr [rsi], r8w
 	mov	rsi, rax
@@ -1101,7 +1101,7 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Lk_cas_i32_block0:
-	# v3 = atomic_cas seq_cst v0, v1, v2
+	# v3, v4 = atomic_cas seq_cst seq_cst v0, v1, v2
 	mov	rax, rdi
 	lock cmpxchg	dword ptr [rsi], r8d
 	mov	rsi, rax
@@ -1475,7 +1475,7 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Lk_cas_i64_block0:
-	# v3 = atomic_cas acquire v0, v1, v2
+	# v3, v4 = atomic_cas acquire acquire v0, v1, v2
 	mov	rax, rdi
 	lock cmpxchg	qword ptr [rsi], r8
 	mov	rsi, rax
@@ -1541,7 +1541,7 @@
 	mov	rdi, rax
 	# v3 = atomic_load.ptr acquire v0
 	mov	r8, qword ptr [rsi]
-	# v4 = atomic_cas acq_rel v0, v3, v2
+	# v4, v5 = atomic_cas acq_rel acquire v0, v3, v2
 	mov	rax, r8
 	lock cmpxchg	qword ptr [rsi], rdi
 	mov	rsi, rax
@@ -1616,12 +1616,12 @@
 	mov	edi, 1
 	# v1 = iconst.i32 0
 	xor	r8d, r8d
-	# v3 = atomic_cas acquire v0, v1, v2
+	# v3, v4 = atomic_cas acquire acquire v0, v1, v2
 	mov	rax, r8
 	lock cmpxchg	dword ptr [rsi], edi
 	mov	rdi, rax
-	# v4 = icmp.eq v3, v1
-	# brif v4, block2, block1
+	# v5 = icmp.eq v3, v1
+	# brif v5, block2, block1
 	cmp	edi, 0
 	jne	".Lk_lock_block1"
 .Lk_lock_block2:
@@ -1632,6 +1632,220 @@
 .Lk_lock_end:
 	.cfi_endproc
 	.size "k_lock", .-"k_lock"
+	.section	".text","ax",@progbits
+	.globl "k_lock_flag"
+	.p2align	4
+	.type	"k_lock_flag",@function
+"k_lock_flag":
+.Lk_lock_flag_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	rsi, rdi
+.Lk_lock_flag_block0:
+	# jump block1
+.Lk_lock_flag_block1:
+	# v2 = iconst.i32 1
+	mov	edi, 1
+	# v1 = iconst.i32 0
+	xor	r8d, r8d
+	# v3, v4 = atomic_cas weak acquire relaxed v0, v1, v2
+	mov	rax, r8
+	lock cmpxchg	dword ptr [rsi], edi
+	sete	cl
+	mov	rdi, rax
+	mov	r8, rcx
+	# brif v4, block2, block1
+	test	r8b, r8b
+	je	".Lk_lock_flag_block1"
+.Lk_lock_flag_block2:
+	# return
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_lock_flag_end:
+	.cfi_endproc
+	.size "k_lock_flag", .-"k_lock_flag"
+	.section	".text","ax",@progbits
+	.globl "k_cas_flag_i8"
+	.p2align	4
+	.type	"k_cas_flag_i8",@function
+"k_cas_flag_i8":
+.Lk_cas_flag_i8_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	r8, rdx
+	mov	r9, rcx
+	mov	r11, rsi
+	mov	rsi, rdi
+	mov	rdi, r11
+.Lk_cas_flag_i8_block0:
+	# v4 = trunc.i8 v1
+	# v5, v6 = atomic_cas acquire relaxed v0, v4, v2
+	mov	rax, rdi
+	lock cmpxchg	byte ptr [rsi], r8b
+	sete	cl
+	mov	rsi, rax
+	mov	rdi, rcx
+	# store v5, v3
+	mov	byte ptr [r9], sil
+	# return v6
+	mov	rax, rdi
+	movzx	eax, al
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_cas_flag_i8_end:
+	.cfi_endproc
+	.size "k_cas_flag_i8", .-"k_cas_flag_i8"
+	.section	".text","ax",@progbits
+	.globl "k_cas_flag_i16"
+	.p2align	4
+	.type	"k_cas_flag_i16",@function
+"k_cas_flag_i16":
+.Lk_cas_flag_i16_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	r8, rdx
+	mov	r9, rcx
+	mov	r11, rsi
+	mov	rsi, rdi
+	mov	rdi, r11
+.Lk_cas_flag_i16_block0:
+	# v4 = trunc.i16 v1
+	# v5, v6 = atomic_cas weak release acquire v0, v4, v2
+	mov	rax, rdi
+	lock cmpxchg	word ptr [rsi], r8w
+	sete	cl
+	mov	rsi, rax
+	mov	rdi, rcx
+	# store v5, v3
+	mov	word ptr [r9], si
+	# return v6
+	mov	rax, rdi
+	movzx	eax, al
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_cas_flag_i16_end:
+	.cfi_endproc
+	.size "k_cas_flag_i16", .-"k_cas_flag_i16"
+	.section	".text","ax",@progbits
+	.globl "k_cas_flag_i32"
+	.p2align	4
+	.type	"k_cas_flag_i32",@function
+"k_cas_flag_i32":
+.Lk_cas_flag_i32_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	r8, rdx
+	mov	r9, rcx
+	mov	r11, rsi
+	mov	rsi, rdi
+	mov	rdi, r11
+.Lk_cas_flag_i32_block0:
+	# v4, v5 = atomic_cas relaxed seq_cst v0, v1, v2
+	mov	rax, rdi
+	lock cmpxchg	dword ptr [rsi], r8d
+	sete	cl
+	mov	rsi, rax
+	mov	rdi, rcx
+	# store v4, v3
+	mov	dword ptr [r9], esi
+	# return v5
+	mov	rax, rdi
+	movzx	eax, al
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_cas_flag_i32_end:
+	.cfi_endproc
+	.size "k_cas_flag_i32", .-"k_cas_flag_i32"
+	.section	".text","ax",@progbits
+	.globl "k_cas_flag_i64"
+	.p2align	4
+	.type	"k_cas_flag_i64",@function
+"k_cas_flag_i64":
+.Lk_cas_flag_i64_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	r8, rdx
+	mov	r9, rcx
+	mov	r11, rsi
+	mov	rsi, rdi
+	mov	rdi, r11
+.Lk_cas_flag_i64_block0:
+	# v4, v5 = atomic_cas weak acq_rel acquire v0, v1, v2
+	mov	rax, rdi
+	lock cmpxchg	qword ptr [rsi], r8
+	sete	cl
+	mov	rsi, rax
+	mov	rdi, rcx
+	# store v4, v3
+	mov	qword ptr [r9], rsi
+	# return v5
+	mov	rax, rdi
+	movzx	eax, al
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_cas_flag_i64_end:
+	.cfi_endproc
+	.size "k_cas_flag_i64", .-"k_cas_flag_i64"
+	.section	".text","ax",@progbits
+	.globl "k_cas_flag_ptr"
+	.p2align	4
+	.type	"k_cas_flag_ptr",@function
+"k_cas_flag_ptr":
+.Lk_cas_flag_ptr_begin:
+	.cfi_startproc
+	push	rbp
+	.cfi_def_cfa_offset 16
+	.cfi_offset 6, -16
+	mov	rbp, rsp
+	.cfi_def_cfa_register 6
+	mov	r8, rdx
+	mov	r9, rcx
+	mov	r11, rsi
+	mov	rsi, rdi
+	mov	rdi, r11
+.Lk_cas_flag_ptr_block0:
+	# v4, v5 = atomic_cas seq_cst seq_cst v0, v1, v2
+	mov	rax, rdi
+	lock cmpxchg	qword ptr [rsi], r8
+	sete	cl
+	mov	rsi, rax
+	mov	rdi, rcx
+	# store v4, v3
+	mov	qword ptr [r9], rsi
+	# return v5
+	mov	rax, rdi
+	movzx	eax, al
+	mov	rsp, rbp
+	pop	rbp
+	ret
+.Lk_cas_flag_ptr_end:
+	.cfi_endproc
+	.size "k_cas_flag_ptr", .-"k_cas_flag_ptr"
 	.section	".text","ax",@progbits
 	.globl "k_unlock"
 	.p2align	4

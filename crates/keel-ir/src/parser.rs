@@ -2097,13 +2097,27 @@ impl Parser {
                 }
                 "atomic_cas" => {
                     no_suffix()?;
-                    let ordering = self.ordering()?;
+                    let weak = matches!(self.peek(), Tok::Ident(w) if w == "weak");
+                    if weak {
+                        self.ident("weak")?;
+                    }
+                    let success = self.ordering()?;
+                    if !matches!(self.peek(), Tok::Ident(w) if matches!(w.as_str(), "relaxed" | "acquire" | "release" | "acq_rel" | "seq_cst"))
+                    {
+                        return Err(error(
+                            self.loc(),
+                            "atomic_cas needs a success and a failure ordering, as in `atomic_cas acq_rel acquire`".into(),
+                        ));
+                    }
+                    let failure = self.ordering()?;
                     let addr = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
                     let expected = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
                     InstData::AtomicCas {
-                        ordering,
+                        success,
+                        failure,
+                        weak,
                         args: [addr, expected, self.value(names)?],
                     }
                 }
@@ -2216,7 +2230,7 @@ impl Parser {
             InstData::X86RflagsRegion { plan, .. } => Some(plan.observations),
             InstData::LandingPad { .. } => Some(2),
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
-            InstData::Overflow { .. } => Some(2),
+            InstData::Overflow { .. } | InstData::AtomicCas { .. } => Some(2),
             InstData::Neon { op, .. } => Some(op.result_count()),
             InstData::Store { .. }
             | InstData::AtomicStore { .. }
@@ -2587,6 +2601,14 @@ fn build(
                 types[flag.index()] = Some(Type::I8);
                 changed = true;
             }
+            if let (InstData::AtomicCas { args, .. }, [old, flag]) = (&inst.data, &inst.results[..])
+                && types[old.index()].is_none()
+                && types[args[1].index()].is_some()
+            {
+                types[old.index()] = types[args[1].index()];
+                types[flag.index()] = Some(Type::I8);
+                changed = true;
+            }
             if let InstData::Neon { ty, .. } = inst.data {
                 for result in &inst.results {
                     if types[result.index()].is_none() {
@@ -2609,7 +2631,6 @@ fn build(
                 | InstData::AtomicLoad { ty, .. }
                 | InstData::VaArg { ty, .. } => Some(*ty),
                 InstData::AtomicRmw { args, .. } => types[args[1].index()],
-                InstData::AtomicCas { args, .. } => types[args[1].index()],
                 InstData::F80const { .. } => Some(Type::F80),
                 InstData::StackAddr { .. }
                 | InstData::SymbolAddr { .. }

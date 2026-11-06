@@ -326,11 +326,53 @@ impl InstBuilder<'_> {
         })
     }
 
-    pub fn atomic_cas(self, ordering: Ordering, addr: Value, expected: Value, new: Value) -> Value {
-        self.value(InstData::AtomicCas {
-            ordering,
-            args: [addr, expected, new],
-        })
+    /// A strong compare-and-swap: the old value and the `i8` flag, 1 if it
+    /// stored.
+    pub fn atomic_cas(
+        self,
+        success: Ordering,
+        failure: Ordering,
+        addr: Value,
+        expected: Value,
+        new: Value,
+    ) -> (Value, Value) {
+        self.cas(success, failure, false, [addr, expected, new])
+    }
+
+    /// [`Self::atomic_cas`], but it may fail while the memory holds
+    /// `expected`.
+    pub fn atomic_cas_weak(
+        self,
+        success: Ordering,
+        failure: Ordering,
+        addr: Value,
+        expected: Value,
+        new: Value,
+    ) -> (Value, Value) {
+        self.cas(success, failure, true, [addr, expected, new])
+    }
+
+    fn cas(
+        self,
+        success: Ordering,
+        failure: Ordering,
+        weak: bool,
+        args: [Value; 3],
+    ) -> (Value, Value) {
+        let func = &mut *self.func;
+        let data = InstData::AtomicCas {
+            success,
+            failure,
+            weak,
+            args,
+        };
+        let inst = match self.result_tys {
+            Some(scratch) => func.insert_inst_with_scratch(self.at, data, scratch),
+            None => func.insert_inst(self.at, data),
+        };
+        func.set_inst_loc(inst, self.loc);
+        let results = func.inst_results(inst);
+        (results[0], results[1])
     }
 
     pub fn fence(self, ordering: Ordering) -> Inst {

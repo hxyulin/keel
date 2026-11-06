@@ -314,7 +314,7 @@ block2:
 #[test]
 fn atomics() {
     let src = "\
-func @f(i32) -> (i32, i32, i32, i32, i32) {
+func @f(i32) -> (i32, i32, i32, i8, i32, i8, i32, i8, i32) {
     ss0 = stack_slot 4, align 4
 block0(v0: i32):
     v1 = stack_addr ss0
@@ -323,21 +323,28 @@ block0(v0: i32):
     v3 = atomic_rmw.add seq_cst v1, v2
     v4 = iconst.i32 -3
     v5 = atomic_rmw.smin relaxed v1, v4
-    v6 = atomic_cas acq_rel v1, v4, v2
-    v7 = atomic_cas acq_rel v1, v4, v0
+    v6, v9 = atomic_cas acq_rel acquire v1, v4, v2
+    v7, v10 = atomic_cas acq_rel acquire v1, v4, v0
+    v11, v12 = atomic_cas weak release relaxed v1, v2, v4
     fence seq_cst
     v8 = atomic_load.i32 acquire v1
-    return v3, v5, v6, v7, v8
+    return v3, v5, v6, v9, v7, v10, v11, v12, v8
 }
 ";
+    // The first compare-and-swap stores, the second fails and stores
+    // nothing, and the weak one stores.
     assert_eq!(
         run(src, "f", &[Val::I32(10)]),
         Outcome::Return(vec![
             Val::I32(10),
             Val::I32(15),
             Val::I32(-3i32 as u32),
+            Val::I8(1),
             Val::I32(5),
-            Val::I32(5)
+            Val::I8(0),
+            Val::I32(5),
+            Val::I8(1),
+            Val::I32(-3i32 as u32)
         ])
     );
 }

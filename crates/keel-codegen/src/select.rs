@@ -133,6 +133,9 @@ pub struct Selection {
     /// Covers the selection options turned off. Empty by default, so a
     /// custom selector's plan runs every backend cover.
     disabled: CoverSet,
+    /// Results that get no location: a compare-and-swap's unused flag. The
+    /// lowering computes a result only when it has a location.
+    pub(crate) omitted_defs: HashSet<Value>,
 }
 
 /// The input each result would like to share a register with, if any,

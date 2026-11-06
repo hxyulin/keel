@@ -179,7 +179,13 @@ impl FunctionCompiler<'_> {
                     self.emit_move(loc, Loc::Reg(S2));
                 }
             }
-            InstData::AtomicCas { ordering, args } => {
+            // LSE `cas` never fails spuriously, so a weak one is the same.
+            InstData::AtomicCas {
+                success,
+                failure,
+                args,
+                ..
+            } => {
                 // `cas` compares with its first register and overwrites it
                 // with the old value, so the expected value goes in a
                 // scratch register.
@@ -188,7 +194,7 @@ impl FunctionCompiler<'_> {
                 let expected = self.use_reg(args[1], S1);
                 self.move_gp(S2, expected, true);
                 let new = self.use_reg(args[2], S1);
-                let order = ordering_suffix(ordering);
+                let order = ordering_suffix(Ordering::merge(success, failure));
                 let (rs, rt) = (reg(S2, ty), reg(new, ty));
                 self.atomic(
                     "cas",
@@ -196,8 +202,23 @@ impl FunctionCompiler<'_> {
                     ty,
                     [rs.into(), rt.into(), Address::base(Reg::x(a)).into()],
                 );
+                // An unused flag has no location (`omit_unused_cas_flags`).
+                let flag = self.defined(self.func.inst_results(inst)[1]);
+                // The flag compares before the old value moves out, which
+                // may overwrite the expected value's register. `cas` zero
+                // extends a narrow old value; the expected value's upper
+                // bits are unspecified.
+                if flag.is_some() {
+                    let expected = self.use_reg(args[1], S1);
+                    let expected = self.extend(S0, expected, ty, false);
+                    self.mach("cmp", [reg(S2, ty).into(), reg(expected, ty).into()]);
+                    self.mach("cset", [Reg::w(S0).into(), "eq".into()]);
+                }
                 if let Some(loc) = result.and_then(|r| self.defined(r)) {
                     self.emit_move(loc, Loc::Reg(S2));
+                }
+                if let Some(loc) = flag {
+                    self.emit_move(loc, Loc::Reg(S0));
                 }
             }
             InstData::Fence { ordering } => {

@@ -392,6 +392,7 @@ impl Covers {
             &|data| folds(func, data),
             uses,
         );
+        selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
         let on = |cover| selection.enabled(cover);
         let [
             mask_tests,

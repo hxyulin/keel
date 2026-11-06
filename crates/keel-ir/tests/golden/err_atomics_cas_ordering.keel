@@ -1,0 +1,5 @@
+func @f(ptr, i32) cc(c) {
+block0(v0: ptr, v1: i32):
+    v2, v3 = atomic_cas seq_cst v0, v1, v1
+    return
+}

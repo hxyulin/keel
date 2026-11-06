@@ -3,7 +3,9 @@ verifier errors:
   @f inst1 `atomic_store acq_rel v1, v0`: a store cannot be acq_rel
   @f inst2 `v5 = atomic_rmw.add seq_cst v0, v3`: atomic_rmw.add takes integers up to i64, got f64
   @f inst3 `v6 = atomic_rmw.add seq_cst v0, v0`: atomic_rmw.add takes integers up to i64, got ptr
-  @f inst4 `v7 = atomic_cas seq_cst v0, v1, v2`: atomic_cas values must have the same type, got (i32, i64)
-  @f inst5 `v8 = atomic_load.i128 seq_cst v0`: atomic_load takes integers up to i64 and ptr, got i128
-  @f inst6 `v9 = atomic_rmw.or relaxed v1, v1`: atomic_rmw.or address must be ptr, got i32
-  @f inst7 `fence relaxed`: a fence cannot be relaxed
+  @f inst4 `v7, v8 = atomic_cas seq_cst seq_cst v0, v1, v2`: atomic_cas values must have the same type, got (i32, i64)
+  @f inst5 `v9 = atomic_load.i128 seq_cst v0`: atomic_load takes integers up to i64 and ptr, got i128
+  @f inst6 `v10 = atomic_rmw.or relaxed v1, v1`: atomic_rmw.or address must be ptr, got i32
+  @f inst7 `v11, v12 = atomic_cas acq_rel release v0, v1, v1`: atomic_cas failure ordering cannot be release
+  @f inst8 `v13, v14 = atomic_cas seq_cst acq_rel v0, v1, v1`: atomic_cas failure ordering cannot be acq_rel
+  @f inst9 `fence relaxed`: a fence cannot be relaxed

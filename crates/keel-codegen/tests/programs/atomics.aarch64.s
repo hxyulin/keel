@@ -267,7 +267,7 @@ Lk_cas_i8_begin:
 	mov	x10, x1
 	mov	x11, x2
 Lk_cas_i8_block0:
-	; v3 = atomic_cas relaxed v0, v1, v2
+	; v3, v4 = atomic_cas relaxed relaxed v0, v1, v2
 	mov	x8, x10
 	casb	w8, w11, [x9]
 	mov	x9, x8
@@ -576,7 +576,7 @@ Lk_cas_i16_begin:
 	mov	x10, x1
 	mov	x11, x2
 Lk_cas_i16_block0:
-	; v3 = atomic_cas release v0, v1, v2
+	; v3, v4 = atomic_cas release relaxed v0, v1, v2
 	mov	x8, x10
 	caslh	w8, w11, [x9]
 	mov	x9, x8
@@ -875,7 +875,7 @@ Lk_cas_i32_begin:
 	mov	x10, x1
 	mov	x11, x2
 Lk_cas_i32_block0:
-	; v3 = atomic_cas seq_cst v0, v1, v2
+	; v3, v4 = atomic_cas seq_cst seq_cst v0, v1, v2
 	mov	x8, x10
 	casal	w8, w11, [x9]
 	mov	x9, x8
@@ -1172,7 +1172,7 @@ Lk_cas_i64_begin:
 	mov	x10, x1
 	mov	x11, x2
 Lk_cas_i64_block0:
-	; v3 = atomic_cas acquire v0, v1, v2
+	; v3, v4 = atomic_cas acquire acquire v0, v1, v2
 	mov	x8, x10
 	casa	x8, x11, [x9]
 	mov	x9, x8
@@ -1231,7 +1231,7 @@ Lk_xchg_ptr_block0:
 	mov	x10, x8
 	; v3 = atomic_load.ptr acquire v0
 	ldar	x11, [x9]
-	; v4 = atomic_cas acq_rel v0, v3, v2
+	; v4, v5 = atomic_cas acq_rel acquire v0, v3, v2
 	mov	x8, x11
 	casal	x8, x10, [x9]
 	mov	x9, x8
@@ -1300,12 +1300,12 @@ Lk_lock_block0:
 	movz	w11, #0x1
 	; jump block1
 Lk_lock_block1:
-	; v3 = atomic_cas acquire v0, v1, v2
+	; v3, v4 = atomic_cas acquire acquire v0, v1, v2
 	mov	x8, x10
 	casa	w8, w11, [x9]
 	mov	x12, x8
-	; v4 = icmp.eq v3, v1
-	; brif v4, block2, block1
+	; v5 = icmp.eq v3, v1
+	; brif v5, block2, block1
 	cmp	w12, #0
 	b.ne	Lk_lock_block1
 Lk_lock_block2:
@@ -1313,6 +1313,211 @@ Lk_lock_block2:
 	ldp	x29, x30, [sp], #16
 	ret
 Lk_lock_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_lock_flag
+	.p2align	2
+_k_lock_flag:
+Lk_lock_flag_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+Lk_lock_flag_block0:
+	; v1 = iconst.i32 0
+	movz	w10, #0x0
+	; v2 = iconst.i32 1
+	movz	w11, #0x1
+	; jump block1
+Lk_lock_flag_block1:
+	; v3, v4 = atomic_cas weak acquire relaxed v0, v1, v2
+	mov	x8, x10
+	casa	w8, w11, [x9]
+	cmp	w8, w10
+	cset	w16, eq
+	mov	x12, x8
+	mov	x13, x16
+	; brif v4, block2, block1
+	tst	w13, #255
+	b.eq	Lk_lock_flag_block1
+Lk_lock_flag_block2:
+	; return
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_lock_flag_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_cas_flag_i8
+	.p2align	2
+_k_cas_flag_i8:
+Lk_cas_flag_i8_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x10 v5=x9 v6=x10
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+	mov	x10, x1
+	mov	x11, x2
+	mov	x12, x3
+Lk_cas_flag_i8_block0:
+	; v4 = trunc.i8 v1
+	; v5, v6 = atomic_cas acquire relaxed v0, v4, v2
+	mov	x8, x10
+	casab	w8, w11, [x9]
+	uxtb	w16, w10
+	cmp	w8, w16
+	cset	w16, eq
+	mov	x9, x8
+	mov	x10, x16
+	; store v5, v3
+	strb	w9, [x12]
+	; return v6
+	mov	x0, x10
+	uxtb	w0, w0
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_cas_flag_i8_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_cas_flag_i16
+	.p2align	2
+_k_cas_flag_i16:
+Lk_cas_flag_i16_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x10 v5=x9 v6=x10
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+	mov	x10, x1
+	mov	x11, x2
+	mov	x12, x3
+Lk_cas_flag_i16_block0:
+	; v4 = trunc.i16 v1
+	; v5, v6 = atomic_cas weak release acquire v0, v4, v2
+	mov	x8, x10
+	casalh	w8, w11, [x9]
+	uxth	w16, w10
+	cmp	w8, w16
+	cset	w16, eq
+	mov	x9, x8
+	mov	x10, x16
+	; store v5, v3
+	strh	w9, [x12]
+	; return v6
+	mov	x0, x10
+	uxtb	w0, w0
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_cas_flag_i16_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_cas_flag_i32
+	.p2align	2
+_k_cas_flag_i32:
+Lk_cas_flag_i32_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x9 v5=x10
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+	mov	x10, x1
+	mov	x11, x2
+	mov	x12, x3
+Lk_cas_flag_i32_block0:
+	; v4, v5 = atomic_cas relaxed seq_cst v0, v1, v2
+	mov	x8, x10
+	casal	w8, w11, [x9]
+	cmp	w8, w10
+	cset	w16, eq
+	mov	x9, x8
+	mov	x10, x16
+	; store v4, v3
+	str	w9, [x12]
+	; return v5
+	mov	x0, x10
+	uxtb	w0, w0
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_cas_flag_i32_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_cas_flag_i64
+	.p2align	2
+_k_cas_flag_i64:
+Lk_cas_flag_i64_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x9 v5=x10
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+	mov	x10, x1
+	mov	x11, x2
+	mov	x12, x3
+Lk_cas_flag_i64_block0:
+	; v4, v5 = atomic_cas weak acq_rel acquire v0, v1, v2
+	mov	x8, x10
+	casal	x8, x11, [x9]
+	cmp	x8, x10
+	cset	w16, eq
+	mov	x9, x8
+	mov	x10, x16
+	; store v4, v3
+	str	x9, [x12]
+	; return v5
+	mov	x0, x10
+	uxtb	w0, w0
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_cas_flag_i64_end:
+	.cfi_endproc
+	.section	__TEXT,__text
+	.globl	_k_cas_flag_ptr
+	.p2align	2
+_k_cas_flag_ptr:
+Lk_cas_flag_ptr_begin:
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x9 v5=x10
+	.cfi_startproc
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	mov	x9, x0
+	mov	x10, x1
+	mov	x11, x2
+	mov	x12, x3
+Lk_cas_flag_ptr_block0:
+	; v4, v5 = atomic_cas seq_cst seq_cst v0, v1, v2
+	mov	x8, x10
+	casal	x8, x11, [x9]
+	cmp	x8, x10
+	cset	w16, eq
+	mov	x9, x8
+	mov	x10, x16
+	; store v4, v3
+	str	x9, [x12]
+	; return v5
+	mov	x0, x10
+	uxtb	w0, w0
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_cas_flag_ptr_end:
 	.cfi_endproc
 	.section	__TEXT,__text
 	.globl	_k_unlock

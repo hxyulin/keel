@@ -53,7 +53,13 @@ uint64_t k_swap_i64(uint64_t *p, uint64_t v);
 void *k_xchg_ptr(void **p, void *v);
 void k_count(int64_t *p, int64_t n);
 void k_lock(int32_t *l);
+void k_lock_flag(int32_t *l);
 void k_unlock(int32_t *l);
+uint8_t k_cas_flag_i8(uint8_t *p, uint32_t expected, uint8_t new_value, uint8_t *old);
+uint8_t k_cas_flag_i16(uint16_t *p, uint32_t expected, uint16_t new_value, uint16_t *old);
+uint8_t k_cas_flag_i32(uint32_t *p, uint32_t expected, uint32_t new_value, uint32_t *old);
+uint8_t k_cas_flag_i64(uint64_t *p, uint64_t expected, uint64_t new_value, uint64_t *old);
+uint8_t k_cas_flag_ptr(void **p, void *expected, void *new_value, void **old);
 
 static int failures;
 
@@ -511,11 +517,63 @@ static void *count(void *arg) {
     return 0;
 }
 
+/* A compare-and-swap that stores gives flag 1 and the expected value. One
+ * that fails gives flag 0, leaves memory alone and gives what it read. A
+ * weak one may also fail while memory holds the expected value, so a weak
+ * success is retried a bounded number of times. */
+#define CHECK_FLAG(T, f, weak, a, b, garbage)                                     \
+    do {                                                                         \
+        T m = (a), old;                                                          \
+        int tries = 0, flag;                                                     \
+        do flag = f(&m, (a) | (garbage), (b), &old);                             \
+        while (weak && !flag && old == (a) && ++tries < 1000);                   \
+        if (flag != 1 || old != (a) || m != (b)) {                               \
+            if (failures++ < 20) printf(#f " success: flag %d\n", flag);        \
+        }                                                                        \
+        if ((a) != (b)) {                                                        \
+            flag = f(&m, (a) | (garbage), (T)((a) + 1), &old);                   \
+            if (flag != 0 || old != (b) || m != (b)) {                           \
+                if (failures++ < 20) printf(#f " failure: flag %d\n", flag);    \
+            }                                                                    \
+        }                                                                        \
+    } while (0)
+
+static void check_flags(void) {
+    for (unsigned i = 0; i < N; i++)
+        for (unsigned j = 0; j < N; j++) {
+            uint64_t a = values[i], b = values[j];
+            CHECK_FLAG(uint8_t, k_cas_flag_i8, 0, (uint8_t)a, (uint8_t)b, 0x5a00u);
+            CHECK_FLAG(uint16_t, k_cas_flag_i16, 1, (uint16_t)a, (uint16_t)b, 0xa5a50000u);
+            CHECK_FLAG(uint32_t, k_cas_flag_i32, 0, (uint32_t)a, (uint32_t)b, 0);
+            CHECK_FLAG(uint64_t, k_cas_flag_i64, 1, a, b, 0);
+        }
+    int x, y;
+    void *m = &x, *old;
+    if (!k_cas_flag_ptr(&m, &x, &y, &old) || old != &x || m != &y) {
+        failures++;
+        printf("cas flag ptr success wrong\n");
+    }
+    if (k_cas_flag_ptr(&m, &x, &x, &old) || old != &y || m != &y) {
+        failures++;
+        printf("cas flag ptr failure wrong\n");
+    }
+}
+
 static void *locked(void *arg) {
     (void)arg;
     for (int i = 0; i < ROUNDS; i++) {
         k_lock(&lock);
         /* A plain read-modify-write, only safe under the lock. */
+        guarded = *(volatile int64_t *)&guarded + 1;
+        k_unlock(&lock);
+    }
+    return 0;
+}
+
+static void *locked_flag(void *arg) {
+    (void)arg;
+    for (int i = 0; i < ROUNDS; i++) {
+        k_lock_flag(&lock);
         guarded = *(volatile int64_t *)&guarded + 1;
         k_unlock(&lock);
     }
@@ -540,6 +598,10 @@ int main(void) {
     if (shared != (int64_t)THREADS * ROUNDS) { failures++; printf("counter %lld\n", (long long)shared); }
     run(locked);
     if (guarded != (int64_t)THREADS * ROUNDS) { failures++; printf("guarded %lld\n", (long long)guarded); }
+    check_flags();
+    guarded = 0;
+    run(locked_flag);
+    if (guarded != (int64_t)THREADS * ROUNDS) { failures++; printf("flag guarded %lld\n", (long long)guarded); }
     /* An exit status is taken mod 256. */
     return failures != 0;
 }

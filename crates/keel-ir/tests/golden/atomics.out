@@ -4,8 +4,11 @@ block0(v0: ptr, v1: i32, v2: ptr):
     atomic_store release v1, v0
     v4 = atomic_rmw.add seq_cst v0, v1
     v5 = atomic_rmw.umax relaxed v0, v3
-    v6 = atomic_cas acq_rel v0, v3, v4
-    v7 = atomic_rmw.xchg seq_cst v2, v0
+    v6, v7 = atomic_cas acq_rel acquire v0, v3, v4
+    v8, v9 = atomic_cas weak seq_cst relaxed v0, v3, v1
+    v10, v11 = atomic_cas release acquire v0, v1, v3
+    v12, v13 = atomic_cas relaxed seq_cst v0, v1, v3
+    v14 = atomic_rmw.xchg seq_cst v2, v0
     fence acquire
     fence seq_cst
     return v6

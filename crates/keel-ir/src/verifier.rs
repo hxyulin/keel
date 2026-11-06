@@ -1438,9 +1438,18 @@ impl Verifier<'_> {
                 let allows_ptr = *op == RmwOp::Xchg;
                 self.check_atomic(inst, &what, ty(args[1]), ty(args[0]), allows_ptr);
             }
-            InstData::AtomicCas { args, .. } => {
+            InstData::AtomicCas { failure, args, .. } => {
                 let (expected, new) = (ty(args[1]), ty(args[2]));
                 self.check_atomic(inst, "atomic_cas", expected, ty(args[0]), true);
+                // A failed compare-and-swap stores nothing, so it cannot
+                // release. It may be stronger than the success ordering, as
+                // in C++17 and LLVM.
+                if matches!(failure, Ordering::Release | Ordering::AcqRel) {
+                    self.inst_error(
+                        inst,
+                        format!("atomic_cas failure ordering cannot be {failure}"),
+                    );
+                }
                 if expected != new {
                     self.inst_error(
                         inst,

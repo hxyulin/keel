@@ -654,7 +654,7 @@ fn build_fast_intervals(
             }
             selection.for_each_operand(func, inst, |v| extend(&mut open, v, read, &mut touched));
             for &result in func.inst_results(inst) {
-                if !is_alias(result) {
+                if !is_alias(result) && !selection.omitted_defs.contains(&result) {
                     extend(&mut open, result, write, &mut touched);
                 }
             }
@@ -1137,8 +1137,9 @@ fn compute_liveness(
             });
             for &result in func.inst_results(inst) {
                 def_block[result.index()] = b;
-                // An alias's instruction is dead; its result goes nowhere.
-                if !is_alias(result) {
+                // An alias's instruction is dead; its result goes nowhere,
+                // and neither does an omitted one.
+                if !is_alias(result) && !selection.omitted_defs.contains(&result) {
                     extend(open, result, write, touched);
                 }
             }

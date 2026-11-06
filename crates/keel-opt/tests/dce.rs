@@ -291,3 +291,31 @@ block0(v0: i64):
         ]
     );
 }
+
+/// A compare-and-swap writes memory, so GVN does not merge two identical
+/// ones and DCE keeps one whose results are unused.
+#[test]
+fn compare_and_swaps_survive_gvn_and_dce() {
+    let source = "func @f(ptr, i32, i32) -> i32 {
+block0(v0: ptr, v1: i32, v2: i32):
+    v3, v4 = atomic_cas acq_rel acquire v0, v1, v2
+    v5, v6 = atomic_cas acq_rel acquire v0, v1, v2
+    v7, v8 = atomic_cas weak relaxed relaxed v0, v2, v1
+    v9 = iadd v3, v5
+    return v9
+}
+";
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let f = &mut module.functions[0];
+    for name in ["gvn", "dce"] {
+        keel_opt::find_pass(name)
+            .unwrap()
+            .run(f, &Default::default());
+    }
+    let cases = f
+        .layout_insts()
+        .filter(|&(_, i)| matches!(f.inst_data(i), InstData::AtomicCas { .. }))
+        .count();
+    assert_eq!(cases, 3);
+}

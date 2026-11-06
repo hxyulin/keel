@@ -523,15 +523,19 @@ impl<'m> Interpreter<'m> {
                 self.memory.write(addr, &new.to_bytes())?;
                 old
             }
+            // The interpreter has one thread, so a weak compare-and-swap
+            // never fails spuriously, which is a legal execution.
             InstData::AtomicCas { args, .. } => {
                 let (expected, new) = (frame.get(args[1])?, frame.get(args[2])?);
                 same_type(&expected, &new)?;
                 let addr = self.atomic_addr(ptr(&frame.get(args[0])?)?, new.ty())?;
                 let old = self.load(new.ty(), addr)?;
-                if old == expected {
+                let stored = old == expected;
+                if stored {
                     self.memory.write(addr, &new.to_bytes())?;
                 }
-                old
+                frame.set_results(inst, vec![old, flag(stored)])?;
+                return Ok(Flow::Next);
             }
             InstData::Fence { .. } => return Ok(Flow::Next),
             InstData::VaArg { .. } | InstData::AggregateVaArg { .. } => {

@@ -3,7 +3,8 @@
 //! summary first skips their own whole-function scans.
 use std::cell::OnceCell;
 
-use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp};
+use keel_ir::fxhash::FxHashSet;
+use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp, Value};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct InstKinds {
@@ -22,6 +23,7 @@ pub(crate) struct InstKinds {
     /// `icmp` or `fcmp`.
     pub compare: bool,
     pub brif: bool,
+    pub atomic_cas: bool,
     pub vector_splat: bool,
     pub vector_icmp: bool,
     pub vector_select: bool,
@@ -72,6 +74,7 @@ impl InstKinds {
                 InstData::Select { .. } => kinds.select = true,
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => kinds.compare = true,
                 InstData::Brif { .. } => kinds.brif = true,
+                InstData::AtomicCas { .. } => kinds.atomic_cas = true,
                 InstData::VectorSplat { .. } => kinds.vector_splat = true,
                 InstData::VectorIcmp { .. } => kinds.vector_icmp = true,
                 InstData::VectorSelect { .. } => kinds.vector_select = true,
@@ -84,6 +87,19 @@ impl InstKinds {
         }
         (kinds, uses)
     }
+}
+
+/// The flags of compare-and-swaps that nothing uses, given `facts`.
+pub(crate) fn unused_cas_flags(facts: &FunctionFacts<'_>) -> FxHashSet<Value> {
+    if !facts.kinds.atomic_cas {
+        return FxHashSet::default();
+    }
+    let func = facts.func;
+    func.layout_insts()
+        .filter(|&(_, i)| matches!(func.inst_data(i), InstData::AtomicCas { .. }))
+        .map(|(_, i)| func.inst_results(i)[1])
+        .filter(|flag| facts.machine_uses[flag.index()] == 0)
+        .collect()
 }
 
 /// Immutable facts shared by the target selectors for one function.

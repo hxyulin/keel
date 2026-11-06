@@ -278,8 +278,19 @@ impl FunctionCompiler<'_> {
         self.native(Opcode::CLREX_BN_barriers, [(FieldId::CRm, 15)], |out| {
             out.write_str("clrex")
         });
+        // Neither the store-exclusive, its branch nor `clrex` writes the
+        // flags, so they still hold the compare: eq exactly when it stored.
+        let flag = cas
+            .then(|| self.func.inst_results(inst)[1])
+            .and_then(|flag| self.defined(flag));
+        if flag.is_some() {
+            self.mach("cset", [Reg::w(S0).into(), "eq".into()]);
+        }
         if let Some(dst) = result.and_then(|v| self.defined(v)) {
             self.emit_move(dst, Loc::Reg(3));
+        }
+        if let Some(loc) = flag {
+            self.emit_move(loc, Loc::Reg(S0));
         }
     }
 }

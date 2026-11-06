@@ -95,7 +95,7 @@ impl AllocationInput<'_> {
         self.selection
             .for_each_operand(self.func, inst, |v| emit(v, OperandKind::Use));
         for &v in self.func.inst_results(inst) {
-            if self.func.resolve(v) == v {
+            if self.func.resolve(v) == v && !self.selection.omitted_defs.contains(&v) {
                 emit(v, OperandKind::Def);
             }
         }

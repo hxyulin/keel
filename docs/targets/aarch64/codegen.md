@@ -188,7 +188,10 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
 - On Apple arm64, read-modify-writes and `cas` use the LSE instructions
   (`ldadd`, `ldclr`, `swp`, `cas`…, suffixed `a`/`l`/`al` for the ordering),
   which every Apple arm64 CPU has. `sub` adds the negation and `and` clears
-  the complement, since LSE has neither. Ordered loads and stores are
+  the complement, since LSE has neither. A `cas` takes the suffix of the
+  merged success and failure orderings, and never fails spuriously, so a
+  weak one is the same. Its flag compares the old value with the expected
+  one, extended for i8 and i16. Ordered loads and stores are
   `ldar`/`stlr`; fences are `dmb ishld` (acquire) or `dmb ish`. AArch64 Linux
   targets baseline ARMv8.0 and uses load-exclusive/store-exclusive loops
   instead.

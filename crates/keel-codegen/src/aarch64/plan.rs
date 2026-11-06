@@ -442,6 +442,7 @@ impl Covers {
                 uses,
             )
         };
+        selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
         let on = |cover| selection.enabled(cover);
         let [
             abs,

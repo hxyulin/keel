@@ -84,7 +84,8 @@ impl FunctionCompiler<'_> {
             }
             InstData::AtomicRmw { op, args, .. } => self.atomic_rmw(inst, op, args, result),
             // `cmpxchg` compares memory with rax and writes the old value
-            // to rax either way.
+            // to rax either way. It is a full barrier and never fails
+            // spuriously, so every ordering and a weak one lower alike.
             InstData::AtomicCas { args, .. } => {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S1);
@@ -98,8 +99,18 @@ impl FunctionCompiler<'_> {
                         asm_arg(reg(new, ty)),
                     ],
                 );
+                // ZF is set when it stored. The address is dead now, so the
+                // flag takes its scratch register.
+                // An unused flag has no location (`omit_unused_cas_flags`).
+                let flag = self.defined(self.func.inst_results(inst)[1]);
+                if flag.is_some() {
+                    self.emit(Opcode::Setcc(condition("e")), [asm_arg(r8(S1))]);
+                }
                 if let Some(loc) = result.and_then(|r| self.defined(r)) {
                     self.emit_move(loc, Loc::Reg(S0));
+                }
+                if let Some(loc) = flag {
+                    self.emit_move(loc, Loc::Reg(S1));
                 }
             }
             InstData::Fence { ordering } => {
