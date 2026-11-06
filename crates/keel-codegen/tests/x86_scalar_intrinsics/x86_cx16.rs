@@ -362,3 +362,47 @@ fn native_cx16_oracles() {
         }
     }
 }
+
+/// i128 atomics need CX16, from the target or a function's own features,
+/// and also lower with an empty pool, where every operand is spilled.
+#[test]
+fn i128_atomics_require_cx16() {
+    let source = |features: &str| {
+        format!(
+            "func @f(ptr, i128) -> i128 {features} {{\nblock0(v0: ptr, v1: i128):\n v2, v3 = atomic_cas seq_cst seq_cst v0, v1, v1\n v4 = atomic_rmw.smax relaxed v0, v2\n atomic_store seq_cst v4, v0\n v5 = atomic_load.i128 acquire v0\n return v5\n}}\n"
+        )
+    };
+    let compile = |text: &str, features: Features, pools: &Pools| {
+        let m = keel_ir::parse(text).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        let tier = SelectionTier::Full;
+        let selector = FeatureSelector {
+            inner: &tier,
+            features,
+        };
+        let pipeline = CodegenPipeline {
+            selector: &selector,
+            allocator: &AllocationTier::Full,
+        };
+        keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline)
+    };
+    let v1 = Features::for_level(CpuLevel::V1);
+    let error = compile(&source(""), v1, &keel_codegen::x86_64::REGISTERS).unwrap_err();
+    assert!(
+        error.message.contains("--cpu-level v2"),
+        "{}",
+        error.message
+    );
+    for (attribute, features) in [
+        ("target_features(\"cx16\")", v1),
+        ("", Features::for_level(CpuLevel::V2)),
+    ] {
+        for pools in [&keel_codegen::x86_64::REGISTERS, &EMPTY, &TINY] {
+            let asm = compile(&source(attribute), features, pools).unwrap();
+            assert!(asm.contains("cmpxchg16b"));
+        }
+    }
+    let avx = Features::for_level(CpuLevel::V3);
+    let asm = compile(&source(""), avx, &EMPTY).unwrap();
+    assert!(asm.contains("vmovdqa") && asm.contains("mfence"), "{asm}");
+}

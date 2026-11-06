@@ -108,14 +108,18 @@ pub(super) fn preflight(
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), String> {
     let not_yet = |what: &str| format!("{what} not supported on x86-64 yet");
-    if let Some(error) = func
-        .layout_insts()
-        .find_map(|(_, i)| match func.inst_data(i) {
+    if let Some(error) =
+        func.layout_insts().find_map(|(_, i)| {
+            match func.inst_data(i) {
             InstData::VaArg { ty: Type::I128, .. } => {
                 Some("va_arg.i128 requires AArch64 Linux".into())
             }
-            data if crate::lowering::wide_atomic(func, data) => Some(not_yet("i128 atomics")),
+            data if !features.cx16 && crate::lowering::wide_atomic(func, data) => Some(
+            "i128 atomics require CX16: compile with `--cpu-level v2` or `--target-features cx16`"
+                .into(),
+        ),
             _ => None,
+        }
         })
     {
         return Err(error);
@@ -657,7 +661,7 @@ impl SystemSlots {
                             | Intrinsic::X86CpuXcr0,
                         ..
                     }
-                )
+                ) || crate::lowering::wide_atomic(func, func.inst_data(i))
             })
             .then_some(offset.next_multiple_of(8));
         let offset = cx16_save.map_or(offset, |slot| slot + 8);

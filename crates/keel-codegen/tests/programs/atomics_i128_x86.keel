@@ -1,0 +1,153 @@
+; expect: exit 0
+; target: x86_64-unknown-linux-gnu
+; The functions of atomics_i128.keel for x86-64, checked by the same driver.
+; With CX16 only, every access is `lock cmpxchg16b`.
+
+func @k_load_relaxed(ptr) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr):
+    v1 = atomic_load.i128 relaxed v0
+    return v1
+}
+
+func @k_load_acquire(ptr) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr):
+    v1 = atomic_load.i128 acquire v0
+    return v1
+}
+
+func @k_load_seq_cst(ptr) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr):
+    v1 = atomic_load.i128 seq_cst v0
+    return v1
+}
+
+func @k_store_relaxed(ptr, i128) cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    atomic_store relaxed v1, v0
+    return
+}
+
+func @k_store_release(ptr, i128) cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    atomic_store release v1, v0
+    return
+}
+
+func @k_store_seq_cst(ptr, i128) cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    atomic_store seq_cst v1, v0
+    return
+}
+
+; The old value goes through the last argument; the flag is returned.
+func @k_cas_strong(ptr, i128, i128, ptr) -> i8 uext cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128, v2: i128, v3: ptr):
+    v4, v5 = atomic_cas acq_rel acquire v0, v1, v2
+    store v4, v3
+    return v5
+}
+
+; The old value goes through the last argument; the flag is returned.
+func @k_cas_weak(ptr, i128, i128, ptr) -> i8 uext cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128, v2: i128, v3: ptr):
+    v4, v5 = atomic_cas weak relaxed seq_cst v0, v1, v2
+    store v4, v3
+    return v5
+}
+
+; The old value goes through the last argument; the flag is returned.
+func @k_cas_release(ptr, i128, i128, ptr) -> i8 uext cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128, v2: i128, v3: ptr):
+    v4, v5 = atomic_cas release relaxed v0, v1, v2
+    store v4, v3
+    return v5
+}
+
+; The old value goes through the last argument; the flag is returned.
+func @k_cas_acquire(ptr, i128, i128, ptr) -> i8 uext cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128, v2: i128, v3: ptr):
+    v4, v5 = atomic_cas acquire acquire v0, v1, v2
+    store v4, v3
+    return v5
+}
+
+func @k_add(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.add relaxed v0, v1
+    return v2
+}
+
+func @k_sub(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.sub acquire v0, v1
+    return v2
+}
+
+func @k_and(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.and release v0, v1
+    return v2
+}
+
+func @k_or(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.or acq_rel v0, v1
+    return v2
+}
+
+func @k_xor(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.xor seq_cst v0, v1
+    return v2
+}
+
+func @k_xchg(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.xchg relaxed v0, v1
+    return v2
+}
+
+func @k_umin(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.umin acquire v0, v1
+    return v2
+}
+
+func @k_umax(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.umax release v0, v1
+    return v2
+}
+
+func @k_smin(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.smin acq_rel v0, v1
+    return v2
+}
+
+func @k_smax(ptr, i128) -> i128 cc(c) target_features("cx16") {
+block0(v0: ptr, v1: i128):
+    v2 = atomic_rmw.smax seq_cst v0, v1
+    return v2
+}
+
+; Adds one to the pair's counter and keeps the high half its complement,
+; with a weak compare-and-swap loop that branches on the flag.
+func @k_bump(ptr) cc(c) target_features("cx16") {
+block0(v0: ptr):
+    v1 = atomic_load.i128 relaxed v0
+    jump block1(v1)
+block1(v2: i128):
+    v3 = iconst.i128 1
+    v4 = iadd v2, v3
+    v5 = iconst.i128 64
+    v6 = shl v4, v5
+    v7 = ushr v6, v5
+    v8 = bnot v7
+    v9 = shl v8, v5
+    v10 = or v7, v9
+    v11, v12 = atomic_cas weak acq_rel relaxed v0, v2, v10
+    brif v12, block2, block1(v11)
+block2:
+    return
+}

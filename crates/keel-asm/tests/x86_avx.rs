@@ -500,12 +500,16 @@ fn feature_enabled_backend_fixtures_have_identical_typed_and_text_objects() {
         {
             continue;
         }
+        // Functions may enable features of their own, such as CX16.
+        let features =
+            keel_codegen::x86_features::module_features(&keel_ir::parse(&source).unwrap(), avx())
+                .unwrap();
         for (opt, fast) in [(false, false), (true, false), (true, true)] {
             let (text, program) = compile_fixture(&source, opt, fast, avx());
             assert_eq!(program.stats().text_bytes, 0, "{}", path.display());
             assert_eq!(
-                assemble(&text),
-                assemble_program_object_with_features(&program, avx()).unwrap(),
+                assemble_object_with_features(&text, features).unwrap(),
+                assemble_program_object_with_features(&program, features).unwrap(),
                 "{}",
                 path.display()
             );

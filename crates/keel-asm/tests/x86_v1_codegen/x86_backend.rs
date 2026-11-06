@@ -36,12 +36,19 @@ fn every_x86_backend_fixture_assembles() {
             let text =
                 keel_codegen::compile_with_pipeline(&module, Target::X86_64LinuxGnu, &pipeline)
                     .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            let object = keel_asm::x86::assemble_object(&text).unwrap_or_else(|e| {
-                panic!(
-                    "{} opt={opt} {selection:?}/{allocation:?}: {e}\n{text}",
-                    path.display()
-                )
-            });
+            // Functions may enable features of their own, such as CX16.
+            let features = keel_codegen::x86_features::module_features(
+                &module,
+                keel_asm::x86::Features::default(),
+            )
+            .unwrap();
+            let object = keel_asm::x86::assemble_object_with_features(&text, features)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "{} opt={opt} {selection:?}/{allocation:?}: {e}\n{text}",
+                        path.display()
+                    )
+                });
             let elf = object::File::parse(&*object).unwrap();
             assert!(
                 elf.sections().all(|s| !s.name().unwrap().contains(',')),
@@ -64,7 +71,7 @@ fn every_x86_backend_fixture_assembles() {
             assert_eq!(program.stats().text_bytes, 0, "{}", path.display());
             assert_eq!(
                 object,
-                keel_asm::x86::assemble_program_object(&program).unwrap(),
+                keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap(),
                 "{}",
                 path.display()
             );

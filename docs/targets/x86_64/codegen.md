@@ -349,6 +349,22 @@ userspace TLS. `medium` and `large` are rejected; a large model would also need
 distant calls, constants and tables. Linkers diagnose relocation overflow
 rather than truncating.
 
+## Atomics
+
+`lock cmpxchg`, `lock xadd` and `xchg` are full barriers on x86, so only a
+seq_cst store (`xchg`) and a seq_cst fence (`mfence`) depend on the
+ordering. A compare-and-swap's flag is `sete` on the ZF that `lock cmpxchg`
+leaves, or a fused `jne`.
+
+i128 atomics need CX16 (`--cpu-level v2` or `--target-features cx16`, or a
+function's own `target_features`); without it they are rejected. Every
+form is `lock cmpxchg16b`, with the address in r11 and RBX saved to a frame
+slot around it; the prologue pushes RBX, so a fault there unwinds. A load
+exchanges zero with zero, which writes, so it faults on read-only memory.
+A store and a read-modify-write loop until the exchange succeeds. With AVX,
+an aligned 16-byte `vmovdqa` is atomic, so loads and stores use it instead
+and write nothing they only read; a seq_cst store adds `mfence`.
+
 ## Two-word aggregate wrappers
 
 The backend keeps small straight-line wrappers in SSA when their System V ABI

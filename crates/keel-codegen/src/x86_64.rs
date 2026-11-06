@@ -1958,6 +1958,9 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit_move(loc, Loc::Reg(S1));
                 }
             }
+            _ if crate::lowering::wide_atomic(self.func, data) => {
+                self.atomic_i128(inst, data, result)
+            }
             _ => return false,
         }
         true

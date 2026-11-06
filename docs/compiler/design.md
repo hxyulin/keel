@@ -262,7 +262,7 @@ they do not wrap at 65,536 entries.
   `i128`, and `ptr` for loads, stores, `xchg` and `cas`; memory must be
   naturally aligned, so an `i128` needs 16 bytes. A load cannot be
   `release`, a store cannot be `acquire`, and a fence cannot be `relaxed`.
-  AArch64 lowers `i128` atomics; x86-64 rejects them.
+  x86-64 lowers `i128` atomics only with CX16.
 - **Compare and swap** gives the old value and an `i8` flag, 1 if it
   stored. It takes a success ordering, then a failure ordering. The failure
   ordering cannot be `release` or `acq_rel`, because a failed one stores
