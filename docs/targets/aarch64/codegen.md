@@ -191,7 +191,14 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
   the complement, since LSE has neither. A `cas` takes the suffix of the
   merged success and failure orderings, and never fails spuriously, so a
   weak one is the same. Its flag compares the old value with the expected
-  one, extended for i8 and i16. Ordered loads and stores are
+  one, extended for i8 and i16. An i128 load or store is `ldp` or `stp`,
+  which FEAT_LSE2 makes single-copy atomic when aligned: acquire adds
+  `dmb ishld` after the load, release `dmb ish` before the store, and
+  seq_cst also `dmb ish` after the store. A seq_cst i128 load is
+  `ldar; ldp; dmb ishld`: Clang's `ldp; dmb ish` lets the load pass an
+  earlier 64-bit seq_cst `stlr`, which a store-buffering litmus test under
+  herd7's AArch64 model shows. An i128 compare-and-swap is `casp`, and a
+  read-modify-write a `casp` loop. Ordered loads and stores are
   `ldar`/`stlr`; fences are `dmb ishld` (acquire) or `dmb ish`. AArch64 Linux
   targets baseline ARMv8.0 and uses load-exclusive/store-exclusive loops
   instead, ordered as the [target README](README.md) describes.

@@ -2221,9 +2221,176 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit_move(loc, Loc::Reg(6));
                 }
             }
+            // LSE2, which every Apple CPU has, makes an aligned 16-byte
+            // `ldp` or `stp` single-copy atomic. CASP does the rest.
+            InstData::AtomicLoad {
+                ty: Type::I128,
+                ordering,
+                addr,
+            } if !self.linux => {
+                let a = self.use_reg(addr, S0);
+                if ordering == Ordering::SeqCst {
+                    // A plain `ldp` may pass an earlier seq_cst store, an
+                    // `stlr`; an `ldar` may not, and the `ldp` may not pass
+                    // the `ldar`.
+                    self.atomic(
+                        "ldar",
+                        "",
+                        Type::I64,
+                        [Reg::x(6).into(), Address::base(Reg::x(a)).into()],
+                    );
+                }
+                self.mach(
+                    "ldp",
+                    [
+                        Reg::x(4).into(),
+                        Reg::x(5).into(),
+                        Address::base(Reg::x(a)).into(),
+                    ],
+                );
+                if ordering != Ordering::Relaxed {
+                    self.mach("dmb", [Arg::Barrier(9)]);
+                }
+                self.pair_out(result, 4, 5);
+            }
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } if wide(self, value) && !self.linux => {
+                self.operands(&[value, addr]);
+                if ordering != Ordering::Relaxed {
+                    self.mach("dmb", [Arg::Barrier(11)]);
+                }
+                self.mach(
+                    "stp",
+                    [
+                        Reg::x(0).into(),
+                        Reg::x(1).into(),
+                        Address::base(Reg::x(2)).into(),
+                    ],
+                );
+                if ordering == Ordering::SeqCst {
+                    self.mach("dmb", [Arg::Barrier(11)]);
+                }
+            }
+            // x0:x1 the expected value, then the old one; x2:x3 the new
+            // value; x4 the address; x5:x6 the expected value again.
+            InstData::AtomicCas {
+                success,
+                failure,
+                args,
+                ..
+            } if wide(self, args[1]) && !self.linux => {
+                self.operands(&[args[1], args[2], args[0], args[1]]);
+                self.casp(Ordering::merge(success, failure));
+                let flag = self.func.inst_results(inst)[1];
+                let fused = self.fused_compares.contains(&flag);
+                let flag = self.defined(flag);
+                if flag.is_some() || fused {
+                    self.compare_pair(0, 5);
+                }
+                if flag.is_some() {
+                    self.mach("cset", [Reg::w(7).into(), "eq".into()]);
+                }
+                self.pair_out(result, 0, 1);
+                if let Some(loc) = flag {
+                    self.emit_move(loc, Loc::Reg(7));
+                }
+            }
+            InstData::AtomicRmw { op, ordering, args } if wide(self, args[1]) && !self.linux => {
+                self.rmw_i128(inst, op, ordering, args);
+                self.pair_out(result, 0, 1);
+            }
             _ => return false,
         }
         true
+    }
+
+    /// `casp` of the pair x0:x1 with x2:x3 at [x4], with `ordering`'s
+    /// suffix.
+    fn casp(&mut self, ordering: Ordering) {
+        let suffix = ordering_suffix(ordering);
+        let opcode = match suffix {
+            "" => Opcode::CASP_CP64_comswappr,
+            "a" => Opcode::CASPA_CP64_comswappr,
+            "l" => Opcode::CASPL_CP64_comswappr,
+            _ => Opcode::CASPAL_CP64_comswappr,
+        };
+        self.native(
+            opcode,
+            [(FieldId::Rs, 0), (FieldId::Rt, 2), (FieldId::Rn, 4)],
+            |out| write!(out, "casp{suffix}\tx0, x1, x2, x3, [x4]"),
+        );
+    }
+
+    /// Sets eq when the pair at `x<a>` equals the pair at `x<b>`.
+    fn compare_pair(&mut self, a: u8, b: u8) {
+        self.mach("cmp", [Reg::x(a).into(), Reg::x(b).into()]);
+        self.mach(
+            "ccmp",
+            [
+                Reg::x(a + 1).into(),
+                Reg::x(b + 1).into(),
+                Arg::imm(0),
+                Arg::from("eq"),
+            ],
+        );
+    }
+
+    /// An i128 read-modify-write as a CASP loop: x4 the address, x6:x7 the
+    /// operand, x0:x1 the guess and then the old value, x2:x3 the new
+    /// value. A plain `ldp` gives the first guess; `casp` checks it.
+    fn rmw_i128(&mut self, inst: Inst, op: RmwOp, ordering: Ordering, args: [Value; 2]) {
+        let moves = [
+            (Loc::Reg(4), self.loc(args[0])),
+            (Loc::Reg(6), self.loc(args[1])),
+            (Loc::Reg(7), self.hi(args[1])),
+        ];
+        self.parallel_copy(&moves);
+        let x = |r: u8| -> Arg { Reg::x(r).into() };
+        self.mach("ldp", [x(0), x(1), Address::base(Reg::x(4)).into()]);
+        // `casp` never writes x2:x3, so an exchange sets them once.
+        if op == RmwOp::Xchg {
+            self.move_gp(2, 6, true);
+            self.move_gp(3, 7, true);
+        }
+        let retry = format!("L{}_{inst}_retry", self.func.name);
+        self.out.label(retry.clone());
+        self.move_gp(S0, 0, true);
+        self.move_gp(S1, 1, true);
+        let pair = |this: &mut Self, lo: &str, hi: &str| {
+            this.mach(lo, [x(2), x(0), x(6)]);
+            this.mach(hi, [x(3), x(1), x(7)]);
+        };
+        match op {
+            RmwOp::Add => pair(self, "adds", "adc"),
+            RmwOp::Sub => pair(self, "subs", "sbc"),
+            RmwOp::And => pair(self, "and", "and"),
+            RmwOp::Or => pair(self, "orr", "orr"),
+            RmwOp::Xor => pair(self, "eor", "eor"),
+            RmwOp::Xchg => {}
+            RmwOp::Umin | RmwOp::Umax | RmwOp::Smin | RmwOp::Smax => {
+                // Keep the old value when the condition holds for old
+                // compared with the operand.
+                let keep = match op {
+                    RmwOp::Umin => "lo",
+                    RmwOp::Umax => "hs",
+                    RmwOp::Smin => "lt",
+                    _ => "ge",
+                };
+                self.mach("cmp", [x(0), x(6)]);
+                self.mach("sbcs", [Reg::XZR.into(), x(1), x(7)]);
+                self.mach("csel", [x(2), x(0), x(6), keep.into()]);
+                self.mach("csel", [x(3), x(1), x(7), keep.into()]);
+            }
+        }
+        self.casp(ordering);
+        self.compare_pair(0, S0);
+        self.out.symbolic(Symbolic::Conditional {
+            condition: 1,
+            target: retry,
+        });
     }
 
     /// Copies `values` into x0, x1, ... in order, an `i128` taking two.
