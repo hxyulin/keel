@@ -129,7 +129,10 @@ Linux symbols, ELF sections, argument placement and variadic state:
   load-exclusive is `ldaxr` when the ordering acquires and `ldxr` otherwise;
   the store-exclusive is `stlxr` when it releases and `stxr` otherwise. A
   compare-and-swap uses its merged success and failure orderings, and a weak
-  one makes a single attempt.
+  one makes a single attempt. An i128 atomic is an `ldxp`/`stxp` loop that
+  always ends with a successful store-exclusive, because the load-exclusive
+  pair is single-copy atomic only then: a load stores back what it read, so
+  it faults on read-only memory, and a weak i128 compare-and-swap also loops.
   TLS uses the initial-exec model and TPIDR_EL0; independent threads get distinct
   storage. Initial-exec TLS in dynamically loaded modules has the normal static
   TLS allocation restrictions.

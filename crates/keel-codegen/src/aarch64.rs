@@ -2221,6 +2221,9 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit_move(loc, Loc::Reg(6));
                 }
             }
+            _ if self.linux && crate::lowering::wide_atomic(self.func, data) => {
+                self.linux_atomic_i128(inst, data, result)
+            }
             // LSE2, which every Apple CPU has, makes an aligned 16-byte
             // `ldp` or `stp` single-copy atomic. CASP does the rest.
             InstData::AtomicLoad {
@@ -2325,7 +2328,7 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Sets eq when the pair at `x<a>` equals the pair at `x<b>`.
-    fn compare_pair(&mut self, a: u8, b: u8) {
+    pub(super) fn compare_pair(&mut self, a: u8, b: u8) {
         self.mach("cmp", [Reg::x(a).into(), Reg::x(b).into()]);
         self.mach(
             "ccmp",

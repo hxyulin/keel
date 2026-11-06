@@ -325,4 +325,165 @@ impl FunctionCompiler<'_> {
             self.emit_move(loc, Loc::Reg(S0));
         }
     }
+
+    /// An i128 atomic on ARMv8.0, as an exclusive-pair loop. A load-exclusive
+    /// pair is single-copy atomic only when the matching store-exclusive
+    /// succeeds, so every form ends with one, a load storing back what it
+    /// read. x0 holds the address, x1:x2 the expected value or operand, x3:x4
+    /// the replacement, x6:x7 the old value and w5 the status; none of these
+    /// is allocated on Linux. A weak compare-and-swap loops too: a failed
+    /// store-exclusive leaves the read possibly torn.
+    pub(super) fn linux_atomic_i128(&mut self, inst: Inst, data: &InstData, result: Option<Value>) {
+        let func = self.func;
+        let (ordering, values, cas, op) = match *data {
+            InstData::AtomicLoad { ordering, addr, .. } => (ordering, vec![addr], false, None),
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } => (ordering, vec![addr, value], false, None),
+            InstData::AtomicRmw { op, ordering, args } => {
+                (ordering, args.to_vec(), false, Some(op))
+            }
+            InstData::AtomicCas {
+                success,
+                failure,
+                args,
+                ..
+            } => (Ordering::merge(success, failure), args.to_vec(), true, None),
+            _ => unreachable!("not an i128 atomic"),
+        };
+        let mut moves = vec![(Loc::Reg(0), self.loc(values[0]))];
+        for (i, &v) in values[1..].iter().enumerate() {
+            let lo = 1 + 2 * i as u8;
+            moves.push((Loc::Reg(lo), self.loc(v)));
+            moves.push((Loc::Reg(lo + 1), self.hi(v)));
+        }
+        self.parallel_copy(&moves);
+        let acquire = matches!(
+            ordering,
+            Ordering::Acquire | Ordering::AcqRel | Ordering::SeqCst
+        );
+        // A seq_cst load also releases, as Clang does.
+        let release = matches!(
+            ordering,
+            Ordering::Release | Ordering::AcqRel | Ordering::SeqCst
+        );
+        let store = matches!(data, InstData::AtomicStore { .. });
+        if op == Some(RmwOp::Xchg) {
+            self.move_gp(3, 1, true);
+            self.move_gp(4, 2, true);
+        }
+        let label = |what: &str| format!(".L{}_{inst}_{what}", func.name);
+        let (retry, fail, done) = (label("retry"), label("fail"), label("done"));
+        self.out.label(retry.clone());
+        // A store reads into scratch registers it then discards.
+        let (lo, hi) = if store { (S0, S1) } else { (6, 7) };
+        self.load_exclusive_pair(acquire, lo, hi);
+        let x = |r: u8| -> Arg { Reg::x(r).into() };
+        let pair = |this: &mut Self, lo: &str, hi: &str| {
+            this.mach(lo, [x(3), x(6), x(1)]);
+            this.mach(hi, [x(4), x(7), x(2)]);
+        };
+        match op {
+            Some(RmwOp::Add) => pair(self, "adds", "adc"),
+            Some(RmwOp::Sub) => pair(self, "subs", "sbc"),
+            Some(RmwOp::And) => pair(self, "and", "and"),
+            Some(RmwOp::Or) => pair(self, "orr", "orr"),
+            Some(RmwOp::Xor) => pair(self, "eor", "eor"),
+            Some(RmwOp::Xchg) | None => {}
+            Some(op) => {
+                // Keep the old value when the condition holds for old
+                // compared with the operand.
+                let keep = match op {
+                    RmwOp::Umin => "lo",
+                    RmwOp::Umax => "hs",
+                    RmwOp::Smin => "lt",
+                    _ => "ge",
+                };
+                self.mach("cmp", [x(6), x(1)]);
+                self.mach("sbcs", [Reg::XZR.into(), x(7), x(2)]);
+                self.mach("csel", [x(3), x(6), x(1), keep.into()]);
+                self.mach("csel", [x(4), x(7), x(2), keep.into()]);
+            }
+        }
+        let data = if cas {
+            self.compare_pair(6, 1);
+            self.out.symbolic(Symbolic::Conditional {
+                condition: 1,
+                target: fail.clone(),
+            });
+            3
+        } else if store {
+            1
+        } else if op.is_some() {
+            3
+        } else {
+            6
+        };
+        self.store_exclusive_pair(release, data, &retry);
+        if cas {
+            // Neither path writes the flags after the compare: eq when the
+            // new value was stored, ne when the old one was written back.
+            self.out.branch_name(false, Name::Text(&done));
+            self.out.label(fail);
+            self.store_exclusive_pair(release, 6, &retry);
+            self.out.label(done);
+            let flag = func.inst_results(inst)[1];
+            let fused = self.fused_compares.contains(&flag);
+            if let Some(loc) = self.defined(flag).filter(|_| !fused) {
+                self.mach("cset", [Reg::w(S2).into(), "eq".into()]);
+                self.pair_out(result, 6, 7);
+                self.emit_move(loc, Loc::Reg(S2));
+                return;
+            }
+        }
+        if !store {
+            self.pair_out(result, 6, 7);
+        }
+    }
+
+    fn load_exclusive_pair(&mut self, acquire: bool, lo: u8, hi: u8) {
+        let (opcode, a) = if acquire {
+            (Opcode::LDAXP_LP64_ldstexclp, "a")
+        } else {
+            (Opcode::LDXP_LP64_ldstexclp, "")
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Rt, lo as u32),
+                (FieldId::Rt2, hi as u32),
+                (FieldId::Rn, 0),
+            ],
+            |out| write!(out, "ld{a}xp\tx{lo}, x{hi}, [x0]"),
+        );
+    }
+
+    /// Stores x<lo>:x<lo + 1> exclusively to [x0], and retries from `retry`
+    /// when that fails.
+    fn store_exclusive_pair(&mut self, release: bool, lo: u8, retry: &str) {
+        let (opcode, l) = if release {
+            (Opcode::STLXP_SP64_ldstexclp, "l")
+        } else {
+            (Opcode::STXP_SP64_ldstexclp, "")
+        };
+        let hi = lo + 1;
+        self.native(
+            opcode,
+            [
+                (FieldId::Rs, 5),
+                (FieldId::Rt, lo as u32),
+                (FieldId::Rt2, hi as u32),
+                (FieldId::Rn, 0),
+            ],
+            |out| write!(out, "st{l}xp\tw5, x{lo}, x{hi}, [x0]"),
+        );
+        self.out.symbolic(Symbolic::Compare {
+            register: 5,
+            is64: false,
+            nonzero: true,
+            target: retry.to_owned(),
+        });
+    }
 }

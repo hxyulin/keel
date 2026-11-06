@@ -17,9 +17,6 @@ pub(super) fn preflight(
             InstData::VaArg { ty: Type::I128, .. } if !linux => {
                 Some("va_arg.i128 requires AArch64 Linux")
             }
-            data if linux && crate::lowering::wide_atomic(func, data) => {
-                Some("i128 atomics are not supported on AArch64 Linux yet")
-            }
             _ => None,
         })
     {
