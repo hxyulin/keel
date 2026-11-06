@@ -21,7 +21,7 @@ impl FunctionCompiler<'_> {
                         Name::Symbol(&decl.name)
                     },
                 );
-                self.call_result(result, sret);
+                self.call_results(inst, &decl.sig, result, sret);
             }
             // Only the call itself can throw, so the call-site entry
             // covers just the `bl`.
@@ -45,7 +45,7 @@ impl FunctionCompiler<'_> {
                 self.out.label(format!("{site}_end"));
                 let pad = self.label(dests[1].block);
                 self.eh.sites.push((site, pad, dests[1].block));
-                self.call_result(result, sret);
+                self.call_results(inst, &decl.sig, result, sret);
                 self.block_args(&dests[0], 0);
                 self.branch_unless_next(dests[0].block);
             }
@@ -109,7 +109,7 @@ impl FunctionCompiler<'_> {
                 // spill slot, reloaded after the moves so x16 is free.
                 let target = self.use_reg(callee, S0);
                 self.mach("blr", [(Reg::x(target)).into()]);
-                self.call_result(result, sret);
+                self.call_results(inst, func.signature(sig), result, sret);
             }
             InstData::Jump { ref dest } => {
                 self.block_args(dest, 0);
@@ -191,7 +191,15 @@ impl FunctionCompiler<'_> {
                 {
                     self.load_struct_regs(layout, area);
                 }
-                if let Some(&value) = args.first() {
+                if args.len() > 1 {
+                    let locs = abi::multi_result_locs(&func.sig).expect("preflight checked it");
+                    let moves: Vec<_> = args
+                        .iter()
+                        .zip(locs)
+                        .map(|(&v, dst)| (dst, self.loc(v)))
+                        .collect();
+                    self.parallel_copy(&moves);
+                } else if let Some(&value) = args.first() {
                     let src = self.loc(value);
                     self.emit_move(return_loc(self.ty(value)), src);
                     if self.ty(value) == Type::I128 {

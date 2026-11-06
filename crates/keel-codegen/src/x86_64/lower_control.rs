@@ -13,7 +13,7 @@ impl FunctionCompiler<'_> {
                 let decl = func.callee(callee);
                 let sret = self.move_args(args, &decl.sig, None, false);
                 self.call_function(Opcode::Call, &decl.name);
-                self.call_result(result, sret);
+                self.call_results(inst, &decl.sig, result, sret);
             }
             InstData::CallIndirect {
                 sig,
@@ -22,7 +22,7 @@ impl FunctionCompiler<'_> {
             } => {
                 let sret = self.move_args(args, func.signature(sig), Some(callee), false);
                 self.emit(Opcode::Call, [asm_arg(r64(R10))]);
-                self.call_result(result, sret);
+                self.call_results(inst, func.signature(sig), result, sret);
             }
             // Arguments into registers, then this function's epilogue, then
             // a jump: the callee returns straight to our caller.
@@ -133,7 +133,15 @@ impl FunctionCompiler<'_> {
                     let at = self.frame(slot);
                     self.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(sized(at, 64))]);
                 }
-                if let Some(&value) = args.first() {
+                if args.len() > 1 {
+                    let locs = sysv::multi_result_locs(&func.sig).expect("preflight checked it");
+                    let moves: Vec<_> = args
+                        .iter()
+                        .zip(locs)
+                        .map(|(&v, dst)| (dst, self.loc(v)))
+                        .collect();
+                    self.parallel_copy(&moves);
+                } else if let Some(&value) = args.first() {
                     let ty = self.ty(value);
                     if ty == Type::F80 {
                         self.f80_push(value);

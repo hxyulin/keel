@@ -16,7 +16,8 @@ roles and the frame layout. The rules that differ from AArch64:
 - With 16 general registers, never allocating argument registers would leave
   five. So rsi, rdi, r8 and r9 are allocatable, and a call's arguments move
   into place as one parallel copy (`f(b, a)` with `a` in rdi and `b` in rsi is
-  a swap, broken with r11).
+  a swap, broken with r11). Several results move the same way, into their
+  return registers before `ret` and out of them after a call.
 - Instructions are two-address (`add d, b` overwrites `d`), and many use fixed
   registers (`div` in rdx:rax, shift counts in cl). rax, rcx and rdx are
   therefore never allocated and serve as scratch. r10 holds indirect call

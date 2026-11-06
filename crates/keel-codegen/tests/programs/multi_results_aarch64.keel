@@ -1,0 +1,26 @@
+; target: aarch64-apple-darwin
+; expect: exit 0
+; Several floats of one type come back as C returns a homogeneous float
+; aggregate: one per register, v0-v3. Checked in multi_results_aarch64.c.
+decl @c_hfa3(f64, f64, f64) -> (f64, f64, f64)
+
+; Rotates the four values, so the return is a register cycle.
+func @k_hfa4(f32, f32, f32, f32) -> (f32, f32, f32, f32) {
+block0(v0: f32, v1: f32, v2: f32, v3: f32):
+    return v1, v2, v3, v0
+}
+
+func @k_call_hfa3(f64) -> f64 {
+block0(v0: f64):
+    v1 = fconst.f64 1.0
+    v2 = fadd v0, v1
+    v3, v4, v5 = call @c_hfa3(v2, v0, v1)
+    v6 = fconst.f64 4.0
+    v7 = fmul v4, v6
+    v8 = fadd v3, v7
+    v9 = fconst.f64 16.0
+    v10 = fmul v5, v9
+    v11 = fadd v8, v10
+    v12 = fadd v11, v0
+    return v12
+}

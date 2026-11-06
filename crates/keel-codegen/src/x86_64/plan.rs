@@ -131,7 +131,7 @@ pub(super) fn preflight(
         }
         [_] => {}
         _ => {
-            return Err("multiple return values are not supported by the C convention".into());
+            sysv::multi_result_locs(&func.sig)?;
         }
     }
     if func.personality.is_some() {

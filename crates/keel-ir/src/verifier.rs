@@ -2696,8 +2696,8 @@ fn check_signature(sig: &Signature) -> Vec<String> {
     if sig.x86_vector_abi.is_some() && sig.cc != CallConv::C {
         errors.push("x86_vector_abi requires cc(c), not the private Fast convention".into());
     }
-    if sig.cc == CallConv::Fast && (sig.variadic || sig.returns_twice || sig.returns.len() > 1) {
-        errors.push("cc(fast) requires a fixed, single-result, single-return call contract".into());
+    if sig.cc == CallConv::Fast && (sig.variadic || sig.returns_twice) {
+        errors.push("cc(fast) requires a fixed call contract that returns once".into());
     }
     for param in sig.params.iter().chain(&sig.returns) {
         if param.ext != ArgExt::None && !matches!(param.ty, Type::I8 | Type::I16) {

@@ -46,7 +46,9 @@ The prologue saves the callee-saved registers the function uses with
 Parallel copies break a cycle by saving one destination in x16; `fmov` moves
 a float's bits into x16 and back, so one temporary serves both classes. A
 slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
-values have unspecified upper bits. Guaranteed tail calls move their
+values have unspecified upper bits. A return with several results moves them
+as one parallel copy, because a function that makes no calls may allocate
+x0–x7. Guaranteed tail calls move their
 arguments into registers, run the epilogue and jump with `b` or `br`.
 Arguments that would go on the stack, struct arguments and callers that
 return a struct are rejected. A function whose only instruction is a direct

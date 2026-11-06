@@ -1,0 +1,34 @@
+; target: x86_64-unknown-linux-gnu
+; expect: exit 0
+; Integer and float results in one struct: each eightbyte takes the next
+; register of its class, rax or xmm0. Checked in multi_results_sysv.c.
+decl @c_mixed(i64, f64) -> (i64, f64)
+
+; The float result first, so it goes in xmm0 and the integer in rax.
+func @k_mixed(i64, f64) -> (f64, i64) {
+block0(v0: i64, v1: f64):
+    v2 = fconst.f64 0.5
+    v3 = fadd v1, v2
+    return v3, v0
+}
+
+; struct { float; long; }: the float is alone in its eightbyte.
+func @k_narrow_float(f32, i64) -> (f32, i64) {
+block0(v0: f32, v1: i64):
+    return v0, v1
+}
+
+; struct { double; float; }: two SSE eightbytes, xmm0 and xmm1.
+func @k_two_sse(f64, f32) -> (f64, f32) {
+block0(v0: f64, v1: f32):
+    return v0, v1
+}
+
+func @k_call_mixed(i64, f64) -> f64 {
+block0(v0: i64, v1: f64):
+    v2, v3 = call @c_mixed(v0, v1)
+    v4 = sitofp.f64 v2
+    v5 = fadd v4, v3
+    v6 = fadd v5, v1
+    return v6
+}

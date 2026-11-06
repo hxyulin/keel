@@ -29,7 +29,7 @@
 //! memory whose address the caller passes in x8.
 
 use crate::regalloc::Loc;
-use keel_ir::{Layout, Purpose, Type};
+use keel_ir::{CallConv, Layout, Purpose, Signature, Type};
 
 /// How a struct crosses a call.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -119,6 +119,55 @@ fn result_regs(class: StructClass) -> Option<Vec<Loc>> {
         StructClass::Gprs { count } => Some((0..count as u8).map(Loc::Reg).collect()),
         StructClass::Indirect => None,
     }
+}
+
+/// Where each result of `sig`, which has more than one, comes back.
+///
+/// `cc(c)` returns them where C returns a struct of them in natural
+/// layout: one to four floats of one type in v0–v3, anything else of up
+/// to 16 bytes in x0 and x1. Version 1 rejects the structs that would put
+/// two results in one register, a float in a general register, or the
+/// results in memory. `cc(fast)` places them as it places arguments:
+/// integers and pointers in x0–x7, floats in v0–v7, each class counted on
+/// its own. Both conventions place every signature `cc(c)` accepts alike.
+pub fn multi_result_locs(sig: &Signature) -> Result<Vec<Loc>, String> {
+    use crate::lowering::{ResultClass, multi_result_classes, result_units};
+    let classes = multi_result_classes(sig)?;
+    if sig.cc == CallConv::Fast {
+        let (mut ints, mut floats) = (0, 0);
+        return classes
+            .iter()
+            .map(|class| {
+                let (next, loc): (&mut u8, fn(u8) -> Loc) = match class {
+                    ResultClass::Int => (&mut ints, Loc::Reg),
+                    ResultClass::Float => (&mut floats, Loc::FReg),
+                };
+                if *next == 8 {
+                    return Err(format!(
+                        "{sig}: cc(fast) returns at most 8 integer and 8 float results"
+                    ));
+                }
+                *next += 1;
+                Ok(loc(*next - 1))
+            })
+            .collect();
+    }
+    let layout = Layout::Struct(sig.returns.iter().map(|r| Layout::Scalar(r.ty)).collect());
+    let units = match classify(&layout) {
+        StructClass::Hfa { count, .. } => return Ok((0..count as u8).map(Loc::FReg).collect()),
+        StructClass::Gprs { .. } if classes.iter().all(|&c| c == ResultClass::Int) => {
+            result_units(&sig.returns)
+        }
+        _ => None,
+    };
+    units
+        .map(|units| units.into_iter().map(|u| Loc::Reg(u as u8)).collect())
+        .ok_or_else(|| {
+            format!(
+                "{sig}: C returns these results as a struct of them, which does not give each \
+                 its own register of its class; use cc(fast) or an sret pointer"
+            )
+        })
 }
 
 /// Registers and stack used so far while placing arguments.

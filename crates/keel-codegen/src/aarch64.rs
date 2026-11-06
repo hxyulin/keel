@@ -2570,6 +2570,30 @@ impl<'a> FunctionCompiler<'a> {
         (self.func.first_result(inst) == value).then(|| self.stack_slot_offsets[slot.index()])
     }
 
+    /// Moves a call's results to their places: [`Self::call_result`] for
+    /// at most one, and one parallel copy out of their return registers for
+    /// several, which may land in each other's registers.
+    fn call_results(
+        &mut self,
+        inst: Inst,
+        sig: &Signature,
+        result: Option<Value>,
+        sret: Option<RegisterSret<'_>>,
+    ) {
+        if sig.returns.len() <= 1 {
+            return self.call_result(result, sret);
+        }
+        let func = self.func;
+        let locs = abi::multi_result_locs(sig).expect("preflight checked it");
+        let moves: Vec<_> = func
+            .inst_results(inst)
+            .iter()
+            .zip(locs)
+            .filter_map(|(&v, src)| self.defined(v).map(|dst| (dst, src)))
+            .collect();
+        self.parallel_copy(&moves);
+    }
+
     /// Moves a call's result, if it has one, from x0 or v0 to its place,
     /// and stores a struct result that came back in registers to its
     /// `sret` address.
@@ -4657,10 +4681,7 @@ fn check_call_signature(
 ) -> Result<(), String> {
     let (CallConv::C | CallConv::Fast) = sig.cc;
     if sig.returns.len() > 1 {
-        return Err(format!(
-            "{}: multiple return values are not supported by the C convention",
-            what()
-        ));
+        abi::multi_result_locs(sig).map_err(|e| format!("{}: {e}", what()))?;
     }
     // The Apple ABI has the caller extend narrow arguments to 32 bits by C
     // signedness. Keel functions do not rely on it, but external ones may,

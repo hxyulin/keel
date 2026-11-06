@@ -1,0 +1,175 @@
+; expect: exit 0
+; Several results, checked in multi_results.c. cc(c) returns them where C
+; returns a struct of them, so the C side declares each as a struct. These
+; shapes are the ones both targets place alike; cc(fast) places results
+; like arguments and allows more of them.
+decl @c_pair(i64, i64) -> (i64, i64)
+decl @c_sized(i32, i64) -> (i32, i64)
+decl @c_floats(f64, f64) -> (f64, f64)
+
+; The results in each other's registers.
+func @k_swap(i64, i64) -> (i64, i64) {
+block0(v0: i64, v1: i64):
+    return v1, v0
+}
+
+; struct { char; void *; }: the char is alone in its 8 bytes.
+func @k_narrow(i64, ptr) -> (i8, ptr) {
+block0(v0: i64, v1: ptr):
+    v2 = trunc.i8 v0
+    return v2, v1
+}
+
+; struct { long; int; }, with trailing padding.
+func @k_padded(i64) -> (i64, i32) {
+block0(v0: i64):
+    v1 = trunc.i32 v0
+    v2 = iconst.i64 1
+    v3 = iadd v0, v2
+    return v3, v1
+}
+
+func @k_floats(f64, f64) -> (f64, f64) {
+block0(v0: f64, v1: f64):
+    v2 = fadd v0, v1
+    v3 = fsub v0, v1
+    return v3, v2
+}
+
+; The same value twice.
+func @k_twice(i64) -> (i64, i64) {
+block0(v0: i64):
+    return v0, v0
+}
+
+; Calls C with a value live across the calls, feeds one call's results to
+; the next swapped, and leaves one result unused.
+func @k_call(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2, v3 = call @c_pair(v0, v1)
+    v4, v5 = call @c_pair(v3, v2)
+    v6, v7 = call @c_pair(v4, v0)
+    v8 = iconst.i64 7
+    v9 = imul v4, v8
+    v10 = iconst.i64 11
+    v11 = imul v5, v10
+    v12 = iadd v9, v11
+    v13 = iadd v12, v7
+    v14 = iadd v13, v0
+    return v14
+}
+
+func @k_call_sized(i32, i64) -> i64 {
+block0(v0: i32, v1: i64):
+    v2, v3 = call @c_sized(v0, v1)
+    v4 = sext.i64 v2
+    v5 = iconst.i64 100
+    v6 = imul v4, v5
+    v7 = iadd v6, v3
+    return v7
+}
+
+func @k_call_floats(f64, f64) -> f64 {
+block0(v0: f64, v1: f64):
+    v2, v3 = call @c_floats(v0, v1)
+    v4 = fconst.f64 3.0
+    v5 = fmul v2, v4
+    v6 = fadd v5, v3
+    return v6
+}
+
+func @k_indirect(ptr, i64, i64) -> i64 {
+block0(v0: ptr, v1: i64, v2: i64):
+    v3, v4 = call_indirect v0(v1, v2) : (i64, i64) -> (i64, i64)
+    v5 = iconst.i64 5
+    v6 = imul v3, v5
+    v7 = isub v6, v4
+    return v7
+}
+
+; Tail calls return the callee's results in place: a forwarder and a
+; reordering one.
+func @k_forward(i64, i64) -> (i64, i64) {
+block0(v0: i64, v1: i64):
+    return_call @c_pair(v0, v1)
+}
+
+func @k_forward_swapped(i64, i64) -> (i64, i64) {
+block0(v0: i64, v1: i64):
+    return_call @c_pair(v1, v0)
+}
+
+; Seven integer and eight float results, the most both targets allow,
+; returned in the reverse of their argument order.
+func @fast_many(i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64) -> (i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64) cc(fast) noinline local {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: f64, v8: f64, v9: f64, v10: f64, v11: f64, v12: f64, v13: f64, v14: f64):
+    return v6, v5, v4, v3, v2, v1, v0, v14, v13, v12, v11, v10, v9, v8, v7
+}
+
+; Weighs fast_many's results by position: the sum of (i + 1) * (x + 7 - i)
+; and of (j + 1) * (y + 8 - j).
+func @k_fast(i64, f64) -> i64 {
+block0(v0: i64, v1: f64):
+    c1 = iconst.i64 1
+    c2 = iconst.i64 2
+    c3 = iconst.i64 3
+    c4 = iconst.i64 4
+    c5 = iconst.i64 5
+    c6 = iconst.i64 6
+    c7 = iconst.i64 7
+    a1 = iadd v0, c1
+    a2 = iadd v0, c2
+    a3 = iadd v0, c3
+    a4 = iadd v0, c4
+    a5 = iadd v0, c5
+    a6 = iadd v0, c6
+    a7 = iadd v0, c7
+    d1 = fconst.f64 1.0
+    d2 = fconst.f64 2.0
+    d3 = fconst.f64 3.0
+    d4 = fconst.f64 4.0
+    d5 = fconst.f64 5.0
+    d6 = fconst.f64 6.0
+    d7 = fconst.f64 7.0
+    d8 = fconst.f64 8.0
+    f1 = fadd v1, d1
+    f2 = fadd v1, d2
+    f3 = fadd v1, d3
+    f4 = fadd v1, d4
+    f5 = fadd v1, d5
+    f6 = fadd v1, d6
+    f7 = fadd v1, d7
+    f8 = fadd v1, d8
+    r1, r2, r3, r4, r5, r6, r7, g1, g2, g3, g4, g5, g6, g7, g8 = call @fast_many(a1, a2, a3, a4, a5, a6, a7, f1, f2, f3, f4, f5, f6, f7, f8)
+    w2 = imul r2, c2
+    w3 = imul r3, c3
+    w4 = imul r4, c4
+    w5 = imul r5, c5
+    w6 = imul r6, c6
+    w7 = imul r7, c7
+    s2 = iadd r1, w2
+    s3 = iadd s2, w3
+    s4 = iadd s3, w4
+    s5 = iadd s4, w5
+    s6 = iadd s5, w6
+    s7 = iadd s6, w7
+    h2 = fmul g2, d2
+    h3 = fmul g3, d3
+    h4 = fmul g4, d4
+    h5 = fmul g5, d5
+    h6 = fmul g6, d6
+    h7 = fmul g7, d7
+    h8 = fmul g8, d8
+    t2 = fadd g1, h2
+    t3 = fadd t2, h3
+    t4 = fadd t3, h4
+    t5 = fadd t4, h5
+    t6 = fadd t5, h6
+    t7 = fadd t6, h7
+    t8 = fadd t7, h8
+    n = fptosi.i64 t8
+    m = iconst.i64 1000000
+    s8 = imul s7, m
+    s9 = iadd s8, n
+    return s9
+}

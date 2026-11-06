@@ -52,7 +52,7 @@ pub(super) fn preflight(
         }
         [_] => {}
         _ => {
-            return Err("multiple return values are not supported by the C convention".into());
+            abi::multi_result_locs(&func.sig)?;
         }
     }
     for (_, callee) in func.callees() {

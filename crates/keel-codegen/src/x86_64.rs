@@ -486,14 +486,11 @@ fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
         }
     }
     let check = |name: &str, sig: &keel_ir::Signature, extra: &[&AbiParam]| {
-        // Call lowering moves only the first result out of its register.
         if sig.returns.len() > 1 {
-            return Err(CodegenError {
+            sysv::multi_result_locs(sig).map_err(|message| CodegenError {
                 func: name.into(),
-                message: format!(
-                    "{sig}: multiple return values are not supported by the C convention"
-                ),
-            });
+                message,
+            })?;
         }
         let params = || {
             sig.params
@@ -2485,6 +2482,30 @@ impl<'a> FunctionCompiler<'a> {
             return None;
         }
         stack_slot(self.func, sret).map(|slot| self.stack_slot_offsets[slot])
+    }
+
+    /// Moves a call's results to their places: [`Self::call_result`] for
+    /// at most one, and one parallel copy out of their return registers for
+    /// several, which may be allocatable and land in each other's registers.
+    fn call_results(
+        &mut self,
+        inst: Inst,
+        sig: &keel_ir::Signature,
+        result: Option<Value>,
+        sret: Option<AggregateResult<'_>>,
+    ) {
+        if sig.returns.len() <= 1 {
+            return self.call_result(result, sret);
+        }
+        let func = self.func;
+        let locs = sysv::multi_result_locs(sig).expect("preflight checked it");
+        let moves: Vec<_> = func
+            .inst_results(inst)
+            .iter()
+            .zip(locs)
+            .filter_map(|(&v, src)| self.defined(v).map(|dst| (dst, src)))
+            .collect();
+        self.parallel_copy(&moves);
     }
 
     /// Moves a call's result, if it has one, from rax or xmm0 to its place,

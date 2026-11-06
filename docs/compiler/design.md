@@ -442,8 +442,21 @@ Apple arm64's C convention, as implemented:
   any function, on a `va_list` it was passed (as `vprintf` reads its
   arguments); only `va_start` needs a variadic function.
 
-Limits: at most one return value (return structs through `sret`); at most
-4080 bytes of stack arguments per call.
+- **Several results** (`-> (ptr, i64)`) come back where C returns a struct
+  of them in natural layout, so C code declares such a function returning
+  that struct. Results may be integers up to 64 bits, pointers, `f32` and
+  `f64`, with no `sext` or `uext`, since struct fields are not extended.
+  Version 1 accepts only the structs that give each result its own register:
+  one to four floats of one type in v0–v3, or up to 16 bytes of integers and
+  pointers with one result in each of x0 and x1. A struct that C would pack
+  into one register, return in memory, or return with a float in an x
+  register is rejected. `cc(fast)` places results as it places arguments,
+  integers and pointers in x0–x7 and floats in v0–v7, and rejects more than
+  eight of a class. Every signature `cc(c)` accepts is placed the same way
+  under `cc(fast)`.
+
+Limits: results that need memory go through `sret`; at most 4080 bytes of
+stack arguments per call.
 
 System V x86-64's C convention (`keel-codegen/src/sysv.rs`, whose module
 docs list the rules) is placed by the same IR signatures. The differences
@@ -456,6 +469,11 @@ from Apple arm64 that matter to a frontend:
   SSE, each going to the next register of its class (`{double, long}` in
   xmm0 and rdi). Bigger structs are copied onto the stack, not passed by
   address.
+- Several results follow the same struct rule: each eightbyte comes back in
+  the next of rax and rdx or of xmm0 and xmm1, so `(i64, f64)` is accepted
+  here. `(f32, f32)`, which packs into xmm0, and anything over 16 bytes are
+  rejected. `cc(fast)` takes integers and pointers from rax,
+  rdx, rdi, rsi, rcx, r8 and r9, and floats from xmm0–xmm7.
 - A `va_list` is 24 bytes, `struct { u32 gp_offset, fp_offset; ptr
   overflow_arg_area, reg_save_area; }`. A variadic function saves the
   argument registers into a 176-byte area that `va_arg` reads from

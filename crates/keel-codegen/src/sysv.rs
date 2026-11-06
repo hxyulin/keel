@@ -612,6 +612,46 @@ pub fn return_loc(ty: Type) -> Loc {
     }
 }
 
+/// Where each result of `sig`, which has more than one, comes back.
+///
+/// `cc(c)` returns them where C returns a struct of them in natural
+/// layout. Version 1 accepts only structs of up to 16 bytes with one
+/// result in each eightbyte, so integers come back in rax and rdx and
+/// floats in xmm0 and xmm1, in order. It rejects the structs that would
+/// pack two results into one register or return them in memory.
+/// `cc(fast)` continues the same sequences with the argument registers:
+/// integers and pointers in rax, rdx, rdi, rsi, rcx, r8 and r9, floats in
+/// xmm0–xmm7. Both conventions place every signature `cc(c)` accepts alike.
+pub fn multi_result_locs(sig: &Signature) -> Result<Vec<Loc>, String> {
+    use crate::lowering::{ResultClass, multi_result_classes, result_units};
+    let classes = multi_result_classes(sig)?;
+    let fast = sig.cc == keel_ir::CallConv::Fast;
+    if !fast && result_units(&sig.returns).is_none() {
+        return Err(format!(
+            "{sig}: C returns these results as a struct of them, which does not give each \
+             its own register; use cc(fast) or an sret pointer"
+        ));
+    }
+    const FAST_INTS: [u8; 7] = [RAX, RDX, RDI, RSI, RCX, 8, 9];
+    let (mut ints, mut floats) = (0, 0);
+    classes
+        .iter()
+        .map(|class| {
+            let loc = match class {
+                ResultClass::Int => FAST_INTS.get(ints).map(|&r| Loc::Reg(r)),
+                ResultClass::Float => (floats < 8).then(|| Loc::FReg(floats as u8)),
+            };
+            match class {
+                ResultClass::Int => ints += 1,
+                ResultClass::Float => floats += 1,
+            }
+            loc.ok_or_else(|| {
+                format!("{sig}: cc(fast) returns at most 7 integer and 8 float results")
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -238,6 +238,58 @@ fn same_placement(callee: &keel_ir::Signature, caller: &keel_ir::Signature) -> b
             }))
 }
 
+/// One class of result register: general-purpose or floating-point.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) enum ResultClass {
+    Int,
+    Float,
+}
+
+/// The register class of each result of `sig`, which has more than one.
+/// Version 1 returns only integers up to 64 bits, pointers, `f32` and
+/// `f64`, with no extension: a struct's fields are not extended.
+pub(crate) fn multi_result_classes(sig: &keel_ir::Signature) -> Result<Vec<ResultClass>, String> {
+    sig.returns
+        .iter()
+        .map(|r| {
+            if r.ext != keel_ir::ArgExt::None {
+                return Err(format!(
+                    "{sig}: a function with several results does not extend them"
+                ));
+            }
+            match r.ty {
+                Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr => Ok(ResultClass::Int),
+                Type::F32 | Type::F64 => Ok(ResultClass::Float),
+                ty => Err(format!(
+                    "{sig}: a function with several results cannot return {ty} yet"
+                )),
+            }
+        })
+        .collect()
+}
+
+/// Which 8-byte unit of a C struct of the results, in order and natural
+/// layout, holds each result. `None` when the struct is over 16 bytes,
+/// which C returns through memory, or when two results share a unit, which
+/// C would pack into one register.
+pub(crate) fn result_units(returns: &[keel_ir::AbiParam]) -> Option<Vec<u64>> {
+    let layout = keel_ir::Layout::Struct(
+        returns
+            .iter()
+            .map(|r| keel_ir::Layout::Scalar(r.ty))
+            .collect(),
+    );
+    if layout.size() > 16 {
+        return None;
+    }
+    let units: Vec<u64> = layout
+        .leaves()
+        .iter()
+        .map(|&(offset, _)| offset / 8)
+        .collect();
+    units.windows(2).all(|w| w[0] < w[1]).then_some(units)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
