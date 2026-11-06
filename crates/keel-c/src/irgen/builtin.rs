@@ -4,6 +4,16 @@ use super::*;
 
 // CAS IR has one ordering: the success order also supplies a legally stronger
 // failure order. Runtime orders conservatively select seq_cst.
+/// A compare-exchange's failure order. The frontend rejects release and
+/// acq_rel, and an order that is not a constant is seq_cst.
+fn failure_order(order: Option<i64>) -> Ordering {
+    match order {
+        Some(0) => Ordering::Relaxed,
+        Some(1 | 2) => Ordering::Acquire,
+        _ => Ordering::SeqCst,
+    }
+}
+
 fn atomic_order(order: i64, load: bool, store: bool) -> Ordering {
     match order {
         0 => Ordering::Relaxed,
@@ -216,14 +226,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 GenericAtomicOp::CompareExchange => {
                     let expected = self.b.ins().load_with_flags(ty, vals[1], expected_flags);
                     let desired = self.b.ins().load_with_flags(ty, vals[2], desired_flags);
-                    let old = self
-                        .b
-                        .ins()
-                        .atomic_cas(ordering, ordering.cas_failure(), vals[0], expected, desired)
-                        .0;
+                    // (ptr, expected, desired, weak, success, failure)
+                    let failure = failure_order(crate::eval::eval_int(&args[5]));
+                    let weak = crate::eval::eval_int(&args[3]).is_some_and(|w| w != 0);
+                    let (old, stored) =
+                        self.compare_exchange(ordering, failure, weak, vals[0], expected, desired);
                     return Ok(Some(self.atomic_expected(
                         old,
-                        expected,
+                        stored,
                         vals[1],
                         expected_flags,
                     )));
@@ -264,19 +274,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             } else {
                 value
             };
-            let found = self
-                .b
-                .ins()
-                .atomic_cas(
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                    vals[0],
-                    expected,
-                    desired,
-                )
-                .0;
-            let success = self.b.ins().icmp(IntCC::Eq, found, expected);
-            self.b.ins().brif(success, done, &[], retry, &[found]);
+            // The loop retries anyway, so a spurious failure costs nothing.
+            let (found, stored) = self.b.ins().atomic_cas_weak(
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+                vals[0],
+                expected,
+                desired,
+            );
+            self.b.ins().brif(stored, done, &[], retry, &[found]);
             self.b.seal_block(retry);
             self.b.seal_block(done);
             self.switch_to(done);
@@ -586,10 +592,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         }
                     }
                     Builtin::AtomicCasBool => {
-                        let old = ins
-                            .atomic_cas(ordering, ordering.cas_failure(), vals[0], vals[1], vals[2])
-                            .0;
-                        self.b.ins().icmp(IntCC::Eq, old, vals[1])
+                        ins.atomic_cas(ordering, ordering.cas_failure(), vals[0], vals[1], vals[2])
+                            .1
                     }
                     Builtin::AtomicCompareExchange => {
                         let ty = if float {
@@ -605,18 +609,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                             ..MemoryFlags::default()
                         };
                         let expected = ins.load_with_flags(ty, vals[1], flags);
-                        let old = self
-                            .b
-                            .ins()
-                            .atomic_cas(
-                                ordering,
-                                ordering.cas_failure(),
-                                vals[0],
-                                expected,
-                                vals[2],
-                            )
-                            .0;
-                        self.atomic_expected(old, expected, vals[1], flags)
+                        // (ptr, expected, desired, success, failure, weak)
+                        let failure = failure_order(crate::eval::eval_int(&args[4]));
+                        let weak = args
+                            .get(5)
+                            .and_then(crate::eval::eval_int)
+                            .is_some_and(|w| w != 0);
+                        let (old, stored) = self
+                            .compare_exchange(ordering, failure, weak, vals[0], expected, vals[2]);
+                        self.atomic_expected(old, stored, vals[1], flags)
                     }
                     _ => {
                         if order != 0 {
@@ -640,14 +641,34 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     /// The expected buffer is written only on failure (observable for volatile).
+    /// A compare-and-swap: strong, or weak when C asked for it.
+    fn compare_exchange(
+        &mut self,
+        success: Ordering,
+        failure: Ordering,
+        weak: bool,
+        addr: Value,
+        expected: Value,
+        desired: Value,
+    ) -> (Value, Value) {
+        let ins = self.b.ins();
+        if weak {
+            ins.atomic_cas_weak(success, failure, addr, expected, desired)
+        } else {
+            ins.atomic_cas(success, failure, addr, expected, desired)
+        }
+    }
+
+    /// C's compare-exchange result: `stored`, the flag of the
+    /// compare-and-swap that gave `old`. On failure, `old` goes to `*ptr`.
     fn atomic_expected(
         &mut self,
         old: Value,
-        expected: Value,
+        stored: Value,
         ptr: Value,
         flags: MemoryFlags,
     ) -> Value {
-        let success = self.b.ins().icmp(IntCC::Eq, old, expected);
+        let success = stored;
         let fail = self.new_block();
         let done = self.new_block();
         self.b.ins().brif(success, done, &[], fail, &[]);

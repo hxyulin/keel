@@ -269,13 +269,15 @@ impl<'a> Parser<'a> {
             "val_compare_and_swap" => (Builtin::AtomicCas, 4),
             "bool_compare_and_swap" => (Builtin::AtomicCasBool, 4),
             "compare_exchange_n" | "compare_exchange_strong" | "compare_exchange_weak" => {
-                // (ptr, expected, desired[, weak], success, failure): the
-                // failure order is never stronger, so the success one does.
+                // (ptr, expected, desired[, weak], success, failure) becomes
+                // (ptr, expected, desired, success, failure, weak).
                 let weak_arg = op == "compare_exchange_n";
                 want(&args, if weak_arg { 6 } else { 5 })?;
                 if weak_arg {
                     let weak = args.remove(3);
                     args.push(weak);
+                } else {
+                    args.push(order(i64::from(op == "compare_exchange_weak")));
                 }
                 (Builtin::AtomicCompareExchange, args.len())
             }

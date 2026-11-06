@@ -461,3 +461,69 @@ int main(void) {
         }
     }
 }
+
+/// Compare-exchange passes both orders and the weak form to the IR, and
+/// branches on the compare-and-swap's flag. A failure order that is not a
+/// constant is seq_cst.
+#[test]
+fn compare_exchange_keeps_failure_order_and_weak_form() {
+    use keel_ir::{InstData, Ordering};
+    let source = "\
+int weak_c11(_Atomic int *p, int *e) { return __c11_atomic_compare_exchange_weak(p, e, 1, 4, 2); }
+int strong_c11(_Atomic int *p, int *e) { return __c11_atomic_compare_exchange_strong(p, e, 1, 3, 0); }
+int weak_gcc(int *p, int *e) { return __atomic_compare_exchange_n(p, e, 1, 1, 5, 0); }
+int runtime_weak(int *p, int *e, int w) { return __atomic_compare_exchange_n(p, e, 1, w, 2, 2); }
+int generic(int *p, int *e, int *d) { return __atomic_compare_exchange(p, e, d, 1, 2, 1); }
+int runtime_failure(int *p, int *e, int f) { return __atomic_compare_exchange_n(p, e, 1, 0, 5, f); }
+int boolean(int *p) { return __sync_bool_compare_and_swap(p, 0, 1); }";
+    let m = keel_c::compile(
+        source,
+        "cas-orders.c",
+        keel_c::Options {
+            debug_info: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    use Ordering::*;
+    for (name, want) in [
+        ("weak_c11", (AcqRel, Acquire, true)),
+        ("strong_c11", (Release, Relaxed, false)),
+        ("weak_gcc", (SeqCst, Relaxed, true)),
+        ("runtime_weak", (Acquire, Acquire, false)),
+        ("generic", (Acquire, Acquire, true)),
+        ("runtime_failure", (SeqCst, SeqCst, false)),
+        ("boolean", (SeqCst, SeqCst, false)),
+    ] {
+        let f = m.functions.iter().find(|f| f.name == name).unwrap();
+        let (cas, data) = f
+            .layout_insts()
+            .find_map(|(_, i)| match *f.inst_data(i) {
+                InstData::AtomicCas {
+                    success,
+                    failure,
+                    weak,
+                    ..
+                } => Some((i, (success, failure, weak))),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(data, want, "{name}");
+        // Nothing compares the old value with the expected one again.
+        let flag = f.inst_results(cas)[1];
+        assert!(
+            !f.layout_insts()
+                .any(|(_, i)| matches!(f.inst_data(i), InstData::Icmp { .. })),
+            "{name}"
+        );
+        assert!(
+            f.layout_insts().any(|(_, i)| {
+                let mut uses = false;
+                f.inst_data(i)
+                    .for_each_operand(|v| uses |= f.resolve(v) == flag);
+                uses
+            }),
+            "{name}"
+        );
+    }
+}
