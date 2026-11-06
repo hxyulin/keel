@@ -3,8 +3,9 @@
 //!
 //! Both compilers build every chosen suite with one configuration, and the
 //! suites' tests and benchmark outputs are checked before any timing. Each
-//! further placement relinks both builds with a padding object in front of
-//! the suite code, which moves every suite function by 16 more bytes.
+//! further placement reassembles both builds with never-executed padding in
+//! front of every function, chosen per function name and placement, so each
+//! function's offset in its cache line and its distance to the others change.
 //! `suite/c/ab_timing.py` then runs the baseline, the candidate and an
 //! identical copy of the baseline (the control) in mirrored blocks, under
 //! `perf stat` on Linux and `/usr/bin/time -l` on macOS. This module turns
@@ -27,8 +28,8 @@ use std::process::{Command, Stdio};
 const ACCEPT_GEOMEAN: f64 = 0.995;
 /// It is rejected if a workload is slower than +1.5% at every placement.
 const WORKLOAD_LIMIT: f64 = 1.015;
-/// How far each further placement moves the suite code, in bytes.
-const PLACEMENT_STEP: usize = 16;
+/// Padding before a function stays below a cache line.
+const PAD_LIMIT: usize = 64;
 /// The placeholders `ab_timing.py` replaces with the image and counter file.
 const BIN: &str = "@BIN@";
 const COUNTERS: &str = "@COUNTERS@";
@@ -56,7 +57,7 @@ pub struct Options {
     /// selection choices, for example `all,-x86-mask-test`.
     #[arg(long, value_name = "LIST")]
     candidate_isel: Option<String>,
-    /// Code placements; each moves the suite code 16 bytes further.
+    /// Code placements; each further one pads every function differently.
     #[arg(long, default_value_t = 4)]
     placements: usize,
     /// Measured rounds per placement; a round runs each image twice.
@@ -559,7 +560,7 @@ fn prepare(
     }
     let mut placements = vec![bins.clone()];
     for k in 1..options.placements {
-        placements.push(relink(suite, &sources, &bins, k * PLACEMENT_STEP)?);
+        placements.push(relink(suite, &sources, &bins, k, jobs)?);
     }
     let mut planned = Vec::new();
     for bench in benches {
@@ -590,55 +591,103 @@ fn prepare(
     Ok((app, identical))
 }
 
-/// Relinks both builds with `bytes` of padding in front of the suite code.
+/// Reassembles and relinks both builds with each function padded for
+/// `placement`.
 fn relink(
     suite: &Suite,
     sources: &build::Sources,
     bins: &[PathBuf; 2],
-    bytes: usize,
+    placement: usize,
+    jobs: usize,
 ) -> Result<[PathBuf; 2]> {
-    let pad = pad_object(&sources.work.join("ab"), bytes)?;
+    // Steps of the functions' own alignment: 16 bytes on x86-64 and one
+    // instruction on AArch64.
+    let (fill, step) = if cfg!(target_arch = "x86_64") {
+        ("0xcc", 16)
+    } else {
+        ("0", 4)
+    };
+    let units: Vec<_> = (0..sources.pre.len()).collect();
     let mut padded = Vec::new();
     for bin in bins {
         let dir = bin.parent().unwrap();
-        let objects = (0..sources.pre.len()).map(|i| dir.join(format!("unit-{i}.o")));
-        let name = format!("{}.pad{bytes:03}", suite.manifest.build.binary);
+        let objects = build::parallel(&units, jobs, &indicatif::ProgressBar::hidden(), |i| {
+            let asm = dir.join(format!("unit-{i}.s"));
+            let text = fs::read_to_string(&asm).with_context(|| {
+                format!(
+                    "reading {}; placements need the configuration's assembly output",
+                    asm.display()
+                )
+            })?;
+            let text = pad_functions(&text, placement, fill, step)
+                .with_context(|| asm.display().to_string())?;
+            let stem = format!("unit-{i}.place{placement}");
+            let asm = dir.join(format!("{stem}.s"));
+            let object = dir.join(format!("{stem}.o"));
+            fs::write(&asm, text)?;
+            let argv = ["clang", "-c", &path(&asm), "-o", &path(&object)].map(String::from);
+            build::run_checked(&argv, dir, None)?;
+            Ok(object)
+        })?;
+        let name = format!("{}.place{placement}", suite.manifest.build.binary);
         let out = dir.join(name);
-        build::link(
-            suite,
-            std::iter::once(pad.clone()).chain(objects),
-            &out,
-            dir,
-        )?;
+        build::link(suite, objects, &out, dir)?;
         if fs::read(&out)? == fs::read(bin)? {
-            bail!("{bytes} bytes of padding did not change {}", bin.display());
+            bail!("placement {placement} did not change {}", bin.display());
         }
         padded.push(out);
     }
     Ok([padded[0].clone(), padded[1].clone()])
 }
 
-/// An object whose code section is `bytes` of never-executed fill. Linked
-/// first, it moves the code of every object after it by that much.
-fn pad_object(dir: &Path, bytes: usize) -> Result<PathBuf> {
-    fs::create_dir_all(dir)?;
-    let asm = dir.join(format!("pad-{bytes}.s"));
-    let object = asm.with_extension("o");
-    let fill = if cfg!(target_arch = "x86_64") {
-        "0xcc"
-    } else {
-        "0"
-    };
-    fs::write(&asm, format!("\t.text\n\t.skip {bytes}, {fill}\n"))?;
-    let argv = [
-        "clang".into(),
-        "-c".into(),
-        asm.display().to_string(),
-        "-o".into(),
-        object.display().to_string(),
-    ];
-    build::run_checked(&argv, dir, None)?;
-    Ok(object)
+fn path(file: &Path) -> String {
+    file.display().to_string()
+}
+
+/// Puts never-executed `fill` in front of the alignment of every function in
+/// keel's assembly. A function is an entry label followed by its
+/// `L<name>_begin` label (`.L` on ELF). Its padding is a multiple of `step`
+/// below `PAD_LIMIT`, chosen from its name and `placement` alone, so both
+/// builds pad a function the same way.
+fn pad_functions(asm: &str, placement: usize, fill: &str, step: usize) -> Result<String> {
+    let lines: Vec<&str> = asm.lines().collect();
+    let mut pads = BTreeMap::new();
+    for (i, line) in lines.iter().enumerate() {
+        let line = line.trim();
+        let Some(name) = line
+            .strip_suffix("_begin:")
+            .and_then(|l| l.strip_prefix(".L").or_else(|| l.strip_prefix('L')))
+        else {
+            continue;
+        };
+        if i < 2 || !lines[i - 1].trim_end().ends_with(':') {
+            continue;
+        }
+        let align = (0..i - 1)
+            .rev()
+            .map_while(|j| {
+                let line = lines[j].trim();
+                let directive = line.starts_with('.') && !line.starts_with(".section");
+                let comment = line.starts_with(';') || line.starts_with('#');
+                (directive || comment).then_some(j)
+            })
+            .find(|&j| {
+                let line = lines[j].trim();
+                line.starts_with(".p2align") || line.starts_with(".align")
+            })
+            .with_context(|| format!("function {name} has no alignment directive"))?;
+        let digest = Sha256::digest(format!("{placement}:{name}"));
+        pads.insert(align, usize::from(digest[0]) % (PAD_LIMIT / step) * step);
+    }
+    let mut out = String::with_capacity(asm.len() + pads.len() * 24);
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(&bytes) = pads.get(&i).filter(|&&bytes| bytes > 0) {
+            out.push_str(&format!("\t.skip {bytes}, {fill}\n"));
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(out)
 }
 
 /// Runs a benchmark once with each build, checks the candidate prints what
@@ -903,7 +952,7 @@ fn trailer(
         },
         format!("AB-Host: {host}"),
         format!(
-            "AB-Protocol: {config}, {} workloads, {} placements x {} rounds, ABBA with an identical-image control, {metric}",
+            "AB-Protocol: {config}, {} workloads, {} function-padded placements x {} rounds, ABBA with an identical-image control, {metric}",
             workloads.len(),
             options.placements,
             options.rounds
@@ -1028,6 +1077,70 @@ mod tests {
             metrics: [cycles.clone(), cycles.clone(), cycles],
         };
         summarize(&series).unwrap()
+    }
+
+    const MACHO: &str = "\t.section\t__TEXT,__text\n\t.globl\t_g\n\t.p2align\t2\n_g:\nLg_begin:\n\t.p2align\t4\nLg_block1:\n\tret\nLg_end:\n\t.section\t__TEXT,__text\n\t.globl\t_w\n\t.weak_definition _w\n\t.p2align\t2\n_w:\nLw_begin:\n\tret\n";
+    const ELF: &str = "\t.section\t\".text\",\"ax\",@progbits\n\t.p2align\t4\n\t.type\t\"t\",@function\n\"t\":\n.Lt_begin:\n\tret\n";
+
+    /// The padding in front of each line that has some.
+    fn skips(padded: &str) -> Vec<(String, usize)> {
+        let lines: Vec<_> = padded.lines().collect();
+        lines
+            .windows(2)
+            .filter_map(|w| {
+                let bytes = w[0].strip_prefix("\t.skip ")?.split(',').next()?;
+                Some((w[1].trim().to_string(), bytes.parse().unwrap()))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn functions_are_padded_before_their_alignment_by_name() {
+        let mut seen = std::collections::BTreeSet::new();
+        for placement in 1..32 {
+            let padded = pad_functions(MACHO, placement, "0", 4).unwrap();
+            let pads = skips(&padded);
+            // Only the two entry alignments, never the block alignment inside g.
+            assert!(pads.iter().all(|(line, bytes)| line == ".p2align\t2"
+                && bytes % 4 == 0
+                && *bytes < PAD_LIMIT));
+            assert_eq!(padded.lines().count(), MACHO.lines().count() + pads.len());
+            // A function's padding does not depend on the rest of the unit.
+            let alone = pad_functions(
+                &MACHO[MACHO
+                    .find("\t.section\t__TEXT,__text\n\t.globl\t_w")
+                    .unwrap()..],
+                placement,
+                "0",
+                4,
+            )
+            .unwrap();
+            assert!(padded.ends_with(&alone), "placement {placement}");
+            seen.insert(pads.iter().map(|(_, bytes)| *bytes).collect::<Vec<_>>());
+            let elf = pad_functions(ELF, placement, "0xcc", 16).unwrap();
+            assert!(
+                skips(&elf)
+                    .iter()
+                    .all(|(line, bytes)| line == ".p2align\t4" && bytes % 16 == 0)
+            );
+        }
+        // Placements pad the functions differently.
+        assert!(seen.len() > 16, "{seen:?}");
+    }
+
+    #[test]
+    fn functions_without_alignment_are_errors_and_data_stays() {
+        assert!(
+            pad_functions(
+                "\t.section\t__TEXT,__text\n_g:\nLg_begin:\n\tret\n",
+                1,
+                "0",
+                4
+            )
+            .is_err()
+        );
+        let data = "\t.data\n_x:\n\t.byte 1\n";
+        assert_eq!(pad_functions(data, 1, "0", 4).unwrap(), data);
     }
 
     #[test]

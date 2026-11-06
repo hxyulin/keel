@@ -444,10 +444,16 @@ the candidate must print what the baseline prints. Each benchmark must also
 print the same with both builds. `--no-tests` skips the test commands but not
 the benchmark check.
 
-Every further placement relinks both builds with a padding object in front of
-the suite code, which moves every suite function 16 more bytes: placement 0 is
-the normal build, placement 1 moves the code 16 bytes, placement 3 moves it
-48. Placements catch alignment effects that an identical-image control cannot.
+Placement 0 is the normal build. Every further placement reassembles both
+builds' assembly with never-executed fill in front of each function's
+alignment: 0 to 48 bytes in 16-byte steps on x86-64, 0 to 60 bytes in 4-byte
+steps on AArch64. The fill depends only on the function's name and the
+placement, so both builds pad a function the same way. Each placement changes
+every function's offset in its cache line and its distance to the other
+functions, so a slowdown that comes from where the linker happened to put an
+unchanged hot function does not repeat at every placement. Placements catch
+layout effects that an identical-image control cannot. They need a
+configuration that emits assembly, not `--emit-object`.
 `suite/c/ab_timing.py` then runs each benchmark in blocks. A block runs the
 baseline, the candidate and the control (a copy of the baseline image) twice
 each, in a shuffled order followed by its mirror, so linear drift cancels.
