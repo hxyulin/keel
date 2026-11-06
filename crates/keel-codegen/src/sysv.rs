@@ -639,7 +639,7 @@ pub fn multi_result_locs(sig: &Signature) -> Result<Vec<Loc>, String> {
         .map(|class| {
             let loc = match class {
                 ResultClass::Int => FAST_INTS.get(ints).map(|&r| Loc::Reg(r)),
-                ResultClass::Float => (floats < 8).then(|| Loc::FReg(floats as u8)),
+                ResultClass::Float => (floats < 8).then_some(Loc::FReg(floats as u8)),
             };
             match class {
                 ResultClass::Int => ints += 1,
