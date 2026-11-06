@@ -163,6 +163,12 @@ pub(crate) fn run(func: &mut Function) -> bool {
                         },
                     );
                 }
+                // A marker writes indeterminate bytes to its slot alone.
+                InstData::Intrinsic { .. } if func.lifetime_marker_slot(inst).is_some() => {
+                    facts.retain(|&(_, ty), fact| {
+                        aliases.marker_keeps(func, inst, fact.addr, ty.bytes())
+                    });
+                }
                 ref data if data.memory_effects().may_write() => facts.clear(),
                 _ => {}
             }

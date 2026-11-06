@@ -116,7 +116,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `known-bits` | Fold masks and comparisons from known-zero and known-one bits |
 | `phi-simplify` | Replace uniform block arguments with a dominating value |
 | `gvn` | Scoped hash table over the dominator tree; loads are never merged |
-| `dce` | Mark from pinned instructions; dead block parameters die with their arguments |
+| `dce` | Mark from pinned instructions; dead block parameters die with their arguments; lifetime markers stay only while another needed instruction addresses their slot |
 | `gcm` | Global code motion, the scheduler for floating instructions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
@@ -350,8 +350,11 @@ outside this boundary.
 
 All memory passes keep the first potentially faulting access and every store
 unless a section says otherwise. Volatile and atomic accesses, calls, inline
-asm, `debugtrap` and lifetime barriers end their facts through the IR
-memory-effects model. Functions with debugger-visible variable homes are
+asm and `debugtrap` end their facts through the IR memory-effects model. A
+lifetime marker is a write of indeterminate bytes to its whole slot:
+`load-reuse` and `memory-forward` drop only the facts that may overlap that
+slot, and keep facts on accesses that lie inside another fixed slot. Passes
+that do not handle markers see the registry's `Barrier` effect. Functions with debugger-visible variable homes are
 excluded, because a debugger can edit a home between source locations.
 Alignment, `notrap` and `trap_ub` never establish alias freedom.
 `loop-vectorize` is the one pass that uses `trap_ub`: it may reorder accesses
@@ -416,8 +419,9 @@ copies call the C library.
 slot's `stack_addr`, or a chain of constant non-negative `ptradd`s from it, when
 the access ends within the slot. A fixed slot stays mapped for the whole frame,
 so this holds even after its address escapes. Pointer accesses count as 8
-bytes. Slots with lifetime markers are skipped, because an access outside a
-slot's lifetime may trap. The pass infers no alignment. `dce` can then delete
+bytes. Slots with lifetime markers qualify too: their bytes stay mapped, and an
+access outside a lifetime is undefined whatever its flags say. The pass infers
+no alignment. `dce` can then delete
 such loads when their results are unused. Every tier except None runs it before
 a `dce`: Fast and Basic once, Balanced after each round's `stack-forward`, and
 Full after each `FULL_ROUND` `stack-forward`.
@@ -444,7 +448,7 @@ postorder. Merges, unprocessed predecessors and backedges inherit nothing, and
 a loop header resets availability. Chains stop after eight edges and snapshots
 hold at most 128 facts. Stores do not create facts. A later duplicate load
 disappears only after the original load succeeded with no possible mutation
-or lifetime barrier on the path. Address analysis is shared with
+or marker of the load's slot on the path. Address analysis is shared with
 `memory-forward`. Balanced, Size and Full run it.
 
 `call-load-reuse` also reuses loads across calls whose explicit scoped

@@ -220,8 +220,10 @@ block2:
     assert_eq!(notrap, [true]);
 }
 
-/// `stack-notrap` marks only accesses proven inside a fixed slot without
-/// lifetime markers. DCE then deletes the dead ones and keeps the rest.
+/// `stack-notrap` marks only accesses proven inside a fixed slot, with or
+/// without lifetime markers. DCE then deletes the dead ones and keeps the
+/// rest. Once ss1's load is gone, nothing addresses ss1, so DCE also deletes
+/// its markers and its address.
 #[test]
 fn dead_loads_inside_fixed_stack_slots_are_deleted() {
     let source = "decl @escape(ptr)
@@ -264,8 +266,9 @@ block0(v0: i64):
             .collect()
     };
     assert!(pass("stack-notrap").run(f, &Default::default()));
-    // In bounds, even after the slot escapes: offset 8, the store and offset 0.
-    // Past the end, dynamic, volatile or lifetime-marked accesses stay as is.
+    // In bounds, even after the slot escapes or with markers: offset 8, the
+    // ss1 load, the store and offset 0. Past the end, dynamic or volatile
+    // accesses stay as is.
     assert_eq!(
         accesses(f),
         [
@@ -273,7 +276,7 @@ block0(v0: i64):
             (true, false),
             (true, false),
             (true, false),
-            (true, false),
+            (true, true),
             (false, true),
             (true, true),
         ]
@@ -282,14 +285,10 @@ block0(v0: i64):
     assert!(pass("dce").run(f, &Default::default()));
     assert_eq!(
         accesses(f),
-        [
-            (true, false),
-            (true, false),
-            (true, false),
-            (true, false),
-            (false, true)
-        ]
+        [(true, false), (true, false), (true, false), (false, true)]
     );
+    let left = f.to_string();
+    assert!(!left.contains("lifetime") && !left.contains("stack_addr ss1"), "{left}");
 }
 
 /// A compare-and-swap writes memory, so GVN does not merge two identical

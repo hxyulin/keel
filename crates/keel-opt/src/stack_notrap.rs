@@ -4,39 +4,25 @@
 //! A fixed slot stays mapped for the whole frame, so an access within its
 //! bounds cannot fault, even when the slot's address escapes. The address
 //! must be a slot's `stack_addr` or a chain of constant, non-negative
-//! `ptradd`s from it, as [`crate::stack_address::propagate`] proves. Slots
-//! with lifetime markers are skipped: the interpreter traps on an access
-//! outside a slot's lifetime. Alignment is not inferred. Volatile accesses
-//! are left alone.
-use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::{Function, InstData, Intrinsic, Type};
+//! `ptradd`s from it, as [`crate::stack_address::propagate`] proves. That
+//! holds for slots with lifetime markers too: their bytes stay mapped, and
+//! an access outside a lifetime is undefined whatever its flags say.
+//! Alignment is not inferred. Volatile accesses are left alone.
+use keel_ir::fxhash::FxHashMap;
+use keel_ir::{Function, InstData, Type};
 
 pub fn run(f: &mut Function) -> bool {
     if f.num_stack_slots() == 0 {
         return false;
     }
-    let mut marked = FxHashSet::default();
     let mut seeds = FxHashMap::default();
     for (_, i) in f.layout_insts() {
-        match f.inst_data(i) {
-            InstData::Intrinsic {
-                id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
-                args,
-            } => {
-                // The verifier requires a direct `stack_addr` operand.
-                if let keel_ir::ValueDef::Result(def, _) = f.value_def(f.resolve(args[0]))
-                    && let InstData::StackAddr { slot } = *f.inst_data(def)
-                {
-                    marked.insert(slot);
-                }
-            }
-            &InstData::StackAddr { slot } if f.resolve(f.first_result(i)) == f.first_result(i) => {
-                seeds.insert(f.first_result(i), (slot, 0usize));
-            }
-            _ => {}
+        if let &InstData::StackAddr { slot } = f.inst_data(i)
+            && f.resolve(f.first_result(i)) == f.first_result(i)
+        {
+            seeds.insert(f.first_result(i), (slot, 0usize));
         }
     }
-    seeds.retain(|_, (slot, _)| !marked.contains(slot));
     if seeds.is_empty() {
         return false;
     }

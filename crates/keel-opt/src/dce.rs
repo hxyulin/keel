@@ -10,6 +10,10 @@
 //! ever passed around the loop (`jump block1(v7)` where `v7 = iadd v3, ..`
 //! and nothing else reads `v3`) dies, parameter and all, which plain
 //! "remove instructions with no uses" cannot see.
+//!
+//! Lifetime markers are pinned but are not roots. A marker stays only while
+//! some other needed instruction addresses its slot; otherwise nothing
+//! observes the slot, and its markers go with its accesses.
 
 use crate::scratch::Scratch;
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Value, ValueDef};
@@ -52,6 +56,7 @@ pub fn run(func: &mut Function) -> bool {
     let mut live_value = Scratch::filled(func.num_values(), false);
     let mut live_inst = Scratch::filled(func.num_insts(), false);
     let mut worklist: Scratch<Value> = Scratch::new();
+    let mut markers: Scratch<Inst> = Scratch::new();
 
     // Roots: the operands of pinned instructions, minus branch arguments.
     for block in func.blocks() {
@@ -60,6 +65,10 @@ pub fn run(func: &mut Function) -> bool {
             let dead_read_eligible = matches!(data, InstData::Load { flags, .. }
                 if flags.notrap && !flags.volatile);
             if data.is_pinned() && !dead_read_eligible {
+                if data.is_lifetime_marker() {
+                    markers.push(inst);
+                    continue;
+                }
                 live_inst[inst.index()] = true;
                 uses_except_branch_args(func, inst, |value| {
                     enqueue(func, value, &mut live_value, &mut worklist);
@@ -92,6 +101,9 @@ pub fn run(func: &mut Function) -> bool {
             }
             ValueDef::Alias(_) => unreachable!("resolved"),
         }
+    }
+    if !markers.is_empty() {
+        keep_used_markers(func, &markers, &mut live_inst, &mut live_value);
     }
 
     let mut changed = false;
@@ -144,5 +156,42 @@ fn uses_except_branch_args(func: &Function, inst: Inst, mut visit: impl FnMut(Va
         InstData::Brif { cond, .. } => visit(*cond),
         InstData::Switch { arg, .. } => visit(*arg),
         data => data.for_each_operand(visit),
+    }
+}
+
+/// Marks live each marker whose slot another live instruction addresses,
+/// with the `stack_addr` it names. Kept out of `run`, which every pipeline
+/// calls many times, since few functions have markers.
+#[inline(never)]
+fn keep_used_markers(
+    func: &Function,
+    markers: &[Inst],
+    live_inst: &mut [bool],
+    live_value: &mut [bool],
+) {
+    let mut live_slot = Scratch::filled(func.num_stack_slots(), false);
+    for block in func.blocks() {
+        for &inst in func.block_insts(block) {
+            if let InstData::StackAddr { slot } | InstData::AggregateVaArg { home: slot, .. } =
+                *func.inst_data(inst)
+                && live_inst[inst.index()]
+            {
+                live_slot[slot.index()] = true;
+            }
+        }
+    }
+    for &marker in markers {
+        let slot = func.lifetime_marker_slot(marker).expect("verified marker");
+        if !live_slot[slot.index()] {
+            continue;
+        }
+        live_inst[marker.index()] = true;
+        // The operand is a `stack_addr`, which has no operands of its own.
+        uses_except_branch_args(func, marker, |value| {
+            live_value[value.index()] = true;
+            if let ValueDef::Result(address, _) = func.value_def(value) {
+                live_inst[address.index()] = true;
+            }
+        });
     }
 }

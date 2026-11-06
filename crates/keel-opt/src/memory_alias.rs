@@ -153,6 +153,46 @@ impl AliasInfo {
         })
     }
 
+    /// Whether lifetime marker `marker` leaves the `bytes` at `addr` alone. An
+    /// end leaves everything: an access after it is undefined. A start writes
+    /// its whole slot, so it leaves an access alone when the access lies
+    /// inside another fixed slot, or does not overlap its own.
+    pub(crate) fn marker_keeps(
+        &self,
+        func: &Function,
+        marker: keel_ir::Inst,
+        addr: Value,
+        bytes: Option<u32>,
+    ) -> bool {
+        if matches!(
+            func.inst_data(marker),
+            InstData::Intrinsic {
+                id: keel_ir::Intrinsic::LifetimeEnd,
+                ..
+            }
+        ) {
+            return true;
+        }
+        let (Some(slot), Some(bytes)) = (func.lifetime_marker_slot(marker), bytes) else {
+            return false;
+        };
+        let address = self.address(func, addr);
+        if let ValueDef::Result(def, 0) = func.value_def(address.root)
+            && let InstData::StackAddr { slot: other } = *func.inst_data(def)
+            && other != slot
+            && address.offset >= 0
+            && (address.offset as u64).checked_add(u64::from(bytes))
+                <= Some(u64::from(func.stack_slot(other).size))
+        {
+            return true;
+        }
+        let InstData::Intrinsic { args, .. } = func.inst_data(marker) else {
+            return false;
+        };
+        let size = u64::from(func.stack_slot(slot).size);
+        !self.may_alias(func, args[0], size, addr, u64::from(bytes))
+    }
+
     /// Query two nonzero byte footprints, with at least one modifying access.
     /// Unknown bases alias; distinct roots require *both* eligible contracts.
     /// Callers handle zero-sized operations and all call/lifetime/observable

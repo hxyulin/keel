@@ -126,6 +126,12 @@ fn forward(func: &mut Function, mode: Forwarding) -> bool {
                         available.clear();
                     }
                 }
+                // A marker writes indeterminate bytes to its slot alone.
+                InstData::Intrinsic { .. } if func.lifetime_marker_slot(inst).is_some() => {
+                    available.retain(|&(_, ty), &mut (_, other)| {
+                        aliases.marker_keeps(func, inst, other, ty.bytes())
+                    });
+                }
                 ref data if data.memory_effects().may_write() => available.clear(),
                 _ => {}
             }

@@ -736,6 +736,11 @@ impl Function {
     }
 
     #[inline]
+    pub fn stack_slot(&self, slot: StackSlot) -> StackSlotData {
+        self.stack_slots[slot]
+    }
+
+    #[inline]
     pub fn num_stack_slots(&self) -> usize {
         self.stack_slots.len()
     }
