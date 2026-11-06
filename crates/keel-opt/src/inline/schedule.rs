@@ -2,8 +2,8 @@
 use super::clone::{inline_call, two_functions};
 use super::cost::{
     CHEAP_SITE_GROWTH, CallerLedger, MAX_MODULE_GROWTH, MAX_SCC_CALLER_INSTRUCTIONS, ModuleLedger,
-    SiteCost, Verdict, budget_verdict, charge, cheap_helper, inline_cost, profitability_reason,
-    small_scc_wrapper, tiny_priority_leaf,
+    SiteCost, Verdict, budget_verdict, charge, cheap_helper, code_insts, code_size, inline_cost,
+    profitability_reason, small_scc_wrapper, tiny_priority_leaf,
 };
 use super::eligibility::eligibility_reason;
 use super::{
@@ -246,9 +246,7 @@ pub(super) fn run_observed_policy_budgeted(
     let large_scc_callers: Vec<_> = module
         .functions
         .iter()
-        .map(|caller| {
-            !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS
-        })
+        .map(|caller| !wrappers.is_empty() && code_size(caller) > MAX_SCC_CALLER_INSTRUCTIONS)
         .collect();
     let mut ledgers = vec![CallerLedger::default(); module.functions.len()];
     // Priority sites, then the remaining alwaysinline sites, then ordinary
@@ -443,7 +441,7 @@ pub(super) fn run_observed_policy_budgeted(
                     }),
                     _ => false,
                 };
-                callee.layout_insts().take(129).count() > 128
+                code_insts(callee).take(129).count() > 128
                     || !(callee.attrs.inlinehint
                         || constant
                         || (callee.local
@@ -563,7 +561,7 @@ pub(super) fn run_observed_policy_budgeted(
                 },
             ));
         }
-        let before = use_cheap.then(|| caller.layout_insts().count());
+        let before = use_cheap.then(|| code_size(caller));
         if !live_templates && templates.get(&caller.name) == Some(&index) && frozen[index].is_none()
         {
             frozen[index] = Some(Box::new(caller.clone()));
@@ -577,9 +575,7 @@ pub(super) fn run_observed_policy_budgeted(
         if let Some(before) = before {
             // Fail compilation before codegen on an accounting violation.
             // No recoverable post-mutation fallback or artifact is allowed.
-            let actual_net_growth = caller
-                .layout_insts()
-                .count()
+            let actual_net_growth = code_size(caller)
                 .checked_sub(before)
                 .expect("reserve inlining unexpectedly shrank layout");
             assert!(

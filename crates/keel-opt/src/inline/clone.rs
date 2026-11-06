@@ -1,7 +1,8 @@
 //! Copies a callee body into its caller at one call site.
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{
-    BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Purpose, Symbol, Type,
+    BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic, Purpose,
+    StackSlot, Symbol, Type,
 };
 
 pub(super) fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
@@ -39,6 +40,42 @@ pub(super) fn inline_stack_slots(callee: &Function) -> Vec<bool> {
     used
 }
 
+/// The callee slots that inlining gives lifetime markers: those it uses
+/// that have no markers of their own and are no debug or `AggregateVaArg`
+/// home, which nothing tracks through markers. Each comes with the callee's
+/// first entry-block `stack_addr` of it, if any; the entry runs once per call,
+/// since nothing branches to it. Otherwise inlining adds an address.
+pub(super) fn slots_to_mark(callee: &Function) -> Vec<(StackSlot, Option<Inst>)> {
+    if callee.num_stack_slots() == 0 {
+        return Vec::new();
+    }
+    let mut mark = inline_stack_slots(callee);
+    for var in &callee.debug_vars {
+        mark[var.slot.index()] = false;
+    }
+    let entry = callee.entry_block().expect("an inlined callee has a body");
+    let mut first = vec![None; callee.num_stack_slots()];
+    for (block, inst) in callee.layout_insts() {
+        let data = callee.inst_data(inst);
+        if let Some(slot) = callee.lifetime_marker_slot(inst) {
+            mark[slot.index()] = false;
+        } else if let InstData::AggregateVaArg { home, .. } = *data {
+            mark[home.index()] = false;
+        } else if let InstData::StackAddr { slot } = *data
+            && block == entry
+            && first[slot.index()].is_none()
+            && callee.resolve(callee.first_result(inst)) == callee.first_result(inst)
+        {
+            first[slot.index()] = Some(inst);
+        }
+    }
+    callee
+        .stack_slots()
+        .filter(|(slot, _)| mark[slot.index()])
+        .map(|(slot, _)| (slot, first[slot.index()]))
+        .collect()
+}
+
 pub(super) fn two_functions(
     functions: &mut [Function],
     caller: usize,
@@ -74,11 +111,18 @@ pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) 
     caller.move_insts_to_end(call_block, position + 1, continuation);
     let mut args = args;
     args.iter_mut().for_each(|v| *v = caller.resolve(*v));
+    // Each new slot lives from just before its first write until control
+    // returns to the continuation. A path that never returns needs no end.
+    let mut lifetimes = Vec::new();
     // Copy every byte, including padding. All snapshots precede callee effects.
     for (arg, param) in args.iter_mut().zip(&callee.sig.params) {
         if let Purpose::ByVal(layout) = &param.purpose {
             let slot = caller.create_stack_slot(layout.size() as u32, layout.align() as u32);
             let dst = caller.ins(InsertPoint::Before(call)).stack_addr(slot);
+            caller
+                .ins(InsertPoint::Before(call))
+                .intrinsic(Intrinsic::LifetimeStart, &[dst]);
+            lifetimes.push(dst);
             for (offset, ty) in byval_copy_chunks(layout.size()) {
                 let mut src_at = *arg;
                 let mut dst_at = dst;
@@ -197,6 +241,41 @@ pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) 
             caller.set_inst_loc(new, loc);
         }
     }
+    // Mark each callee slot that has no markers of its own, reusing the
+    // callee's entry-block address when it has one.
+    for (slot, address) in slots_to_mark(callee) {
+        let address = match address {
+            Some(old) => {
+                let new = values[&callee.first_result(old)];
+                let keel_ir::ValueDef::Result(def, _) = caller.value_def(new) else {
+                    unreachable!("a cloned stack_addr is an instruction result")
+                };
+                let block = caller.inst_block(def);
+                let insts = caller.block_insts(block);
+                let next = insts[insts.iter().position(|&i| i == def).unwrap() + 1];
+                caller
+                    .ins(InsertPoint::Before(next))
+                    .intrinsic(Intrinsic::LifetimeStart, &[new]);
+                new
+            }
+            None => {
+                let address = caller
+                    .ins(InsertPoint::Before(call))
+                    .stack_addr(slots[&slot]);
+                caller
+                    .ins(InsertPoint::Before(call))
+                    .intrinsic(Intrinsic::LifetimeStart, &[address]);
+                address
+            }
+        };
+        lifetimes.push(address);
+    }
+    let head = caller.block_insts(continuation)[0];
+    for &address in &lifetimes {
+        caller
+            .ins(InsertPoint::Before(head))
+            .intrinsic(Intrinsic::LifetimeEnd, &[address]);
+    }
     caller.remove_inst(call);
     let jump = caller.append_inst(
         call_block,
@@ -214,7 +293,7 @@ pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) 
 mod byval_tests {
     use super::*;
 
-    use crate::inline::cost::{byval_copy_cost, inline_cost};
+    use crate::inline::cost::{byval_copy_cost, code_size, inline_cost};
     use crate::inline::run_with_report;
     #[test]
     fn copy_cost_matches_real_emitted_ir_for_every_supported_size() {
@@ -226,18 +305,29 @@ mod byval_tests {
             ))
             .unwrap();
             keel_ir::verify_module(&module).unwrap();
-            let before = module.functions[1].layout_insts().count();
+            let before = code_size(&module.functions[1]);
             assert!(run_with_report(&mut module).changed);
             keel_ir::verify_module(&module).unwrap();
             let caller = &module.functions[1];
             assert_eq!(
-                caller.layout_insts().count() - before,
+                code_size(caller) - before,
                 1 + byval_copy_cost(size as u64),
                 "net growth for size {size}",
             );
+            // The snapshot lives from before its copy to the continuation.
+            let markers = caller
+                .layout_insts()
+                .filter(|&(_, i)| caller.inst_data(i).is_lifetime_marker())
+                .count();
+            assert_eq!(markers, 2, "size {size}");
             // This block contains only the snapshot and the jump replacing
             // the call. Count real IR, independently of the chunk iterator.
-            let insts = caller.block_insts(caller.entry_block().unwrap());
+            let insts: Vec<_> = caller
+                .block_insts(caller.entry_block().unwrap())
+                .iter()
+                .copied()
+                .filter(|&i| !caller.inst_data(i).is_lifetime_marker())
+                .collect();
             assert!(matches!(
                 caller.inst_data(*insts.last().unwrap()),
                 InstData::Jump { .. }

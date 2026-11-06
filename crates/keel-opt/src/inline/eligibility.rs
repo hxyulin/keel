@@ -94,6 +94,8 @@ pub(super) fn body_eligibility_reason(
                         | Intrinsic::Memmove
                         | Intrinsic::Memset
                         | Intrinsic::Debugtrap
+                        | Intrinsic::LifetimeStart
+                        | Intrinsic::LifetimeEnd
                 ) && !inlineable_target_intrinsic(*id)
                     && !(matches!(frames, FrameSemantics::CRequiredInline)
                         && matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)) =>

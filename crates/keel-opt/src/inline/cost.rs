@@ -213,7 +213,7 @@ pub(super) fn small_scc_wrapper(f: &Function) -> bool {
             .iter()
             .any(|p| matches!(p.purpose, Purpose::Sret(_))))
         || f.blocks().count() > MAX_BLOCKS
-        || f.layout_insts().count() > MAX_INSTS
+        || code_size(f) > MAX_INSTS
         || f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() > MAX_STACK
     {
         return false;
@@ -272,9 +272,26 @@ pub(super) fn tiny_priority_leaf(f: &Function) -> bool {
     cost <= 32 && acyclic_cfg(f)
 }
 
+/// The instructions that emit code. Lifetime markers emit none, so no
+/// inlining decision counts them.
+pub(super) fn code_insts(f: &Function) -> impl Iterator<Item = Inst> + '_ {
+    f.layout_insts()
+        .map(|(_, i)| i)
+        .filter(|&i| !f.inst_data(i).is_lifetime_marker())
+}
+
+pub(super) fn code_size(f: &Function) -> usize {
+    code_insts(f).count()
+}
+
 pub(super) fn inline_cost(callee: &Function) -> (usize, u64) {
     let used = inline_stack_slots(callee);
-    let mut cost = callee.layout_insts().count();
+    // The addresses inlining adds for markers are charged; markers are not.
+    let added = super::clone::slots_to_mark(callee)
+        .iter()
+        .filter(|(_, address)| address.is_none())
+        .count();
+    let mut cost = code_size(callee) + added;
     let mut stack = callee
         .stack_slots()
         .filter(|(slot, _)| used[slot.index()])
@@ -300,7 +317,7 @@ pub(super) fn profitability_reason(f: &Function, full: bool) -> Option<&'static 
     }
     if f.blocks().count() > MAX_BLOCKS * scale && !cheap_leaf_switch(f) {
         Some("profitability_blocks")
-    } else if f.layout_insts().count() > MAX_INSTS * scale {
+    } else if code_size(f) > MAX_INSTS * scale {
         Some("profitability_instructions")
     } else if f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>()
         > MAX_STACK * scale as u64

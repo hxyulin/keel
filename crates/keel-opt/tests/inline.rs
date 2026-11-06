@@ -17,6 +17,13 @@ fn run(s: &str, passes: &[&str]) -> Module {
     keel_ir::verify_module(&m).unwrap();
     m
 }
+/// Instructions that emit code: everything but lifetime markers.
+fn code_size(f: &keel_ir::Function) -> usize {
+    f.layout_insts()
+        .filter(|&(_, i)| !f.inst_data(i).is_lifetime_marker())
+        .count()
+}
+
 fn calls(m: &Module, name: &str) -> usize {
     m.functions
         .iter()
@@ -817,7 +824,7 @@ fn quickjs_dup_value_reducer_uses_the_same_bounded_growth() {
     // expansion, 73 fit; the old 30-instruction estimate admitted only 68.
     assert_eq!(calls(&m, "f"), 7);
     assert_eq!(
-        m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+        code_size(&m.functions[1]) - code_size(&before.functions[1]),
         2044,
     );
     // Each expansion retains its real byval snapshot, but not the unused
@@ -872,7 +879,7 @@ fn emitted_growth_covers_cfg_shapes_and_multiple_snapshots() {
         let m = run(source, &["inline"]);
         assert_eq!(calls(&m, "f"), 0, "{source}");
         assert_eq!(
-            m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+            code_size(&m.functions[1]) - code_size(&before.functions[1]),
             estimate - omitted_ir,
             "{source}",
         );
@@ -1047,5 +1054,91 @@ block0(v0: i64, v1: i64):
             &["inline"],
         );
         assert_eq!(calls(&m, "test"), if inlined { 0 } else { 2 }, "{template}");
+    }
+}
+
+/// Each used callee slot gets one lifetime per inlined call: a start before
+/// its first write and an end where the call returned. The interpreter then
+/// traps on any access outside those lifetimes.
+#[test]
+fn inlined_slots_live_from_the_call_to_its_return() {
+    let source = "decl @use(ptr)
+func @h(i64) -> i64 local {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ store v0, v1
+ v2 = load.i64 v1
+ return v2
+}
+func @marked(i64) -> i64 local {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ intrinsic lifetime_start(v1)
+ store v0, v1
+ v2 = load.i64 v1
+ intrinsic lifetime_end(v1)
+ return v2
+}
+func @late(i64, i8) -> i64 local {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v5: i8):
+ brif v5, block1, block2
+block1:
+ v1 = stack_addr ss0
+ store v0, v1
+ v2 = load.i64 v1
+ return v2
+block2:
+ return v0
+}
+func @f(i64) -> i64 {
+block0(v0: i64):
+ v1 = call @h(v0)
+ v2 = call @h(v1)
+ v3 = call @marked(v2)
+ v4 = iadd v1, v3
+ return v4
+}
+func @g(i64, i8) -> i64 {
+block0(v0: i64, v2: i8):
+ v1 = call @late(v0, v2)
+ return v1
+}";
+    let m = run(source, &["inline"]);
+    let f = m.functions.iter().find(|f| f.name == "f").unwrap();
+    assert_eq!(calls(&m, "f"), 0);
+    let count = |f: &keel_ir::Function, id| {
+        f.layout_insts()
+            .filter(
+                |&(_, i)| matches!(f.inst_data(i), InstData::Intrinsic { id: x, .. } if *x == id),
+            )
+            .count()
+    };
+    // Two copies of @h get a pair each; @marked keeps its own pair.
+    assert_eq!(count(f, keel_ir::Intrinsic::LifetimeStart), 3);
+    assert_eq!(count(f, keel_ir::Intrinsic::LifetimeEnd), 3);
+    // @late addresses its slot only after a branch, so the start goes before
+    // the jump into the copy, with an address of its own.
+    let g = m.functions.iter().find(|f| f.name == "g").unwrap();
+    let entry = g.entry_block().unwrap();
+    let starts: Vec<_> = g
+        .layout_insts()
+        .filter(|&(_, i)| g.inst_data(i).is_lifetime_marker())
+        .map(|(b, _)| b == entry)
+        .collect();
+    assert_eq!(starts, [true, false], "{g}");
+    let mut interp = keel_ir_interp::Interpreter::new(&m);
+    use keel_ir_interp::{Outcome, Val};
+    assert_eq!(
+        interp.call("f", &[Val::I64(5)]),
+        Outcome::Return(vec![Val::I64(10)])
+    );
+    for flag in [0, 1] {
+        assert_eq!(
+            interp.call("g", &[Val::I64(3), Val::I8(flag)]),
+            Outcome::Return(vec![Val::I64(3)])
+        );
     }
 }

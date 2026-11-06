@@ -59,7 +59,12 @@ fn vector_stores_and_scalar_accesses_use_no_memcpy() {
     );
     for name in ["ps", "si512", "ss", "si32", "sd"] {
         let f = body(&ir, name);
-        assert!(!f.contains("intrinsic"), "{f}");
+        // The inliner bounds each inlined snapshot with lifetime markers.
+        assert!(
+            !f.lines()
+                .any(|l| l.contains("intrinsic") && !l.contains("intrinsic lifetime_")),
+            "{f}"
+        );
     }
 }
 

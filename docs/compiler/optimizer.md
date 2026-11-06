@@ -309,6 +309,13 @@ conservative.
 snapshots before callee effects. `sret` keeps the caller's destination. Callee
 lines, scopes and stack variable homes move into a fresh scope below the call
 site; the IR has no DWARF inline-subroutine representation.
+Each cloned slot and each snapshot gets one lifetime per inlined call, so frame
+layout can share its bytes with other slots. It starts before the slot's first
+write: before the snapshot copy, or after the callee's entry-block `stack_addr`
+of the slot. Without one, the inliner adds a `stack_addr` before the jump into
+the copy and charges it. It ends at the head of the continuation. A slot with
+markers of its own keeps them, and debug and `aggregate_va_arg` homes get none.
+Inlining decisions do not count markers.
 
 ## Internal fast calls
 
