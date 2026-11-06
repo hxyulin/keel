@@ -392,6 +392,7 @@ pub(crate) fn compile_output(
             &local_pipeline,
             structured,
             crate::emission::function_goal(&func.attrs, emission.goal),
+            emission.separate_slots,
         )?;
         compiler.debug = debug;
         compiler.code_model = code_model;
@@ -966,6 +967,7 @@ impl<'a> FunctionCompiler<'a> {
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
         goal: crate::CodegenGoal,
+        separate_slots: bool,
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let features = pipeline.selector.x86_features();
@@ -1019,8 +1021,12 @@ impl<'a> FunctionCompiler<'a> {
             .unwrap_or(0);
         let inline_asm_home = (asm_bytes != 0).then_some(system.end.next_multiple_of(8));
         let offset = inline_asm_home.map_or(system.end, |home| home + asm_bytes);
-        let (stack_slot_offsets, offset) =
-            crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
+        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout(
+            func,
+            offset,
+            !module.files.is_empty(),
+            separate_slots,
+        );
         let saved = plan::saved_registers(
             &alloc,
             system.cx16_save.is_some(),
@@ -4873,6 +4879,7 @@ mod feature_guard_tests {
                     &pipeline,
                     structured,
                     crate::CodegenGoal::default(),
+                    false,
                 )
                 .unwrap();
                 let i = Instruction::parse_intel(source).unwrap();

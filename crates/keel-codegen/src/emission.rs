@@ -43,6 +43,10 @@ pub struct EmissionOptions {
     /// On ELF, put each data object in its own section, `.data.<name>` and
     /// so on. Thread-local objects keep sharing `.tdata` and `.tbss`.
     pub data_sections: bool,
+    /// Give every IR stack slot its own frame bytes, even when lifetime
+    /// markers show that two slots are never live at once. For bisecting a
+    /// producer's markers; sharing is on by default.
+    pub separate_slots: bool,
 }
 
 /// The ELF section for function `name`: its `section` attribute, the retain

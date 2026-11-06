@@ -452,6 +452,101 @@ Lk_invoke_storage_cst_end:
 	.long	0
 Lk_invoke_storage_ttbase:
 	.section	__TEXT,__text
+	.section	__TEXT,__text
+	.globl	_k_slot_pad
+	.p2align	2
+_k_slot_pad:
+Lk_slot_pad_begin:
+	; regalloc: v0=x9 v1=x10 v2=x9 v3=x9 v4=x9 v5=x10 v6=x9 v7=x10 v8=x10 v9=x9 v10=x9 v15=x10
+	.cfi_startproc
+	.cfi_personality 155, ___gxx_personality_v0
+	.cfi_lsda 16, Lk_slot_pad_lsda
+	stp	x29, x30, [sp, #-16]!
+	mov	x29, sp
+	.cfi_def_cfa x29, 16
+	.cfi_offset x30, -8
+	.cfi_offset x29, -16
+	sub	sp, sp, #16
+	mov	x9, x0
+Lk_slot_pad_block0:
+	; v1 = stack_addr ss0
+	; intrinsic lifetime_start(v1)
+	; store volatile v0, v1
+	str	w9, [sp, #0]
+	; v3 = invoke @c_may_throw(v0), block1, block2
+	mov	x0, x9
+Lk_slot_pad_inst4_begin:
+	bl	_c_may_throw
+Lk_slot_pad_inst4_end:
+	mov	x9, x0
+	b	Lk_slot_pad_block1
+Lk_slot_pad_block2:
+	; v4, v5 = landingpad catch null
+	mov	x9, x0
+	mov	x10, x1
+	; v6 = call @__cxa_begin_catch(v4)
+	mov	x0, x9
+	bl	___cxa_begin_catch
+	mov	x9, x0
+	; call @__cxa_end_catch()
+	bl	___cxa_end_catch
+	; v2 = stack_addr ss1
+	; intrinsic lifetime_start(v2)
+	; v7 = iconst.i32 99
+	movz	w10, #0x63
+	; store volatile v7, v2
+	str	w10, [sp, #4]
+	; v15 = stack_addr ss0
+	; v8 = load.i32 volatile v15
+	ldr	w10, [sp, #0]
+	; v9 = load.i32 volatile v2
+	ldr	w9, [sp, #4]
+	; intrinsic lifetime_end(v2)
+	; intrinsic lifetime_end(v15)
+	; v10 = iadd v8, v9
+	add	w9, w10, w9
+	; return v10
+	mov	x0, x9
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_slot_pad_block1:
+	; v16 = stack_addr ss0
+	; intrinsic lifetime_end(v16)
+	; return v3
+	mov	x0, x9
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+	ret
+Lk_slot_pad_end:
+	.cfi_endproc
+	.section	__TEXT,__gcc_except_tab
+	.p2align	2
+GCC_except_table_k_slot_pad:
+Lk_slot_pad_lsda:
+	.byte	255
+	.byte	155
+	.uleb128	Lk_slot_pad_ttbase-Lk_slot_pad_ttref
+Lk_slot_pad_ttref:
+	.byte	1
+	.uleb128	Lk_slot_pad_cst_end-Lk_slot_pad_cst_begin
+Lk_slot_pad_cst_begin:
+	.uleb128	Lk_slot_pad_begin-Lk_slot_pad_begin
+	.uleb128	Lk_slot_pad_inst4_begin-Lk_slot_pad_begin
+	.byte	0, 0
+	.uleb128	Lk_slot_pad_inst4_begin-Lk_slot_pad_begin
+	.uleb128	Lk_slot_pad_inst4_end-Lk_slot_pad_inst4_begin
+	.uleb128	Lk_slot_pad_block2-Lk_slot_pad_begin
+	.uleb128	1
+	.uleb128	Lk_slot_pad_inst4_end-Lk_slot_pad_begin
+	.uleb128	Lk_slot_pad_end-Lk_slot_pad_inst4_end
+	.byte	0, 0
+Lk_slot_pad_cst_end:
+	.byte	1, 0
+	.p2align	2
+	.long	0
+Lk_slot_pad_ttbase:
+	.section	__TEXT,__text
 	.globl	_cleanups
 	.zerofill	__DATA,__bss,_cleanups,4,2
 	.subsections_via_symbols

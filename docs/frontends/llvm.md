@@ -58,8 +58,10 @@ marks those accesses `trap_ub`. Volatile accesses keep observable faults.
 Export writes `trap_ub` accesses as ordinary accesses, which is exact.
 
 Whole fixed-stack `lifetime_start(ptr)` and `lifetime_end(ptr)` survive import
-and export as memory barriers. Native lowering emits nothing, and there is no
-stack-slot reuse or lifetime-based DCE.
+and export, with LLVM's meaning: a marked slot is dead until its first start.
+The optimizer treats each marker as a write of its own slot, and `dce` drops
+the markers of a slot nothing else addresses. Native lowering emits nothing
+for them, and slots whose lifetimes never overlap share frame bytes.
 
 ## Pointer facts
 

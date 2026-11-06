@@ -8,6 +8,7 @@ extern "C" {
 extern "C" int k_catch(int x);
 extern "C" int k_cleanup(int x);
 extern "C" int k_two(int a, int b, int c);
+extern "C" int k_slot_pad(int x);
 extern "C" int cleanups;
 
 /* Clobbers every caller-saved register first, as any call may, so keel
@@ -72,6 +73,8 @@ int main() {
     check("invoke aggregate guard", output.b, 1234);
     check("invoke storage throws", k_invoke_storage(&output, &input, 1), 1234);
     check("invoke private copy", input.a, 10);
+    check("k_slot_pad(4)", k_slot_pad(4), 8);
+    check("k_slot_pad(-5)", k_slot_pad(-5), -5 + 99);
     /* An exit status is taken mod 256. */
     return failures != 0;
 }

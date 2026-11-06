@@ -333,6 +333,7 @@ pub(crate) fn compile_output(
             structured,
             &leaf_summaries,
             linux,
+            emission.separate_slots,
         )?;
         compiler.debug = debug;
         compiler.unwind_tables = emission.unwind_tables;
@@ -915,6 +916,7 @@ impl<'a> FunctionCompiler<'a> {
             structured,
             leaf_summaries,
             false,
+            false,
         )
     }
     /// Checks the function, then plans it in phases: call area, inline
@@ -928,6 +930,7 @@ impl<'a> FunctionCompiler<'a> {
         structured: bool,
         leaf_summaries: &leaf_calls::Summaries,
         linux: bool,
+        separate_slots: bool,
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let err = |message: String| CodegenError {
@@ -980,8 +983,12 @@ impl<'a> FunctionCompiler<'a> {
         // Slot offsets are aligned, so an `sp` aligned to the largest slot
         // alignment gives aligned addresses. `sp` is 16-byte aligned; the
         // prologue rounds it down further for slots aligned above that.
-        let (stack_slot_offsets, offset) =
-            crate::stack_frame::SlotOffsets::layout(func, spills.end, !module.files.is_empty());
+        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout(
+            func,
+            spills.end,
+            !module.files.is_empty(),
+            separate_slots,
+        );
         let realign = Some(stack_slot_offsets.align(func)).filter(|&align| align > 16);
         let frame_size = offset.next_multiple_of(16);
         if frame_size > MAX_FRAME_SIZE {

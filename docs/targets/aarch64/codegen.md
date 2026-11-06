@@ -87,6 +87,17 @@ to that alignment after lowering it by the frame size (`mov x16, sp` then
 frame then has no fixed offset from x29, so debug information addresses its
 slots from `sp`, or from x19 with `stack_alloc`.
 
+Both native backends share one IR slot layout. Slots without lifetime markers
+come first, in declaration order. Slots with markers follow, largest first,
+each at the lowest aligned offset that no slot live at the same time already
+uses. Liveness comes from the markers along every CFG edge, including an
+invoke's unwind edge. Each slot keeps its own bytes when the module has debug
+information, when the function has a returns-twice call, when the slot is an
+`AggregateVaArg` home or has a debug variable, or when more than
+16 × (marked slots) + 4,096 pairs of slots are live together.
+`EmissionOptions::separate_slots` turns sharing off. Lowering never moves an
+access across a marker: the loads that fuse into a consumer must sit next to it.
+
 Argument areas may be larger than 4,080 bytes for incoming parameters and for
 direct or indirect calls. Loads and stores use scaled immediate offsets when
 they fit and form a scratch address otherwise; aggregate copies follow the

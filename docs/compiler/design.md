@@ -331,7 +331,9 @@ they do not wrap at 65,536 entries.
   each of them one location for the whole function: `longjmp` restores the
   callee-saved registers, and nothing else writes that slot. The optimizer
   needs no change: SSA values never change, and memory (address-taken and
-  `volatile` locals) is left alone as always.
+  `volatile` locals) is left alone as always. For the same reason frame
+  layout gives every stack slot of such a function its own bytes, even
+  when lifetime markers would let two share.
 
 ## Inline assembly
 

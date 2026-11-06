@@ -130,6 +130,7 @@ block3:
         .count();
     // ss0's load moves to the entry block; ss1's stays in the loop.
     assert_eq!(loop_loads, 1, "{m}");
-    assert!(f.layout_insts().any(|(b, i)| b == entry
-        && matches!(f.inst_data(i), D::Load { flags, .. } if flags.notrap)));
+    assert!(f.layout_insts().any(
+        |(b, i)| b == entry && matches!(f.inst_data(i), D::Load { flags, .. } if flags.notrap)
+    ));
 }

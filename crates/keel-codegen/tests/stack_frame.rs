@@ -381,6 +381,34 @@ block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v
     v14 = iadd v13, v8
     return v14
 }
+func @shared(i64) -> i64 {
+    ss0 = stack_slot 64, align 64
+    ss1 = stack_slot 8, align 8
+    ss2 = stack_slot 16, align 16
+block0(v0: i64):
+    v1 = stack_addr ss0
+    v2 = stack_addr ss1
+    v3 = stack_addr ss2
+    intrinsic lifetime_start(v1)
+    store v0, v1
+    v4 = call @check(v1, v1)
+    v5 = load.i64 v1
+    intrinsic lifetime_end(v1)
+    intrinsic lifetime_start(v2)
+    intrinsic lifetime_start(v3)
+    store v0, v2
+    store v0, v3
+    v6 = call @check(v1, v3)
+    v7 = load.i64 v2
+    v8 = load.i64 v3
+    intrinsic lifetime_end(v2)
+    intrinsic lifetime_end(v3)
+    v9 = iadd v4, v6
+    v10 = iadd v9, v5
+    v11 = iadd v10, v7
+    v12 = iadd v11, v8
+    return v12
+}
 func @dynamic(i64) -> i64 {
     ss0 = stack_slot 64, align 64
 block0(v0: i64):
@@ -405,6 +433,8 @@ block0(v0: i64):
 #include <stdio.h>
 #include <string.h>
 long aligned(long), many(long, long, long, long, long, long, long, long, long, long), dynamic(long);
+/* ss2 of shared, a 16-aligned slot, takes the bytes of its 64-aligned ss0. */
+long shared(long);
 /* Misalignment is reported as a large value, so sums cannot hide it. */
 long check(void *a, void *b) {
     return ((uintptr_t)a & 63 ? 1000000 : 0) + ((uintptr_t)b & 15 ? 1000000 : 0);
@@ -412,7 +442,8 @@ long check(void *a, void *b) {
 static long run(int pad) {
     volatile char *p = alloca(pad + 1);
     p[0] = 0;
-    return aligned(7) - 14 + many(0, 0, 0, 0, 0, 0, 0, 0, 5, 9) - 14 + dynamic(24) - 48;
+    return aligned(7) - 14 + many(0, 0, 0, 0, 0, 0, 0, 0, 5, 9) - 14 + dynamic(24) - 48 +
+           shared(5) - 15;
 }
 int main(void) {
     for (int pad = 0; pad < 128; pad += 16)
