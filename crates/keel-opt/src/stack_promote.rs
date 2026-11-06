@@ -3,6 +3,10 @@
 //! No uninitialized SSA values are invented: a forward must analysis
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
+//! A lifetime marker of a slot is not an escape. A start uninitializes every
+//! field of its slot, so a load after a start needs a store after that
+//! start. An end changes nothing: a load after it is undefined. Once no
+//! access to a slot is left, `dce` removes its markers.
 use crate::ir_match::int_const;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value};
@@ -75,8 +79,21 @@ fn promote_private(f: &mut Function) -> bool {
     let mut accesses: FxHashMap<_, Field> = FxHashMap::default();
     let mut fields = Vec::new();
     let mut seen_fields = FxHashSet::default();
+    // Each marker's slot, and whether it is a start.
+    let mut markers: FxHashMap<_, (StackSlot, bool)> = FxHashMap::default();
     for &i in &insts {
         let d = f.inst_data(i);
+        if let Some(slot) = f.lifetime_marker_slot(i) {
+            let start = matches!(
+                d,
+                InstData::Intrinsic {
+                    id: keel_ir::Intrinsic::LifetimeStart,
+                    ..
+                }
+            );
+            markers.insert(i, (slot, start));
+            continue;
+        }
         d.for_each_operand(|v| {
             let v = f.resolve(v);
             let Some(&(slot, offset)) = addresses.get(&v) else {
@@ -174,16 +191,24 @@ fn promote_private(f: &mut Function) -> bool {
             .then(|| splats.get(i).copied())
             .flatten()
         };
-        let relevant = |i: &_| accesses.get(i) == Some(&field) || covers(i).is_some();
+        let marker = |i: &_| !markers.is_empty() && markers.get(i).is_some_and(|m| m.0 == field.0);
+        let start = |i: keel_ir::Inst| markers.get(&i).is_some_and(|m| m.1);
+        let relevant = |i: &_| accesses.get(i) == Some(&field) || covers(i).is_some() || marker(i);
         let mut relevant_insts = vec![Vec::new(); f.num_blocks()];
-        let mut stores = vec![false; f.num_blocks()];
+        // Whether the field is initialized where each block ends, when the
+        // block itself decides it: by a store, or by a marker that clears it.
+        let mut exits = vec![None; f.num_blocks()];
         let mut has_load = false;
         for &b in &blocks {
             for &i in f.block_insts(b) {
                 if relevant(&i) && !f.is_removed(i) {
                     relevant_insts[b.index()].push(i);
-                    stores[b.index()] |= matches!(f.inst_data(i), InstData::Store { .. });
-                    has_load |= matches!(f.inst_data(i), InstData::Load { .. });
+                    match f.inst_data(i) {
+                        InstData::Store { .. } => exits[b.index()] = Some(true),
+                        InstData::Load { .. } => has_load = true,
+                        _ if start(i) => exits[b.index()] = Some(false),
+                        _ => {}
+                    }
                 }
             }
         }
@@ -200,7 +225,7 @@ fn promote_private(f: &mut Function) -> bool {
                 let value = cfg
                     .preds(b)
                     .iter()
-                    .all(|p| initialized[p.index()] || stores[p.index()]);
+                    .all(|p| exits[p.index()].unwrap_or(initialized[p.index()]));
                 if initialized[b.index()] != value {
                     initialized[b.index()] = value;
                     progress = true;
@@ -216,6 +241,8 @@ fn promote_private(f: &mut Function) -> bool {
                 match f.inst_data(i) {
                     InstData::Store { .. } => defined = true,
                     InstData::Load { .. } if !defined => return false,
+                    InstData::Load { .. } => {}
+                    _ if start(i) => defined = false,
                     _ => {}
                 }
             }
@@ -234,6 +261,13 @@ fn promote_private(f: &mut Function) -> bool {
         for &b in &blocks {
             let mut value = incoming[b.index()];
             for &i in &relevant_insts[b.index()] {
+                if marker(&i) {
+                    // A load before the next store was rejected above.
+                    if start(i) {
+                        value = None;
+                    }
+                    continue;
+                }
                 if accesses.get(&i) != Some(&field) {
                     let byte = covers(&i).unwrap();
                     retained_initializers.insert(i);

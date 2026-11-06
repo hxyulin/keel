@@ -288,7 +288,10 @@ block0(v0: i64):
         [(true, false), (true, false), (true, false), (false, true)]
     );
     let left = f.to_string();
-    assert!(!left.contains("lifetime") && !left.contains("stack_addr ss1"), "{left}");
+    assert!(
+        !left.contains("lifetime") && !left.contains("stack_addr ss1"),
+        "{left}"
+    );
 }
 
 /// A compare-and-swap writes memory, so GVN does not merge two identical

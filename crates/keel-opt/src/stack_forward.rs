@@ -4,7 +4,9 @@
 //! low vector construction also uses same-block byte facts. Exact types can
 //! forward from uniquely written dominating pieces. This handles union
 //! temporaries exposed by aggregate helpers without assuming that arbitrary
-//! pointers cannot alias.
+//! pointers cannot alias. A lifetime marker of a slot is not an escape. A
+//! start makes the slot's bytes indeterminate, so no fact on the slot crosses
+//! it. An end makes every later access undefined, so facts may cross it.
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, DataLayout, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot,
@@ -40,6 +42,8 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
     let mut marks = FxHashSet::default();
     let mut aliased_mark = false;
     let mut restore = false;
+    // Most functions have no lifetime markers; they skip every marker check.
+    let mut has_markers = false;
     for (_, inst) in func.layout_insts() {
         match *func.inst_data(inst) {
             InstData::StackAddr { slot } => {
@@ -61,6 +65,9 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                     marks.insert(mark);
                 }
                 keel_ir::Intrinsic::StackRestore => restore = true,
+                keel_ir::Intrinsic::LifetimeStart | keel_ir::Intrinsic::LifetimeEnd => {
+                    has_markers = true
+                }
                 _ => {}
             },
             InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
@@ -138,6 +145,9 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
     }
     for (_, inst) in func.layout_insts() {
         let data = func.inst_data(inst);
+        if has_markers && data.is_lifetime_marker() {
+            continue;
+        }
         data.for_each_operand(|v| {
             let v = func.resolve(v);
             if is_address[v.index() / 64] & (1 << (v.index() % 64)) == 0 {
@@ -180,8 +190,19 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
     // This avoids phi nodes and iterative memory dataflow at joins/loops.
     let mut writers = FxHashMap::<(StackSlot, usize), usize>::default();
     let mut stores = Vec::new();
+    // Each slot's lifetime starts: (block, position).
+    let mut starts = FxHashMap::<StackSlot, Vec<_>>::default();
     for block in func.blocks().filter(|_| !local_only) {
         for (position, &inst) in func.block_insts(block).iter().enumerate() {
+            if has_markers
+                && let InstData::Intrinsic {
+                    id: keel_ir::Intrinsic::LifetimeStart,
+                    ..
+                } = func.inst_data(inst)
+                && let Some(slot) = func.lifetime_marker_slot(inst)
+            {
+                starts.entry(slot).or_default().push((block, position));
+            }
             if let InstData::Store { addr, value, .. } = *func.inst_data(inst)
                 && let Some(&(slot, offset)) = addresses.get(&func.resolve(addr))
                 && !escaped.contains(&slot)
@@ -248,6 +269,32 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
     });
     let analysis = cross_block.then(|| crate::analysis::get(func));
     let dominators = analysis.as_ref().map(|analysis| &analysis.dom);
+    // Whether a unique store's value still holds at a load: the store must
+    // dominate the load, and no start of the slot may run between them. In
+    // one block that means none between the two. Across blocks, a start is
+    // harmless before the store in its block, or in a block that strictly
+    // dominates the store's: every path from there to the load passes the
+    // store again. Ends never matter, since a load after one is undefined.
+    let reaches = |slot: StackSlot, (store_block, store_position), (block, position)| {
+        let dominates = if store_block == block {
+            store_position < position
+        } else {
+            dominators.is_some_and(|d| d.dominates(store_block, block))
+        };
+        dominates
+            && (starts.is_empty()
+                || starts.get(&slot).is_none_or(|list| {
+                    list.iter().all(|&(b, p)| {
+                        if store_block == block {
+                            b != block || p < store_position || p > position
+                        } else if b == store_block {
+                            p < store_position
+                        } else {
+                            dominators.is_some_and(|d| d.dominates(b, store_block))
+                        }
+                    })
+                }))
+    };
     let mut changed = false;
     let mut remaining_loads = FxHashSet::default();
     // Per-block state and the block's instruction snapshot, reused.
@@ -300,12 +347,8 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                     }
                     let global = unique.get(&(slot, offset, ty)).and_then(
                         |&(store_block, store_position, value)| {
-                            let dominates = if store_block == block {
-                                store_position < position
-                            } else {
-                                dominators.as_ref()?.dominates(store_block, block)
-                            };
-                            dominates.then_some(value)
+                            reaches(slot, (store_block, store_position), (block, position))
+                                .then_some(value)
                         },
                     );
                     // Only one complete i64 store may supply a pointer. The
@@ -320,12 +363,8 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                             exact.get(&(slot, offset, Type::I64)).copied().or_else(|| {
                                 let &(store_block, store_position, value) =
                                     unique.get(&(slot, offset, Type::I64))?;
-                                let dominates = if store_block == block {
-                                    store_position < position
-                                } else {
-                                    dominators.as_ref()?.dominates(store_block, block)
-                                };
-                                dominates.then_some(value)
+                                reaches(slot, (store_block, store_position), (block, position))
+                                    .then_some(value)
                             })
                         })
                         .flatten();
@@ -390,12 +429,7 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                         .or_else(|| {
                             let &(store_block, store_position, value, source) =
                                 subranges.get(&(slot, offset, ty))?;
-                            let dominates = if store_block == block {
-                                store_position < position
-                            } else {
-                                dominators.as_ref()?.dominates(store_block, block)
-                            };
-                            if !dominates {
+                            if !reaches(slot, (store_block, store_position), (block, position)) {
                                 return None;
                             }
                             let parts: Vec<_> = (0..integer_width(ty)?)
@@ -419,6 +453,14 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                 } => {
                     bytes.clear();
                     exact.clear();
+                }
+                InstData::Intrinsic {
+                    id: keel_ir::Intrinsic::LifetimeStart,
+                    ..
+                } => {
+                    let slot = func.lifetime_marker_slot(inst).expect("verified marker");
+                    bytes.retain(|&(s, _), _| s != slot);
+                    exact.retain(|&(s, _, _), _| s != slot);
                 }
                 _ => {}
             }

@@ -351,10 +351,11 @@ outside this boundary.
 All memory passes keep the first potentially faulting access and every store
 unless a section says otherwise. Volatile and atomic accesses, calls, inline
 asm and `debugtrap` end their facts through the IR memory-effects model. A
-lifetime marker is a write of indeterminate bytes to its whole slot:
+lifetime start is a write of indeterminate bytes to its whole slot:
 `load-reuse` and `memory-forward` drop only the facts that may overlap that
-slot, and keep facts on accesses that lie inside another fixed slot. Passes
-that do not handle markers see the registry's `Barrier` effect. Functions with debugger-visible variable homes are
+slot, and keep facts on accesses that lie inside another fixed slot. Facts
+cross an end, since an access after it is undefined. Passes that do not
+handle markers see the registry's `Barrier` effect. Functions with debugger-visible variable homes are
 excluded, because a debugger can edit a home between source locations.
 Alignment, `notrap` and `trap_ub` never establish alias freedom.
 `loop-vectorize` is the one pass that uses `trap_ub`: it may reorder accesses
@@ -370,6 +371,11 @@ inspection and stack-state barriers exclude the function. Exact typed stores
 satisfy later loads in the same block, and integer loads through 64 bits can be
 rebuilt from stored bytes in little-endian order. Across blocks, a store must
 dominate the load and be the only writer of every byte in the forwarded range.
+A lifetime marker is not an escape. No fact on its slot crosses a start, and
+facts cross an end. Across blocks, a start blocks the fact unless it comes
+before the store in the store's block or sits in a block that strictly
+dominates the store's: every path from such a start to the load runs the
+store again.
 Stores are removed only when no load from the object remains.
 
 With `DataLayout::NATIVE64`, which the native x86-64 and AArch64 contexts
@@ -448,7 +454,7 @@ postorder. Merges, unprocessed predecessors and backedges inherit nothing, and
 a loop header resets availability. Chains stop after eight edges and snapshots
 hold at most 128 facts. Stores do not create facts. A later duplicate load
 disappears only after the original load succeeded with no possible mutation
-or marker of the load's slot on the path. Address analysis is shared with
+or start of the load's slot on the path. Address analysis is shared with
 `memory-forward`. Balanced, Size and Full run it.
 
 `call-load-reuse` also reuses loads across calls whose explicit scoped
@@ -465,10 +471,12 @@ covering integer store of a repeated constant byte may initialize a smaller
 field. Calls, intrinsics, volatile or atomic accesses, address comparisons and
 returned or stored addresses make the slot escape. Inline assembly, frame
 observers, stack save and restore, returns-twice calls, invokes and landing
-pads exclude the function.
+pads exclude the function. A lifetime marker is not an escape.
 
 A must-initialization analysis requires an exact or covering store before every
 load on every path, including zero-trip paths; the pass never invents a value.
+A start of the slot uninitializes it, so a load after a start needs a store
+after that start. An end changes nothing.
 Promoted fields become block parameters, and a store is removed only when no
 overlapping read stays in memory. Limits are 256 blocks, 8192 instructions and
 64 fields. Full also admits a suffix after the entry block's last memory
@@ -480,7 +488,9 @@ after the barrier seed the SSA values. Follow the pass with
 to an entry-block initializer call. It seeds them from memory after the last
 entry-block effect and carries them through bounded loop SSA. Every later load
 must read an exact field or a pointer derived from an entry parameter, so the
-pass removes the later stores. Limits are 64 blocks, 2,048 instructions and
+pass removes the later stores. A slot with lifetime markers is not promoted
+this way, because the seeding loads can come before its start; its markers do
+not stop other slots. Limits are 64 blocks, 2,048 instructions and
 eight fields (`cargo test -p keel-opt --test stack_cache`).
 
 ## Module cleanup

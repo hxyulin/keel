@@ -7,7 +7,9 @@
 //! derived from an entry parameter, which predates the slot. With no observer
 //! left, suffix stores are removed. Initial reads are confined to valid,
 //! in-bounds fixed slots; Keel's uninitialized memory is stable, so this does
-//! not invent values or speculate faults.
+//! not invent values or speculate faults. A slot with lifetime markers is never
+//! promoted, because the cut can come before its start. Its markers are not
+//! barriers for other slots.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopInfo;
@@ -32,18 +34,25 @@ pub fn promote(f: &mut Function) -> bool {
     {
         return false;
     }
+    let mut has_markers = false;
     if instructions.iter().any(|&(_, i)| match f.inst_data(i) {
         D::Invoke { .. } | D::LandingPad { .. } | D::InlineAsm { .. } => true,
         D::Call { func, .. } => f.callee(*func).sig.returns_twice,
         D::CallIndirect { sig, .. } => f.signature(*sig).returns_twice,
-        D::Intrinsic { id, .. } => matches!(
-            id,
-            keel_ir::Intrinsic::FrameAddress
-                | keel_ir::Intrinsic::StackSave
-                | keel_ir::Intrinsic::StackRestore
-                | keel_ir::Intrinsic::StackAlloc
-                | keel_ir::Intrinsic::Debugtrap
-        ),
+        D::Intrinsic { id, .. } => {
+            has_markers |= matches!(
+                id,
+                keel_ir::Intrinsic::LifetimeStart | keel_ir::Intrinsic::LifetimeEnd
+            );
+            matches!(
+                id,
+                keel_ir::Intrinsic::FrameAddress
+                    | keel_ir::Intrinsic::StackSave
+                    | keel_ir::Intrinsic::StackRestore
+                    | keel_ir::Intrinsic::StackAlloc
+                    | keel_ir::Intrinsic::Debugtrap
+            )
+        }
         _ => false,
     }) {
         return false;
@@ -81,8 +90,13 @@ pub fn promote(f: &mut Function) -> bool {
         D::Store { addr, value, flags } if !flags.volatile => {
             field(addr, f.value_type(f.resolve(value))).is_none()
         }
+        ref d if has_markers && d.is_lifetime_marker() => false,
         ref d => d.memory_effects().may_write(),
     };
+    let mut marked = keel_ir::fxhash::FxHashSet::default();
+    for &(_, i) in instructions.iter().filter(|_| has_markers) {
+        marked.extend(f.lifetime_marker_slot(i));
+    }
     // The entry has no predecessors: no execution can return across this cut.
     let entry_insts = f.block_insts(entry);
     let cut = entry_insts
@@ -129,6 +143,9 @@ pub fn promote(f: &mut Function) -> bool {
     }
     for &(_, i) in &suffix {
         let d = f.inst_data(i);
+        if has_markers && d.is_lifetime_marker() {
+            continue;
+        }
         match *d {
             D::Load { addr, ty, flags } if !flags.volatile => {
                 if field(addr, ty).is_none() && !external.contains(&f.resolve(addr)) {
@@ -205,6 +222,7 @@ pub fn promote(f: &mut Function) -> bool {
         .copied()
         .filter(|&(s, o, t)| {
             captured.contains(&s)
+                && !marked.contains(&s)
                 && !fields.iter().any(|&(other, offset, ty)| {
                     other == s
                         && (offset, ty) != (o, t)

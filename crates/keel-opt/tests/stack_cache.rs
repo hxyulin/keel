@@ -89,3 +89,47 @@ block3:
         "{m}"
     );
 }
+
+/// A slot with lifetime markers is not cached, since the cut can come before
+/// its start. Its markers do not stop another slot from being cached.
+#[test]
+fn marked_slots_are_ineligible_without_blocking_others() {
+    let source = "decl @init(ptr,ptr)
+func @f(i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+ ss1 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = stack_addr ss1
+ call @init(v1,v2)
+ v3 = iconst.i64 0
+ jump block1(v3)
+block1(v4: i64):
+ v5 = icmp.ult v4,v0
+ brif v5,block2,block3
+block2:
+ v6 = load.i64 v1
+ v7 = load.i64 v2
+ v8 = iadd v6,v7
+ v9 = iadd v4,v8
+ intrinsic lifetime_end(v2)
+ intrinsic lifetime_start(v2)
+ jump block1(v9)
+block3:
+ return v4
+}";
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    keel_opt::run_passes(&mut m, &["stack-promote", "phi-simplify", "dce"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let f = &m.functions[0];
+    let entry = f.entry_block().unwrap();
+    let loop_loads = f
+        .layout_insts()
+        .filter(|&(b, i)| b != entry && matches!(f.inst_data(i), D::Load { .. }))
+        .count();
+    // ss0's load moves to the entry block; ss1's stays in the loop.
+    assert_eq!(loop_loads, 1, "{m}");
+    assert!(f.layout_insts().any(|(b, i)| b == entry
+        && matches!(f.inst_data(i), D::Load { flags, .. } if flags.notrap)));
+}

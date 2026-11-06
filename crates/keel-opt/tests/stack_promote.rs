@@ -259,6 +259,78 @@ block1:
     assert_eq!(before.to_string(), optimize(src).to_string());
 }
 
+#[test]
+fn markers_do_not_escape_and_a_start_uninitializes_the_slot() {
+    // Each iteration starts the slot, stores and loads it, then ends it.
+    let promoted = "func @f(i64, i8) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v9: i8):
+ v1 = stack_addr ss0
+ jump block1
+block1:
+ intrinsic lifetime_start(v1)
+ store v0, v1
+ v2 = load.i64 v1
+ intrinsic lifetime_end(v1)
+ brif v9, block1, block2
+block2:
+ return v2
+}";
+    let mut m = optimize(promoted);
+    assert_eq!(memory(&m.functions[0]), 0, "{m}");
+    keel_opt::run_passes(&mut m, &["dce"]).unwrap();
+    let text = m.to_string();
+    assert!(
+        !text.contains("lifetime") && !text.contains("stack_addr"),
+        "{text}"
+    );
+    // An end changes nothing: the load after it is undefined, so promotion
+    // may give it the stored value.
+    let ended_only = "func @f(i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ intrinsic lifetime_start(v1)
+ store v0, v1
+ intrinsic lifetime_end(v1)
+ v2 = load.i64 v1
+ return v2
+}";
+    assert_eq!(memory(&optimize(ended_only).functions[0]), 0);
+    // A load after a restart has no store to read, so it stays in memory.
+    let restarted = "func @f(i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ intrinsic lifetime_start(v1)
+ store v0, v1
+ intrinsic lifetime_end(v1)
+ intrinsic lifetime_start(v1)
+ v2 = load.i64 v1
+ return v2
+}";
+    let before = keel_ir::parse(restarted).unwrap();
+    assert_eq!(before.to_string(), optimize(restarted).to_string());
+    // The same holds when the end is the last thing a predecessor does.
+    let ended = "func @f(i64, i8) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v9: i8):
+ v1 = stack_addr ss0
+ intrinsic lifetime_start(v1)
+ store v0, v1
+ brif v9, block1, block2
+block1:
+ intrinsic lifetime_end(v1)
+ intrinsic lifetime_start(v1)
+ jump block2
+block2:
+ v2 = load.i64 v1
+ return v2
+}";
+    let before = keel_ir::parse(ended).unwrap();
+    assert_eq!(before.to_string(), optimize(ended).to_string());
+}
+
 fn covered_fixture(wide: Type, field: Type, offset: usize, byte: u8) -> String {
     let bits = wide.bytes().unwrap() * 8;
     let imm = ((u64::MAX / 255 * u64::from(byte)) >> (64 - bits)) as i64;
