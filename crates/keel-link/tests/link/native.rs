@@ -127,7 +127,7 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     std::fs::create_dir_all(&temp).unwrap();
     let source = temp.join("memory.c");
     let object = temp.join("original.o");
-    std::fs::write(&source, "int gone(void) __attribute__((section(\"__TEXT,__gone\"))); int gone(void) { return 91; }\nint twice(int value) {\n int local = value * 2;\n return local;\n}\nint main(void) { return twice(21)!=42; }\n").unwrap();
+    std::fs::write(&source, "int gone(void) __attribute__((section(\"__TEXT,__gone\"))); int gone(void) { return 91; }\nint twice(int value) {\n int local = value * 2;\n return local;\n}\nint dead_between(int x) {\n return x * 7;\n}\nint main(void) {\n int result = twice(21);\n return result!=42;\n}\n").unwrap();
     checked(
         Command::new("clang")
             .args(["-g", "-O0", "-c"])
@@ -155,7 +155,11 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     {
         use object::{Object, ObjectSymbol};
         let image = object::File::parse(exe.bytes.as_slice()).unwrap();
-        assert!(!image.symbols().any(|s| s.name().unwrap() == "_gone"));
+        // A function in its own section and one between live functions in
+        // __text both go.
+        for dead in ["_gone", "_dead_between"] {
+            assert!(!image.symbols().any(|s| s.name().unwrap() == dead));
+        }
     }
     assert_eq!(exe.debug_objects.len(), 1);
     assert_eq!(exe.debug_objects[0].bytes, bytes);
@@ -181,10 +185,15 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     assert_eq!(buffered, std::fs::read(&executable).unwrap());
     checked(&mut Command::new(&executable));
     checked(Command::new("dsymutil").arg(&executable));
+    // Nor does the dead function keep a stab.
+    let nm = checked(Command::new("nm").arg("-a").arg(&executable));
+    assert!(!String::from_utf8_lossy(&nm.stdout).contains("dead_between"));
     std::fs::remove_dir_all(temp.join("snapshots")).unwrap();
     let lldb = checked(Command::new("lldb").arg("-b").arg(&executable).args([
         "-o",
         "breakpoint set --file memory.c --line 4",
+        "-o",
+        "breakpoint set --file memory.c --line 11",
         "-o",
         "run",
         "-o",
@@ -193,10 +202,18 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
         "bt",
         "-o",
         "continue",
+        "-o",
+        "frame variable",
+        "-o",
+        "continue",
     ]));
     let output = String::from_utf8_lossy(&lldb.stdout);
+    // Lines on both sides of the removed function resolve.
     assert!(
-        output.contains("local = 42") && output.contains("value = 21") && output.contains("`main"),
+        output.contains("local = 42")
+            && output.contains("value = 21")
+            && output.contains("`main")
+            && output.contains("result = 42"),
         "{output}"
     );
     std::fs::remove_dir_all(temp).unwrap();

@@ -1835,6 +1835,7 @@ int dead_fn(void) { return 47; }
 int callback(void) __attribute__((section("__TEXT,__callback")));
 int callback(void) { return 37; }
 int (*registration)(void) __attribute__((retain,section("__DATA,__registry"))) = callback;
+int unused_in_text(void) { return 53; }
 int main(void) { return registration() != 37; }
 "#;
     for optimize in [false, true] {
@@ -1874,7 +1875,8 @@ int main(void) { return registration() != 37; }
                 for name in ["_kept", "_registration", "_callback"] {
                     assert!(names.iter().any(|n| n == name), "missing {name}");
                 }
-                for name in ["_compiler_only", "_dead_fn"] {
+                // A function in the shared __text goes too, beside live main.
+                for name in ["_compiler_only", "_dead_fn", "_unused_in_text"] {
                     assert!(!names.iter().any(|n| n == name), "retained {name}");
                 }
                 run(&mut Command::new(&exe));

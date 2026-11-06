@@ -893,3 +893,126 @@ fn no_dead_strip_symbols_keep_only_their_atoms() {
     .unwrap();
     assert_eq!(section_size(&exe, "__reg"), 16);
 }
+
+/// Clang objects linked by keel and by Apple's linker with dead stripping
+/// keep the same functions, data and strings, and both images run.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn native_atoms_match_apple_dead_stripping() {
+    use std::{fs, path::PathBuf, process::Command};
+    fn run(command: &mut Command) -> std::process::Output {
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{command:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+    let dir = std::env::temp_dir().join(format!("keel-gc-atoms-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("program.c"),
+        r#"#include <stdio.h>
+int dead_table[64] = {1};
+int live_table[4] = {1, 2, 3, 4};
+const char *dead_message(void) { return "only dead code names this string"; }
+__attribute__((noinline)) int dead_call(int x) {
+    printf("%s %d\n", dead_message(), dead_table[x]);
+    return x;
+}
+__attribute__((noinline)) int used(int x) { return x * live_table[2]; }
+int alt_inner(void);
+extern void *whole_ref;
+int main(int argc, char **argv) {
+    (void)argv;
+    return used(argc) == 3 && alt_inner() == 0 && whole_ref ? 0 : 1;
+}
+"#,
+    )
+    .unwrap();
+    // An alternate entry shares its host's atom. Without the subsections
+    // flag, a whole section stays when any of it lives.
+    fs::write(
+        dir.join("alt.s"),
+        ".subsections_via_symbols\n.text\n.globl _alt_host\n_alt_host:\nnop\n.globl _alt_inner\n.alt_entry _alt_inner\n_alt_inner:\nmov w0, #0\nret\n.globl _alt_dead\n_alt_dead:\nret\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("whole.s"),
+        ".text\n.globl _whole_live\n_whole_live:\nret\n.globl _whole_dead\n_whole_dead:\nret\n.data\n.globl _whole_ref\n_whole_ref:\n.quad _whole_live\n",
+    )
+    .unwrap();
+    for (source, object) in [("alt.s", "alt.o"), ("whole.s", "whole.o")] {
+        run(Command::new("clang")
+            .arg("-c")
+            .arg(dir.join(source))
+            .arg("-o")
+            .arg(dir.join(object)));
+    }
+    let sdk = run(Command::new("xcrun").arg("--show-sdk-path"));
+    let sdk = PathBuf::from(String::from_utf8(sdk.stdout).unwrap().trim());
+    let defined = |path: &PathBuf| -> BTreeSet<String> {
+        let nm = run(Command::new("nm").args(["-g", "-U", "-j"]).arg(path));
+        String::from_utf8(nm.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    };
+    for flags in [&["-O0"][..], &["-O2"], &["-O1", "-g"]] {
+        run(Command::new("clang")
+            .args(flags)
+            .arg("-c")
+            .arg(dir.join("program.c"))
+            .arg("-o")
+            .arg(dir.join("program.o")));
+        let objects = ["program.o", "alt.o", "whole.o"].map(|o| dir.join(o));
+        let inputs = objects.clone().map(|o| fs::read(o).unwrap());
+        let mut opts = options(true);
+        opts.dylibs = vec![Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), &sdk).unwrap()];
+        let exe = link(&inputs, opts).unwrap();
+        let native = dir.join("native");
+        let apple = dir.join("apple");
+        keel_link::write_signed(&exe, &native).unwrap();
+        run(Command::new("clang")
+            .args(&objects)
+            .args(["-Wl,-dead_strip", "-o"])
+            .arg(&apple));
+        let names = [
+            "_main",
+            "_used",
+            "_live_table",
+            "_dead_call",
+            "_dead_message",
+            "_dead_table",
+            "_alt_host",
+            "_alt_inner",
+            "_alt_dead",
+            "_whole_live",
+            "_whole_dead",
+        ];
+        let (ours, theirs) = (defined(&native), defined(&apple));
+        for name in names {
+            assert_eq!(
+                ours.contains(name),
+                theirs.contains(name),
+                "{name} with {flags:?}"
+            );
+        }
+        for dead in ["_dead_call", "_dead_message", "_dead_table", "_alt_dead"] {
+            assert!(!theirs.contains(dead), "Apple keeps {dead} with {flags:?}");
+        }
+        assert!(ours.contains("_whole_dead"));
+        let text = fs::read(&native).unwrap();
+        let dead_string = b"only dead code names this string";
+        assert!(!text.windows(dead_string.len()).any(|w| w == dead_string));
+        for path in [&native, &apple] {
+            run(Command::new("codesign")
+                .args(["--verify", "--strict"])
+                .arg(path));
+            run(&mut Command::new(path));
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

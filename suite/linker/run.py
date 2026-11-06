@@ -105,7 +105,9 @@ def main():
     exe = out / 'program'
     link_commands = {
         'keel': [keel, 'link', '--sysroot', sdk, '-mmacosx-version-min=11.0', *objects, '-o', exe],
+        'keel-dead-strip': [keel, 'link', '--dead-strip', '--sysroot', sdk, '-mmacosx-version-min=11.0', *objects, '-o', exe],
         'apple-ld': [ld, '-arch', 'arm64', '-platform_version', 'macos', '11.0', report['sdk_version'], '-syslibroot', sdk, '-e', '_main', *objects, '-lSystem', '-o', exe],
+        'apple-ld-dead-strip': [ld, '-arch', 'arm64', '-platform_version', 'macos', '11.0', report['sdk_version'], '-syslibroot', sdk, '-e', '_main', '-dead_strip', *objects, '-lSystem', '-o', exe],
         'clang-driver': [clang, '-target', triple, '-isysroot', sdk, *objects, '-o', exe],
     }
     link_commands = {k: list(map(str, v)) for k, v in link_commands.items()}
@@ -132,7 +134,7 @@ def main():
         validate(checked_exe)
         link_outputs[mode] = {'path': str(checked_exe), 'bytes': checked_exe.stat().st_size, 'sha256': sha(checked_exe)}
     report['correctness']['oracle'] = {'cases': list(oracle.CASES), 'lengths': [n for n, _ in answers],
-        'seed': 20261024, 'checks_per_executable': 48, 'assembly_executables': 3, 'link_executables': 3,
+        'seed': 20261024, 'checks_per_executable': 48, 'assembly_executables': 3, 'link_executables': len(link_commands),
         'all_passed': True, 'strict_signatures_passed': True, 'oracle_sha256': sha(ROOT / 'suite/linker/fixtures/oracle.py')}
     rng = random.Random(20261024)
     frozen_inputs = {p: sha(p) for p in [*objects, *[out / (n + '.s') for n in ('kernels', 'driver')]]}
