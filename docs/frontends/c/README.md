@@ -138,6 +138,13 @@ target SDK. Keel does not ship a libc.
   `memmove` beyond, since the source may alias the destination), and calls
   pass them `byval` and return them `sret`. The frontend freezes by-value
   argument bytes when later arguments or callee evaluation may change memory.
+- **Temporaries.** Slots the frontend makes for values, not objects, carry
+  lifetime markers, so frame layout can give disjoint ones the same bytes.
+  An argument snapshot lives to the end of its call. A call result, complex
+  value, union cast or volatile snapshot lives to the end of its full
+  expression (C11 6.2.4p8): its expression statement, initializer,
+  condition or return. Named locals and compound literals get no markers.
+  With `-g` nothing is marked.
 - **Initializers** are flattened to (offset, value) items while parsing.
   Locals are zeroed and then stored to; static objects become bytes plus
   relocations.

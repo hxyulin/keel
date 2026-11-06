@@ -95,7 +95,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // assignment, return or by-value ABI copy loses the lvalue.
                 // This private byte snapshot is never exposed as an aligned C object.
                 let slot = self.b.create_stack_slot(size, align.min(16));
-                let copy = self.b.ins().stack_addr(slot);
+                let copy = self.full_temporary(slot);
                 self.copy_bytes_with_flags(
                     copy,
                     addr,

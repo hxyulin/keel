@@ -6,6 +6,18 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     /// Branches to `t` if `cond` is true (non-zero), else to `f`, without
     /// materializing `&&`, `||` and `!` as values.
     pub(super) fn branch(&mut self, cond: &Expr<'p>, t: Block, f: Block) -> R<()> {
+        self.branch_ending(cond, t, f, None)
+    }
+
+    /// [`Self::branch`]. With `ends`, the condition is a single test: the
+    /// temporaries started since that mark end just before its branch.
+    pub(super) fn branch_ending(
+        &mut self,
+        cond: &Expr<'p>,
+        t: Block,
+        f: Block,
+        ends: Option<usize>,
+    ) -> R<()> {
         match &cond.kind {
             ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
                 let mid = self.new_block();
@@ -18,13 +30,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.switch_to(mid);
                 self.branch(b, t, f)
             }
-            ExprKind::Unary(UnOp::Not, a) => self.branch(a, f, t),
-            _ if let Some(inner) = same_truth(cond, self.g.p.c_layout) => self.branch(inner, t, f),
+            ExprKind::Unary(UnOp::Not, a) => self.branch_ending(a, f, t, ends),
+            _ if let Some(inner) = same_truth(cond, self.g.p.c_layout) => {
+                self.branch_ending(inner, t, f, ends)
+            }
             _ if let Some((ne, x)) = zero_test(cond) => {
                 if ne {
-                    self.branch(x, t, f)
+                    self.branch_ending(x, t, f, ends)
                 } else {
-                    self.branch(x, f, t)
+                    self.branch_ending(x, f, t, ends)
                 }
             }
             // A literal condition (`if (sizeof(long) == 8)`): one constant.
@@ -39,6 +53,10 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             _ => {
                 let c = self.truth(cond)?;
+                if let Some(mark) = ends {
+                    let slots = self.temporaries.split_off(mark);
+                    self.end_slots(&slots);
+                }
                 self.b.ins().brif(c, t, &[], f, &[]);
                 self.terminated = true;
                 Ok(())
@@ -86,7 +104,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // Complex is a C scalar: capture its value now, even when a
                 // later operand overwrites the source object.
                 let slot = self.temporary_slot(&e.ty, e.loc)?;
-                let addr = self.b.ins().stack_addr(slot);
+                let addr = self.full_temporary(slot);
                 self.copy(addr, v, &e.ty);
                 Ok(addr)
             }
@@ -497,7 +515,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                                 unreachable!()
                             };
                             let slot = self.b.create_stack_slot(size.max(1), align.min(16));
-                            let copy = self.b.ins().stack_addr(slot);
+                            let copy = self.full_temporary(slot);
                             self.copy(copy, value, &v.ty);
                             Some(copy)
                         } else {
@@ -517,7 +535,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 })?;
                 let align = self.g.types().align(&e.ty) as u32;
                 let slot = self.b.create_stack_slot(size.max(1), align.min(16));
-                let addr = self.b.ins().stack_addr(slot);
+                let addr = self.full_temporary(slot);
                 self.zero_bytes_with_flags(addr, u64::from(size), MemoryFlags::default());
                 let value = self.val(inner)?;
                 let place = if let Some(field) = bits {
@@ -756,7 +774,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     pub(super) fn complex_pair(&mut self, r: Value, i: Value, elem: &Ty) -> Value {
         let size = self.size(elem) as u32;
         let slot = self.b.create_stack_slot(2 * size, size);
-        let addr = self.b.ins().stack_addr(slot);
+        let addr = self.full_temporary(slot);
         self.b.ins().store(r, addr);
         let imag = self.offset(addr, u64::from(size));
         self.b.ins().store(i, imag);
@@ -878,7 +896,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             });
         }
         let slot = self.temporary_slot(&ty, loc)?;
-        let result = self.b.ins().stack_addr(slot);
+        let result = self.full_temporary(slot);
         let callee = self.b.import_function(name, sig);
         self.b
             .ins()

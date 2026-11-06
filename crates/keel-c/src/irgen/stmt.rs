@@ -93,12 +93,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Stmt::Expr(e) => {
                 self.ensure_block();
                 self.set_loc(e.loc);
-                self.discard(e)?;
+                self.full_expression(|fg| fg.discard(e))?;
             }
             Stmt::Init(id, init, loc) => {
                 self.ensure_block();
                 self.set_loc(*loc);
-                self.init_local(*id, init)?;
+                self.full_expression(|fg| fg.init_local(*id, init))?;
                 self.register_cleanup(*id);
             }
             // Without this, a variable read on a path that did not assign it
@@ -154,7 +154,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.ensure_block();
                 self.set_loc(cond.loc);
                 let (t, f, end) = (self.new_block(), self.new_block(), self.new_block());
-                self.branch(cond, t, f)?;
+                self.branch_full(cond, t, f)?;
                 self.b.seal_block(t);
                 self.b.seal_block(f);
                 self.switch_to(t);
@@ -178,7 +178,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.jump_to(header);
                 self.switch_to(header);
                 self.set_loc(cond.loc);
-                self.branch(cond, body_block, exit)?;
+                self.branch_full(cond, body_block, exit)?;
                 self.b.seal_block(body_block);
                 self.loop_body(body, body_block, exit, header)?;
                 self.jump_to(header);
@@ -196,7 +196,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.seal_block(cond_block);
                 self.switch_to(cond_block);
                 self.set_loc(cond.loc);
-                self.branch(cond, body_block, exit)?;
+                self.branch_full(cond, body_block, exit)?;
                 self.b.seal_block(body_block);
                 self.b.seal_block(exit);
                 self.switch_to(exit);
@@ -222,7 +222,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 match cond {
                     Some(cond) => {
                         self.set_loc(cond.loc);
-                        self.branch(cond, body_block, exit)?;
+                        self.branch_full(cond, body_block, exit)?;
                     }
                     None => self.jump_to(body_block),
                 }
@@ -233,7 +233,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.switch_to(step_block);
                 if let Some(step) = step {
                     self.set_loc(step.loc);
-                    self.emit(step)?;
+                    self.full_expression(|fg| fg.emit(step))?;
                 }
                 self.jump_to(header);
                 self.b.seal_block(header);
@@ -255,7 +255,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
                 self.ensure_block();
                 self.set_loc(cond.loc);
-                let value = self.val(cond)?;
+                let value = self.full_expression(|fg| fg.val(cond))?;
                 let blocks: Vec<Block> = (0..*labels).map(|_| self.new_block()).collect();
                 let exit = self.new_block();
                 let default_block = default.map_or(exit, |d| blocks[d]);
@@ -334,24 +334,26 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.set_loc(*loc);
                 match value {
                     None => self.return_default()?,
-                    Some(e) => {
-                        if matches!(self.result, ResultMapping::Empty) {
-                            self.val(e)?;
-                            self.emit_exit_actions(0)?;
-                            self.b.ins().return_(&[]);
-                        } else if let Some(sret) = self.sret {
-                            let src = self.val(e)?;
+                    // The return ends the temporaries, so they need no end.
+                    Some(e) => self.full_expression(|fg| {
+                        if matches!(fg.result, ResultMapping::Empty) {
+                            fg.val(e)?;
+                            fg.emit_exit_actions(0)?;
+                            fg.b.ins().return_(&[]);
+                        } else if let Some(sret) = fg.sret {
+                            let src = fg.val(e)?;
                             let ty = e.ty;
-                            self.copy(sret, src, &ty);
-                            self.emit_exit_actions(0)?;
-                            self.b.ins().return_(&[]);
+                            fg.copy(sret, src, &ty);
+                            fg.emit_exit_actions(0)?;
+                            fg.b.ins().return_(&[]);
                         } else {
-                            let v = self.val(e)?;
-                            self.emit_exit_actions(0)?;
-                            self.b.ins().return_(&[v]);
+                            let v = fg.val(e)?;
+                            fg.emit_exit_actions(0)?;
+                            fg.b.ins().return_(&[v]);
                         }
-                        self.terminated = true;
-                    }
+                        fg.terminated = true;
+                        Ok(())
+                    })?,
                 }
             }
             Stmt::Goto(label) => {
@@ -393,9 +395,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.g.use_global(global);
                     // PtrAdd's index is already a long. Its evaluation (including
                     // assignments and pc++) stays at the original goto location.
-                    self.val(index)?
+                    self.full_expression(|fg| fg.val(index))?
                 } else {
-                    let p = self.val(target)?;
+                    let p = self.full_expression(|fg| fg.val(target))?;
                     self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, p)
                 };
                 let dispatch = match self.dispatch {

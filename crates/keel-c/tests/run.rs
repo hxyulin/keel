@@ -519,6 +519,48 @@ fn argument_snapshots_live_for_their_call() {
     }
 }
 
+/// A call result lives to the end of its full expression: an expression
+/// statement, an initializer, a condition or a return. A single test ends
+/// its temporaries just before its branch; with `&&` they end at the head
+/// of each target. A return needs no end. A statement expression's value
+/// belongs to the enclosing full expression.
+#[test]
+fn call_results_live_to_the_end_of_their_full_expression() {
+    let src = "struct S { long a[4]; };\n\
+               struct S make(long);\n\
+               long f(long n) {\n\
+                 long s = make(n).a[0];\n\
+                 s += make(s).a[1];\n\
+                 if (make(s).a[2]) s++;\n\
+                 while (make(s).a[0] && s < 9) s++;\n\
+                 return s + make(s).a[3]; }\n\
+               long g(long n) { long s = ({ make(n); }).a[0]; return s; }\n";
+    let module = compile(src).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let text = module.to_string();
+    let starts = |f: &str| f.matches("intrinsic lifetime_start").count();
+    let ends = |f: &str| f.matches("intrinsic lifetime_end").count();
+    let f = text
+        .split("func @f")
+        .nth(1)
+        .unwrap()
+        .split("func @g")
+        .next()
+        .unwrap();
+    assert_eq!((starts(f), ends(f)), (5, 5), "{f}");
+    let lines: Vec<_> = f.lines().map(str::trim).collect();
+    let before_branch = lines
+        .windows(2)
+        .filter(|w| w[0].contains("lifetime_end") && w[1].starts_with("brif"))
+        .count();
+    assert_eq!(before_branch, 1, "{f}");
+    let g = text.split("func @g").nth(1).unwrap();
+    assert_eq!((starts(g), ends(g)), (1, 1), "{g}");
+    // The end follows the load from the statement expression's value.
+    let load = g.find(" = load").unwrap();
+    assert!(g.find("lifetime_end").unwrap() > load, "{g}");
+}
+
 /// A local declared in a loop without an initializer is a new object each
 /// iteration: what it held last time round is not carried over, so it is
 /// not a parameter of the loop header (it was, live through the whole

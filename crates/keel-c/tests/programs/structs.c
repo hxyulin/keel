@@ -44,8 +44,23 @@ double many(struct hfa a, struct dhfa b, struct small c, struct big d, struct pa
     return a.x + a.y + a.z + b.d[0] + b.d[1] + c.c + c.i + d.v[0] + d.v[4] + d.tag + e.a +
            e.b + f.f + f.i + g + h.x + h.z;
 }
+/* Call results are temporaries that end with their full expression, so
+ * the ones below can share frame bytes. */
+__attribute__((noinline)) static long temporaries(int n) {
+    long s = grow((struct big){ { n } }).v[0];
+    s += swap((struct pair){ s, n }).a;
+    if (grow((struct big){ { s } }).v[0] > 10)
+        s += make_small('a', 1).i;
+    for (int i = 0; grow((struct big){ { i } }).v[0] < 6; i++)
+        s += n & 1 ? swap((struct pair){ i, 0 }).b : grow((struct big){ { i } }).v[0];
+    do
+        s += ({ swap((struct pair){ 1, s }); }).a;
+    while (swap((struct pair){ s, 0 }).b < 100);
+    return s + grow((struct big){ { s } }).v[0];
+}
 
 int main(void) {
+    printf("%ld %ld\n", temporaries(2), temporaries(3));
     printf("%zu %zu %zu %zu %zu %zu\n", sizeof(struct small), sizeof(struct big),
            sizeof(union num), sizeof(struct bits), sizeof(struct nested),
            offsetof(struct nested, name));

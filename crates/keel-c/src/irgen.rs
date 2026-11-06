@@ -868,6 +868,8 @@ impl<'p> Gen<'p> {
             scope: None,
             loop_depth: 0,
             labels_placed: false,
+            temporaries: Vec::new(),
+            full_expressions: 0,
             exit_actions: Vec::new(),
             has_cleanup: def.locals.iter().any(|l| l.cleanup.is_some()),
             cleanup_jumps: crate::cleanup_jumps::CleanupJumps::analyze(def)?,
@@ -1123,6 +1125,12 @@ struct FnGen<'g, 'p, 'f> {
     /// Whether a label has been placed: a `goto` after it may run what
     /// follows the label again.
     labels_placed: bool,
+    /// The slots of the temporaries started in the open full expressions,
+    /// innermost last.
+    temporaries: Vec<StackSlot>,
+    /// How many full expressions are open. Temporaries made outside any,
+    /// such as parameter homes, get no markers.
+    full_expressions: u32,
 }
 
 impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
@@ -1184,6 +1192,71 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if !self.g.debug && !self.terminated {
             self.b.ins().intrinsic(Intrinsic::LifetimeEnd, &[address]);
         }
+    }
+
+    /// The address of temporary `slot`, which lives from here to the end of
+    /// the enclosing full expression (C11 6.2.4p8).
+    pub(crate) fn full_temporary(&mut self, slot: StackSlot) -> Value {
+        if self.g.debug || self.full_expressions == 0 {
+            return self.b.ins().stack_addr(slot);
+        }
+        self.temporaries.push(slot);
+        self.start_temporary(slot)
+    }
+
+    /// Runs `build` as one full expression and ends the temporaries it
+    /// started where it leaves off.
+    fn full_expression<T>(&mut self, build: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        let mark = self.open_full_expression();
+        let result = build(self);
+        let slots = self.close_full_expression(mark);
+        self.end_slots(&slots);
+        result
+    }
+
+    fn open_full_expression(&mut self) -> usize {
+        self.full_expressions += 1;
+        self.temporaries.len()
+    }
+
+    fn close_full_expression(&mut self, mark: usize) -> Vec<StackSlot> {
+        self.full_expressions -= 1;
+        self.temporaries.split_off(mark)
+    }
+
+    /// Ends `slots` in the current block. The end needs an address of its
+    /// own: the start's may not dominate it, as when the temporary was made
+    /// in one arm of `?:`. An end on a path without the start does nothing.
+    fn end_slots(&mut self, slots: &[StackSlot]) {
+        if self.terminated {
+            return;
+        }
+        for &slot in slots {
+            let address = self.b.ins().stack_addr(slot);
+            self.b.ins().intrinsic(Intrinsic::LifetimeEnd, &[address]);
+        }
+    }
+
+    /// Branches on `cond` as one full expression. A single test ends its
+    /// temporaries just before its branch, which keeps the targets free for
+    /// if-conversion. With `&&` or `||`, an earlier operand's temporary can
+    /// still be reached through a pointer in a later one, so they end at the
+    /// head of each target that is still empty. A target with code already,
+    /// such as a `do` body, keeps them live into it until the next start.
+    fn branch_full(&mut self, cond: &Expr<'p>, t: Block, f: Block) -> R<()> {
+        let empty = |fg: &Self, block| fg.b.function().block_insts(block).is_empty();
+        let targets: Vec<Block> = [t, f].into_iter().filter(|&b| empty(self, b)).collect();
+        let mark = self.open_full_expression();
+        let result = self.branch_ending(cond, t, f, Some(mark));
+        let slots = self.close_full_expression(mark);
+        result?;
+        if !slots.is_empty() {
+            for block in targets {
+                self.switch_to(block);
+                self.end_slots(&slots);
+            }
+        }
+        Ok(())
     }
 
     fn temporary_slot(&mut self, ty: &Ty, loc: Loc) -> R<StackSlot> {

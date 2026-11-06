@@ -125,7 +125,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let ret_slot = if fty.ret.is_pair_or_struct() {
             let slot = self.temporary_slot(&fty.ret, e.loc)?;
             if matches!(mapping.result, ResultMapping::Indirect) {
-                vals.push(self.b.ins().stack_addr(slot));
+                vals.push(self.full_temporary(slot));
             }
             Some(slot)
         } else {
