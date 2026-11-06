@@ -67,7 +67,9 @@ function. There are no implicit exports and no underscore decoration.
 - **Runtime profile:** static data (`Module.data`) with pointer fixups, static
   stack slots and `StackAddr`.
 
-Everything else is rejected, including FP, SIMD, i128, atomics, intrinsics, inline
+Lifetime markers are accepted and emit nothing.
+
+Everything else is rejected, including FP, SIMD, i128, atomics, other intrinsics, inline
 assembly, imports, indirect and tail calls, function addresses, dynamic stack
 allocation, exception handling, TLS, weak/ODR linkage, RTTI, explicit sections and
 retain metadata. Rejection is whole-module: unexported functions, unused

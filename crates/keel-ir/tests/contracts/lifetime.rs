@@ -50,6 +50,23 @@ fn fixed_stack_start_end_and_restart_roundtrip_as_barriers() {
 }
 
 #[test]
+fn marker_slot_resolves_only_lifetime_markers() {
+    let module = keel_ir::parse(SOURCE).unwrap();
+    let function = &module.functions[0];
+    let slots: Vec<_> = function
+        .layout_insts()
+        .map(|(_, inst)| function.lifetime_marker_slot(inst).map(|s| s.to_string()))
+        .collect();
+    let marked = slots.iter().flatten().collect::<Vec<_>>();
+    assert_eq!(marked, ["ss0"; 4]);
+    // Neither the address, the stores, the load nor the return is a marker.
+    assert_eq!(
+        slots.iter().filter(|s| s.is_none()).count(),
+        slots.len() - 4
+    );
+}
+
+#[test]
 fn lifetime_markers_require_direct_fixed_stack_addresses() {
     let cases = [
         "func @entry_pointer(ptr) {\nblock0(v0: ptr):\n intrinsic lifetime_start(v0)\n return\n}",

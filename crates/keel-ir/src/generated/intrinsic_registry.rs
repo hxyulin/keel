@@ -962,9 +962,9 @@ pub enum Intrinsic {
     X86StiHlt = 817,
     #[doc = "Raw GS-base exchange with caller-owned long-mode CPL0 state and asynchronous entry policy. See docs/targets/x86_64/system/README.md. Pinned compiler memory barrier; not a claim of hardware fencing."]
     X86Swapgs = 818,
-    #[doc = "`lifetime_start(ptr)`: starts or restarts accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."]
+    #[doc = "`lifetime_start(ptr)`: makes the whole fixed stack slot addressed by ptr live, with indeterminate bytes. A slot that any marker names is dead on entry. Pinned; emits no machine instructions."]
     LifetimeStart = 819,
-    #[doc = "`lifetime_end(ptr)`: ends accessibility of the whole fixed stack slot addressed by ptr. A pinned compiler lifetime barrier; emits no machine instructions."]
+    #[doc = "`lifetime_end(ptr)`: makes the whole fixed stack slot addressed by ptr dead; any access to it before the next start is undefined. Pinned; emits no machine instructions."]
     LifetimeEnd = 820,
     #[doc = "Pinned executable-state query: returns XCR0 only when CPUID.1 reports both XSAVE and OSXSAVE; otherwise returns zero. The guarded XGETBV does not grant the enclosing function XSAVE permission."]
     X86CpuXcr0 = 821,

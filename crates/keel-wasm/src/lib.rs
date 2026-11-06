@@ -409,6 +409,7 @@ fn prepare<'a>(
                                 && flags.align.is_power_of_two()
                         }
                         InstData::StackAddr { .. } => has_runtime,
+                        InstData::Intrinsic { .. } => d.is_lifetime_marker(),
                         InstData::SymbolAddr {
                             symbol: Symbol::Data(_),
                         } => has_placement,
@@ -1044,6 +1045,9 @@ impl<'a> Body<'a> {
                         }
                         self.op(W::Return);
                     }
+                    // Lifetime markers, the only intrinsics preflight accepts,
+                    // emit nothing: each slot keeps its own frame bytes.
+                    InstData::Intrinsic { .. } => {}
                     _ => unreachable!("preflight"),
                 }
                 for &v in self.ir.inst_results(i).iter().rev() {

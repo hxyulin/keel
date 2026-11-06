@@ -303,6 +303,24 @@ assert.equal(u[31],0);
 }
 
 #[test]
+fn lifetime_markers_emit_nothing() {
+    let m = checked(
+        "func @twice(i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0:i64):
+ v1 = stack_addr ss0
+ intrinsic lifetime_start(v1)
+ store v0,v1
+ v2 = load.i64 v1
+ intrinsic lifetime_end(v1)
+ v3 = iadd v0,v2
+ return v3
+}",
+    );
+    execute(&m, &options(&["twice"]), "assert.equal(e.twice(21n),42n);");
+}
+
+#[test]
 fn exhaustion_checks_before_frame_stores_and_preserves_data_canaries() {
     let m = checked(
         r#"

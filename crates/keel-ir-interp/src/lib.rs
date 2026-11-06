@@ -135,6 +135,9 @@ pub struct Interpreter<'m> {
     depth_limit: usize,
     /// Addresses of executed `load` instructions, when tracing is on.
     load_trace: Option<Vec<u64>>,
+    /// Per function, which stack slots a lifetime marker names. Those start
+    /// each activation dead.
+    marked_slots: HashMap<&'m str, std::rc::Rc<[bool]>>,
 }
 
 impl<'m> Interpreter<'m> {
@@ -163,6 +166,7 @@ impl<'m> Interpreter<'m> {
             step_limit: 1_000_000,
             depth_limit: 1_000,
             load_trace: None,
+            marked_slots: HashMap::new(),
         };
         for func in functions {
             // A later definition replaces an earlier one, as in the module.

@@ -240,12 +240,32 @@ impl<'m> Interpreter<'m> {
         }
     }
 
+    /// Which of `func`'s slots a lifetime marker names, found once per function.
+    fn marked_slots(&mut self, func: &'m Function) -> std::rc::Rc<[bool]> {
+        self.marked_slots
+            .entry(&func.name)
+            .or_insert_with(|| {
+                let mut marked = vec![false; func.num_stack_slots()];
+                for (_, inst) in func.layout_insts() {
+                    if let Some(slot) = func.lifetime_marker_slot(inst) {
+                        marked[slot.index()] = true;
+                    }
+                }
+                marked.into()
+            })
+            .clone()
+    }
+
     fn set_up(&mut self, frame: &mut Frame<'m>, args: &mut [Val]) -> Result<(), Stop> {
         let func = frame.func;
-        for (_, slot) in func.stack_slots() {
+        let marked = self.marked_slots(func);
+        for (id, slot) in func.stack_slots() {
             let base = self
                 .memory
                 .try_alloc(u64::from(slot.size), u64::from(slot.align), false)?;
+            if marked[id.index()] {
+                self.memory.set_live(base, false)?;
+            }
             frame.slots.push(base);
             frame.owned.push(base);
         }

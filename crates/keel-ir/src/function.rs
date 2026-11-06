@@ -1435,6 +1435,27 @@ impl Function {
         self.values[old].def = ValueDef::Alias(new);
     }
 
+    /// The slot a `lifetime_start` or `lifetime_end` names, or `None` for any
+    /// other instruction. In verified IR every marker's operand is the
+    /// `stack_addr` of a fixed slot. A marker acts on the whole slot as a write
+    /// of indeterminate bytes that does not capture its address.
+    #[inline]
+    pub fn lifetime_marker_slot(&self, inst: Inst) -> Option<StackSlot> {
+        let InstData::Intrinsic { args, .. } = self.inst_data(inst) else {
+            return None;
+        };
+        if !self.inst_data(inst).is_lifetime_marker() {
+            return None;
+        }
+        let ValueDef::Result(address, 0) = self.value_def(self.resolve(*args.first()?)) else {
+            return None;
+        };
+        match *self.inst_data(address) {
+            InstData::StackAddr { slot } => Some(slot),
+            _ => None,
+        }
+    }
+
     /// Follows aliases to the value that is actually defined.
     #[inline]
     pub fn resolve(&self, mut value: Value) -> Value {

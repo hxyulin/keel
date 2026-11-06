@@ -210,6 +210,23 @@ they do not wrap at 65,536 entries.
   known before codegen. The C frontend implements object alignment above
   16 bytes by reserving extra space in a fixed slot and rounding the
   object address up within it.
+- A fixed slot is *marked* when `intrinsic lifetime_start(v0)` or
+  `intrinsic lifetime_end(v0)` names it, where `v0` is its `stack_addr`. An
+  unmarked slot is live for the whole activation. A marked slot is dead on
+  entry. `lifetime_start` makes it live, with indeterminate bytes: a read
+  before the next write gives an arbitrary value that stays stable until
+  the next write or marker of the slot. A start on a live slot does the
+  same. `lifetime_end` makes it dead, and an end on a dead slot does
+  nothing. Liveness follows each execution path, so a loop body with a
+  start and an end has one lifetime per iteration, and a path with no end
+  keeps the slot live until the function returns or unwinds. Any access to
+  a dead slot's bytes is undefined behaviour, including through an escaped
+  pointer; the interpreter reports it as a trap. A slot keeps one address
+  across its lifetimes, and markers do not capture it. For the optimizer a
+  start is a write of indeterminate bytes to the whole slot. A known value
+  may cross an end, since any access after it is undefined. No pass may move
+  an access to a slot across one of its markers. Codegen may give slots
+  whose lifetimes never overlap the same frame bytes.
 - Dynamic stack memory, for `alloca` and VLAs, comes from intrinsics:
   `intrinsic stack_alloc(v0)` gives `v0` bytes, 16-byte aligned, until the
   function returns; `stack_save()` and `stack_restore(mark)` free
@@ -236,8 +253,10 @@ they do not wrap at 65,536 entries.
   (`load.i32 align 4 trap_ub v0`) makes a fault on that access undefined
   behavior instead, as C and LLVM IR do for ordinary accesses. A pass may
   then reorder the access against other accesses the program executes
-  anyway, so a different access can fault first. Unlike `notrap`, it
-  permits neither speculation nor deletion, and `may_trap()` stays true.
+  anyway, so a different access can fault first. It permits no deletion,
+  and `may_trap()` stays true. `notrap` lets a pass delete a load whose
+  result is unused; whether it permits speculation is unspecified until a
+  pass needs it.
   The verifier rejects `volatile trap_ub`. The C frontend and the LLVM
   importer mark every non-volatile load and store `trap_ub`; IR from other
   producers keeps observable faults.

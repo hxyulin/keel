@@ -312,6 +312,41 @@ block2:
 }
 
 #[test]
+fn marked_slots_start_dead_and_unmarked_slots_stay_live() {
+    // ss0 is marked, so it is dead until its first start. ss1 has no
+    // marker and is live for the whole activation.
+    let src = "\
+func @f(i8) -> i32 {
+    ss0 = stack_slot 4, align 4
+    ss1 = stack_slot 4, align 4
+block0(v0: i8):
+    v1 = stack_addr ss0
+    v2 = stack_addr ss1
+    v3 = iconst.i32 7
+    store v3, v2
+    brif v0, block1, block2
+block1:
+    intrinsic lifetime_start(v1)
+    intrinsic lifetime_start(v1)
+    store v3, v1
+    jump block2
+block2:
+    v4 = load.i32 v1
+    intrinsic lifetime_end(v1)
+    intrinsic lifetime_end(v1)
+    v5 = load.i32 v2
+    v6 = iadd v4, v5
+    return v6
+}
+";
+    assert_eq!(eval(src, "f", &[Val::I8(1)]), Val::I32(14));
+    assert!(matches!(
+        run(src, "f", &[Val::I8(0)]),
+        Outcome::Trap(Trap::OutOfBounds { .. })
+    ));
+}
+
+#[test]
 fn atomics() {
     let src = "\
 func @f(i32) -> (i32, i32, i32, i8, i32, i8, i32, i8, i32) {
