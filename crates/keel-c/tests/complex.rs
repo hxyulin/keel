@@ -861,9 +861,10 @@ fn raw_platform_complex_header() {
         double _Complex negative=-0.0i;
         int main(void) {
             volatile double r=2.0;
-            double _Complex z=r+3.0*I, w=4.0-5.0*_Complex_I;
+            double _Complex z=r+3.0*I, w=4.0-4.0*_Complex_I;
             double _Complex x=z*w;
-            if(creal(x)!=23.0 || cimag(x)!=2.0) return 1;
+            if(creal(x)!=20.0 || cimag(x)!=4.0) return 1;
+            // |Re w| = |Im w| keeps division exact in compiler-rt and libgcc.
             z*=w; z/=w;
             if(creal(z)!=r || cimag(z)!=3.0) return 2;
             if(__real__ f!=0.0f || __builtin_signbit(__real__ f)) return 3;

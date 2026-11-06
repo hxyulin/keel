@@ -304,10 +304,26 @@ fn clang_syntax(source: &str, target: Target, accepted: bool) {
 
 #[test]
 fn scalar_builtin_families_and_writable_buffers_match_clang() {
+    // GCC and clang before 23 reject floating `_n` loads, stores and
+    // exchanges; clang 23 accepts them. Keel follows GCC.
     for source in [
         "float f(float *p){return __atomic_load_n(p,5);}",
         "void f(double *p){__atomic_store_n(p,1.0,5);}",
         "float f(float *p){return __atomic_exchange_n(p,1.0f,5);}",
+    ] {
+        for target in Target::NATIVE {
+            let options = keel_c::Options {
+                target,
+                debug_info: false,
+                ..Default::default()
+            };
+            assert!(
+                keel_c::compile(source, "atomic-review.c", options).is_err(),
+                "accepted {source}"
+            );
+        }
+    }
+    for source in [
         "int f(float *p,float *e){return __atomic_compare_exchange_n(p,e,1.0f,0,5,2);}",
         "float f(float *p){return __sync_val_compare_and_swap(p,0,1);}",
         "int f(int *p){return __c11_atomic_load(p,5);}",
