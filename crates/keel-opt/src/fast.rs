@@ -15,7 +15,7 @@ const MERGED_INSTRUCTIONS: usize = 64;
 
 /// DFS directly over terminators, without building predecessor lists or
 /// deduplicating a potentially large switch's successors by linear search.
-fn reverse_postorder(func: &Function) -> Vec<Block> {
+pub(crate) fn reverse_postorder(func: &Function) -> Vec<Block> {
     let Some(entry) = func.entry_block() else {
         return Vec::new();
     };

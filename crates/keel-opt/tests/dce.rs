@@ -182,6 +182,44 @@ block2(v9: i64):
     }
 }
 
+/// `stack-notrap` makes one scan, in reverse postorder, so it follows an
+/// address chain whose blocks are laid out in the opposite order.
+#[test]
+fn stack_notrap_follows_chains_laid_out_backwards() {
+    let source = "func @f() -> i64 {
+    ss0 = stack_slot 16, align 8
+block0:
+    v0 = stack_addr ss0
+    v1 = iconst.i64 4
+    jump block2
+block1:
+    v3 = ptradd v2, v1
+    v4 = load.i32 v3
+    v5 = sext.i64 v4
+    return v5
+block2:
+    v2 = ptradd v0, v1
+    jump block1
+}
+";
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let f = &mut module.functions[0];
+    assert!(
+        keel_opt::find_pass("stack-notrap")
+            .unwrap()
+            .run(f, &Default::default())
+    );
+    let notrap: Vec<_> = f
+        .layout_insts()
+        .filter_map(|(_, i)| match *f.inst_data(i) {
+            InstData::Load { flags, .. } => Some(flags.notrap),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notrap, [true]);
+}
+
 /// `stack-notrap` marks only accesses proven inside a fixed slot without
 /// lifetime markers. DCE then deletes the dead ones and keeps the rest.
 #[test]

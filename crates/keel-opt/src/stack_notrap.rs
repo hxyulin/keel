@@ -45,8 +45,14 @@ pub fn run(f: &mut Function) -> bool {
         .map(|(slot, data)| (slot, data.size as usize))
         .collect();
     let mut addresses = seeds;
-    let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
-    crate::stack_address::propagate(f, insts.iter().copied(), &sizes, &mut addresses, None);
+    // A `ptradd` operand's definition dominates it, so one scan in reverse
+    // postorder finds every chain. Fast and Basic run this pass, so it must
+    // not loop until nothing changes.
+    let insts: Vec<_> = crate::fast::reverse_postorder(f)
+        .into_iter()
+        .flat_map(|b| f.block_insts(b).iter().copied())
+        .collect();
+    crate::stack_address::propagate(f, insts.iter().copied(), &sizes, &mut addresses, Some(1));
     // A pointer is at most 8 bytes on every target.
     let width = |ty: Type| ty.bytes().unwrap_or(8) as usize;
     let inside = |addr, ty| {
