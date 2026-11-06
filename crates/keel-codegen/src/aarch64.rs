@@ -1116,7 +1116,10 @@ impl<'a> FunctionCompiler<'a> {
         #[cfg(feature = "backend-profile")]
         let entry_profile =
             crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
-        if !func.local {
+        // On ELF `.weak` alone makes the symbol global; Mach-O needs `.globl`
+        // before `.weak_definition`.
+        let elf_weak = self.linux && (func.attrs.weak || func.weak_odr);
+        if !func.local && !elf_weak {
             out.directive(Directive::Global(self.symbol(name)));
         }
         if func.hidden {

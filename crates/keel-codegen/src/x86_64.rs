@@ -1147,7 +1147,9 @@ impl<'a> FunctionCompiler<'a> {
                 nobits: false,
             });
         }
-        if !func.local {
+        // On ELF `.weak` alone makes the symbol global; a preceding `.globl`
+        // changes its binding twice, which assemblers warn about.
+        if !func.local && !func.attrs.weak && !func.weak_odr {
             out.directive(Directive::Global(symbol.clone()));
         }
         if func.attrs.weak || func.weak_odr {

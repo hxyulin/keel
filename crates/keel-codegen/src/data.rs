@@ -207,7 +207,8 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit, 
             nobits,
         });
     }
-    if !data.local {
+    // `.weak` alone makes the symbol global.
+    if !data.local && !data.weak && !data.weak_odr {
         out.directive(Directive::Global(name.clone()));
     }
     if data.hidden {
