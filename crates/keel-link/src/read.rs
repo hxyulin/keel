@@ -134,6 +134,37 @@ pub(crate) struct Section {
     pub relocs: Vec<Reloc>,
     pub output: Option<usize>,
     pub offset: usize,
+    /// The atoms of a section that dead stripping split, when some of them
+    /// are dead. Empty when the section is placed whole.
+    pub atoms: Vec<Atom>,
+}
+/// A byte range of an input section that the linker places on its own.
+#[derive(Clone, Debug)]
+pub(crate) struct Atom {
+    pub start: usize,
+    pub end: usize,
+    pub live: bool,
+    /// Its offset in the output section, once placed.
+    pub offset: usize,
+}
+impl Section {
+    /// The atom that a symbol at `offset` belongs to.
+    fn atom(&self, offset: usize) -> Option<&Atom> {
+        let i = self.atoms.partition_point(|a| a.start <= offset);
+        self.atoms.get(i.checked_sub(1)?)
+    }
+    /// Whether the bytes or label at `offset` survive dead stripping.
+    pub fn live_at(&self, offset: usize) -> bool {
+        self.atom(offset).is_none_or(|a| a.live)
+    }
+    /// The output-section offset of input offset `offset`.
+    pub fn place(&self, offset: usize) -> Result<usize> {
+        match self.atom(offset) {
+            None => Ok(self.offset + offset),
+            Some(a) if a.live => Ok(a.offset + (offset - a.start)),
+            Some(_) => fail("reference to a dead-stripped atom"),
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Symbol {
@@ -294,6 +325,7 @@ impl Object {
                             relocs,
                             output: None,
                             offset: 0,
+                            atoms: Vec::new(),
                         });
                     }
                 }

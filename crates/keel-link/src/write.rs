@@ -645,6 +645,9 @@ impl Linker {
                     let Some(out) = section.output else {
                         continue;
                     };
+                    if !section.live_at((symbol.value - section.address) as usize) {
+                        continue;
+                    }
                     let code = section.flags & 0x80000400 != 0;
                     nlist(
                         symbols,
@@ -843,12 +846,18 @@ impl Linker {
                 Fixup::Single { reloc, addend } => (reloc.clone(), addend, None),
                 Fixup::Difference { minus, plus } => (minus.clone(), 0, Some(plus)),
             };
+            // Dead code is not written, and its targets may not exist.
+            if !s.live_at(r.offset) {
+                if !patched.insert(r.offset, r.offset + r.width) {
+                    return fail("overlapping relocation locations");
+                }
+                continue;
+            }
             let location = if metadata {
                 0
             } else {
                 self.outputs[s.output.ok_or("missing output section")?].address
-                    + s.offset as u64
-                    + r.offset as u64
+                    + s.place(r.offset)? as u64
             };
             let (target, mut value) = target_of(self, oi, &r)?;
             let mut difference = false;
@@ -878,9 +887,20 @@ impl Linker {
                         Reader(&data).u32(r.offset)? as i32 as i64 as u64
                     };
                     if !r.external && !difference {
-                        value = value.wrapping_sub(self.objects[oi].sections[r.symbol - 1].address);
+                        let t = &self.objects[oi].sections[r.symbol - 1];
+                        if t.atoms.is_empty() {
+                            value = value.wrapping_sub(t.address).wrapping_add(raw);
+                        } else {
+                            // The pointer holds an input address. In a split
+                            // section it moves with the atom there.
+                            let offset = raw
+                                .checked_sub(t.address)
+                                .ok_or("local pointer precedes its input section")?;
+                            value = value - t.offset as u64 + t.place(offset as usize)? as u64;
+                        }
+                    } else {
+                        value = value.wrapping_add(raw);
                     }
-                    value = value.wrapping_add(raw);
                     // The third word of a TLV descriptor is an offset in the
                     // image's contiguous TLS template, never an ASLR pointer.
                     let tls_offset = s.flags & 255 == 0x13 && r.offset % 24 == 16;
@@ -1053,7 +1073,15 @@ impl Linker {
             }
         }
         if let Some(id) = s.output.filter(|_| !data.is_empty()) {
-            self.outputs[id].data[s.offset..s.offset + data.len()].copy_from_slice(&data);
+            let out = &mut self.outputs[id].data;
+            if s.atoms.is_empty() {
+                out[s.offset..s.offset + data.len()].copy_from_slice(&data);
+            } else {
+                for a in s.atoms.iter().filter(|a| a.live) {
+                    out[a.offset..a.offset + (a.end - a.start)]
+                        .copy_from_slice(&data[a.start..a.end]);
+                }
+            }
         }
         // Only the unwind builder reads relocated input payloads afterward.
         // All other bytes are now in their merged output sections.

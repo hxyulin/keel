@@ -208,9 +208,11 @@ fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() 
     let temp = std::env::temp_dir().join(format!("keel-link-unwind-pages-{}", std::process::id()));
     std::fs::create_dir_all(&temp).unwrap();
     let mut source = String::from(".text\n");
+    // Dead stripping removes unreferenced functions, so the padding is kept
+    // explicitly.
     for i in 0..512 {
         source.push_str(&format!(
-            "_padding{i}:\n.cfi_startproc\nret\n.cfi_endproc\n"
+            ".no_dead_strip _padding{i}\n_padding{i}:\n.cfi_startproc\nret\n.cfi_endproc\n"
         ));
     }
     // Force only the throwing frame to DWARF without changing its machine

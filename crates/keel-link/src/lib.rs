@@ -88,8 +88,9 @@ pub struct Input<'a> {
 /// Explicit system interfaces. No implicit flat-namespace symbol lookup.
 #[derive(Debug)]
 pub struct Options {
-    /// Collect unreachable input sections. Default off; symbols sharing an input
-    /// section are indivisible, even with MH_SUBSECTIONS_VIA_SYMBOLS.
+    /// Remove what no root reaches. Default off. Sections of objects with
+    /// MH_SUBSECTIONS_VIA_SYMBOLS are removed atom by atom, an atom starting at
+    /// each defined symbol; other sections only whole.
     pub dead_strip: bool,
     /// Selected-input definitions required by runtime DSO/dlsym consumers. These
     /// are roots, not an export filter, and do not force archive extraction.
@@ -446,14 +447,37 @@ impl Linker {
                 let id = self.output(&seg, &name, flags, alignment)?;
                 let s = &mut self.objects[oi].sections[si];
                 let out = &mut self.outputs[id];
+                let zero_fill = matches!(s.flags & 255, 1 | 0x12);
                 let offset = align(out.size, 1 << s.alignment);
-                let end = offset.checked_add(s.size).ok_or("section size overflow")?;
+                let end = if s.atoms.is_empty() {
+                    let end = offset.checked_add(s.size).ok_or("section size overflow")?;
+                    if end <= 512 * 1024 * 1024 && !zero_fill {
+                        out.data.resize(offset, 0);
+                        out.data.extend_from_slice(&s.data);
+                    }
+                    end
+                } else {
+                    // Each live atom keeps its offset modulo the section
+                    // alignment, so alignment inside an atom still holds, and
+                    // atoms that follow each other need no padding.
+                    let mask = (1 << s.alignment) - 1;
+                    let mut cursor = out.size;
+                    for a in s.atoms.iter_mut().filter(|a| a.live) {
+                        a.offset = cursor + (a.start.wrapping_sub(cursor) & mask);
+                        cursor = a
+                            .offset
+                            .checked_add(a.end - a.start)
+                            .filter(|&end| end <= 512 * 1024 * 1024)
+                            .ok_or("merged section exceeds 512 MiB")?;
+                        if !zero_fill {
+                            out.data.resize(a.offset, 0);
+                            out.data.extend_from_slice(&s.data[a.start..a.end]);
+                        }
+                    }
+                    cursor
+                };
                 if end > 512 * 1024 * 1024 {
                     return fail("merged section exceeds 512 MiB");
-                }
-                if !matches!(s.flags & 255, 1 | 0x12) {
-                    out.data.resize(offset, 0);
-                    out.data.extend_from_slice(&s.data);
                 }
                 out.size = end;
                 s.output = Some(id);
@@ -599,7 +623,10 @@ impl Linker {
                     continue;
                 }
                 for r in &s.relocs {
-                    if r.external && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9) {
+                    // Dead code's references need no GOT slot or stub, and
+                    // their imports may not exist.
+                    if r.external && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9) && s.live_at(r.offset)
+                    {
                         let sym = o
                             .symbols
                             .get(r.symbol)
@@ -700,7 +727,7 @@ impl Linker {
             .outputs
             .get(s.output.ok_or("reference to discarded metadata section")?)
             .ok_or("invalid output section")?;
-        Ok(out.address + s.offset as u64 + (symbol.value - s.address))
+        Ok(out.address + s.place((symbol.value - s.address) as usize)? as u64)
     }
     fn address(&self, target: Target) -> Result<u64> {
         match target {

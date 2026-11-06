@@ -226,8 +226,9 @@ fn weak_copies_keep_their_own_dwarf_unwind_entries() {
             copy(second, "nop\n")
         ))
         .unwrap();
-        // A strong definition wins, otherwise the first weak one does. Both
-        // copies share a section with live code, so dead_strip keeps both.
+        // A strong definition wins, otherwise the first weak one does. The
+        // losing copy stays when its section is placed whole: without
+        // dead_strip, or without subsections. With both, it is a dead atom.
         for (objects, lengths) in [([&first, &second], (4, 8)), ([&second, &first], (8, 4))] {
             let (kept, other) = if strong { (8, 4) } else { lengths };
             for dead_strip in [false, true] {
@@ -272,8 +273,13 @@ fn weak_copies_keep_their_own_dwarf_unwind_entries() {
                     .unwrap()
                     .address();
                 ranges.sort_by_key(|&(begin, _)| begin != shared);
-                assert_eq!(ranges.len(), 2);
-                assert_eq!((ranges[0], ranges[1].1), ((shared, kept), other));
+                assert_eq!(ranges[0], (shared, kept));
+                if dead_strip && !subsections.is_empty() {
+                    assert_eq!(ranges.len(), 1);
+                } else {
+                    assert_eq!(ranges.len(), 2);
+                    assert_eq!(ranges[1].1, other);
+                }
             }
         }
     }

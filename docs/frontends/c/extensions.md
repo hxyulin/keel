@@ -480,9 +480,9 @@ sharing and data alignment restrictions above also apply.
 (`0x20`) in the MH_OBJECT nlist descriptor, preserving `N_WEAK_DEF` (`0x80`)
 independently. It does not set `S_ATTR_NO_DEAD_STRIP` on a shared default section.
 The object-only descriptor is consumed at link time and is not copied into an
-executable nlist. Native `--dead-strip` / `-dead_strip` roots the containing
-input section; symbol atomization remains deferred, so unrelated definitions
-sharing that section survive together. The option is off by default. See
+executable nlist. Native `--dead-strip` / `-dead_strip` roots the symbol's
+atom, so unrelated definitions sharing its section can still be removed. The
+option is off by default. See
 [native dead stripping](../../linking/macho.md) for root and unwind policies.
 
 ### Registration tables and cross-TU sharing

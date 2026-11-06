@@ -26,7 +26,7 @@ linked. Supported options:
 | `-l NAME`, `-lNAME` | Link `usr/lib/libNAME.tbd` from the SDK. |
 | `--sysroot SDK`, `-syslibroot SDK` | macOS SDK to read interfaces from. |
 | `-mmacosx-version-min VERSION` | Minimum deployment version (raised to the greatest input minimum). |
-| `--dead-strip`, `-dead_strip` | Opt-in input-section garbage collection. |
+| `--dead-strip`, `-dead_strip` | Opt-in garbage collection of unreferenced functions, data and sections. |
 | `--require-export SYMBOL` | Extra dead-strip root for symbols used only at runtime. |
 | `--debug-map DIR` | Retain object snapshots in `DIR` for LLDB source debugging. |
 | `--dsym PATH` | Build a dSYM with `/usr/bin/dsymutil` after signing. |
@@ -113,8 +113,8 @@ signatures leave the destination unchanged and remove the temporary file.
   `__eh_frame` sections keep their CIE/FDE relative layout.
 
 Output favors correctness and diagnostics over size: uncompressed exports and
-unwind tables, whole-section retention, eager binding and generous header
-padding make executables larger than Apple's linker produces. No link-speed or
+unwind tables, eager binding and generous header padding make executables
+larger than Apple's linker produces. No link-speed or
 startup performance claim is made.
 
 ## Input contract
@@ -189,10 +189,11 @@ callback); use compiler guard/wrapper initialization instead.
 ## Weak symbols
 
 - External section-based `N_WEAK_DEF` symbols coalesce to the first weak
-  contribution; any strong definition wins regardless of object order. Losing
-  sections stay allocated because atoms are not split. Each copy keeps the
-  compact unwind records and FDEs of its own object, so unwind lookups do not
-  mix copies. Private-extern weak definitions coalesce only statically.
+  contribution; any strong definition wins regardless of object order. A
+  losing copy stays allocated, except under `--dead-strip` in an object with
+  `MH_SUBSECTIONS_VIA_SYMBOLS`, where nothing references it and it is removed.
+  Each copy that stays keeps the compact unwind records and FDEs of its own
+  object, so unwind lookups do not mix copies. Private-extern weak definitions coalesce only statically.
 - Weak dylib exports keep their TAPI identity. A strong interface is preferred
   over a weak one. Weak exports carry the export-trie flag and `N_WEAK_DEF`;
   coalescible calls go through stubs/GOT, and pointer slots participate in
@@ -264,14 +265,31 @@ the ELF linker's absent-section policy differs.
 
 ## Dead stripping
 
-`--dead-strip` (or `keel_link::Options::dead_strip = true`) enables
-**whole input-section** collection, even when an object carries
-`MH_SUBSECTIONS_VIA_SYMBOLS`: two functions in the same input text section stay
-together. This is deliberately more conservative than ld64/LLD symbol
-subdivision. The default is off.
+`--dead-strip` (or `keel_link::Options::dead_strip = true`) removes what no
+root reaches. The default is off.
 
-Roots are `_main`, symbols marked `N_NO_DEAD_STRIP`, sections marked
-`S_ATTR_NO_DEAD_STRIP`, module-init sections, and `--require-export` symbols.
+The unit of removal is an atom. In an object with `MH_SUBSECTIONS_VIA_SYMBOLS`,
+which every Keel and Clang object sets, each section splits at its symbols. An
+atom starts at offset 0 and at each defined symbol that is not `N_ALT_ENTRY`
+and whose name starts with neither `L` nor `ltmp`. Aliases share an atom, and
+an unwind record's function range joins the atoms it covers. A section of an
+object without the flag is one atom, because its assembler may have resolved
+references between its symbols without a relocation. Module-init,
+`S_ATTR_NO_DEAD_STRIP` and DWARF sections are never split, and thread-local
+descriptor sections split only at 24-byte steps.
+
+A live atom keeps its offset modulo its section's alignment, so alignment
+inside it holds and consecutive live atoms need no padding. An extern
+relocation targets its symbol's atom whatever the addend. A section-relative
+pointer targets the atom at its address. A relocation that crosses an atom, or
+a section-relative difference into a section with several atoms, is an error.
+When no atom of a section dies, the section is placed exactly as without
+`--dead-strip`.
+
+Roots are `_main`, the atoms of symbols marked `N_NO_DEAD_STRIP`, sections
+marked `S_ATTR_NO_DEAD_STRIP`, module-init sections, and `--require-export`
+symbols. Exported symbols are not roots, so an unreferenced global function
+goes even when its neighbours stay.
 C `retain` produces a linker root; compiler-only `used` does not. A live TLS
 descriptor keeps its template contribution and bootstrap import.
 
@@ -296,12 +314,12 @@ Other rules:
   rebuilt from surviving ranges. Unwind ownership must be unambiguous (one code
   contribution per record, symbolic code targets, local anchors); foreign
   implicit FDEs, external symbols in moving unwind metadata, and relocations
-  crossing record boundaries are diagnosed. A losing weak copy in a live
-  contribution keeps its own unwind records.
-- Boundary symbols describe only surviving contributions; a boundary reference
-  does not retain a section. Mark registration records `retain`/`.no_dead_strip`
-  to keep a table and its callback edges.
-- Debug maps omit discarded ranges and keep exact original object snapshots.
+  crossing record boundaries are diagnosed. A losing weak copy that stays keeps
+  its own unwind records.
+- Boundary symbols describe only surviving atoms; a boundary reference does not
+  retain a section. Mark each registration record `retain`/`.no_dead_strip` to
+  keep it and its callback edges; unmarked records in the same section go.
+- Debug maps omit removed atoms and keep exact original object snapshots.
 
 References: [ld64 manual](https://github.com/apple-oss-distributions/ld64/blob/main/doc/man/man1/ld-classic.1),
 [LLD mark-live](https://github.com/llvm/llvm-project/blob/main/lld/MachO/MarkLive.cpp),
@@ -332,8 +350,8 @@ executable output; framework search; arbitrary dylib parsing; rpaths; custom
 entry points; legacy `S_COALESCED` sections (other than `__eh_frame`);
 local/absolute weak definitions; symbol aliases and resolvers; general
 interposition; Objective-C metadata; legacy TLS initializer sections;
-arm64e/PAC; chained fixups; function-starts/data-in-code synthesis; symbol-level
-atom splitting; ICF; relaxation; LOH optimization; branch islands; linker
+arm64e/PAC; chained fixups; function-starts/data-in-code synthesis; splitting
+literal sections by content or deduplicating them; ICF; relaxation; LOH optimization; branch islands; linker
 scripts and order files. Unsupported options and forms are diagnosed.
 
 Only macOS 27 with the macOS 27 SDK has been tested; an older minimum version in

@@ -711,7 +711,6 @@ impl Linker {
             }
         }
         let mut live = vec![false; g.nodes];
-        let mut whole: Vec<_> = g.parts.iter().map(|p| vec![false; p.len()]).collect();
         let mut commons = BTreeSet::new();
         while let Some(node) = pending.pop() {
             let id = g.id(node);
@@ -744,12 +743,6 @@ impl Linker {
                         );
                     }
                     pending.extend(edges);
-                    // Layout still places sections whole, so one live atom
-                    // keeps its section's other atoms.
-                    if !std::mem::replace(&mut whole[oi][si], true) {
-                        let units = g.parts[oi][si].units.len();
-                        pending.extend((0..units).map(|ui| Node::Unit(oi, si, ui)));
-                    }
                 }
                 Node::Common(name) => {
                     commons.insert(name.to_string());
@@ -843,20 +836,45 @@ impl Linker {
                 }
             }
         }
-        for (oi, o) in self.objects.iter().enumerate() {
-            for (si, section) in o.sections.iter().enumerate() {
+        for (oi, o) in self.objects.iter_mut().enumerate() {
+            for (si, section) in o.sections.iter_mut().enumerate() {
                 let id = first[oi][si];
                 let p = &parts[oi][si];
-                let any_live = live[id..id + p.units.len()].contains(&true);
+                let units = &live[id..id + p.units.len()];
+                let any_live = units.contains(&true);
                 if !any_live {
                     self.discarded.insert((oi, si));
                 }
                 if p.records && any_live && section.data.is_empty() {
                     return fail("dead_strip: empty live metadata");
                 }
+                // A section whose atoms all live is placed whole, as before.
+                if !p.records && any_live && units.contains(&false) {
+                    section.atoms = p
+                        .units
+                        .iter()
+                        .zip(units)
+                        .map(|(u, &live)| read::Atom {
+                            start: u.start,
+                            end: u.end,
+                            live,
+                            offset: 0,
+                        })
+                        .collect();
+                }
             }
         }
-        self.globals.retain(|_, t| !matches!(t, Target::Definition(o, s) if self.objects[*o].symbols[*s].section != 0 && self.discarded.contains(&(*o, self.objects[*o].symbols[*s].section - 1))));
+        self.globals.retain(|_, t| match *t {
+            Target::Definition(o, s) => {
+                let symbol = &self.objects[o].symbols[s];
+                symbol.section == 0 || {
+                    let section = &self.objects[o].sections[symbol.section - 1];
+                    !self.discarded.contains(&(o, symbol.section - 1))
+                        && section.live_at((symbol.value - section.address) as usize)
+                }
+            }
+            _ => true,
+        });
         self.weak_names
             .retain(|name| self.globals.contains_key(name));
         self.demanded = Some(demanded);
@@ -880,6 +898,7 @@ mod tests {
             relocs,
             output: None,
             offset: 0,
+            atoms: Vec::new(),
         }
     }
     fn symbol(name: &str, kind: u8, desc: u16) -> Symbol {

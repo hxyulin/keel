@@ -751,3 +751,145 @@ fn overflowing_input_section_range_is_diagnosed_before_collection() {
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+fn symbol(exe: &Executable, name: &str) -> u64 {
+    object::File::parse(exe.bytes.as_slice())
+        .unwrap()
+        .symbols()
+        .find(|s| s.name() == Ok(name))
+        .unwrap_or_else(|| panic!("{name} missing"))
+        .address()
+}
+/// `len` bytes of the image at virtual address `address`.
+fn bytes_at(exe: &Executable, address: u64, len: usize) -> Vec<u8> {
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let section = file
+        .sections()
+        .find(|s| (s.address()..s.address() + s.size()).contains(&address))
+        .unwrap();
+    let at = (address - section.address()) as usize;
+    section.data().unwrap()[at..at + len].to_vec()
+}
+fn section_size(exe: &Executable, name: &str) -> u64 {
+    object::File::parse(exe.bytes.as_slice())
+        .unwrap()
+        .section_by_name(name)
+        .unwrap()
+        .size()
+}
+
+/// With subsections, each function is an atom: a dead one goes, with its
+/// references, even beside live code in the same section.
+#[test]
+fn functions_sharing_a_section_are_stripped_one_by_one() {
+    let source = ".globl _main\n_main:\nbl _used\nmov w0,#0\nret\n.globl _used\n_used:\nret\n.globl _dead\n_dead:\nbl _missing\nbl _puts\nret\n";
+    let split = [assemble(&format!(".subsections_via_symbols\n{source}"))];
+    let exe = link(&split, options(true)).unwrap();
+    let n = names(&exe);
+    assert!(n.contains("_used"));
+    for dead in ["_dead", "_puts", "_missing"] {
+        assert!(!n.contains(dead), "{dead}");
+    }
+    assert_eq!(section_size(&exe, "__text"), 16);
+    assert_eq!(section_size(&exe, "__stubs"), 0);
+    assert!(
+        link(&split, options(false))
+            .err()
+            .unwrap()
+            .contains("_missing")
+    );
+    // Without the flag, an assembler may have resolved references between
+    // the functions, so the section stays whole.
+    let whole = [assemble(source)];
+    assert!(
+        link(&whole, options(true))
+            .err()
+            .unwrap()
+            .contains("_missing")
+    );
+}
+
+/// Differences between live atoms measure the output distance, and a dead
+/// atom's difference with an undefined symbol is never evaluated.
+#[test]
+fn differences_span_removed_atoms_and_dead_ones_are_skipped() {
+    let exe = link(
+        &[assemble(
+            ".subsections_via_symbols\n.globl _main\n_main:\nadrp x0,_table@PAGE\nadd x0,x0,_table@PAGEOFF\nbl _b\nret\n_a:\nret\n_mid:\nnop\nnop\nret\n.globl _b\n_b:\nbl _a\nret\n.data\n.globl _table\n_table:\n.long _b - _a\n.quad _b - _a\n_unused:\n.quad _undefined - _a\n",
+        )],
+        options(true),
+    )
+    .unwrap();
+    let table = bytes_at(&exe, symbol(&exe, "_table"), 12);
+    assert_eq!(u32::from_le_bytes(table[..4].try_into().unwrap()), 4);
+    assert_eq!(u64::from_le_bytes(table[4..].try_into().unwrap()), 4);
+    // _main, _a and _b; _mid is gone.
+    assert_eq!(section_size(&exe, "__text"), 28);
+}
+
+/// An extern relocation targets its symbol's atom whatever the addend, even
+/// when the addend points past that atom into a dead one.
+#[test]
+fn an_addend_past_its_atom_stays_relative_to_the_symbol() {
+    let exe = link(
+        &[assemble(
+            ".subsections_via_symbols\n.globl _main\n_main:\nadrp x0,_ptrs@PAGE\nldr x0,[x0,_ptrs@PAGEOFF]\nret\n.data\n_before:\n.quad 1\n.globl _arr\n_arr:\n.quad 1, 2\n_next:\n.quad 3\n.globl _ptrs\n_ptrs:\n.quad _arr + 16\n",
+        )],
+        options(true),
+    )
+    .unwrap();
+    let pointer = bytes_at(&exe, symbol(&exe, "_ptrs"), 8);
+    assert_eq!(
+        u64::from_le_bytes(pointer.try_into().unwrap()),
+        symbol(&exe, "_arr") + 16
+    );
+    assert_eq!(section_size(&exe, "__data"), 24);
+}
+
+/// An atom keeps its offset modulo the section alignment, so a point inside
+/// it that was aligned stays aligned after an earlier atom goes.
+#[test]
+fn atoms_keep_their_alignment_phase() {
+    let exe = link(
+        &[assemble(
+            ".subsections_via_symbols\n.globl _main\n_main:\nadrp x0,Linner@PAGE\nadd x0,x0,Linner@PAGEOFF\nret\n.data\n.p2align 4\n_dead:\n.long 1\n.globl _host\n_host:\n.long 2, 3, 4\n.p2align 4\nLinner:\n.quad 5\n",
+        )],
+        options(true),
+    )
+    .unwrap();
+    let host = symbol(&exe, "_host");
+    assert_eq!(host % 16, 4);
+    assert_eq!(bytes_at(&exe, host + 12, 8), 5u64.to_le_bytes());
+}
+
+/// Aliases share an atom. A symbol at a section's end is a zero-size atom
+/// that follows the last live atom.
+#[test]
+fn aliases_share_an_atom_and_the_section_end_follows_live_atoms() {
+    let exe = link(
+        &[assemble(
+            ".subsections_via_symbols\n.globl _main\n_main:\nadrp x0,_x@PAGE\nadrp x1,_keep@PAGE\nadrp x2,_end@PAGE\nret\n.data\n.globl _x\n.globl _y\n_x:\n_y:\n.quad 7\n.globl _z\n_z:\n.quad 8\n.globl _keep\n_keep:\n.quad 9\n.globl _end\n_end:\n",
+        )],
+        options(true),
+    )
+    .unwrap();
+    let n = names(&exe);
+    assert!(n.contains("_x") && n.contains("_y"));
+    assert!(!n.contains("_z"));
+    assert_eq!(symbol(&exe, "_x"), symbol(&exe, "_y"));
+    assert_eq!(symbol(&exe, "_end"), symbol(&exe, "_keep") + 8);
+}
+
+/// No-dead-strip symbols keep their own atoms, so a registration section
+/// keeps only its marked entries.
+#[test]
+fn no_dead_strip_symbols_keep_only_their_atoms() {
+    let exe = link(
+        &[assemble(
+            ".subsections_via_symbols\n.globl _main\n_main:\nadrp x0,section$start$__DATA$__reg@PAGE\nadrp x1,section$end$__DATA$__reg@PAGE\nret\n.section __DATA,__reg\n.no_dead_strip _r1\n_r1:\n.quad 1\n_r2:\n.quad 2\n.no_dead_strip _r3\n_r3:\n.quad 3\n",
+        )],
+        options(true),
+    )
+    .unwrap();
+    assert_eq!(section_size(&exe, "__reg"), 16);
+}
