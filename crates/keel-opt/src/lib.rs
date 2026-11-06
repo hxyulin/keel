@@ -1098,7 +1098,11 @@ fn execute_pipeline(
     // Check the no-change contract wherever verification is on, and in every
     // debug build even when a caller disabled verification.
     let audit_unchanged = verification_enabled || cfg!(debug_assertions);
-    let mut fingerprints: Vec<(u64, u64)> = Vec::new();
+    // Each function's name key and fingerprint, by index, as of its last
+    // check; `None` once a pass may have changed it. A function a pass leaves
+    // unchanged keeps its entry, so each function is hashed about once per
+    // pass run instead of once per pipeline entry.
+    let mut prints: Vec<Option<(u64, u64)>> = Vec::new();
     profiling::scope!("optimization");
     let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
@@ -1120,13 +1124,10 @@ fn execute_pipeline(
         let before = reporting.then(|| IrCounts::module(module));
         let mut inline_sites = reporting.then(Vec::new);
         if audit_unchanged {
-            fingerprints.clear();
-            fingerprints.extend(
-                module
-                    .functions
-                    .iter()
-                    .map(|f| (name_key(&f.name), f.fingerprint())),
-            );
+            prints.resize(module.functions.len(), None);
+            for (print, func) in prints.iter_mut().zip(&module.functions) {
+                print.get_or_insert_with(|| (name_key(&func.name), func.fingerprint()));
+            }
         }
         if reporting {
             instcombine::clear_hits();
@@ -1161,19 +1162,28 @@ fn execute_pipeline(
             if audit_unchanged {
                 // Functions keep their names across module passes; indices
                 // shift when a pass removes one.
-                for (index, func) in module.functions.iter().enumerate() {
-                    if index >= old_len || versions.changed.get(index) != Some(&false) {
-                        continue;
-                    }
-                    let key = name_key(&func.name);
-                    let before = fingerprints
-                        .get(index)
-                        .filter(|&&(k, _)| k == key)
-                        .or_else(|| fingerprints.iter().find(|&&(k, _)| k == key));
-                    if let Some(&(_, before)) = before {
-                        assert_unchanged(pass.name(), func, before);
-                    }
-                }
+                let old = std::mem::take(&mut prints);
+                prints = module
+                    .functions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, func)| {
+                        if index >= old_len || versions.changed.get(index) != Some(&false) {
+                            return None;
+                        }
+                        let key = name_key(&func.name);
+                        let before = old
+                            .get(index)
+                            .copied()
+                            .flatten()
+                            .filter(|&(k, _)| k == key)
+                            .or_else(|| old.iter().flatten().find(|&&(k, _)| k == key).copied());
+                        if let Some((_, before)) = before {
+                            assert_unchanged(pass.name(), func, before);
+                        }
+                        before
+                    })
+                    .collect();
             }
             for (index, func) in module.functions.iter().enumerate() {
                 if index >= old_len || versions.changed.get(index) != Some(&false) {
@@ -1253,7 +1263,7 @@ fn execute_pipeline(
                 break;
             }
             // No module hook ran, so the function is as fingerprinted.
-            let mut before_run = fingerprints.get(index).map(|&(_, print)| print);
+            let mut before_run = prints.get(index).copied().flatten().map(|(_, print)| print);
             let mut restoration_ns = 0;
             let mut restoration_verification_ns = 0;
             let mut restoration_changed = None;
@@ -1303,6 +1313,11 @@ fn execute_pipeline(
             analysis::debug_check_stamp(func);
             if !changed && let Some(before) = before_run {
                 assert_unchanged(pass.name(), func, before);
+            }
+            if let Some(print) = prints.get_mut(index) {
+                *print = before_run
+                    .filter(|_| !changed)
+                    .map(|before| (name_key(&func.name), before));
             }
             if changed {
                 trace.changed(pass.name(), func);

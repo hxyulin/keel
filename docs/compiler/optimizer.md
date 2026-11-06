@@ -36,7 +36,9 @@ function a module pass added. A pass that edits a body must report the change:
 the deterministic-pass cache trusts the same flag. With debug assertions or
 verification on, the manager fingerprints each function before a pass and
 panics, naming the pass, when a function it reported unchanged differs
-afterwards. `Function::fingerprint` lists the state it covers. Clean-cache
+afterwards. It keeps a function's fingerprint while passes report it
+unchanged, so it hashes a function again only after a reported change.
+`Function::fingerprint` lists the state it covers. Clean-cache
 entries belong to pass instances, so a repeated unchanged instance stays
 skipped until its function changes.
 

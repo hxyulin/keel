@@ -110,6 +110,21 @@ impl Pass for Liar {
     }
 }
 
+/// Edits every function and reports the change.
+struct Editor;
+impl Pass for Editor {
+    fn name(&self) -> &'static str {
+        "editor"
+    }
+    fn description(&self) -> &'static str {
+        "edit a function and report it"
+    }
+    fn run(&self, f: &mut Function, _: &keel_opt::OptimizationContext) -> bool {
+        add_constant(f);
+        true
+    }
+}
+
 /// Edits the first function and reports no module change.
 struct ModuleLiar;
 impl Pass for ModuleLiar {
@@ -180,4 +195,27 @@ fn a_hidden_alias_is_an_edit() {
 #[should_panic(expected = "pass `module-liar` reported no change but modified @f")]
 fn a_module_pass_that_hides_an_edit_is_named() {
     run_verified(IR, &[&ModuleLiar]);
+}
+
+// The manager reuses a function's fingerprint while passes leave it unchanged.
+#[test]
+fn reported_edits_refresh_the_audit_fingerprint() {
+    let det = Observer(AtomicUsize::new(0), false);
+    run_verified(
+        IR,
+        &[&det, &Editor, &det, &ModuleNoop(false), &Editor, &det],
+    );
+}
+
+#[test]
+#[should_panic(expected = "pass `liar` reported no change but modified @f")]
+fn an_edit_hidden_after_unchanged_passes_is_named() {
+    let det = Observer(AtomicUsize::new(0), false);
+    run_verified(IR, &[&det, &det, &Liar(add_constant)]);
+}
+
+#[test]
+#[should_panic(expected = "pass `module-liar` reported no change but modified @f")]
+fn a_module_edit_hidden_after_a_reported_edit_is_named() {
+    run_verified(IR, &[&Editor, &ModuleLiar]);
 }
