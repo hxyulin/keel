@@ -22,7 +22,7 @@ too.
 | --- | --- | --- |
 | `keel cc` | `.c`, `.i`; several with `-flto` | assembly, object (`--emit-object`), IR (`--emit-ir`), preprocessed text (`-E`) |
 | `keel compile` | `.keel` IR, one or several | assembly or object |
-| `keel opt` | `.keel` IR | optimized IR |
+| `keel opt` | `.keel` IR, one or several | optimized IR |
 | `keel passes` | | list of optimizer passes |
 | `keel asm` | `.s` | object file(s) |
 | `keel disasm` | AArch64 or x86-64 Mach-O/ELF | assembly listing |
@@ -143,12 +143,14 @@ clang prog.o -o prog
 
 Without `--internalize`, every global definition stays global, so objects
 compiled separately can still use them. `-flto` does not preprocess only and
-does not emit Wasm. `keel compile` merges several IR inputs the same way:
+does not emit Wasm. `keel compile` merges several IR inputs the same way, and
+`keel opt` merges them and writes the optimized IR:
 
 ```sh
 keel cc --opt-tier none --emit-ir a.c -o a.keel
 keel cc --opt-tier none --emit-ir b.c -o b.keel
 keel compile -O --internalize main a.keel b.keel --emit-object -o prog.o
+keel opt --internalize main a.keel b.keel -o prog.keel
 ```
 
 Merging resolves symbols as a static link does:
@@ -164,6 +166,10 @@ Merging resolves symbols as a static link does:
 module or inline assembly text, constructors, destructors, and `used` or
 `retain` functions. Weak definitions it makes local become strong, since
 nothing else can replace them.
+
+The merged module gets the sum of the inputs'
+[inlining allowances](compiler/optimizer.md#inlining), so merging never leaves
+the inliner less room than compiling the inputs separately.
 
 Inputs with debug info are rejected. Renaming a local is also rejected when
 assembly text in its own input contains the name. Code for the merged

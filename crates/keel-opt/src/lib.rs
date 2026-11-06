@@ -470,11 +470,13 @@ impl OptimizeOptions {
     }
 }
 
-/// Invocation numbering, the bisect limit and the trace sink.
+/// Invocation numbering, the bisect limit, the trace sink and the least
+/// inlining allowance.
 struct Trace<'a, 'o> {
     options: &'o OptimizeOptions,
     out: Option<&'a mut dyn std::io::Write>,
     invocations: usize,
+    inline_allowance: usize,
 }
 
 impl Trace<'_, '_> {
@@ -841,6 +843,7 @@ pub struct Pipeline<'a> {
     options: OptimizeOptions,
     report: Option<&'a mut OptimizationReport>,
     trace: Option<&'a mut dyn std::io::Write>,
+    inline_allowance: usize,
 }
 
 impl fmt::Debug for Pipeline<'_> {
@@ -865,6 +868,7 @@ impl<'a> Pipeline<'a> {
             options: OptimizeOptions::default(),
             report: None,
             trace: None,
+            inline_allowance: 0,
         }
     }
 
@@ -902,6 +906,15 @@ impl<'a> Pipeline<'a> {
         self
     }
 
+    /// The least ordinary inlining allowance. A module merged from several
+    /// inputs passes the sum of [`InlineBudget::allowance`] over them, so
+    /// merging never leaves less inlining room than compiling the inputs
+    /// separately.
+    pub fn inline_allowance(mut self, instructions: usize) -> Self {
+        self.inline_allowance = instructions;
+        self
+    }
+
     /// Runs the passes in order, restoring declared canonical entry
     /// requirements and honoring function optimization attributes.
     pub fn run(mut self, module: &mut Module) -> Result<(), OptError> {
@@ -923,6 +936,7 @@ impl<'a> Pipeline<'a> {
             options: &self.options,
             out,
             invocations: 0,
+            inline_allowance: self.inline_allowance,
         };
         if let Some(result) = function_policy::run(
             module,
@@ -1109,7 +1123,9 @@ fn execute_pipeline(
     let mut versions = Versions::new(module.functions.len());
     let uses_inline_budget = passes.iter().any(|pass| pass.uses_inline_budget());
     let mut inline_budget = if uses_inline_budget {
-        InlineBudget::new(module)
+        let mut budget = InlineBudget::new(module);
+        budget.limit = budget.limit.max(trace.inline_allowance);
+        budget
     } else {
         InlineBudget::default()
     };

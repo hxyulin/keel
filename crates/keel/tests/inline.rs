@@ -196,6 +196,31 @@ fn compile_merges_units_and_inlines_across_them() {
                 &asm,
             ],
         );
+        // Merging keeps each input's inlining allowance: two small units get
+        // two floors of 196,608 instructions.
+        let report = format!("whole-{target}.json");
+        let _ = fs::remove_file(dir.join(&report));
+        keel(
+            &dir,
+            &[
+                "opt",
+                "--target",
+                target,
+                "--internalize",
+                "main",
+                &a,
+                &b,
+                "--opt-report",
+                &report,
+                "-o",
+                &format!("whole-{target}.keel"),
+            ],
+        );
+        let report = fs::read_to_string(dir.join(&report)).unwrap();
+        assert!(
+            report.contains(r#""inline_budget":{"limit":393216,"#),
+            "{report}"
+        );
         let lto = [
             "cc",
             "--target",

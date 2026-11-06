@@ -40,17 +40,25 @@ pub struct InlineBudget {
 }
 impl InlineBudget {
     pub(crate) fn new(module: &Module) -> Self {
+        Self {
+            limit: Self::allowance(module),
+            used: 0,
+            reserve_used: 0,
+            reserve_sites: 0,
+        }
+    }
+}
+
+impl InlineBudget {
+    /// The ordinary allowance a pipeline starting from `module` gets: a
+    /// small-module floor, or half of its instructions.
+    pub fn allowance(module: &Module) -> usize {
         let instructions = module
             .functions
             .iter()
             .map(|f| f.layout_insts().count())
             .fold(0usize, usize::saturating_add);
-        Self {
-            limit: FULL_MIN_MODULE_GROWTH.max(instructions / FULL_GROWTH_INPUT_DIVISOR),
-            used: 0,
-            reserve_used: 0,
-            reserve_sites: 0,
-        }
+        FULL_MIN_MODULE_GROWTH.max(instructions / FULL_GROWTH_INPUT_DIVISOR)
     }
 }
 

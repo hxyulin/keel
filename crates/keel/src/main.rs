@@ -3,7 +3,7 @@
 //! ```text
 //! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
 //! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
-//! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -46,7 +46,7 @@ mod x86_options;
 const USAGE: &str = "usage:
   keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
   keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
-  keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
   keel compile|cc [--codegen-report <new-report.json>] <input> [-o <output>]
@@ -125,6 +125,8 @@ struct Options {
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
     optimizer: keel_opt::OptimizeOptions,
+    /// The least inlining allowance; a merge sets it to its inputs' sum.
+    inline_allowance: usize,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
     #[cfg(feature = "experimental-regalloc")]
@@ -273,7 +275,8 @@ impl Options {
         let pipeline = keel_opt::Pipeline::named(names)
             .map_err(|e| e.to_string())?
             .context(context)
-            .options(self.optimizer_options());
+            .options(self.optimizer_options())
+            .inline_allowance(self.inline_allowance);
         let Some(path) = &self.opt_report else {
             return pipeline.run(module).map_err(|e| e.to_string());
         };
@@ -981,6 +984,7 @@ const OPT_FLAGS: &[&str] = &[
     "--opt-bisect-verbose",
     "--print-changed",
     "--opt-function",
+    "--internalize",
 ];
 
 fn run(args: Vec<String>) -> Result<(), String> {
@@ -1044,7 +1048,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "link" => link::run(rest),
         "archive" => archive::run(rest),
         "compile" => {
-            let opts = parse_options(rest, COMPILE_FLAGS)?;
+            let mut opts = parse_options(rest, COMPILE_FLAGS)?;
             if opts.emit_wasm {
                 if let Some(extra) = opts.more_inputs.first() {
                     return Err(format!(
@@ -1062,14 +1066,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 for path in &opts.more_inputs {
                     modules.push(load_path(path, opts.ir_lines)?);
                 }
-                module = merge_inputs(&opts, modules)?;
+                module = merge_inputs(&mut opts, modules)?;
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "cc" => {
-            let opts = parse_options(rest, CC_FLAGS)?;
+            let mut opts = parse_options(rest, CC_FLAGS)?;
             if (opts.function_binding.is_some() || opts.link_intent.is_some())
                 && (opts.emit_wasm || opts.target == Some(Target::Wasm32UnknownUnknown))
             {
@@ -1112,7 +1116,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 for path in &opts.more_inputs {
                     modules.push(c_module(&opts, path)?);
                 }
-                module = merge_inputs(&opts, modules)?;
+                module = merge_inputs(&mut opts, modules)?;
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
@@ -1129,6 +1133,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 opts.optimization = optimization::Level::O3.optimization();
             }
             let (input, mut module) = load(&opts)?;
+            if !opts.more_inputs.is_empty() || opts.internalize.is_some() {
+                let mut modules = vec![module];
+                for path in &opts.more_inputs {
+                    modules.push(load_path(path, opts.ir_lines)?);
+                }
+                module = merge_inputs(&mut opts, modules)?;
+            }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &module.to_string())
@@ -1305,8 +1316,14 @@ fn c_module(opts: &Options, input: &str) -> Result<Module, String> {
 }
 
 /// Merges `modules` into one, internalizes it as `--internalize` asks, and
-/// verifies the result.
-fn merge_inputs(opts: &Options, modules: Vec<Module>) -> Result<Module, String> {
+/// verifies the result. The merged module keeps the sum of the inputs'
+/// inlining allowances.
+fn merge_inputs(opts: &mut Options, modules: Vec<Module>) -> Result<Module, String> {
+    let allowance = modules
+        .iter()
+        .map(keel_opt::InlineBudget::allowance)
+        .fold(0usize, usize::saturating_add);
+    opts.inline_allowance = allowance;
     let mut module = keel_ir::merge_modules(modules).map_err(|e| format!("merging inputs: {e}"))?;
     if let Some(keep) = &opts.internalize {
         keel_ir::internalize(&mut module, |name| keep.iter().any(|k| k == name));

@@ -289,9 +289,12 @@ variants inline `alwaysinline` callees before their callers, so a cloned
 wrapper already contains them, and freeze templates before the ordinary sites.
 Template instruction and stack costs are cached within that invocation.
 Caller stack checks and growth ledgers still use the current caller state.
-Full fixes its module allowance from pipeline-entry IR and shares conservative
-clone charges across rounds. The floor preserves the old three-round aggregate
-allowance; it does not reduce the whole pipeline to one round's allowance.
+Full fixes its module allowance from pipeline-entry IR, half of its
+instructions with a floor of 196,608, and shares conservative clone charges
+across rounds. The floor preserves the old three-round aggregate allowance; it
+does not reduce the whole pipeline to one round's allowance. A module merged
+from several inputs gets at least the sum of their allowances
+(`Pipeline::inline_allowance`).
 It schedules original call sites in caller sweeps within each priority phase. Reports include the allowance, cumulative ordinary
 and reserve charges, and each site's admission or first rejection reason.
 These are bounds on expansion work, not predictions of final machine-code size.
