@@ -35,6 +35,38 @@ pub struct EmissionOptions {
     pub unwind_tables: UnwindTables,
     /// Explicit x86-64 address model; other targets reject an explicit value.
     pub x86_code_model: Option<x86_64::CodeModel>,
+    /// On ELF, put each function in its own section, `.text.<name>`, so a
+    /// linker's section garbage collection removes functions one by one.
+    /// Mach-O linkers split sections at symbols already, so Mach-O ignores
+    /// this.
+    pub function_sections: bool,
+    /// On ELF, put each data object in its own section, `.data.<name>` and
+    /// so on. Thread-local objects keep sharing `.tdata` and `.tbss`.
+    pub data_sections: bool,
+}
+
+/// The ELF section for function `name`: its `section` attribute, the retain
+/// section, or `.text`, `.text.unlikely` or `.text.hot`, followed by
+/// `.<name>` when `own` asks for a section per function.
+pub(crate) fn elf_text_section(attrs: &keel_ir::FunctionAttrs, name: &str, own: bool) -> String {
+    if let Some(section) = attrs.section {
+        return section.as_str().to_owned();
+    }
+    if attrs.retain {
+        return format!(".text.keel.retain.{name}");
+    }
+    let base = if attrs.cold {
+        ".text.unlikely"
+    } else if attrs.hot {
+        ".text.hot"
+    } else {
+        ".text"
+    };
+    if own {
+        format!("{base}.{name}")
+    } else {
+        base.into()
+    }
 }
 
 pub(crate) enum Output {

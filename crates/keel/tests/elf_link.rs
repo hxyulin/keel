@@ -577,3 +577,62 @@ fn one_dash_long_options_and_target_spellings() {
     }
     assert!(images.iter().all(|image| image == &images[0]));
 }
+
+/// With `-ffunction-sections -fdata-sections`, `--gc-sections` removes an
+/// unused function and data object even though they share a module with
+/// live code. Without them, the dead function's undefined call fails the
+/// link, because it shares `.text` with live code.
+#[test]
+fn function_and_data_sections_let_gc_remove_single_definitions() {
+    use object::{Object, ObjectSymbol};
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("elf-function-sections");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("module.keel"),
+        "decl @absent() -> i64\ndata @used_data = align 8 { i64 7 }\ndata @unused_data = align 8 { i64 9 }\nfunc @used() -> i64 {\nblock0:\n v0 = symbol_addr @used_data\n v1 = load.i64 v0\n return v1\n}\nfunc @unused() -> i64 {\nblock0:\n v0 = call @absent()\n return v0\n}\nfunc @_start() -> i64 {\nblock0:\n v0 = call @used()\n return v0\n}\n",
+    )
+    .unwrap();
+    for target in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"] {
+        for split in [false, true] {
+            let mut compile = vec!["compile", "--target", target, "--emit-object"];
+            if split {
+                compile.extend(["-ffunction-sections", "-fdata-sections"]);
+            }
+            compile.extend(["module.keel", "-o", "module.o"]);
+            let output = invoke(&dir, &compile);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let link = [
+                "link",
+                "--target",
+                target,
+                "--gc-sections",
+                "module.o",
+                "-o",
+                "program",
+            ];
+            let output = invoke(&dir, &link);
+            if !split {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("absent"));
+                continue;
+            }
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let image = std::fs::read(dir.join("program")).unwrap();
+            let file = object::File::parse(image.as_slice()).unwrap();
+            let names: Vec<_> = file.symbols().filter_map(|s| s.name().ok()).collect();
+            for live in ["_start", "used", "used_data"] {
+                assert!(names.contains(&live), "{target}: {live} missing");
+            }
+            for dead in ["unused", "unused_data"] {
+                assert!(!names.contains(&dead), "{target}: {dead} kept");
+            }
+        }
+    }
+}

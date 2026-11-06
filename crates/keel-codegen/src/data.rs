@@ -146,8 +146,9 @@ fn emit_items(out: &mut impl Sink, init: &DataInit, format: Format) {
 /// `.rodata`. A thread-local goes in `.tbss` or `.tdata`, the image each
 /// thread's copy is made from; the code finds its copy from the thread
 /// pointer. Each symbol gets its type and size, which debuggers and
-/// `nm` show.
-pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
+/// `nm` show. With `own`, a non-thread-local object without a section
+/// attribute gets a section of its own, named after it.
+pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit, own: bool) {
     let name = data.name.clone();
     let (section, mut flags, mut nobits) = match (data.thread_local, init.constant, init.is_zero())
     {
@@ -173,6 +174,8 @@ pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) 
     let section = custom.unwrap_or_else(|| {
         if data.retain {
             format!("{section}.keel.retain.{}", data.name)
+        } else if own && !data.thread_local && !data.weak_odr {
+            format!("{section}.{}", data.name)
         } else {
             section.into()
         }

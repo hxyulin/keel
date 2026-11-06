@@ -212,8 +212,14 @@ strong definitions and unsupported inputs are diagnosed before GC, and TLS is
 rejected even in dead sections.
 
 Granularity is the input section: a live function keeps unrelated functions in
-the same section, and mergeable sections are not split. Compile with
-`-ffunction-sections -fdata-sections` for finer collection. Selected COMDAT
+the same section, and mergeable sections are not split. For finer collection,
+compile with `-ffunction-sections -fdata-sections`. `keel cc` and
+`keel compile` accept both, as does `EmissionOptions` in `keel-codegen`. Each
+function then goes in `.text.<name>`, `.text.hot.<name>` or
+`.text.unlikely.<name>`, and each data object in `.data.<name>`,
+`.rodata.<name>`, `.data.rel.ro.<name>` or `.bss.<name>`. Thread-local data
+keeps sharing `.tdata` and `.tbss`. Functions and objects with a `section` or
+`retain` attribute keep their names. Selected COMDAT
 groups are atomic liveness units. Commons are reached individually; only live
 commons enter `.bss.common`.
 

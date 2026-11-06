@@ -79,6 +79,8 @@ const USAGE: &str = "usage:
   -fno-asynchronous-unwind-tables omits optional compiler-generated CFI.
   -funwind-tables requests tables independently; disable both to suppress both requests.
   Unwind flags do not change stack frames, debug info or explicit user assembly CFI.
+  -ffunction-sections and -fdata-sections give each ELF function or data object its own section,
+  for the linker's --gc-sections; Mach-O output ignores them.
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
   Initial input verification and canonical restoration always run.
@@ -126,6 +128,8 @@ struct Options {
     function_binding: Option<keel_c::FunctionBinding>,
     link_intent: Option<CLinkIntent>,
     x86_code_model: Option<keel_codegen::x86_64::CodeModel>,
+    function_sections: bool,
+    data_sections: bool,
     unwind: unwind_options::UnwindOptions,
     emit_object: bool,
     emit_wasm: bool,
@@ -193,6 +197,8 @@ impl Options {
         }
         emission.unwind_tables = self.unwind.policy();
         emission.x86_code_model = self.x86_code_model;
+        emission.function_sections = self.function_sections;
+        emission.data_sections = self.data_sections;
         emission
     }
 
@@ -564,6 +570,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             | "-fno-unwind-tables"
             | "-fasynchronous-unwind-tables"
             | "-fno-asynchronous-unwind-tables" => opts.unwind.set(flag),
+            "-ffunction-sections" => opts.function_sections = true,
+            "-fdata-sections" => opts.data_sections = true,
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
             "--code-model" => {
@@ -846,6 +854,8 @@ const COMPILE_FLAGS: &[&str] = &[
     "-fno-unwind-tables",
     "-fasynchronous-unwind-tables",
     "-fno-asynchronous-unwind-tables",
+    "-ffunction-sections",
+    "-fdata-sections",
     "--target",
     "--code-model",
     "--emit-object",
@@ -883,6 +893,8 @@ const CC_FLAGS: &[&str] = &[
     "-fno-unwind-tables",
     "-fasynchronous-unwind-tables",
     "-fno-asynchronous-unwind-tables",
+    "-ffunction-sections",
+    "-fdata-sections",
     "--emit-ir",
     "-fsemantic-interposition",
     "-fno-semantic-interposition",

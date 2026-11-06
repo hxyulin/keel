@@ -396,6 +396,7 @@ pub(crate) fn compile_output(
         compiler.debug = debug;
         compiler.code_model = code_model;
         compiler.unwind_tables = emission.unwind_tables;
+        compiler.function_sections = emission.function_sections;
         let slots = if debug {
             compiler.slot_frame_offsets()
         } else {
@@ -440,7 +441,7 @@ pub(crate) fn compile_output(
     }
     for data in &module.data {
         if let Some(init) = &data.init {
-            data::emit_elf(&mut out, data, init);
+            data::emit_elf(&mut out, data, init, emission.data_sections);
         }
     }
     if debug {
@@ -891,6 +892,8 @@ struct FunctionCompiler<'a> {
     /// Whether to emit `.loc` directives.
     debug: bool,
     unwind_tables: crate::UnwindTables,
+    /// Whether a function gets a section of its own.
+    function_sections: bool,
     /// The location of the last `.loc`.
     srcloc: Option<SourceLoc>,
     /// Whether the next `.loc` ends the prologue.
@@ -1099,6 +1102,7 @@ impl<'a> FunctionCompiler<'a> {
             uses_trap: false,
             debug: false,
             unwind_tables: crate::UnwindTables::All,
+            function_sections: false,
             srcloc: None,
             prologue_end: false,
             scope: None,
@@ -1132,21 +1136,7 @@ impl<'a> FunctionCompiler<'a> {
             });
         } else {
             out.directive(Directive::ElfSection {
-                name: func
-                    .attrs
-                    .section
-                    .map(|s| s.as_str().to_owned())
-                    .unwrap_or_else(|| {
-                        if func.attrs.retain {
-                            format!(".text.keel.retain.{}", func.name)
-                        } else if func.attrs.cold {
-                            ".text.unlikely".into()
-                        } else if func.attrs.hot {
-                            ".text.hot".into()
-                        } else {
-                            ".text".into()
-                        }
-                    }),
+                name: crate::emission::elf_text_section(&func.attrs, name, self.function_sections),
                 flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
                 nobits: false,
             });
