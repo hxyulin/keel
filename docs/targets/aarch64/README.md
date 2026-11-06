@@ -125,8 +125,11 @@ Linux symbols, ELF sections, argument placement and variadic state:
   double values/arithmetic are diagnosed as unsupported; storage/type
   declarations remain available. SVE builtin types are declaration-only opaque
   types for libc headers; scalable-vector operations are unsupported.
-- Baseline ARMv8.0 atomics use LL/SC loops instead of requiring LSE. The Linux
-  target currently uses conservative acquire/release ordering for these loops.
+- Baseline ARMv8.0 atomics use LL/SC loops instead of requiring LSE. The
+  load-exclusive is `ldaxr` when the ordering acquires and `ldxr` otherwise;
+  the store-exclusive is `stlxr` when it releases and `stxr` otherwise. A
+  compare-and-swap uses its merged success and failure orderings, and a weak
+  one makes a single attempt.
   TLS uses the initial-exec model and TPIDR_EL0; independent threads get distinct
   storage. Initial-exec TLS in dynamically loaded modules has the normal static
   TLS allocation restrictions.

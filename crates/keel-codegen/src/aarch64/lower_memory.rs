@@ -133,12 +133,22 @@ impl FunctionCompiler<'_> {
                     [reg(v, ty).into(), Address::base(Reg::x(a)).into()],
                 );
             }
-            InstData::AtomicRmw { op, args, .. } if self.linux => {
-                self.linux_atomic(op, &args, result, inst, false)
+            InstData::AtomicRmw { op, ordering, args } if self.linux => {
+                self.linux_atomic(op, &args, result, inst, ordering, None)
             }
-            InstData::AtomicCas { args, .. } if self.linux => {
-                self.linux_atomic(RmwOp::Xchg, &args, result, inst, true)
-            }
+            InstData::AtomicCas {
+                success,
+                failure,
+                weak,
+                args,
+            } if self.linux => self.linux_atomic(
+                RmwOp::Xchg,
+                &args,
+                result,
+                inst,
+                Ordering::merge(success, failure),
+                Some(weak),
+            ),
             InstData::AtomicRmw { op, ordering, args } => {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S0);

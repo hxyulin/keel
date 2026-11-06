@@ -169,15 +169,29 @@ impl FunctionCompiler<'_> {
 }
 
 impl FunctionCompiler<'_> {
-    /// ARMv8.0 LL/SC loops; do not assume the optional LSE extension.
+    /// ARMv8.0 LL/SC loops; do not assume the optional LSE extension. The
+    /// load-exclusive acquires when `ordering` does and the store-exclusive
+    /// releases when it does, as Clang maps them. `cas` is `Some(weak)` for
+    /// a compare-and-swap: a weak one makes one attempt instead of looping.
     pub(super) fn linux_atomic(
         &mut self,
         op: RmwOp,
         args: &[Value],
         result: Option<Value>,
         inst: Inst,
-        cas: bool,
+        ordering: Ordering,
+        cas: Option<bool>,
     ) {
+        let weak = cas == Some(true);
+        let cas = cas.is_some();
+        let acquire = matches!(
+            ordering,
+            Ordering::Acquire | Ordering::AcqRel | Ordering::SeqCst
+        );
+        let release = matches!(
+            ordering,
+            Ordering::Release | Ordering::AcqRel | Ordering::SeqCst
+        );
         let ty = self.ty(args[1]);
         for (r, &arg) in args.iter().enumerate() {
             self.emit_move(Loc::Reg(r as u8), self.loc(arg));
@@ -196,20 +210,27 @@ impl FunctionCompiler<'_> {
         );
         let retry = format!(".L{}_{}_atomic_retry", self.func.name, inst);
         let done = format!(".L{}_{}_atomic_done", self.func.name, inst);
-        self.out.label(retry.clone());
-        let load = match ty {
-            Type::I8 => Opcode::LDAXRB_LR32_ldstexclr,
-            Type::I16 => Opcode::LDAXRH_LR32_ldstexclr,
-            Type::I32 => Opcode::LDAXR_LR32_ldstexclr,
-            _ => Opcode::LDAXR_LR64_ldstexclr,
+        if !weak {
+            self.out.label(retry.clone());
+        }
+        let load = match (ty, acquire) {
+            (Type::I8, true) => Opcode::LDAXRB_LR32_ldstexclr,
+            (Type::I16, true) => Opcode::LDAXRH_LR32_ldstexclr,
+            (Type::I32, true) => Opcode::LDAXR_LR32_ldstexclr,
+            (_, true) => Opcode::LDAXR_LR64_ldstexclr,
+            (Type::I8, false) => Opcode::LDXRB_LR32_ldstexclr,
+            (Type::I16, false) => Opcode::LDXRH_LR32_ldstexclr,
+            (Type::I32, false) => Opcode::LDXR_LR32_ldstexclr,
+            (_, false) => Opcode::LDXR_LR64_ldstexclr,
         };
         let suffix = match ty {
             Type::I8 => "b",
             Type::I16 => "h",
             _ => "",
         };
+        let a = if acquire { "a" } else { "" };
         self.native(load, [(FieldId::Rt, 3), (FieldId::Rn, 0)], |out| {
-            write!(out, "ldaxr{suffix}\t{}, [x0]", reg(3, ty))
+            write!(out, "ld{a}xr{suffix}\t{}, [x0]", reg(3, ty))
         });
         if cas {
             self.mach("cmp", [reg(3, ty).into(), reg(1, ty).into()]);
@@ -257,29 +278,40 @@ impl FunctionCompiler<'_> {
                 }
             }
         }
-        let store = match ty {
-            Type::I8 => Opcode::STLXRB_SR32_ldstexclr,
-            Type::I16 => Opcode::STLXRH_SR32_ldstexclr,
-            Type::I32 => Opcode::STLXR_SR32_ldstexclr,
-            _ => Opcode::STLXR_SR64_ldstexclr,
+        let store = match (ty, release) {
+            (Type::I8, true) => Opcode::STLXRB_SR32_ldstexclr,
+            (Type::I16, true) => Opcode::STLXRH_SR32_ldstexclr,
+            (Type::I32, true) => Opcode::STLXR_SR32_ldstexclr,
+            (_, true) => Opcode::STLXR_SR64_ldstexclr,
+            (Type::I8, false) => Opcode::STXRB_SR32_ldstexclr,
+            (Type::I16, false) => Opcode::STXRH_SR32_ldstexclr,
+            (Type::I32, false) => Opcode::STXR_SR32_ldstexclr,
+            (_, false) => Opcode::STXR_SR64_ldstexclr,
         };
+        let l = if release { "l" } else { "" };
         self.native(
             store,
             [(FieldId::Rs, 5), (FieldId::Rt, 4), (FieldId::Rn, 0)],
-            |out| write!(out, "stlxr{suffix}\tw5, {}, [x0]", reg(4, ty)),
+            |out| write!(out, "st{l}xr{suffix}\tw5, {}, [x0]", reg(4, ty)),
         );
-        self.out.symbolic(Symbolic::Compare {
-            register: 5,
-            is64: false,
-            nonzero: true,
-            target: retry,
-        });
+        if weak {
+            // eq exactly when the store-exclusive succeeded.
+            self.mach("cmp", [Reg::w(5).into(), Arg::imm(0)]);
+        } else {
+            self.out.symbolic(Symbolic::Compare {
+                register: 5,
+                is64: false,
+                nonzero: true,
+                target: retry,
+            });
+        }
         self.out.label(done);
         self.native(Opcode::CLREX_BN_barriers, [(FieldId::CRm, 15)], |out| {
             out.write_str("clrex")
         });
         // Neither the store-exclusive, its branch nor `clrex` writes the
-        // flags, so they still hold the compare: eq exactly when it stored.
+        // flags, so they still hold the last compare: eq exactly when it
+        // stored.
         let flag = cas
             .then(|| self.func.inst_results(inst)[1])
             .and_then(|flag| self.defined(flag));

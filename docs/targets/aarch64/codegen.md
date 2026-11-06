@@ -194,7 +194,7 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
   one, extended for i8 and i16. Ordered loads and stores are
   `ldar`/`stlr`; fences are `dmb ishld` (acquire) or `dmb ish`. AArch64 Linux
   targets baseline ARMv8.0 and uses load-exclusive/store-exclusive loops
-  instead.
+  instead, ordered as the [target README](README.md) describes.
 - Inline assembly operands go in reserved registers that no value is
   allocated to. Inputs move in before the template and outputs out after it.
   Clobbering an allocatable caller-saved register makes the asm a call for
