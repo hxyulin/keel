@@ -107,14 +107,20 @@ pub(super) fn preflight(
     func: &Function,
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), String> {
-    if func
+    let not_yet = |what: &str| format!("{what} not supported on x86-64 yet");
+    if let Some(error) = func
         .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::VaArg { ty: Type::I128, .. }))
+        .find_map(|(_, i)| match func.inst_data(i) {
+            InstData::VaArg { ty: Type::I128, .. } => {
+                Some("va_arg.i128 requires AArch64 Linux".into())
+            }
+            data if crate::lowering::wide_atomic(func, data) => Some(not_yet("i128 atomics")),
+            _ => None,
+        })
     {
-        return Err("va_arg.i128 requires AArch64 Linux".into());
+        return Err(error);
     }
     let (CallConv::C | CallConv::Fast) = func.sig.cc;
-    let not_yet = |what: &str| format!("{what} not supported on x86-64 yet");
     match func.sig.returns.as_slice() {
         [] => {}
         // clang assumes the callee extends these to 32 bits.

@@ -238,6 +238,19 @@ fn same_placement(callee: &keel_ir::Signature, caller: &keel_ir::Signature) -> b
             }))
 }
 
+/// Whether `data` is an atomic access of an `i128`.
+pub(crate) fn wide_atomic(func: &keel_ir::Function, data: &keel_ir::InstData) -> bool {
+    use keel_ir::InstData;
+    let ty = match *data {
+        InstData::AtomicLoad { ty, .. } => ty,
+        InstData::AtomicStore { value, .. } => func.value_type(value),
+        InstData::AtomicRmw { args, .. } => func.value_type(args[1]),
+        InstData::AtomicCas { args, .. } => func.value_type(args[1]),
+        _ => return false,
+    };
+    ty == keel_ir::Type::I128
+}
+
 /// One class of result register: general-purpose or floating-point.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum ResultClass {

@@ -11,12 +11,19 @@ pub(super) fn preflight(
     symbols: &crate::symbols::Symbols<'_>,
     linux: bool,
 ) -> Result<(), String> {
-    if !linux
-        && func
-            .layout_insts()
-            .any(|(_, i)| matches!(func.inst_data(i), InstData::VaArg { ty: Type::I128, .. }))
+    if let Some(error) = func
+        .layout_insts()
+        .find_map(|(_, i)| match func.inst_data(i) {
+            InstData::VaArg { ty: Type::I128, .. } if !linux => {
+                Some("va_arg.i128 requires AArch64 Linux")
+            }
+            data if crate::lowering::wide_atomic(func, data) => {
+                Some("i128 atomics are not supported on AArch64 yet")
+            }
+            _ => None,
+        })
     {
-        return Err("va_arg.i128 requires AArch64 Linux".into());
+        return Err(error.into());
     }
     if linux && func.personality.is_some() {
         return Err("exception handling on AArch64 Linux is not supported yet".into());

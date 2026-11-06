@@ -834,13 +834,15 @@ impl Verifier<'_> {
     /// An atomic access of a `value` type through an `addr`: integers up
     /// to 64 bits, and `ptr` where it makes sense.
     fn check_atomic(&mut self, inst: Inst, what: &str, value: Type, addr: Type, allows_ptr: bool) {
-        let ok = matches!(value, Type::I8 | Type::I16 | Type::I32 | Type::I64)
-            || (allows_ptr && value == Type::Ptr);
+        let ok = matches!(
+            value,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+        ) || (allows_ptr && value == Type::Ptr);
         if !ok {
             let types = if allows_ptr {
-                "integers up to i64 and ptr"
+                "integers up to i128 and ptr"
             } else {
-                "integers up to i64"
+                "integers up to i128"
             };
             self.inst_error(inst, format!("{what} takes {types}, got {value}"));
         }

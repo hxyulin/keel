@@ -369,6 +369,42 @@ block0:
     ));
 }
 
+/// i128 atomics work like the narrower ones and need 16-byte alignment.
+#[test]
+fn wide_atomics() {
+    let src = "\
+func @f(i128, i64) -> (i128, i128, i8, i128, i128) {
+    ss0 = stack_slot 32, align 16
+block0(v0: i128, v1: i64):
+    v2 = stack_addr ss0
+    v3 = ptradd v2, v1
+    atomic_store release v0, v3
+    v4 = iconst.i128 -5
+    v5 = atomic_rmw.smax seq_cst v3, v4
+    v6, v7 = atomic_cas acq_rel acquire v3, v0, v4
+    v8 = atomic_rmw.add relaxed v3, v0
+    v9 = atomic_load.i128 acquire v3
+    return v5, v6, v7, v8, v9
+}
+";
+    let big = (1u128 << 100) | 7;
+    let minus = |x: i128| x as u128;
+    assert_eq!(
+        run(src, "f", &[Val::I128(big), Val::I64(0)]),
+        Outcome::Return(vec![
+            Val::I128(big),
+            Val::I128(big),
+            Val::I8(1),
+            Val::I128(minus(-5)),
+            Val::I128(minus(-5).wrapping_add(big)),
+        ])
+    );
+    assert!(matches!(
+        run(src, "f", &[Val::I128(big), Val::I64(8)]),
+        Outcome::Trap(Trap::Misaligned { align: 16, .. })
+    ));
+}
+
 #[test]
 fn load_trace_records_each_executed_load_in_order() {
     let m = module(
