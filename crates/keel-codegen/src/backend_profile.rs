@@ -84,7 +84,7 @@ impl Stage {
 /// location helpers: operand reloads, result spills, allocation copies and
 /// rematerialization. They are not dynamic execution counts. Spilled values
 /// that an x86-64 instruction reads or writes in place as a memory operand
-/// are not counted.
+/// are not counted. The two slot counters are frame bytes, not instructions.
 #[derive(Clone, Copy, Debug)]
 #[repr(usize)]
 pub enum Counter {
@@ -96,14 +96,20 @@ pub enum Counter {
     RegisterMoves,
     RematConstants,
     RematStackAddresses,
+    /// Frame bytes for IR stack slots after layout, alignment padding included.
+    SlotBytes,
+    /// The bytes those slots would take if no two shared storage.
+    UnsharedSlotBytes,
 }
 impl Counter {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::SpillStores,
         Self::Reloads,
         Self::RegisterMoves,
         Self::RematConstants,
         Self::RematStackAddresses,
+        Self::SlotBytes,
+        Self::UnsharedSlotBytes,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -112,6 +118,8 @@ impl Counter {
             Self::RegisterMoves => "register_moves",
             Self::RematConstants => "rematerialized_constants",
             Self::RematStackAddresses => "rematerialized_stack_addresses",
+            Self::SlotBytes => "ir_slot_bytes",
+            Self::UnsharedSlotBytes => "unshared_ir_slot_bytes",
         }
     }
 }
@@ -199,14 +207,19 @@ pub fn capture<T>(compile: impl FnOnce() -> T) -> (T, Report) {
 
 /// Record one helper invocation only while capture is active.
 pub(crate) fn count(counter: Counter) {
+    count_by(counter, 1);
+}
+
+/// Add `amount` to a counter only while capture is active.
+pub(crate) fn count_by(counter: Counter, amount: u64) {
     RECORDER.with(|cell| {
         let mut slot = cell.borrow_mut();
         let Some(recorder) = slot.as_mut() else {
             return;
         };
-        recorder.report.counters[counter as usize] += 1;
+        recorder.report.counters[counter as usize] += amount;
         if let Some(index) = recorder.function {
-            recorder.report.functions[index].counters[counter as usize] += 1;
+            recorder.report.functions[index].counters[counter as usize] += amount;
         }
     });
 }
@@ -336,9 +349,9 @@ mod tests {
             let _function = function("second");
             count(Counter::SpillStores);
         });
-        assert_eq!(report.counters, [2, 2, 0, 0, 0]);
-        assert_eq!(report.functions[0].counters, [1, 1, 0, 0, 0]);
-        assert_eq!(report.functions[1].counters, [1, 0, 0, 0, 0]);
+        assert_eq!(report.counters, [2, 2, 0, 0, 0, 0, 0]);
+        assert_eq!(report.functions[0].counters, [1, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(report.functions[1].counters, [1, 0, 0, 0, 0, 0, 0]);
         assert_eq!(capture(|| ()).1.counters, [0; Counter::ALL.len()]);
     }
 
@@ -358,8 +371,8 @@ mod tests {
         });
         let names: Vec<_> = report.functions.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["leaf", "other"]);
-        assert_eq!(report.functions[0].counters, [0, 0, 1, 0, 0]);
-        assert_eq!(report.counters, [0, 1, 1, 0, 0]);
+        assert_eq!(report.functions[0].counters, [0, 0, 1, 0, 0, 0, 0]);
+        assert_eq!(report.counters, [0, 1, 1, 0, 0, 0, 0]);
         assert_eq!(
             report.functions[0].stages[Stage::Function as usize].calls,
             2

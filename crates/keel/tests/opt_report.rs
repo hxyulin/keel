@@ -279,6 +279,8 @@ fn codegen_reports_count_spills_reloads_and_moves_per_function() {
                 "register_moves",
                 "rematerialized_constants",
                 "rematerialized_stack_addresses",
+                "ir_slot_bytes",
+                "unshared_ir_slot_bytes",
             ] {
                 let sum: u64 = functions.iter().map(|f| counters(f, key)).sum();
                 assert_eq!(counters(&report, key), sum, "{key} {args:?}");

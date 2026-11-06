@@ -8,6 +8,7 @@ pub(crate) struct SlotOffsets(Vec<Option<usize>>);
 
 impl SlotOffsets {
     pub(crate) fn layout(func: &Function, mut offset: usize, debug: bool) -> (Self, usize) {
+        let base = offset;
         // Inspect IR before target folding: folded loads/stores and rematerialized
         // addresses still need the object. Keeping every surviving StackAddr is
         // conservative, including escapes, aliases and unused address results.
@@ -32,6 +33,9 @@ impl SlotOffsets {
                 offset += slot.size as usize;
             }
         }
+        let bytes = (offset - base) as u64;
+        crate::backend_profile::count_by(crate::backend_profile::Counter::SlotBytes, bytes);
+        crate::backend_profile::count_by(crate::backend_profile::Counter::UnsharedSlotBytes, bytes);
         (Self(offsets), offset)
     }
 
@@ -82,9 +86,13 @@ mod tests {
         )
         .unwrap();
         let f = &module.functions[0];
-        let (slots, end) = SlotOffsets::layout(f, 8, false);
+        let ((slots, end), report) =
+            crate::backend_profile::capture(|| SlotOffsets::layout(f, 8, false));
         assert_eq!(slots.0, [None, Some(8), None, Some(16)]);
         assert_eq!(end, 32);
+        use crate::backend_profile::Counter;
+        assert_eq!(report.counters[Counter::SlotBytes as usize], 24);
+        assert_eq!(report.counters[Counter::UnsharedSlotBytes as usize], 24);
         // Even an address with no uses is retained; address escape analysis is
         // deliberately outside frame layout's responsibility.
         assert_eq!(slots[1], 8);
