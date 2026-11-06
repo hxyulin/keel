@@ -57,6 +57,10 @@ pub struct Options {
     /// selection choices, for example `all,-x86-mask-test`.
     #[arg(long, value_name = "LIST")]
     candidate_isel: Option<String>,
+    /// Build the candidate as one program: merge the units' IR, make every
+    /// symbol but `main` local, and optimize it at once.
+    #[arg(long)]
+    candidate_lto: bool,
     /// Code placements; each further one pads every function differently.
     #[arg(long, default_value_t = 4)]
     placements: usize,
@@ -517,6 +521,7 @@ fn prepare(
     let sources = build::sources(&env(keels[0]), suite)?;
     // Equal-length names keep the two build directories' paths the same length.
     let mut bins = Vec::new();
+    let mut asm = Vec::new();
     for (keel, prefix) in keels.iter().zip(["ab-base", "ab-cand"]) {
         let mut flags = config.flags.clone();
         if let Some(list) = options
@@ -525,6 +530,9 @@ fn prepare(
             .filter(|_| prefix == "ab-cand")
         {
             flags.extend(["--isel".into(), list.clone()]);
+        }
+        if options.candidate_lto && prefix == "ab-cand" {
+            flags.push(build::LTO.into());
         }
         let config = Config {
             name: format!("{prefix}-{}", config.name),
@@ -538,6 +546,7 @@ fn prepare(
             paint(&keel.label, Paint::Dim)
         );
         bins.push(built.bin);
+        asm.push(built.asm);
     }
     let bins = [bins[0].clone(), bins[1].clone()];
     let identical = fs::read(&bins[0])? == fs::read(&bins[1])?;
@@ -560,7 +569,7 @@ fn prepare(
     }
     let mut placements = vec![bins.clone()];
     for k in 1..options.placements {
-        placements.push(relink(suite, &sources, &bins, k, jobs)?);
+        placements.push(relink(suite, &asm, &bins, k, jobs)?);
     }
     let mut planned = Vec::new();
     for bench in benches {
@@ -595,7 +604,7 @@ fn prepare(
 /// `placement`.
 fn relink(
     suite: &Suite,
-    sources: &build::Sources,
+    asm: &[Vec<PathBuf>],
     bins: &[PathBuf; 2],
     placement: usize,
     jobs: usize,
@@ -607,13 +616,11 @@ fn relink(
     } else {
         ("0", 4)
     };
-    let units: Vec<_> = (0..sources.pre.len()).collect();
     let mut padded = Vec::new();
-    for bin in bins {
+    for (bin, units) in bins.iter().zip(asm) {
         let dir = bin.parent().unwrap();
-        let objects = build::parallel(&units, jobs, &indicatif::ProgressBar::hidden(), |i| {
-            let asm = dir.join(format!("unit-{i}.s"));
-            let text = fs::read_to_string(&asm).with_context(|| {
+        let objects = build::parallel(units, jobs, &indicatif::ProgressBar::hidden(), |asm| {
+            let text = fs::read_to_string(asm).with_context(|| {
                 format!(
                     "reading {}; placements need the configuration's assembly output",
                     asm.display()
@@ -621,7 +628,10 @@ fn relink(
             })?;
             let text = pad_functions(&text, placement, fill, step)
                 .with_context(|| asm.display().to_string())?;
-            let stem = format!("unit-{i}.place{placement}");
+            let stem = format!(
+                "{}.place{placement}",
+                asm.file_stem().unwrap().to_string_lossy()
+            );
             let asm = dir.join(format!("{stem}.s"));
             let object = dir.join(format!("{stem}.o"));
             fs::write(&asm, text)?;
@@ -944,11 +954,12 @@ fn trailer(
             )
         })
         .unwrap_or_default();
+    let lto = if options.candidate_lto { " --lto" } else { "" };
     [
         format!("AB-Baseline: {}", keels[0].label),
         match &options.candidate_isel {
-            Some(list) => format!("AB-Candidate: {} --isel {list}", keels[1].label),
-            None => format!("AB-Candidate: {}", keels[1].label),
+            Some(list) => format!("AB-Candidate: {} --isel {list}{lto}", keels[1].label),
+            None => format!("AB-Candidate: {}{lto}", keels[1].label),
         },
         format!("AB-Host: {host}"),
         format!(

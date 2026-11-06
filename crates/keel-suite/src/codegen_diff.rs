@@ -354,6 +354,12 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
                 config.name
             );
         }
+        if build::lto(config) {
+            bail!(
+                "configuration `{}` compiles the whole program at once; codegen-diff compares units",
+                config.name
+            );
+        }
     }
     let all = crate::manifest::load_suites(root)?;
     let chosen = crate::choose(&all, &options.suites)?;

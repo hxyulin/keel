@@ -45,6 +45,11 @@ name = "keel-O"
 compiler = "keel"
 flags = ["--link-intent", "executable", "-O"]
 
+[[config]]
+name = "keel-O-lto"
+compiler = "keel"
+flags = ["--link-intent", "executable", "-O", "--lto"]
+
 # Optional target selection; individual passes support ablation measurements.
 [[config]]
 name = "keel-select"

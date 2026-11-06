@@ -813,6 +813,27 @@ impl Function {
         self.data_symbols.iter().map(|(r, name)| (r, name.as_str()))
     }
 
+    /// Renames the functions and data objects this one refers to, including
+    /// its personality, where `rename` gives a new name. Call contracts and
+    /// facts stay: the referenced definitions are the same.
+    pub fn rename_symbols(&mut self, rename: impl Fn(&str) -> Option<String>) {
+        for decl in self.callees.values_mut() {
+            if let Some(name) = rename(&decl.name) {
+                decl.name = name;
+            }
+        }
+        for name in self.data_symbols.values_mut() {
+            if let Some(new) = rename(name) {
+                *name = new;
+            }
+        }
+        if let Some(name) = self.personality.as_deref().and_then(&rename) {
+            self.personality = Some(name);
+        }
+        self.callee_index = KeyIndex::default();
+        self.data_index = KeyIndex::default();
+    }
+
     /// Returns a reference to `sig` for indirect calls, reusing an existing
     /// one.
     pub fn import_signature(&mut self, sig: Signature) -> SigRef {

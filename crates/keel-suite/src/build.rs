@@ -199,6 +199,8 @@ pub struct BuildStat {
 
 pub struct Built {
     pub bin: PathBuf,
+    /// Keel's assembly files, one per object.
+    pub asm: Vec<PathBuf>,
     pub stat: BuildStat,
     pub cached: bool,
 }
@@ -217,11 +219,24 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
         compile(env, suite, config, file, *i, &out, &sources.work)
     });
     progress.finish_and_clear();
-    let times = times.with_context(|| format!("building {} with {}", suite.name, config.name))?;
-    let objects = (0..sources.pre.len()).map(|i| out.join(format!("unit-{i}.o")));
+    let mut times =
+        times.with_context(|| format!("building {} with {}", suite.name, config.name))?;
+    let stems: Vec<String> = if lto(config) {
+        times.push(compile_merged(env, suite, config, sources.pre.len(), &out)?);
+        vec!["lto".into()]
+    } else {
+        (0..sources.pre.len())
+            .map(|i| format!("unit-{i}"))
+            .collect()
+    };
+    let objects = stems.iter().map(|stem| out.join(format!("{stem}.o")));
     let link_start = Instant::now();
     link(suite, objects, &bin, &out)?;
     let link_ms = link_start.elapsed().as_secs_f64() * 1000.0;
+    let asm = stems
+        .iter()
+        .map(|stem| out.join(format!("{stem}.s")))
+        .collect();
 
     let sum = |f: fn(&(Duration, Duration)) -> Duration| -> f64 {
         times.iter().map(f).sum::<Duration>().as_secs_f64() * 1000.0
@@ -262,6 +277,7 @@ pub fn build(env: &Env, suite: &Suite, sources: &Sources, config: &Config) -> Re
     write_stamp(&out, &stamp)?;
     Ok(Built {
         bin,
+        asm,
         stat,
         cached: false,
     })
@@ -307,6 +323,23 @@ fn compile(
             run_checked(&argv, &dir, None)?;
             Ok((start.elapsed(), Duration::ZERO))
         }
+        Compiler::Keel if lto(config) => {
+            // Unoptimized IR; `compile_merged` optimizes the whole program.
+            let ir = path(&out.join(&stem).with_extension("keel"));
+            let mut argv = vec![path(&env.keel), "cc".into()];
+            argv.extend(input_flags.iter().cloned());
+            argv.extend(
+                config
+                    .flags
+                    .iter()
+                    .filter(|f| *f != LTO && !f.starts_with("-O"))
+                    .cloned(),
+            );
+            argv.extend(["--opt-tier".into(), "none".into(), "--emit-ir".into()]);
+            argv.extend([path(file), "-o".into(), ir]);
+            run_checked(&argv, &dir, None)?;
+            Ok((start.elapsed(), Duration::ZERO))
+        }
         Compiler::Keel if config.flags.iter().any(|flag| flag == "--emit-object") => {
             let mut argv = vec![path(&env.keel), "cc".into()];
             argv.extend(input_flags.iter().cloned());
@@ -329,6 +362,52 @@ fn compile(
             Ok((keel, start.elapsed()))
         }
     }
+}
+
+/// The configuration flag that builds a keel configuration as one program:
+/// the units' IR is merged, every symbol but `main` made local, and the
+/// result optimized and compiled at once.
+pub const LTO: &str = "--lto";
+
+pub fn lto(config: &Config) -> bool {
+    config.compiler == Compiler::Keel && config.flags.iter().any(|f| f == LTO)
+}
+
+/// Merges the `units` IR files of an LTO build into `lto.s` and assembles it.
+fn compile_merged(
+    env: &Env,
+    suite: &Suite,
+    config: &Config,
+    units: usize,
+    out: &Path,
+) -> Result<(Duration, Duration)> {
+    let mut argv = vec![path(&env.keel), "compile".into()];
+    let mut flags = config.flags.iter();
+    while let Some(flag) = flags.next() {
+        match flag.as_str() {
+            LTO => {}
+            // C-only: the IR already carries the binding it chose.
+            "--link-intent" => {
+                flags.next();
+            }
+            _ => argv.push(flag.clone()),
+        }
+    }
+    argv.extend(["--internalize".into(), "main".into()]);
+    argv.extend((0..units).map(|i| path(&out.join(format!("unit-{i}.keel")))));
+    let asm = path(&out.join("lto.s"));
+    argv.extend(["-o".into(), asm.clone()]);
+    let start = Instant::now();
+    run_checked(&argv, out, None).with_context(|| format!("merging {}", suite.name))?;
+    let keel = start.elapsed();
+    let start = Instant::now();
+    let object = path(&out.join("lto.o"));
+    run_checked(
+        &["clang", "-c", &asm, "-o", &object].map(String::from),
+        out,
+        None,
+    )?;
+    Ok((keel, start.elapsed()))
 }
 
 fn input_flags(mode: InputMode, compiler: Compiler, build: &crate::manifest::Build) -> Vec<String> {

@@ -98,6 +98,7 @@ Commonly used configurations:
 |---------------|---------|
 | `keel` | Default unoptimized Keel with covers selection, the `-O0` default |
 | `keel-O` | The CLI `-O` preset; enables all selection passes |
+| `keel-O-lto` | `keel-O` for the whole program: each unit is emitted as unoptimized IR, and `keel compile --internalize main` merges and compiles them as one module ([whole-program compilation](../docs/toolchain.md#whole-program-compilation)) |
 | `keel-select`, `keel-O-select` | Explicit `--isel all` |
 | `keel-g` | Keel with debug info |
 | `keel-basic`, `keel-fast`, `keel-full` | Explicit IR tiers (`keel-fast`: Fast IR with Full selection and allocation; `keel-full`: Full for all three) |
@@ -497,6 +498,7 @@ message. The plan, raw runs and report go to `target/keel-suite/ab/runs/<time>/`
 | `--no-lock` | Do not lock executable pages on Linux |
 | `--seed N` | Seed of the run order |
 | `--candidate-isel LIST` | Also pass `--isel LIST` to the candidate, so one binary can time one cover; the trailer records it |
+| `--candidate-lto` | Also build the candidate as one program, as `keel-O-lto` does, so one binary can time whole-program compilation; the trailer records it |
 
 ## Checking runtime slowdowns
 

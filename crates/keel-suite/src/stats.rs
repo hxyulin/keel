@@ -235,6 +235,12 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
             options.config
         );
     }
+    if build::lto(&config[0]) {
+        bail!(
+            "configuration `{}` compiles the whole program at once; stats counts units",
+            options.config
+        );
+    }
     let all = crate::manifest::load_suites(root)?;
     let chosen = crate::choose(&all, &options.suites)?;
     let env = Env {

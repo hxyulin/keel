@@ -125,6 +125,38 @@ Neither report flag overwrites an existing file, and they need different paths.
 keel cc -O --codegen-report spills.json --emit-object input.c -o input.o
 ```
 
+### Whole-program compilation
+
+`keel compile` with several IR inputs merges them into one module before it
+optimizes, the way a linker combines objects. `--internalize main` then makes
+every other global definition local, so the inliner, the module cleanup passes
+and [internal fast calls](compiler/optimizer.md#internal-fast-calls) see the
+whole program. Give each unit to it unoptimized:
+
+```sh
+keel cc --opt-tier none --emit-ir a.c -o a.keel
+keel cc --opt-tier none --emit-ir b.c -o b.keel
+keel compile -O --internalize main a.keel b.keel --emit-object -o prog.o
+```
+
+Merging resolves symbols as a static link does:
+
+- A strong definition replaces weak ones, the first of several weak ones wins,
+  and two strong definitions are an error.
+- A data definition replaces declarations of the same name.
+- A local symbol whose name another input also uses is renamed `name.N`, where
+  N is the input's position from 0.
+- Declarations of names that some input defines are dropped.
+
+`--internalize` keeps the listed names global, as well as names that appear in
+module or inline assembly text, constructors, destructors, and `used` or
+`retain` functions. Weak definitions it makes local become strong, since
+nothing else can replace them.
+
+Inputs with debug info are rejected. Renaming a local is also rejected when
+assembly text in its own input contains the name. Code for the merged
+module is generated on one thread.
+
 ## Targets
 
 **macOS arm64** is the primary target: Mach-O objects, the native linker and

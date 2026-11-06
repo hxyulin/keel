@@ -1,7 +1,7 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
 //! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
@@ -44,7 +44,7 @@ mod wasm;
 mod x86_options;
 
 const USAGE: &str = "usage:
-  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
   keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
@@ -71,6 +71,8 @@ const USAGE: &str = "usage:
   --isel-tier baseline|covers|trees|full: baseline runs no optional pass or cover; -O0 uses covers.
   --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
   Repeated explicit stage options use the last value.
+  compile merges several inputs into one module, as a linker would combine their objects;
+  --internalize then makes every other global definition local, so the optimizer sees the whole program.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier.
   --opt-bisect-limit n runs only the first n pass invocations (one per function, or one per module pass);
@@ -110,6 +112,10 @@ enum CLinkIntent {
 #[derive(Default)]
 struct Options {
     input: Option<String>,
+    /// Further `compile` inputs, merged with the first into one module.
+    more_inputs: Vec<String>,
+    /// `--internalize`: after merging, only these symbols stay global.
+    internalize: Option<Vec<String>>,
     output: Option<String>,
     opt_report: Option<String>,
     codegen_report: Option<String>,
@@ -632,7 +638,14 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 let list = args.next().ok_or("`-p` needs a list of passes")?;
                 opts.passes = Some(list.split(',').map(|s| s.trim().to_string()).collect());
             }
+            "--internalize" => {
+                let list = args
+                    .next()
+                    .ok_or("`--internalize` needs a list of symbols")?;
+                opts.internalize = Some(list.split(',').map(str::to_string).collect());
+            }
             _ if opts.input.is_none() => opts.input = Some(arg.clone()),
+            _ if allowed.contains(&"--internalize") => opts.more_inputs.push(arg.clone()),
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
     }
@@ -847,6 +860,7 @@ fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, Stri
 const ASM_METRICS_FLAGS: &[&str] = &["-o", "--target", "--cpu-level", "--target-features"];
 const COMPILE_FLAGS: &[&str] = &[
     "-o",
+    "--internalize",
     "-O",
     "-p",
     "-g",
@@ -1022,9 +1036,35 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "compile" => {
             let opts = parse_options(rest, COMPILE_FLAGS)?;
             if opts.emit_wasm {
+                if let Some(extra) = opts.more_inputs.first() {
+                    return Err(format!(
+                        "unexpected argument `{extra}`: Wasm output compiles one input"
+                    ));
+                }
+                if opts.internalize.is_some() {
+                    return Err("`--internalize` is unsupported for Wasm output".into());
+                }
                 return wasm::compile_ir(&opts);
             }
             let (input, mut module) = load(&opts)?;
+            if !opts.more_inputs.is_empty() || opts.internalize.is_some() {
+                let mut modules = vec![module];
+                for path in &opts.more_inputs {
+                    modules.push(load_path(path, opts.ir_lines)?);
+                }
+                module =
+                    keel_ir::merge_modules(modules).map_err(|e| format!("merging inputs: {e}"))?;
+                if let Some(keep) = &opts.internalize {
+                    keel_ir::internalize(&mut module, |name| keep.iter().any(|k| k == name));
+                }
+                if let Err(errors) = keel_ir::verify_module(&module) {
+                    let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                    return Err(format!(
+                        "merged module: verifier errors:\n{}",
+                        lines.join("\n")
+                    ));
+                }
+            }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
@@ -1230,12 +1270,17 @@ fn with_codegen_report<T>(
 
 /// Reads, parses and verifies the input.
 fn load(opts: &Options) -> Result<(String, Module), String> {
-    profiling::scope!("parse-and-verify");
     let input = opts.input.clone().ok_or(USAGE)?;
-    let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
+    let module = load_path(&input, opts.ir_lines)?;
+    Ok((input, module))
+}
+
+fn load_path(input: &str, ir_lines: bool) -> Result<Module, String> {
+    profiling::scope!("parse-and-verify");
+    let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
     let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-    let module = if opts.ir_lines {
-        keel_ir::parse_with_ir_lines(text, &input)
+    let module = if ir_lines {
+        keel_ir::parse_with_ir_lines(text, input)
     } else {
         keel_ir::parse(text)
     };
@@ -1244,7 +1289,7 @@ fn load(opts: &Options) -> Result<(String, Module), String> {
         let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
         return Err(format!("{input}: verifier errors:\n{}", lines.join("\n")));
     }
-    Ok((input, module))
+    Ok(module)
 }
 
 fn write_output(opts: &Options, text: &str) -> Result<(), String> {

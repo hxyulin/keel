@@ -17,6 +17,8 @@ pub mod intrinsic;
 pub mod layout;
 pub mod loops;
 pub mod memory;
+mod merge;
+pub use merge::{internalize, merge_modules};
 pub mod module;
 mod neon;
 pub mod parser;

@@ -144,3 +144,104 @@ fn native_inline_preserves_aggregate_copies_side_effects_and_partial_stores() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// Two units, each with a `static helper`, where `main` calls the other
+/// unit's `twice`.
+const UNIT_A: &str = "static int helper(int x) { return x * 3; }\n\
+int twice(int);\n\
+int main(void) { return twice(helper(7)) == 42 ? 0 : 1; }\n";
+const UNIT_B: &str = "static int helper(int x) { return x + 1; }\n\
+int twice(int x) { return 2 * helper(x) - 2; }\n";
+
+#[test]
+fn compile_merges_units_and_inlines_across_them() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("inline-whole-program");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("a.c"), UNIT_A).unwrap();
+    fs::write(dir.join("b.c"), UNIT_B).unwrap();
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        for unit in ["a", "b"] {
+            let (c, ir) = (format!("{unit}.c"), format!("{unit}-{target}.keel"));
+            keel(
+                &dir,
+                &[
+                    "cc",
+                    "--target",
+                    target,
+                    "--opt-tier",
+                    "none",
+                    "--emit-ir",
+                    &c,
+                    "-o",
+                    &ir,
+                ],
+            );
+        }
+        let (a, b) = (format!("a-{target}.keel"), format!("b-{target}.keel"));
+        let separate = keel(&dir, &["compile", "--target", target, "-O", &a]);
+        assert!(separate.contains("twice"), "{separate}");
+        let asm = format!("whole-{target}.s");
+        keel(
+            &dir,
+            &[
+                "compile",
+                "--target",
+                target,
+                "-O",
+                "--internalize",
+                "main",
+                &a,
+                &b,
+                "-o",
+                &asm,
+            ],
+        );
+        // `twice` became local, was inlined into `main` and then removed.
+        let whole = fs::read_to_string(dir.join(&asm)).unwrap();
+        assert!(!whole.contains("twice"), "{whole}");
+        assert!(whole.contains("main"), "{whole}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn merged_units_keep_their_own_static_helpers_natively() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("inline-whole-program-native");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("a.c"), UNIT_A).unwrap();
+    fs::write(dir.join("b.c"), UNIT_B).unwrap();
+    for unit in ["a", "b"] {
+        let (c, ir) = (format!("{unit}.c"), format!("{unit}.keel"));
+        keel(
+            &dir,
+            &["cc", "--opt-tier", "none", "--emit-ir", &c, "-o", &ir],
+        );
+    }
+    let merge = |tier: &str, output: &[&str]| {
+        let args = [
+            &["compile", tier, "--internalize", "main", "a.keel", "b.keel"][..],
+            output,
+        ];
+        keel(&dir, &args.concat())
+    };
+    // Without optimization both helpers survive under their renamed names.
+    let asm = merge("-O0", &[]);
+    assert!(
+        asm.contains("helper.0") && asm.contains("helper.1"),
+        "{asm}"
+    );
+    for tier in ["-O0", "-O"] {
+        merge(tier, &["--emit-object", "-o", "whole.o"]);
+        command(
+            Command::new("clang")
+                .current_dir(&dir)
+                .args(["whole.o", "-o", "whole"]),
+        );
+        command(&mut Command::new(dir.join("whole")));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
