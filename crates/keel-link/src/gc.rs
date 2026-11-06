@@ -4,11 +4,13 @@ use crate::{
     *,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Node {
+/// A collector node. A record is named by its index in its section's
+/// [`Meta::records`].
+#[derive(Clone, Copy)]
+enum Node<'a> {
     Section(usize, usize),
     Record(usize, usize, usize),
-    Common(String),
+    Common(&'a str),
 }
 #[derive(Clone)]
 struct Record {
@@ -16,38 +18,71 @@ struct Record {
     end: usize,
     cie: Option<usize>,
 }
+/// An unwind metadata section split into records.
+struct Meta {
+    /// Sorted by start, and disjoint.
+    records: Vec<Record>,
+    /// Each record's relocations, as indexes in their original order.
+    relocs: Vec<Vec<u32>>,
+    /// The relocations among those that start a fixup.
+    fixups: Vec<Vec<u32>>,
+}
+impl Meta {
+    fn find(&self, offset: usize) -> Option<usize> {
+        let i = self.records.partition_point(|r| r.start <= offset);
+        i.checked_sub(1).filter(|&i| offset < self.records[i].end)
+    }
+    fn starting_at(&self, start: usize) -> Option<usize> {
+        self.records.binary_search_by_key(&start, |r| r.start).ok()
+    }
+}
 struct Graph<'a> {
     linker: &'a Linker,
-    records: BTreeMap<(usize, usize), Vec<Record>>,
-    owners: BTreeMap<Node, Vec<Node>>,
+    /// `meta[object][section]` for unwind metadata sections.
+    meta: Vec<Vec<Option<Meta>>>,
+    /// `first[object][section]` is the section's node id. Its records follow.
+    first: Vec<Vec<usize>>,
+    /// Common node ids, after every section's nodes.
+    common_ids: BTreeMap<&'a str, usize>,
+    nodes: usize,
+    /// The records owned by each code node, by node id.
+    owners: Vec<Vec<Node<'a>>>,
     demanded: BTreeSet<(usize, usize)>,
-    /// Names with a tentative (common) definition in any object.
-    commons: BTreeSet<&'a str>,
 }
-impl Graph<'_> {
-    fn at(&self, oi: usize, si: usize, offset: usize) -> Result<Node> {
-        if let Some(records) = self.records.get(&(oi, si)) {
-            let record = records
-                .iter()
-                .find(|r| offset >= r.start && offset < r.end)
+impl<'a> Graph<'a> {
+    fn meta(&self, oi: usize, si: usize) -> Option<&Meta> {
+        self.meta[oi][si].as_ref()
+    }
+    fn id(&self, node: Node<'_>) -> usize {
+        match node {
+            Node::Section(oi, si) => self.first[oi][si],
+            Node::Record(oi, si, ri) => self.first[oi][si] + 1 + ri,
+            Node::Common(name) => self.common_ids[name],
+        }
+    }
+    fn at(&self, oi: usize, si: usize, offset: usize) -> Result<Node<'a>> {
+        if let Some(meta) = self.meta(oi, si) {
+            let ri = meta
+                .find(offset)
                 .ok_or("dead_strip: reference outside an unwind record")?;
-            Ok(Node::Record(oi, si, record.start))
+            Ok(Node::Record(oi, si, ri))
         } else {
             Ok(Node::Section(oi, si))
         }
     }
-    fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<Node>> {
-        let s = self.linker.objects[oi]
+    fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<Node<'a>>> {
+        let linker = self.linker;
+        let s = linker.objects[oi]
             .symbols
             .get(si)
             .ok_or("relocation symbol index out of range")?;
         self.demanded.insert((oi, si));
         let (oi, si) = if s.kind & 1 != 0 || s.kind & 0xe == 0 {
-            match self.linker.globals.get(&s.name) {
+            match linker.globals.get(&s.name) {
                 Some(Target::Definition(o, s)) => (*o, *s),
                 Some(Target::Header) => return Ok(None),
-                None if self.commons.contains(s.name.as_str()) => {
-                    return Ok(Some(Node::Common(s.name.clone())));
+                None if self.common_ids.contains_key(s.name.as_str()) => {
+                    return Ok(Some(Node::Common(s.name.as_str())));
                 }
                 None => return Ok(None), // imports and synthesized boundaries resolve after GC
                 _ => return fail("dead_strip: unexpected pre-layout symbol target"),
@@ -57,7 +92,7 @@ impl Graph<'_> {
         };
         self.definition(oi, si)
     }
-    fn definition(&self, oi: usize, si: usize) -> Result<Option<Node>> {
+    fn definition(&self, oi: usize, si: usize) -> Result<Option<Node<'a>>> {
         let s = &self.linker.objects[oi].symbols[si];
         if s.kind & 0xe == 2 {
             return Ok(None);
@@ -69,7 +104,13 @@ impl Graph<'_> {
             (s.value - section.address) as usize,
         )?))
     }
-    fn target(&mut self, oi: usize, r: &Reloc, data: &[u8], pointer: bool) -> Result<Option<Node>> {
+    fn target(
+        &mut self,
+        oi: usize,
+        r: &Reloc,
+        data: &[u8],
+        pointer: bool,
+    ) -> Result<Option<Node<'a>>> {
         if r.external {
             return self.symbol(oi, r.symbol);
         }
@@ -91,7 +132,7 @@ impl Graph<'_> {
         } else {
             0
         };
-        if self.records.contains_key(&(oi, si)) {
+        if self.meta(oi, si).is_some() {
             return fail(
                 "dead_strip: local section relocation into unwind metadata is unsupported; use explicit symbol differences",
             );
@@ -111,8 +152,8 @@ impl Graph<'_> {
         r: &Reloc,
         data: &[u8],
         pointer: bool,
-    ) -> Result<Option<Node>> {
-        if self.records.contains_key(&(oi, si))
+    ) -> Result<Option<Node<'a>>> {
+        if self.meta(oi, si).is_some()
             && r.external
             && self.linker.objects[oi]
                 .symbols
@@ -125,10 +166,16 @@ impl Graph<'_> {
     }
     /// Decode prefix/pair records before interpreting symbol fields. ADDEND's
     /// 24-bit symbol field is a signed number, never an edge.
-    fn edges(&mut self, oi: usize, si: usize, begin: usize, end: usize) -> Result<Vec<Node>> {
+    fn edges(
+        &mut self,
+        oi: usize,
+        si: usize,
+        fixups: impl Iterator<Item = Result<Fixup<'a>>>,
+    ) -> Result<Vec<Node<'a>>> {
         let s = &self.linker.objects[oi].sections[si];
+        let metadata = self.meta(oi, si).is_some();
         let mut edges = Vec::new();
-        for fixup in read::fixups(&s.relocs, begin..end) {
+        for fixup in fixups {
             match fixup? {
                 Fixup::Difference { minus, plus } => {
                     // Native FDE differences use a local metadata anchor. It is
@@ -137,7 +184,7 @@ impl Graph<'_> {
                         .symbols
                         .get(minus.symbol)
                         .ok_or("invalid subtractor symbol")?;
-                    if !(self.records.contains_key(&(oi, si))
+                    if !(metadata
                         && anchor.kind & 0xe == 0xe
                         && anchor.kind & 1 == 0
                         && anchor.section == si + 1)
@@ -166,9 +213,34 @@ impl Graph<'_> {
         }
         Ok(edges)
     }
-    fn owner(&mut self, oi: usize, si: usize, field: usize, fde: bool) -> Result<Node> {
+    /// The fixups that start inside record `ri`, decoded from the section's
+    /// whole relocation list.
+    fn record_fixups(&self, oi: usize, si: usize, ri: usize) -> Vec<Result<Fixup<'a>>> {
+        let linker = self.linker;
+        let relocs = &linker.objects[oi].sections[si].relocs;
+        self.meta(oi, si).unwrap().fixups[ri]
+            .iter()
+            .map(|&at| {
+                read::fixups(&relocs[at as usize..], 0..usize::MAX)
+                    .next()
+                    .unwrap()
+            })
+            .collect()
+    }
+    fn owner(
+        &mut self,
+        oi: usize,
+        si: usize,
+        ri: usize,
+        field: usize,
+        fde: bool,
+    ) -> Result<Node<'a>> {
         let s = &self.linker.objects[oi].sections[si];
-        let matches: Vec<_> = s.relocs.iter().filter(|r| r.offset == field).collect();
+        let matches: Vec<_> = self.meta(oi, si).unwrap().relocs[ri]
+            .iter()
+            .map(|&at| &s.relocs[at as usize])
+            .filter(|r| r.offset == field)
+            .collect();
         let rel = if fde {
             if matches.len() != 2
                 || matches[0].kind != 1
@@ -261,25 +333,22 @@ impl Graph<'_> {
 }
 impl Linker {
     pub(crate) fn collect(&mut self) -> Result<BTreeSet<String>> {
-        let mut g = Graph {
-            linker: self,
-            records: BTreeMap::new(),
-            owners: BTreeMap::new(),
-            demanded: BTreeSet::new(),
-            commons: self
-                .objects
-                .iter()
-                .flat_map(|o| &o.symbols)
-                .filter(|c| c.kind & 0xe == 0 && c.value != 0)
-                .map(|c| c.name.as_str())
-                .collect(),
-        };
+        let commons: BTreeSet<&str> = self
+            .objects
+            .iter()
+            .flat_map(|o| &o.symbols)
+            .filter(|c| c.kind & 0xe == 0 && c.value != 0)
+            .map(|c| c.name.as_str())
+            .collect();
         // Parse record extents first, so all symbol references can be mapped to
         // records even when a CIE or an FDE is shared or appears out of order.
-        for (oi, o) in self.objects.iter().enumerate() {
+        let mut meta = Vec::with_capacity(self.objects.len());
+        for o in &self.objects {
+            let mut sections = Vec::with_capacity(o.sections.len());
             for (si, s) in o.sections.iter().enumerate() {
                 let compact = s.segment == "__LD" && s.name == "__compact_unwind";
                 if !compact && s.name != "__eh_frame" {
+                    sections.push(None);
                     continue;
                 }
                 if o.symbols
@@ -325,46 +394,97 @@ impl Linker {
                     });
                     at = end;
                 }
+                let mut m = Meta {
+                    relocs: vec![Vec::new(); records.len()],
+                    fixups: vec![Vec::new(); records.len()],
+                    records,
+                };
                 // A fixup belongs to one original record in its entirety.
                 // Otherwise dropping its starting record can silently remove
                 // a write into a surviving neighbor (or reinterpret it after
                 // compaction). Validate dead records too, before pruning.
-                for rel in &s.relocs {
-                    let record = records
-                        .iter()
-                        .find(|r| rel.offset >= r.start && rel.offset < r.end)
+                let mut next_fixup = 0;
+                for (at, rel) in s.relocs.iter().enumerate() {
+                    let ri = m
+                        .find(rel.offset)
                         .ok_or("dead_strip: relocation outside an unwind record")?;
                     if rel
                         .offset
                         .checked_add(rel.width)
-                        .is_none_or(|end| end > record.end)
+                        .is_none_or(|end| end > m.records[ri].end)
                     {
                         return fail("dead_strip: relocation crosses an unwind record boundary");
                     }
+                    m.relocs[ri].push(at as u32);
+                    // Decode once in list order, as an ADDEND prefix or a
+                    // SUBTRACTOR pair takes the next relocation with it.
+                    if at == next_fixup {
+                        m.fixups[ri].push(at as u32);
+                        let paired = matches!(rel.kind, read::ADDEND | read::SUBTRACTOR)
+                            && read::fixups(&s.relocs[at..], 0..usize::MAX)
+                                .next()
+                                .is_some_and(|f| f.is_ok());
+                        next_fixup = at + 1 + paired as usize;
+                    }
                 }
-                g.records.insert((oi, si), records);
+                sections.push(Some(m));
             }
+            meta.push(sections);
         }
+        let mut nodes = 0;
+        let first: Vec<Vec<usize>> = meta
+            .iter()
+            .map(|sections| {
+                sections
+                    .iter()
+                    .map(|m| {
+                        let id = nodes;
+                        nodes += 1 + m.as_ref().map_or(0, |m| m.records.len());
+                        id
+                    })
+                    .collect()
+            })
+            .collect();
+        let common_ids: BTreeMap<_, _> = commons.into_iter().zip(nodes..).collect();
+        nodes += common_ids.len();
+        let mut g = Graph {
+            linker: self,
+            meta,
+            first,
+            common_ids,
+            nodes,
+            owners: vec![Vec::new(); nodes],
+            demanded: BTreeSet::new(),
+        };
         let mut pending = Vec::new();
-        for (&(oi, si), records) in &g.records.clone() {
-            let compact = self.objects[oi].sections[si].name == "__compact_unwind";
-            for r in records {
-                if !compact && r.cie.is_none() {
+        for oi in 0..g.meta.len() {
+            for si in 0..g.meta[oi].len() {
+                let Some(m) = g.meta(oi, si) else {
                     continue;
-                }
-                let owner = g
-                    .owner(oi, si, r.start + if compact { 0 } else { 8 }, !compact)
-                    .map_err(|e| format!("{}: {e}", self.objects[oi].name))?;
-                g.owners
-                    .entry(owner)
-                    .or_default()
-                    .push(Node::Record(oi, si, r.start));
-                if let Some(cie) = r.cie {
-                    let c = records
-                        .iter()
-                        .find(|c| c.start == cie && c.cie.is_none())
-                        .ok_or("invalid FDE CIE pointer")?;
-                    crate::unwind::validate_cie(&self.objects[oi].sections[si].data, c.start)?;
+                };
+                let compact = self.objects[oi].sections[si].name == "__compact_unwind";
+                let records = m.records.clone();
+                for (ri, r) in records.iter().enumerate() {
+                    if !compact && r.cie.is_none() {
+                        continue;
+                    }
+                    let owner = g
+                        .owner(oi, si, ri, r.start + if compact { 0 } else { 8 }, !compact)
+                        .map_err(|e| format!("{}: {e}", self.objects[oi].name))?;
+                    let id = g.id(owner);
+                    g.owners[id].push(Node::Record(oi, si, ri));
+                    if let Some(cie) = r.cie {
+                        let c = g
+                            .meta(oi, si)
+                            .unwrap()
+                            .starting_at(cie)
+                            .filter(|&c| records[c].cie.is_none())
+                            .ok_or("invalid FDE CIE pointer")?;
+                        crate::unwind::validate_cie(
+                            &self.objects[oi].sections[si].data,
+                            records[c].start,
+                        )?;
+                    }
                 }
             }
         }
@@ -380,6 +500,20 @@ impl Linker {
         } else {
             return fail("_main is not a text definition");
         }
+        // Each common's declarations, in input order.
+        let mut common_decls: BTreeMap<&str, Vec<(usize, usize)>> = BTreeMap::new();
+        if !self.options.required_exports.is_empty() {
+            for (oi, o) in self.objects.iter().enumerate() {
+                for (si, s) in o.symbols.iter().enumerate() {
+                    if s.kind & 0xe == 0 && s.value != 0 {
+                        common_decls
+                            .entry(s.name.as_str())
+                            .or_default()
+                            .push((oi, si));
+                    }
+                }
+            }
+        }
         for name in &self.options.required_exports {
             if name.is_empty() || name.contains('\0') {
                 return fail("required export must be a nonempty symbol name without NUL");
@@ -388,16 +522,12 @@ impl Linker {
                 Some(Target::Definition(o, s)) => Some((*o, *s)),
                 // Commons merge visibility across every declaration: any
                 // public common makes the selected common public.
-                _ => self
-                    .objects
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(oi, o)| {
-                        o.symbols.iter().enumerate().map(move |(si, s)| (oi, si, s))
-                    })
-                    .filter(|(_, _, s)| s.name == *name && s.kind & 0xe == 0 && s.value != 0)
-                    .min_by_key(|(_, _, s)| s.kind & 0x10)
-                    .map(|(oi, si, _)| (oi, si)),
+                _ => common_decls.get(name.as_str()).and_then(|decls| {
+                    decls
+                        .iter()
+                        .copied()
+                        .min_by_key(|&(oi, si)| self.objects[oi].symbols[si].kind & 0x10)
+                }),
             };
             let Some((o, s)) = definition else {
                 return fail(format!(
@@ -415,8 +545,8 @@ impl Linker {
                     continue;
                 }
                 if s.flags & 0x10000000 != 0 || matches!(s.flags & 255, 9 | 0xa) {
-                    if let Some(records) = g.records.get(&(oi, si)) {
-                        pending.extend(records.iter().map(|r| Node::Record(oi, si, r.start)));
+                    if let Some(m) = g.meta(oi, si) {
+                        pending.extend((0..m.records.len()).map(|ri| Node::Record(oi, si, ri)));
                     } else {
                         pending.push(Node::Section(oi, si));
                     }
@@ -428,24 +558,25 @@ impl Linker {
                 }
             }
         }
-        let mut live = BTreeSet::new();
+        let mut live = vec![false; g.nodes];
         let mut commons = BTreeSet::new();
         while let Some(node) = pending.pop() {
-            if !live.insert(node.clone()) {
+            let id = g.id(node);
+            if std::mem::replace(&mut live[id], true) {
                 continue;
             }
-            if let Some(records) = g.owners.get(&node) {
-                pending.extend(records.iter().cloned());
-            }
+            pending.extend_from_slice(&g.owners[id]);
             match node {
                 Node::Section(oi, si) => {
                     let s = &self.objects[oi].sections[si];
                     if s.segment == "__DWARF" {
                         return fail("dead_strip: live reference into debug metadata");
                     }
-                    let edges = g.edges(oi, si, 0, s.size).map_err(|e| {
-                        format!("{}: {},{}: {e}", self.objects[oi].name, s.segment, s.name)
-                    })?;
+                    let edges = g
+                        .edges(oi, si, read::fixups(&s.relocs, 0..s.size))
+                        .map_err(|e| {
+                            format!("{}: {},{}: {e}", self.objects[oi].name, s.segment, s.name)
+                        })?;
                     if edges.iter().any(|n| matches!(n, Node::Record(..))) {
                         return fail(
                             "dead_strip: ordinary input relocation into moving unwind metadata is unsupported",
@@ -453,118 +584,112 @@ impl Linker {
                     }
                     pending.extend(edges);
                 }
-                Node::Record(oi, si, at) => {
-                    let r = g.records[&(oi, si)]
-                        .iter()
-                        .find(|r| r.start == at)
-                        .unwrap()
-                        .clone();
-                    pending.extend(g.edges(oi, si, r.start, r.end)?);
-                    if let Some(cie) = r.cie {
-                        pending.push(Node::Record(oi, si, cie));
+                Node::Record(oi, si, ri) => {
+                    let fixups = g.record_fixups(oi, si, ri);
+                    pending.extend(g.edges(oi, si, fixups.into_iter())?);
+                    if let Some(cie) = g.meta(oi, si).unwrap().records[ri].cie {
+                        let c = g.meta(oi, si).unwrap().starting_at(cie).unwrap();
+                        pending.push(Node::Record(oi, si, c));
                     }
                 }
                 Node::Common(name) => {
-                    commons.insert(name);
+                    commons.insert(name.to_string());
                 }
             }
         }
         let demanded = std::mem::take(&mut g.demanded);
-        let records = std::mem::take(&mut g.records);
+        let meta = std::mem::take(&mut g.meta);
+        let first = std::mem::take(&mut g.first);
         drop(g);
         // Rebuild metadata before sizing, preserving original contribution IDs.
         // Remap local metadata symbols and FDE backward CIE pointers; section
         // relocations into these moving records were rejected above.
-        for ((oi, si), records) in records {
-            let object = &mut self.objects[oi];
-            let old_symbols = object.symbols.clone();
-            let section = &mut object.sections[si];
-            let mut mapping = BTreeMap::new();
-            let mut data = Vec::new();
-            for r in &records {
-                if live.contains(&Node::Record(oi, si, r.start)) {
-                    mapping.insert(r.start, data.len());
-                    data.extend_from_slice(&section.data[r.start..r.end]);
-                }
-            }
-            for r in &records {
-                if let (Some(&at), Some(cie)) = (mapping.get(&r.start), r.cie) {
-                    let cie = *mapping
-                        .get(&cie)
-                        .ok_or("dead_strip: live FDE lost its CIE")?;
-                    let delta =
-                        u32::try_from(at + 4 - cie).map_err(|_| "FDE CIE offset overflow")?;
-                    data[at + 4..at + 8].copy_from_slice(&delta.to_le_bytes());
-                }
-            }
-            let old_relocs = section.relocs.clone();
-            section.relocs.retain_mut(|rel| {
-                let Some(r) = records
-                    .iter()
-                    .find(|r| rel.offset >= r.start && rel.offset < r.end)
-                else {
-                    return false;
-                };
-                let Some(&at) = mapping.get(&r.start) else {
-                    return false;
-                };
-                rel.offset = at + rel.offset - r.start;
-                true
-            });
-            section.size = data.len();
-            section.data = data;
-            for sym in &mut object.symbols {
-                if sym.section != si + 1 {
-                    continue;
-                }
-                let offset = (sym.value - section.address) as usize;
-                sym.value = section.address
-                    + records
-                        .iter()
-                        .find_map(|r| {
-                            (offset >= r.start && offset < r.end)
-                                .then(|| mapping.get(&r.start).map(|at| at + offset - r.start))
-                                .flatten()
-                        })
-                        .unwrap_or(section.size) as u64;
-            }
-            for rel in old_relocs.iter().filter(|r| r.kind == 1) {
-                let Some(record) = records
-                    .iter()
-                    .find(|r| rel.offset >= r.start && rel.offset < r.end)
-                else {
+        for (oi, sections) in meta.iter().enumerate() {
+            for (si, m) in sections.iter().enumerate() {
+                let Some(m) = m else {
                     continue;
                 };
-                let Some(&at) = mapping.get(&record.start) else {
-                    continue;
-                };
-                let old = &old_symbols[rel.symbol];
-                if old.kind & 0xe != 0xe || old.kind & 1 != 0 || old.section != si + 1 {
-                    return fail(
-                        "dead_strip: unwind difference requires a local anchor in its own section",
-                    );
+                let records = &m.records;
+                let object = &mut self.objects[oi];
+                let old_symbols = object.symbols.clone();
+                let section = &mut object.sections[si];
+                let mut mapping = vec![None; records.len()];
+                let mut data = Vec::new();
+                for (ri, r) in records.iter().enumerate() {
+                    if live[first[oi][si] + 1 + ri] {
+                        mapping[ri] = Some(data.len());
+                        data.extend_from_slice(&section.data[r.start..r.end]);
+                    }
                 }
-                let new_field = at + rel.offset - record.start;
-                let raw = if rel.width == 8 {
-                    Reader(&section.data).u64(new_field)?
-                } else {
-                    Reader(&section.data).u32(new_field)? as u64
-                };
-                let value = raw
-                    .wrapping_add(rel.offset as u64)
-                    .wrapping_sub(new_field as u64)
-                    .wrapping_add(object.symbols[rel.symbol].value)
-                    .wrapping_sub(old.value);
-                section.data[new_field..new_field + rel.width]
-                    .copy_from_slice(&value.to_le_bytes()[..rel.width]);
+                for (ri, r) in records.iter().enumerate() {
+                    if let (Some(at), Some(cie)) = (mapping[ri], r.cie) {
+                        let cie = m
+                            .starting_at(cie)
+                            .and_then(|c| mapping[c])
+                            .ok_or("dead_strip: live FDE lost its CIE")?;
+                        let delta =
+                            u32::try_from(at + 4 - cie).map_err(|_| "FDE CIE offset overflow")?;
+                        data[at + 4..at + 8].copy_from_slice(&delta.to_le_bytes());
+                    }
+                }
+                let old_relocs = section.relocs.clone();
+                section.relocs.retain_mut(|rel| {
+                    let Some(ri) = m.find(rel.offset) else {
+                        return false;
+                    };
+                    let Some(at) = mapping[ri] else {
+                        return false;
+                    };
+                    rel.offset = at + rel.offset - records[ri].start;
+                    true
+                });
+                section.size = data.len();
+                section.data = data;
+                for sym in &mut object.symbols {
+                    if sym.section != si + 1 {
+                        continue;
+                    }
+                    let offset = (sym.value - section.address) as usize;
+                    sym.value = section.address
+                        + m.find(offset)
+                            .and_then(|ri| mapping[ri].map(|at| at + offset - records[ri].start))
+                            .unwrap_or(section.size) as u64;
+                }
+                for rel in old_relocs.iter().filter(|r| r.kind == 1) {
+                    let Some(ri) = m.find(rel.offset) else {
+                        continue;
+                    };
+                    let Some(at) = mapping[ri] else {
+                        continue;
+                    };
+                    let old = &old_symbols[rel.symbol];
+                    if old.kind & 0xe != 0xe || old.kind & 1 != 0 || old.section != si + 1 {
+                        return fail(
+                            "dead_strip: unwind difference requires a local anchor in its own section",
+                        );
+                    }
+                    let new_field = at + rel.offset - records[ri].start;
+                    let raw = if rel.width == 8 {
+                        Reader(&section.data).u64(new_field)?
+                    } else {
+                        Reader(&section.data).u32(new_field)? as u64
+                    };
+                    let value = raw
+                        .wrapping_add(rel.offset as u64)
+                        .wrapping_sub(new_field as u64)
+                        .wrapping_add(object.symbols[rel.symbol].value)
+                        .wrapping_sub(old.value);
+                    section.data[new_field..new_field + rel.width]
+                        .copy_from_slice(&value.to_le_bytes()[..rel.width]);
+                }
             }
         }
         for (oi, o) in self.objects.iter().enumerate() {
             for (si, section) in o.sections.iter().enumerate() {
-                let metadata_live = live
-                    .iter()
-                    .any(|n| matches!(n, Node::Record(o,s,_) if *o == oi && *s == si));
-                if !live.contains(&Node::Section(oi, si)) && !metadata_live {
+                let id = first[oi][si];
+                let records = meta[oi][si].as_ref().map_or(0, |m| m.records.len());
+                let metadata_live = live[id + 1..id + 1 + records].contains(&true);
+                if !live[id] && !metadata_live {
                     self.discarded.insert((oi, si));
                 }
                 if metadata_live && section.data.is_empty() {
