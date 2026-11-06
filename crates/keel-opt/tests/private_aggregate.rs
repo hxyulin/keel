@@ -105,6 +105,22 @@ fn public_addresses_padding_constraints_and_observers_are_unchanged() {
     assert_eq!(private_aggregate::run(&mut debug), 0);
     assert_eq!(before, debug.to_string());
 }
+/// Lifetime markers scope the function's own slots and are no frame
+/// facility, so they leave both definitions eligible.
+#[test]
+fn lifetime_markers_keep_definitions_eligible() {
+    let marked = SOURCE
+        .replace(
+            "block0(v0:ptr,v1:ptr,v2:ptr):",
+            " ss0 = stack_slot 8, align 8\nblock0(v0:ptr,v1:ptr,v2:ptr):",
+        )
+        .replace(
+            " return v8\n}\nfunc @entry",
+            " v9 = stack_addr ss0\n intrinsic lifetime_start(v9)\n store v8,v9\n \
+             intrinsic lifetime_end(v9)\n return v8\n}\nfunc @entry",
+        );
+    check(&marked, 1);
+}
 #[test]
 fn recursive_calls_and_sret_preserve_result_contract() {
     let s = "func @rec(ptr sret [2 x i64], ptr byval [2 x i64], i64) noinline local {

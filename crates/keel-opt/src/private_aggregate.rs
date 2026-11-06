@@ -256,8 +256,9 @@ pub fn run(m: &mut Module) -> usize {
             match f.inst_data(i) {
                 // Textual symbols disable the module; intrinsic/frame facilities
                 // exclude the containing definition from this prototype.
+                // Lifetime markers scope other slots and are no facility.
                 InstData::InlineAsm { .. } => return 0,
-                InstData::Intrinsic { .. } => {
+                d @ InstData::Intrinsic { .. } if !d.is_lifetime_marker() => {
                     blocked.insert(f.name.clone());
                 }
                 InstData::SymbolAddr {
