@@ -590,8 +590,7 @@ impl Linker {
                 // the next value above its start.
                 let mut starts = vec![Vec::new(); object.sections.len() + 1];
                 for s in &object.symbols {
-                    if !s.name.starts_with("ltmp")
-                        && !s.name.starts_with('L')
+                    if !crate::gc::temporary_label(&s.name)
                         && let Some(values) = starts.get_mut(s.section)
                     {
                         values.push(s.value);
@@ -634,10 +633,7 @@ impl Linker {
                         );
                         continue;
                     }
-                    if symbol.kind & 0xe != 0xe
-                        || symbol.name.starts_with("ltmp")
-                        || symbol.name.starts_with('L')
-                    {
+                    if symbol.kind & 0xe != 0xe || crate::gc::temporary_label(&symbol.name) {
                         continue;
                     }
                     if symbol.kind & 1 != 0

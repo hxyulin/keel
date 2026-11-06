@@ -144,6 +144,7 @@ mod tests {
                 .collect(),
             minimum: 11 << 16,
             debug_bytes: None,
+            subsections: false,
         }
     }
 
@@ -275,6 +276,7 @@ mod tests {
                         .collect(),
                     minimum: 11 << 16,
                     debug_bytes: None,
+                    subsections: false,
                 })
                 .collect();
             let (objects, members) = objects.split_at(direct);

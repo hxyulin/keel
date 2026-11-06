@@ -150,6 +150,9 @@ pub(crate) struct Object {
     pub symbols: Vec<Symbol>,
     pub minimum: u32,
     pub debug_bytes: Option<Vec<u8>>,
+    /// MH_SUBSECTIONS_VIA_SYMBOLS: no reference between two symbols' bytes
+    /// in one section was resolved without a relocation.
+    pub subsections: bool,
 }
 impl Object {
     /// Attach owned payloads to an already validated archive summary. Reuse its
@@ -383,6 +386,7 @@ impl Object {
             symbols,
             minimum,
             debug_bytes,
+            subsections: r.u32(24)? & 0x2000 != 0,
         })
     }
 }
