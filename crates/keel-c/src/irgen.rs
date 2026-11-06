@@ -1169,6 +1169,23 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         self.g.types().size(ty)
     }
 
+    /// The address of temporary `slot`, whose lifetime starts here. With
+    /// debug information every slot keeps its own home, so no markers.
+    pub(crate) fn start_temporary(&mut self, slot: StackSlot) -> Value {
+        let address = self.b.ins().stack_addr(slot);
+        if !self.g.debug {
+            self.b.ins().intrinsic(Intrinsic::LifetimeStart, &[address]);
+        }
+        address
+    }
+
+    /// Ends the lifetime that `start_temporary` began at `address`.
+    pub(crate) fn end_temporary(&mut self, address: Value) {
+        if !self.g.debug && !self.terminated {
+            self.b.ins().intrinsic(Intrinsic::LifetimeEnd, &[address]);
+        }
+    }
+
     fn temporary_slot(&mut self, ty: &Ty, loc: Loc) -> R<StackSlot> {
         let size = self
             .g
@@ -1277,14 +1294,20 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     // Cleanup discards the result, but nonempty aggregates still
                     // require the normal hidden result address.
                     let mapping = self.g.abi_mapping(fty, g, &[])?;
+                    let mut result = None;
                     if matches!(mapping.result, ResultMapping::Indirect) {
                         let slot = self.temporary_slot(&fty.ret, loc)?;
-                        args.push(self.b.ins().stack_addr(slot));
+                        let address = self.start_temporary(slot);
+                        result = Some(address);
+                        args.push(address);
                     }
                     args.push(addr);
                     self.g.use_global(g);
                     let callee = self.import_global(g, fty, None)?;
                     self.b.ins().call(callee, &args);
+                    if let Some(address) = result {
+                        self.end_temporary(address);
+                    }
                 }
             }
         }

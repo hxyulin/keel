@@ -135,6 +135,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         // Freeze an argument's bytes now when later evaluation could change
         // them. With no intervening effects, immediate ABI copying suffices.
         let mut snapshots = Vec::new();
+        // Snapshot addresses, whose lifetimes end after the call.
+        let mut copies = Vec::new();
         if args.iter().any(|arg| arg.ty.is_pair_or_struct()) {
             snapshots.resize(args.len(), false);
             let mut later_effect = self.may_change_memory(f);
@@ -171,8 +173,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     unreachable!()
                 };
                 let slot = self.b.create_stack_slot(size.max(1), align);
-                let copy = self.b.ins().stack_addr(slot);
+                let copy = self.start_temporary(slot);
                 self.copy(copy, value, &arg.ty);
+                copies.push(copy);
                 value = copy;
             }
             vals.push(value);
@@ -238,6 +241,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
         };
+        for copy in copies {
+            self.end_temporary(copy);
+        }
         if direct.is_some_and(|g| self.g.p.globals[g].function_attrs.noreturn) {
             self.b.ins().trap();
             self.terminated = true;

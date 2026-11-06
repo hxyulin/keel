@@ -478,6 +478,47 @@ fn locals_become_ssa_values() {
     assert_eq!(f.matches("stack_slot").count(), 2, "{f}");
 }
 
+/// An argument snapshot lives from its copy to the end of its call, so two
+/// calls' snapshots can share frame bytes. With debug information every
+/// slot keeps its own home and gets no markers.
+#[test]
+fn argument_snapshots_live_for_their_call() {
+    let src = "struct S { long a[4]; };\n\
+               int use(struct S, int);\n\
+               int bump(struct S *p) { return ++p->a[0]; }\n\
+               int f(struct S *p) { return use(*p, bump(p)) + use(*p, bump(p)); }\n";
+    for debug_info in [false, true] {
+        let module = keel_c::compile(
+            src,
+            "snapshot.c",
+            keel_c::Options {
+                debug_info,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let text = module.to_string();
+        let f = text.split("func @f").nth(1).unwrap();
+        let markers = if debug_info { 0 } else { 2 };
+        assert_eq!(
+            f.matches("intrinsic lifetime_start").count(),
+            markers,
+            "{f}"
+        );
+        assert_eq!(f.matches("intrinsic lifetime_end").count(), markers, "{f}");
+        if !debug_info {
+            // Each end follows its call.
+            let lines: Vec<_> = f.lines().map(str::trim).collect();
+            for (i, line) in lines.iter().enumerate() {
+                if line.contains("lifetime_end") {
+                    assert!(lines[i - 1].contains("call "), "{f}");
+                }
+            }
+        }
+    }
+}
+
 /// A local declared in a loop without an initializer is a new object each
 /// iteration: what it held last time round is not carried over, so it is
 /// not a parameter of the loop header (it was, live through the whole

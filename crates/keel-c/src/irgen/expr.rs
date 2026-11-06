@@ -173,13 +173,16 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     let size = self.size(&base.ty) as u32;
                     let align = self.g.types().align(&base.ty) as u32;
                     let slot = self.b.create_stack_slot(size, align);
-                    let address = self.b.ins().stack_addr(slot);
-                    self.b.ins().store(vector, address);
+                    let base = self.start_temporary(slot);
+                    self.b.ins().store(vector, base);
                     let offset = self.scaled(index, self.size(&e.ty))?;
-                    let address = self.b.ins().ptradd(address, offset);
-                    self.b
+                    let address = self.b.ins().ptradd(base, offset);
+                    let lane = self
+                        .b
                         .ins()
-                        .load(e.ty.ir_with_layout(self.g.p.c_layout), address)
+                        .load(e.ty.ir_with_layout(self.g.p.c_layout), address);
+                    self.end_temporary(base);
+                    lane
                 }
             }
             ExprKind::Local(id) => match self.locals[*id] {
