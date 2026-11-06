@@ -25,6 +25,9 @@ pub struct PreprocessOptions {
     /// Definitions/undefinitions applied in order, after predefined macros.
     pub defines: Vec<(String, Option<String>)>,
     pub target: keel_ir::Target,
+    /// The x86 features every function has. Only CX16 matters: it defines
+    /// `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16`.
+    pub x86_baseline: Option<keel_asm_ir::x86::Features>,
     /// Return the final macro definitions instead of preprocessed source (-dM).
     pub dump_macros: bool,
 }
@@ -144,8 +147,12 @@ fn preprocess_inner<const TRACK: bool>(
         output_next: None,
     };
     let predefined = arena.alloc_str(
-        &crate::predefined_macros(options.target, options.darwin_deployment.as_deref())
-            .map_err(|e| pp.error(e))?,
+        &crate::predefined_macros(
+            options.target,
+            options.darwin_deployment.as_deref(),
+            options.x86_baseline,
+        )
+        .map_err(|e| pp.error(e))?,
     );
     for line in predefined.lines() {
         pp.define(&scan(

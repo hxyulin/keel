@@ -208,6 +208,7 @@ fn c_kernels_raw_and_optimized_ir() {
             darwin_deployment: None,
             defines: vec![],
             target,
+            x86_baseline: None,
             dump_macros: false,
         },
     )

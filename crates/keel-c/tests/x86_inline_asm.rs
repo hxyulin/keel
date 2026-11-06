@@ -846,7 +846,7 @@ fn flag_output_capability_is_advertised_only_for_x86() {
         Target::Aarch64AppleDarwin,
         Target::Aarch64LinuxGnu,
     ] {
-        let macros = keel_c::predefined_macros(target, None).unwrap();
+        let macros = keel_c::predefined_macros(target, None, None).unwrap();
         assert_eq!(
             macros.contains("#define __GCC_ASM_FLAG_OUTPUTS__ 1"),
             target == Target::X86_64LinuxGnu

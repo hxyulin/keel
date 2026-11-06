@@ -3,11 +3,28 @@
 use keel_ir::Target;
 use std::fmt::Write;
 
+/// The widest atomic object, in bytes. AArch64 has 16-byte atomics; x86-64
+/// has them only when `x86_baseline`, the features every function has,
+/// includes CX16. Wasm has no atomics, which `Types::atomic_size` enforces.
+pub(crate) fn max_atomic_size(
+    target: Target,
+    x86_baseline: Option<keel_asm_ir::x86::Features>,
+) -> u64 {
+    match target {
+        Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => 16,
+        Target::X86_64LinuxGnu if x86_baseline.is_some_and(|f| f.cx16) => 16,
+        _ => 8,
+    }
+}
+
 /// Predefined object/function macros in `#define` form. Compiler identity is a
 /// pinned compatibility profile; capability queries are maintained separately.
+/// `x86_baseline` decides `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16` on x86-64, as
+/// `-mcx16` does for Clang.
 pub fn predefined_macros(
     target: Target,
     darwin_deployment: Option<&str>,
+    x86_baseline: Option<keel_asm_ir::x86::Features>,
 ) -> Result<String, String> {
     let wasm = target == Target::Wasm32UnknownUnknown;
     let apple = target == Target::Aarch64AppleDarwin;
@@ -274,8 +291,10 @@ pub fn predefined_macros(
             }
         }
         def("__GCC_ATOMIC_TEST_AND_SET_TRUEVAL", "1");
-        for size in [1, 2, 4, 8] {
-            def(&format!("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_{size}"), "1");
+        for size in [1, 2, 4, 8, 16] {
+            if size <= max_atomic_size(target, x86_baseline) {
+                def(&format!("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_{size}"), "1");
+            }
         }
     }
     for (

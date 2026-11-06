@@ -165,7 +165,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 1 => Type::I8,
                 2 => Type::I16,
                 4 => Type::I32,
-                _ => Type::I64,
+                8 => Type::I64,
+                _ => Type::I128,
             };
             let order_index = if kind == GenericAtomicOp::CompareExchange {
                 4

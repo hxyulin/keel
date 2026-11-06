@@ -123,7 +123,7 @@ fn clang_declaration_and_macro_oracles() {
         .unwrap();
     assert!(output.status.success());
     let clang = macros(&String::from_utf8(output.stdout).unwrap());
-    let keel = macros(&predefined_macros(WASM, None).unwrap());
+    let keel = macros(&predefined_macros(WASM, None, None).unwrap());
     let mut compared = 0;
     for (name, value) in &keel {
         if name.starts_with("__KEEL")
@@ -171,7 +171,7 @@ fn clang_declaration_and_macro_oracles() {
 }
 #[test]
 fn macros_and_capabilities_do_not_claim_native_or_unimplemented_features() {
-    let m = macros(&predefined_macros(WASM, None).unwrap());
+    let m = macros(&predefined_macros(WASM, None, None).unwrap());
     for name in [
         "__LP64__",
         "_LP64",
@@ -234,7 +234,7 @@ fn explicit_freestanding_search_and_override_policy() {
         );
     }
     for deployment in [Some("13.0"), Some("garbage")] {
-        assert!(predefined_macros(WASM, deployment).is_err());
+        assert!(predefined_macros(WASM, deployment, None).is_err());
     }
     let mut opts = pp();
     opts.sysroot = Some("/".into());

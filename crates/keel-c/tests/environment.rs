@@ -42,7 +42,7 @@ fn derived_abi_macros_match_clang_for_each_target() {
             String::from_utf8_lossy(&out.stderr)
         );
         let reference = macros(&String::from_utf8(out.stdout).unwrap());
-        let ours = macros(&predefined_macros(target, None).unwrap());
+        let ours = macros(&predefined_macros(target, None, None).unwrap());
         assert!(
             ours.len() > 300,
             "most macros should be generated from ABI families"
@@ -80,14 +80,33 @@ fn derived_abi_macros_match_clang_for_each_target() {
 
 #[test]
 fn deployment_target_is_explicit_and_validated() {
-    let defs = macros(&predefined_macros(Target::Aarch64AppleDarwin, Some("14.2.1")).unwrap());
+    let defs =
+        macros(&predefined_macros(Target::Aarch64AppleDarwin, Some("14.2.1"), None).unwrap());
     assert_eq!(
         defs["__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__"],
         "140201"
     );
     for bad in ["", "hello", "10.15", "14.100", "14.0.0.0"] {
-        assert!(predefined_macros(Target::Aarch64AppleDarwin, Some(bad)).is_err());
+        assert!(predefined_macros(Target::Aarch64AppleDarwin, Some(bad), None).is_err());
     }
+}
+
+#[test]
+fn sixteen_byte_compare_and_swap_macro_follows_cx16() {
+    use keel_asm_ir::x86::{CpuLevel, Features};
+    let cas16 = |target, baseline| {
+        macros(&predefined_macros(target, None, baseline).unwrap())
+            .contains_key("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16")
+    };
+    assert!(cas16(Target::Aarch64AppleDarwin, None));
+    assert!(cas16(Target::Aarch64LinuxGnu, None));
+    assert!(!cas16(Target::X86_64LinuxGnu, None));
+    let v1 = Features::for_level(CpuLevel::V1);
+    assert!(!cas16(Target::X86_64LinuxGnu, Some(v1)));
+    assert!(cas16(
+        Target::X86_64LinuxGnu,
+        Some(v1.with_features("cx16").unwrap())
+    ));
 }
 
 #[test]

@@ -187,7 +187,12 @@ parse, but values are errors. On x86-64 Linux `__float128` and
   lowering for the whole function. Numbers work in static tables, and
   `&&a - &&b` offsets work.
 - **Atomics.** `_Atomic(T)` is a separate type (`Ty::Atomic`) for native-width
-  integers, pointers, float and double. Reads are atomic loads, and
+  integers, pointers, float and double, and for `__int128` where the target has
+  16-byte atomics. AArch64 always has them. x86-64 has them only with CX16
+  (`--cpu-level v2` or `--target-features cx16`); without it, each 16-byte
+  atomic is an error that names those options. The same rule sets
+  `__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16` and the answer of
+  `__atomic_always_lock_free(16, 0)`. Reads are atomic loads, and
   assignment, compound assignment and `++` are atomic stores or
   read-modify-writes, all seq_cst. GCC's `__atomic_*` and `__sync_*` and
   Clang's `__c11_atomic_*` builtins become IR atomic instructions;
@@ -198,7 +203,7 @@ parse, but values are errors. On x86-64 Linux `__float128` and
   compare-and-swap. `__sync_bool_compare_and_swap` returns the flag.
   Float and double operations use integer representations and CAS loops.
   Generic buffer operations support naturally aligned 1, 2, 4 and 8-byte
-  objects. Atomic pointer `++` and `--` scale by the pointee size; pointer
+  objects, and 16-byte objects under the same rule as `__int128`. Atomic pointer `++` and `--` scale by the pointee size; pointer
   `+=` and `-=` are unsupported.
 - **`__auto_type`** declares one variable with a plain identifier and an
   initializer, following

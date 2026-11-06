@@ -130,6 +130,11 @@ pub struct Options {
     /// before code generation: a call the optimizer would delete, such as one
     /// under `if (0)`, is accepted there but reported here.
     pub x86_features: Option<keel_asm_ir::x86::Features>,
+    /// The x86 features every function has, as code generation will use them.
+    /// Unlike `x86_features`, it never rejects a call: it only decides whether
+    /// 16-byte atomics are available, which needs CX16. Pass it whether or not
+    /// the optimizer runs, with the same value given to `PreprocessOptions`.
+    pub x86_baseline: Option<keel_asm_ir::x86::Features>,
 }
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
@@ -198,6 +203,7 @@ pub fn compile_with_policies(
     };
     let mut parser = parse::Parser::new(src, path, opts.target, text);
     parser.set_x86_features(opts.x86_features);
+    parser.set_x86_baseline(opts.x86_baseline);
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;

@@ -137,10 +137,12 @@ impl<'a> Parser<'a> {
                 self.type_alignment(&ty, &args[0].sugar.pointee(&self.typedefs))
             };
             if self.types().atomic_size(&ty, align).is_none() {
-                return Err(Error::new(
-                    loc,
-                    "generic atomic requires a naturally aligned 1/2/4/8-byte object",
-                ));
+                return Err(self.wide_atomic_error(&ty, align, loc).unwrap_or_else(|| {
+                    Error::new(
+                        loc,
+                        "generic atomic requires a naturally aligned 1/2/4/8/16-byte object",
+                    )
+                }));
             }
             let kind = match op {
                 "load" => GenericAtomicOp::Load,
@@ -236,7 +238,7 @@ impl<'a> Parser<'a> {
                         .map(|t| self.type_alignment(t, &args[1].sugar.pointee(&self.typedefs)))
                         .unwrap_or(1)
                 };
-                let free = matches!(size, Some(1 | 2 | 4 | 8))
+                let free = matches!(size, Some(n @ (1 | 2 | 4 | 8 | 16)) if n as u64 <= self.max_atomic)
                     && (c11
                         || eval_int_with_layout(&args[1], self.c_layout) == Some(0)
                         || size.is_some_and(|n| align >= n as u64));
@@ -360,11 +362,11 @@ impl<'a> Parser<'a> {
             return Err(Error::new(loc, format!("`{name}` needs a pointer")));
         };
         if !(ty.is_integer() || ty.is_ptr() || matches!(ty, Ty::Float | Ty::Double))
-            || !matches!(self.types().size(&ty), 1 | 2 | 4 | 8)
+            || !matches!(self.types().size(&ty), 1 | 2 | 4 | 8 | 16)
         {
             return Err(Error::new(
                 loc,
-                format!("`{name}` requires a supported 1/2/4/8-byte scalar"),
+                format!("`{name}` requires a supported 1/2/4/8/16-byte scalar"),
             ));
         }
         self.atomic_orders(
@@ -403,7 +405,9 @@ impl<'a> Parser<'a> {
             self.type_alignment(&ty, &args[0].sugar.pointee(&self.typedefs))
         };
         if self.types().atomic_size(&ty, align).is_none() {
-            return Err(Error::new(loc, "atomic object is not naturally aligned"));
+            return Err(self
+                .wide_atomic_error(&ty, align, loc)
+                .unwrap_or_else(|| Error::new(loc, "atomic object is not naturally aligned")));
         }
         let value_ty = if arith && ty.is_ptr() { ULONG } else { ty };
         let pointee = ty;

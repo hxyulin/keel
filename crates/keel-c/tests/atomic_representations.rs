@@ -29,8 +29,8 @@ fn representations_both_targets() {
 #[test]
 fn unsupported_representations() {
     for src in [
-        "_Atomic(__int128) a;",
-        "void f(__int128 *p, __int128 *q){__atomic_load(p,q,5);}",
+        "struct S { long a, b; }; void f(struct S *p, struct S *q){__atomic_load(p,q,5);}",
+        "struct __attribute__((aligned(32))) S { long x[4]; }; void f(struct S *p, struct S *q){__atomic_load(p,q,5);}",
         "void f(int *p){__atomic_load(p,5);}",
         "void f(void){__atomic_thread_fence(6);}",
         "void f(void){__c11_atomic_signal_fence(-1);}",
@@ -52,6 +52,73 @@ fn unsupported_representations() {
         );
     }
 }
+#[test]
+fn sixteen_byte_atomics_need_cx16_on_x86() {
+    use keel_codegen::{
+        CodegenPipeline, SelectionTier,
+        regalloc::AllocationTier,
+        x86_features::{CpuLevel, FeatureSelector, Features},
+    };
+    let wide = "typedef struct __attribute__((aligned(16))) { long a, b; } Pair;\n\
+                _Static_assert(__atomic_always_lock_free(16, 0), \"\");\n\
+                _Atomic(__int128) counter;\n\
+                __int128 add(void) { return counter += 1; }\n\
+                int cas(unsigned __int128 *p, unsigned __int128 *e) { return __atomic_compare_exchange_n(p, e, 0, 1, 4, 2); }\n\
+                void copy(Pair *p, Pair *q) { __atomic_load(p, q, 5); }\n";
+    let compile = |src: &str, target, x86_baseline| {
+        keel_c::compile(
+            src,
+            "wide.c",
+            keel_c::Options {
+                target,
+                x86_baseline,
+                ..Default::default()
+            },
+        )
+    };
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        let m = compile(wide, target, None).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        keel_codegen::compile(&m, target).unwrap();
+    }
+    let v2 = Features::for_level(CpuLevel::V2);
+    let m = compile(wide, Target::X86_64LinuxGnu, Some(v2)).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features: v2,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Full,
+    };
+    keel_codegen::compile_with_pipeline(&m, Target::X86_64LinuxGnu, &pipeline).unwrap();
+    // Without CX16, 16-byte objects are not lock-free and each use names the option.
+    let v1 = Some(Features::for_level(CpuLevel::V1));
+    compile(
+        "_Static_assert(!__atomic_always_lock_free(16, 0), \"\");",
+        Target::X86_64LinuxGnu,
+        v1,
+    )
+    .unwrap();
+    for src in [
+        "_Atomic(__int128) a;",
+        "__int128 f(__int128 *p){return __atomic_load_n(p,5);}",
+        "typedef struct __attribute__((aligned(16))) { long a, b; } Pair; void f(Pair *p, Pair *q){__atomic_load(p,q,5);}",
+    ] {
+        for baseline in [None, v1] {
+            let error = compile(src, Target::X86_64LinuxGnu, baseline).unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("`--cpu-level v2` or `--target-features cx16`"),
+                "{src}: {}",
+                error.message
+            );
+        }
+    }
+}
+
 #[test]
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 fn native_arm64_matches_clang_with_and_without_optimization() {
@@ -148,7 +215,7 @@ fn native_mixed_clang_keel_contention() {
         for _ in 0..3 {
             assert_eq!(
                 run(&mut Command::new(&path)).stdout,
-                b"80000 80000 80000 80000\n"
+                b"80000 80000 80000 80000 80000 80000\n"
             );
         }
     }

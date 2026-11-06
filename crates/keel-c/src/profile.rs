@@ -57,6 +57,7 @@ pub fn compile(
     let start = Instant::now();
     let mut parser = parse::Parser::new(src, path, opts.target, text);
     parser.set_x86_features(opts.x86_features);
+    parser.set_x86_baseline(opts.x86_baseline);
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;

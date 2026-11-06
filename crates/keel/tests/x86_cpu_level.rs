@@ -19,6 +19,53 @@ fn success(command: &mut Command) {
 }
 
 #[test]
+fn sixteen_byte_c_atomics_follow_the_cpu_baseline_with_and_without_optimization() {
+    let dir = std::env::temp_dir().join(format!("keel-c-atomic16-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("input.c");
+    fs::write(
+        &source,
+        "_Atomic(__int128) counter;\n__int128 bump(void){return counter += 1;}\n",
+    )
+    .unwrap();
+    let output = dir.join("output.s");
+    for features in [
+        &["--cpu-level", "v1"][..],
+        &["--cpu-level", "v2"],
+        &["--target-features", "cx16"],
+    ] {
+        let cx16 = features[1] != "v1";
+        for optimized in [false, true] {
+            let mut cmd = keel();
+            cmd.args(["cc", "--target", "x86_64-unknown-linux-gnu"])
+                .args(features);
+            if optimized {
+                cmd.arg("-O");
+            }
+            let result = cmd.arg(&source).arg("-o").arg(&output).output().unwrap();
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert_eq!(result.status.success(), cx16, "{features:?}: {stderr}");
+            if cx16 {
+                assert!(fs::read_to_string(&output).unwrap().contains("cmpxchg16b"));
+            } else {
+                assert!(stderr.contains("16-byte atomics require CX16"), "{stderr}");
+            }
+        }
+        let macros = keel()
+            .args(["cc", "--target", "x86_64-unknown-linux-gnu", "-E", "-dM"])
+            .args(features)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(macros.status.success());
+        let defined = String::from_utf8_lossy(&macros.stdout)
+            .contains("#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_16 1");
+        assert_eq!(defined, cx16, "{features:?}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn explicit_cpu_levels_c_objects_and_assembly_obey_the_same_feature_contract() {
     let dir = std::env::temp_dir().join(format!("keel-c-v1-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

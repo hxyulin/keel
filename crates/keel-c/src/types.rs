@@ -697,13 +697,26 @@ impl<'a> StructDef<'a> {
 pub struct Types<'a> {
     structs: &'a [StructDef<'a>],
     layout: CDataLayout,
+    max_atomic: u64,
 }
 
 impl<'a> Types<'a> {
     /// Completed records in `structs` must have been laid out with `layout`.
     /// Their stored sizes/offsets are authoritative; this does not relayout them.
+    /// Atomics are at most 8 bytes until `with_max_atomic` raises the limit.
     pub fn new(structs: &'a [StructDef<'a>], layout: CDataLayout) -> Self {
-        Self { structs, layout }
+        Self {
+            structs,
+            layout,
+            max_atomic: 8,
+        }
+    }
+    /// Allows atomics of up to `bytes` bytes, from `max_atomic_size`.
+    pub fn with_max_atomic(self, bytes: u64) -> Self {
+        Self {
+            max_atomic: bytes,
+            ..self
+        }
     }
     /// Size queries after completed-type validation cannot overflow.
     pub fn size(&self, ty: &Ty) -> u64 {
@@ -744,7 +757,8 @@ impl<'a> Types<'a> {
         }
         let size = self.size(ty);
         if matches!(ty, Ty::Void | Ty::Func(_) | Ty::Array(_))
-            || !matches!(size, 1 | 2 | 4 | 8)
+            || !matches!(size, 1 | 2 | 4 | 8 | 16)
+            || size > self.max_atomic
             || align < size
         {
             None

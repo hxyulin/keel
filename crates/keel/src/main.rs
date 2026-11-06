@@ -1063,6 +1063,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                             }),
                             defines: opts.preprocessing_defines(),
                             target,
+                            x86_baseline: Some(opts.x86_features),
                             dump_macros: opts.dump_macros,
                         },
                     )
@@ -1080,6 +1081,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 target,
                 // Code generation rejects the same calls without a C location.
                 x86_features: (!opts.optimizes()).then_some(opts.x86_features),
+                x86_baseline: Some(opts.x86_features),
             };
             let mut module = {
                 profiling::scope!("c-frontend");

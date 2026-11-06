@@ -15,6 +15,7 @@ pub(crate) struct Unit<'a> {
     pub assembly: &'a [String],
     pub target: Target,
     pub c_layout: CDataLayout,
+    pub max_atomic: u64,
 }
 
 impl<'a> Unit<'a> {
@@ -28,10 +29,11 @@ impl<'a> Unit<'a> {
             assembly: &p.assembly,
             target: p.target,
             c_layout: p.c_layout,
+            max_atomic: p.max_atomic,
         }
     }
     pub fn types(&self) -> Types<'_> {
-        Types::new(self.structs, self.c_layout)
+        Types::new(self.structs, self.c_layout).with_max_atomic(self.max_atomic)
     }
     pub fn type_alignment(&self, ty: &Ty<'a>, sugar: &Sugar<'a>) -> u64 {
         sugar

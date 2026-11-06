@@ -407,6 +407,8 @@ pub struct Parser<'a> {
     va_list_tag: Option<usize>,
     /// The module's x86 feature baseline, when builtin calls are checked.
     x86_features: Option<keel_asm_ir::x86::Features>,
+    /// The widest atomic object, in bytes, from `max_atomic_size`.
+    pub(crate) max_atomic: u64,
 }
 
 /// A keyword that starts a type name or declaration.
@@ -735,6 +737,7 @@ impl<'a> Parser<'a> {
             },
             va_list_tag: None,
             x86_features: None,
+            max_atomic: crate::predefined::max_atomic_size(target, None),
         };
         p.fill();
         p
@@ -760,6 +763,28 @@ impl<'a> Parser<'a> {
     /// target features. Only x86-64 has x86 builtins.
     pub fn set_x86_features(&mut self, baseline: Option<keel_asm_ir::x86::Features>) {
         self.x86_features = baseline.filter(|_| self.target == Target::X86_64LinuxGnu);
+    }
+
+    /// Set the x86 features every function has, which decide whether
+    /// 16-byte atomics are available.
+    pub fn set_x86_baseline(&mut self, baseline: Option<keel_asm_ir::x86::Features>) {
+        self.max_atomic = crate::predefined::max_atomic_size(self.target, baseline);
+    }
+
+    /// The error for an object of type `ty`, aligned to `align`, that is a
+    /// valid 16-byte atomic except that x86-64 lacks CX16.
+    pub(crate) fn wide_atomic_error(&self, ty: &Ty<'a>, align: u64, loc: Loc) -> Option<Error> {
+        let types = self.types().with_max_atomic(16);
+        (self.target == Target::X86_64LinuxGnu
+            && self.max_atomic < 16
+            && types.atomic_size(ty, align) == Some(16))
+        .then(|| {
+            Error::new(
+                loc,
+                "16-byte atomics require CX16: compile with `--cpu-level v2` or \
+                     `--target-features cx16`",
+            )
+        })
     }
 
     /// The features x86 builtin calls in function `g`, defined at `loc`, may
@@ -1131,7 +1156,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn types(&self) -> Types<'_> {
-        Types::new(&self.structs, self.c_layout)
+        Types::new(&self.structs, self.c_layout).with_max_atomic(self.max_atomic)
     }
 
     pub(crate) fn size_of(&self, ty: &Ty<'a>) -> u64 {
@@ -3507,10 +3532,18 @@ impl<'a> Parser<'a> {
             {
                 Ok(Ty::Atomic(self.type_ref(ty)))
             }
-            _ => Err(Error::new(
-                loc,
-                "`_Atomic` requires a supported 1/2/4/8-byte integer, pointer, float or double",
-            )),
+            _ => {
+                let wide = ty
+                    .is_integer()
+                    .then(|| self.wide_atomic_error(&ty, self.types().align(&ty), loc));
+                Err(wide.flatten().unwrap_or_else(|| {
+                    Error::new(
+                        loc,
+                        "`_Atomic` requires a supported 1/2/4/8/16-byte integer, pointer, \
+                         float or double",
+                    )
+                }))
+            }
         }
     }
 

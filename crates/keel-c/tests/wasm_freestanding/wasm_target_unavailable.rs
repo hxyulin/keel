@@ -4,7 +4,7 @@ use keel_ir::Target;
 #[test]
 fn native_c_entry_points_keep_their_profiles() {
     for target in Target::NATIVE {
-        let macros = predefined_macros(target, None).unwrap();
+        let macros = predefined_macros(target, None, None).unwrap();
         assert!(macros.contains("#define __LP64__ 1"));
         let text = preprocess(
             "int answer(void) { return 42; }",
