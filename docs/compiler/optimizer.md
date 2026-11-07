@@ -132,7 +132,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
-| `constant-args`, `empty-calls`, `unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
+| `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
@@ -527,6 +527,11 @@ cloned. `empty-calls` removes calls proven to have no effect, and
 `unused-functions` removes functions that optimization made unreachable. Both
 treat constructors, destructors, address references, relocations and assembly
 references as roots. Balanced, Size and Full run them late.
+The opt-in `compact-unused-functions` pass first compacts callee declarations that no
+layout instruction references. This lets it discard inlined private Fast bodies
+without leaving imports that require their local definitions. Surviving calls
+keep their declaration attributes and call-site facts. Standard cleanup retains
+its Fast-definition policy; frontends choose compacting cleanup explicitly.
 
 ## Loop passes
 

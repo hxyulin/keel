@@ -93,11 +93,40 @@ impl Pass for UnusedFunctions {
         module: &mut Module,
         context: &mut crate::ModuleContext<'_>,
     ) -> Option<bool> {
-        Some(remove_unused_functions(module, context.enabled))
+        Some(remove_unused_functions::<false>(module, context.enabled))
     }
 }
 
-fn remove_unused_functions(module: &mut Module, enabled: &dyn Fn(&Function) -> bool) -> bool {
+pub struct CompactUnusedFunctions;
+impl Pass for CompactUnusedFunctions {
+    fn name(&self) -> &'static str {
+        "compact-unused-functions"
+    }
+    fn description(&self) -> &'static str {
+        "compact imports and discard unreachable function bodies, including private Fast definitions"
+    }
+    fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
+        false
+    }
+    fn run_module(
+        &self,
+        module: &mut Module,
+        context: &mut crate::ModuleContext<'_>,
+    ) -> Option<bool> {
+        Some(remove_unused_functions::<true>(module, context.enabled))
+    }
+}
+
+fn remove_unused_functions<const COMPACT: bool>(
+    module: &mut Module,
+    enabled: &dyn Fn(&Function) -> bool,
+) -> bool {
+    let mut imports_changed = false;
+    if COMPACT {
+        for function in &mut module.functions {
+            imports_changed |= function.compact_callees();
+        }
+    }
     let mut live = crate::assembly_symbols::roots(module);
     live.extend(
         module
@@ -106,15 +135,16 @@ fn remove_unused_functions(module: &mut Module, enabled: &dyn Fn(&Function) -> b
             .filter(|f| !enabled(f))
             .map(|f| f.name.clone()),
     );
-    // Fast declarations are invalid without their local definition. Keep
-    // these bodies until callee-table compaction can remove stale imports.
-    live.extend(
-        module
-            .functions
-            .iter()
-            .filter(|f| f.sig.cc == CallConv::Fast)
-            .map(|f| f.name.clone()),
-    );
+    if !COMPACT {
+        // Preserve the standard cleanup policy for frontends that retain Fast imports.
+        live.extend(
+            module
+                .functions
+                .iter()
+                .filter(|f| f.sig.cc == CallConv::Fast)
+                .map(|f| f.name.clone()),
+        );
+    }
     let functions: FxHashMap<_, _> = module
         .functions
         .iter()
@@ -142,7 +172,7 @@ fn remove_unused_functions(module: &mut Module, enabled: &dyn Fn(&Function) -> b
     }
     let before = module.functions.len();
     for f in &module.functions {
-        if !live.contains(&f.name) {
+        if !live.contains(&f.name) && (!COMPACT || f.sig.cc != CallConv::Fast) {
             let mut attrs = f.attrs.clone();
             attrs.section = None;
             if let Some(decl) = module.decls.iter_mut().find(|d| d.name == f.name) {
@@ -157,7 +187,7 @@ fn remove_unused_functions(module: &mut Module, enabled: &dyn Fn(&Function) -> b
         }
     }
     module.functions.retain(|f| live.contains(&f.name));
-    let changed = before != module.functions.len();
+    let changed = imports_changed || before != module.functions.len();
     if changed {
         module.sync_function_attrs();
     }

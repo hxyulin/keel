@@ -17,6 +17,41 @@ fn parsed(source: &str) -> keel_ir::Module {
 const SOURCE: &str = "decl @callee(ptr) -> ptr contract(memory(argmem: read, other: none, inaccessible: readwrite), nofree, param(0, align 8, nonnull, readable 16, nocapture))\nfunc @f(ptr) -> ptr contract(nosync, param(0, align 4)) {\nblock0(v0: ptr):\n v1 = call @callee(v0) contract(memory(argmem: readwrite, other: none, inaccessible: none), nosync, nocallback, result(0, align 16, nonnull))\n return v1\n}\n";
 
 #[test]
+fn callee_compaction_preserves_site_contracts_and_rebuilds_lookup() {
+    let source = format!(
+        "decl @dead()\n{}",
+        SOURCE.replace(" v1 = call", " call @dead()\n v1 = call")
+    );
+    let mut module = parsed(&source);
+    let function = &mut module.functions[0];
+    let dead = function.layout_insts().next().unwrap().1;
+    function.remove_inst(dead);
+    let call = function.layout_insts().next().unwrap().1;
+    let contract = function.call_contract(call).cloned();
+    let signature = function
+        .callees()
+        .find(|(_, declaration)| declaration.name == "callee")
+        .unwrap()
+        .1
+        .sig
+        .clone();
+    for index in 0..32 {
+        function.import_function(&format!("unused{index}"), signature.clone());
+    }
+    assert!(function.compact_callees());
+    assert_eq!(function.callees().count(), 1);
+    assert_eq!(function.call_contract(call), contract.as_ref());
+    assert!(!function.compact_callees());
+    let reference = function.import_function("callee", signature.clone());
+    assert_eq!(function.callee(reference).name, "callee");
+    let added = function.import_function("another", signature.clone());
+    assert_eq!(function.callee(added).sig, signature);
+    assert_eq!(function.callees().count(), 2);
+    function.compact_callees();
+    keel_ir::verify_module(&module).unwrap();
+}
+
+#[test]
 fn richer_pointer_and_integer_contracts_roundtrip_at_their_scopes() {
     let module = parsed(
         "decl @callee(ptr, i32) -> ptr contract(param(0, captures(other(address_is_null), ret(address, read_provenance)), readable_or_null 32), range_param(1, 0xfffffff8, 0x8), result(0, noalias))\nfunc @f(ptr, i32) -> ptr {\nblock0(v0: ptr, v1: i32):\n v2 = call @callee(v0, v1) contract(param(0, nocapture), range_param(1, 0x0, 0x4))\n return v2\n}\n",

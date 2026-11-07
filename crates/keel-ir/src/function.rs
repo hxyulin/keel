@@ -795,6 +795,61 @@ impl Function {
         self.callees.iter()
     }
 
+    /// Drops declarations not referenced by layout instructions and renumbers the
+    /// remaining direct-call and symbol references. External `FuncRef` handles
+    /// are invalidated. Call-site contracts and instruction facts are preserved.
+    pub fn compact_callees(&mut self) -> bool {
+        if self.callees.is_empty() {
+            return false;
+        }
+        let mut used = vec![false; self.callees.len()];
+        for (_, inst) in self.layout_insts() {
+            let reference = match self.inst_data(inst) {
+                InstData::Call { func, .. }
+                | InstData::Invoke { func, .. }
+                | InstData::ReturnCall { func, .. }
+                | InstData::SymbolAddr {
+                    symbol: Symbol::Func(func),
+                } => Some(*func),
+                _ => None,
+            };
+            if let Some(reference) = reference {
+                used[reference.index()] = true;
+            }
+        }
+        if used.iter().all(|&used| used) {
+            return false;
+        }
+        let mut remap = vec![None; used.len()];
+        let mut callees = Arena::new();
+        for (reference, declaration) in self.callees.iter() {
+            if used[reference.index()] {
+                remap[reference.index()] = Some(callees.push(declaration.clone()));
+            }
+        }
+        // Only live instructions are rewritten. Removed arena entries cannot
+        // become reachable again, and their call-site facts are already gone.
+        for instruction in self.insts.values_mut() {
+            if instruction.block == NO_BLOCK {
+                continue;
+            }
+            match &mut instruction.data {
+                InstData::Call { func, .. }
+                | InstData::Invoke { func, .. }
+                | InstData::ReturnCall { func, .. }
+                | InstData::SymbolAddr {
+                    symbol: Symbol::Func(func),
+                } => {
+                    *func = remap[func.index()].expect("live reference has a declaration");
+                }
+                _ => {}
+            }
+        }
+        self.callees = callees;
+        self.callee_index = KeyIndex::default();
+        true
+    }
+
     /// Returns a reference to data object `name`, reusing an existing one.
     pub fn import_data(&mut self, name: &str) -> DataRef {
         let hash = match find_entry(&self.data_symbols, &mut self.data_index, name, |n| {

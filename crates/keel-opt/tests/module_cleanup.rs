@@ -6,10 +6,18 @@ use keel_ir::{Module, parse, verify_module};
 fn clean(source: &str) -> Module {
     let mut module = parse(source).unwrap();
     verify_module(&module).unwrap();
-    keel_opt::run_passes(&mut module, &["empty-calls", "dce", "unused-functions"]).unwrap();
+    keel_opt::run_passes(
+        &mut module,
+        &["empty-calls", "dce", "compact-unused-functions"],
+    )
+    .unwrap();
     verify_module(&module).unwrap();
     let once = module.to_string();
-    keel_opt::run_passes(&mut module, &["empty-calls", "dce", "unused-functions"]).unwrap();
+    keel_opt::run_passes(
+        &mut module,
+        &["empty-calls", "dce", "compact-unused-functions"],
+    )
+    .unwrap();
     assert_eq!(once, module.to_string());
     module
 }
@@ -110,10 +118,49 @@ fn removing_a_call_keeps_potentially_trapping_argument_reads() {
 }
 
 #[test]
-fn keeps_fast_definitions_required_by_stale_import_contracts() {
+fn discards_fast_definitions_after_compacting_stale_imports() {
     let module = clean(
         "func @helper() cc(fast) local {\nblock0:\n return\n}\nfunc @live() {\nblock0:\n call @helper()\n return\n}",
     );
-    assert!(module.functions.iter().any(|f| f.name == "helper"));
-    assert!(!module.functions[1].to_string().contains("call @helper"));
+    assert_eq!(module.functions.len(), 1);
+    assert_eq!(module.functions[0].name, "live");
+    assert_eq!(module.functions[0].callees().count(), 0);
+}
+
+#[test]
+fn remaps_live_fast_calls_after_removing_an_earlier_import() {
+    let module = clean(
+        "decl @effect()\nfunc @empty() cc(fast) local {\nblock0:\n return\n}\nfunc @helper() cc(fast) local {\nblock0:\n call @effect()\n return\n}\nfunc @live() {\nblock0:\n call @empty()\n call @helper()\n return\n}",
+    );
+    assert_eq!(module.functions.len(), 2);
+    assert!(
+        module
+            .functions
+            .iter()
+            .any(|function| function.name == "helper")
+    );
+    let live = module
+        .functions
+        .iter()
+        .find(|function| function.name == "live")
+        .unwrap();
+    assert!(live.to_string().contains("call @helper"));
+    assert!(
+        !live
+            .callees()
+            .any(|(_, declaration)| declaration.name == "empty")
+    );
+}
+
+#[test]
+fn standard_cleanup_keeps_fast_definitions_without_compaction() {
+    let mut module = parse(
+        "func @helper() cc(fast) local {\nblock0:\n return\n}\nfunc @live() {\nblock0:\n return\n}",
+    )
+    .unwrap();
+    keel_opt::run_passes(&mut module, &["unused-functions"]).unwrap();
+    assert_eq!(module.functions.len(), 2);
+    keel_opt::run_passes(&mut module, &["compact-unused-functions"]).unwrap();
+    assert_eq!(module.functions.len(), 1);
+    verify_module(&module).unwrap();
 }

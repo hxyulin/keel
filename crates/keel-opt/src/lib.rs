@@ -382,6 +382,7 @@ pub(crate) static TAIL_CALLS: &dyn Pass = &tail_calls::TailCalls;
 pub(crate) static CONSTANT_ARGS: &dyn Pass = &constant_args::ConstantArgs;
 pub(crate) static EMPTY_CALLS: &dyn Pass = &module_cleanup::EmptyCalls;
 pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions;
+pub(crate) static COMPACT_UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::CompactUnusedFunctions;
 pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
     &private_aggregate::PrivateAggregateCleanup;
 pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize;
@@ -427,6 +428,7 @@ pub static PASSES: &[&dyn Pass] = &[
     CONSTANT_ARGS,
     EMPTY_CALLS,
     UNUSED_FUNCTIONS,
+    COMPACT_UNUSED_FUNCTIONS,
     PRIVATE_AGGREGATE_CLEANUP,
     INLINE_SIZE,
 ];
