@@ -1,5 +1,8 @@
 //! Wrapping sums must count their initial value once and never read a tail
 //! past the scalar bound. A protected page follows every native input.
+#[path = "loop_reduction/matmul.rs"]
+mod matmul;
+
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
     regalloc::{AllocationTier, Pools},

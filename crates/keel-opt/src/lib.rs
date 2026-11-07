@@ -23,6 +23,8 @@ mod canonicalize;
 mod const_fold;
 mod constant_args;
 mod counted_loop;
+mod devirtualize;
+mod loop_matmul;
 mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
 mod dce;
@@ -179,6 +181,8 @@ pub struct ModuleContext<'a> {
     /// pass's overall result.
     pub changed: &'a mut Vec<bool>,
     pub(crate) budget: &'a mut InlineBudget,
+    pub(crate) layout: Option<DataLayout>,
+    pub(crate) target: VectorTarget,
 }
 impl fmt::Debug for ModuleContext<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -385,6 +389,8 @@ pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions
 pub(crate) static COMPACT_UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::CompactUnusedFunctions;
 pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
     &private_aggregate::PrivateAggregateCleanup;
+pub(crate) static LOOP_MATMUL: &dyn Pass = &loop_matmul::LoopMatmul;
+pub(crate) static DEVIRTUALIZE: &dyn Pass = &devirtualize::Devirtualize;
 pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize;
 
 /// Every registered pass, in `keel passes` order.
@@ -431,6 +437,8 @@ pub static PASSES: &[&dyn Pass] = &[
     COMPACT_UNUSED_FUNCTIONS,
     PRIVATE_AGGREGATE_CLEANUP,
     INLINE_SIZE,
+    DEVIRTUALIZE,
+    LOOP_MATMUL,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
@@ -766,6 +774,8 @@ const FULL_EPILOGUE: [&str; 28] = [
 const FULL_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
     &["const-fold"],
+    &["devirtualize-const-table"],
+    &["loop-matmul"],
     &FULL_ROUND,
     &FULL_ROUND,
     &FULL_ROUND,
@@ -1167,6 +1177,8 @@ fn execute_pipeline(
                 sites: inline_sites.as_mut(),
                 changed: &mut versions.changed,
                 budget: &mut inline_budget,
+                layout: context.layout,
+                target: context.target,
             },
         );
         let pass_ns = start.map_or(0, |start| start.elapsed().as_nanos());

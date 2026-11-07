@@ -1,4 +1,4 @@
-//! Bounded two-way unrolling of wrapping integer additive reductions.
+//! Bounded two-way unrolling of wrapping additive and affine reductions.
 //! The original loop is retained as the scalar tail. Full runs this pass in its
 //! epilogue, after loop-reduce-multi and before loop-rotate.
 //! Accept zero-based signed/unsigned counted innermost loops at any nesting depth.
@@ -20,7 +20,7 @@ impl crate::Pass for LoopUnroll {
         "loop-unroll"
     }
     fn description(&self) -> &'static str {
-        "unroll bounded wrapping integer additive reductions with two accumulators"
+        "unroll bounded wrapping integer additive and constant-affine reductions"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Unroll
@@ -46,6 +46,7 @@ struct Candidate {
     next_sum: Value,
     signed: bool,
     extras: Vec<(Value, Value, Value)>,
+    affine: Option<(Inst, i64)>,
 }
 fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let params = f.block_params(header);
@@ -127,10 +128,34 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let D::Binary { op: B::Iadd, args } = *f.inst_data(reduction) else {
         return None;
     };
-    if f.inst_block(reduction) != body || (f.resolve(args[0]) == sum) == (f.resolve(args[1]) == sum)
-    {
+    if f.inst_block(reduction) != body {
         return None;
     }
+    // An affine recurrence s'=k*s+x can be split into parity streams with
+    // coefficient k*k. No term may otherwise depend on the carried sum.
+    let carry = |v| {
+        let v = f.resolve(v);
+        if v == sum {
+            return Some(None);
+        }
+        let i = def(f, v)?;
+        let D::Binary { op: B::Imul, args } = *f.inst_data(i) else {
+            return None;
+        };
+        let constant = if f.resolve(args[0]) == sum {
+            args[1]
+        } else if f.resolve(args[1]) == sum {
+            args[0]
+        } else {
+            return None;
+        };
+        (f.inst_block(i) == body).then_some(())?;
+        Some(Some((i, int_const(f, constant)?)))
+    };
+    let affine = match (carry(args[0]), carry(args[1])) {
+        (Some(carry), None) | (None, Some(carry)) => carry,
+        _ => return None,
+    };
     let mut loads = 0;
     let mut local = FxHashSet::default();
     for &i in &insts[..insts.len() - 1] {
@@ -155,7 +180,11 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
                 ty,
                 ..
             } if ty.is_int() => {}
-            D::Load { flags, ty, .. } if !flags.volatile && matches!(ty, Type::I32 | Type::I64) => {
+            D::Load { flags, ty, .. }
+                if !flags.volatile
+                    && (matches!(ty, Type::I32 | Type::I64)
+                        || affine.is_some() && matches!(ty, Type::I8 | Type::I16)) =>
+            {
                 loads += 1;
             }
             _ => return None,
@@ -175,10 +204,11 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         let mut ok = true;
         f.inst_data(i).for_each_operand(|v| {
             let v = f.resolve(v);
-            // The carried sum may occur only at the final additive update;
+            // The carried sum occurs only in its direct update or affine product;
             // its updated result cannot feed another operation in this body.
             if v == next_sum
-                || v == sum && i != reduction
+                || v == sum && i != affine.map_or(reduction, |a| a.0)
+                || affine.is_some_and(|a| v == f.first_result(a.0) && i != reduction)
                 || !(params.contains(&v) || local.contains(&v) || invariant(f, dom, pre, v))
             {
                 ok = false;
@@ -229,6 +259,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         next_sum,
         signed,
         extras,
+        affine,
     })
 }
 fn emit(f: &mut Function, b: Block, d: D) -> Value {
@@ -249,6 +280,13 @@ fn jump(f: &mut Function, b: Block, to: Block, args: Vec<Value>) {
 fn transform(f: &mut Function, c: Candidate) {
     let iv_ty = f.value_type(c.iv);
     let sum_ty = f.value_type(c.sum);
+    let squared = c.affine.map(|(_, coefficient)| {
+        let i = f.insert_inst(
+            InsertPoint::Before(c.pre_jump),
+            D::iconst(sum_ty, coefficient.wrapping_mul(coefficient)),
+        );
+        f.first_result(i)
+    });
     let pair_header = f.create_block();
     let pair_body = f.create_block();
     let combine = f.create_block();
@@ -303,6 +341,12 @@ fn transform(f: &mut Function, c: Candidate) {
                 let resolved = f.resolve(*v);
                 *v = map.get(&resolved).copied().unwrap_or(resolved);
             });
+            if c.affine.is_some_and(|a| a.0 == i) {
+                data = D::Binary {
+                    op: B::Imul,
+                    args: [*lane, squared.unwrap()],
+                };
+            }
             let v = emit(f, pair_body, data);
             map.insert(f.resolve(f.first_result(i)), v);
         }
@@ -313,14 +357,26 @@ fn transform(f: &mut Function, c: Candidate) {
     let mut back = vec![next_iv, sums[0], sums[1]];
     back.extend(extra_values);
     jump(f, pair_body, pair_header, back);
-    let sum = bin(f, combine, B::Iadd, lane0, lane1);
+    let weighted = if let Some((_, coefficient)) = c.affine {
+        let factor = emit(f, combine, D::iconst(sum_ty, coefficient));
+        bin(f, combine, B::Imul, lane0, factor)
+    } else {
+        lane0
+    };
+    let sum = bin(f, combine, B::Iadd, weighted, lane1);
     let mut tail = vec![iv, sum];
     tail.extend(extra_params);
     jump(f, combine, c.header, tail);
     // Insert zero before the preheader terminator, preserving all existing work.
     let zero_inst = f.insert_inst(InsertPoint::Before(c.pre_jump), D::iconst(sum_ty, 0));
     let zero = f.first_result(zero_inst);
-    let mut entry = vec![c.start, c.seed, zero];
+    // Put the seed in the odd stream: k*even+odd then equals the original
+    // seed even when the paired loop executes zero times, for any k.
+    let mut entry = if c.affine.is_some() {
+        vec![c.start, zero, c.seed]
+    } else {
+        vec![c.start, c.seed, zero]
+    };
     entry.extend(c.extras.iter().map(|e| e.1));
     *f.inst_data_mut(c.pre_jump) = D::Jump {
         dest: BlockCall {

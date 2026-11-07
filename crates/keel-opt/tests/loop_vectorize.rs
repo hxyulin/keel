@@ -8,10 +8,14 @@ mod loop_reduce_affine;
 mod loop_reduce_casts;
 #[path = "loop_vectorize/loop_reduce_multi.rs"]
 mod loop_reduce_multi;
+#[path = "loop_vectorize/matmul.rs"]
+mod matmul;
 #[path = "loop_vectorize/mixed_narrow.rs"]
 mod mixed_narrow;
 #[path = "loop_vectorize/packed_clamp.rs"]
 mod packed_clamp;
+#[path = "loop_vectorize/predicate_counts.rs"]
+mod predicate_counts;
 
 use keel_ir::{InstData, Type, VectorType};
 use keel_ir_interp::{Interpreter, Outcome, Trap, Val};

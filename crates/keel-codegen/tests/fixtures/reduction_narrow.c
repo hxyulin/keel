@@ -23,7 +23,8 @@ static int64_t expected(const int16_t *p, uint64_t n) {
 
 int main(void) {
     const size_t page = (size_t)sysconf(_SC_PAGESIZE);
-    const size_t bytes = 65536 * sizeof(int16_t);
+    const uint64_t large = 1u << 20;
+    const size_t bytes = large * sizeof(int16_t);
     if (!page || bytes % page) return 2;
     uint8_t *region = mmap(NULL, bytes + page, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -55,6 +56,14 @@ int main(void) {
             fprintf(stderr, "narrow mismatch for repeated value %d\n", v);
             return 1;
         }
+    }
+    // Each vector lane's carried sum exceeds i32, even though every
+    // per-element contribution and pairwise partial fits a narrow lane.
+    int16_t *p = (int16_t *)(region + bytes) - large;
+    for (uint64_t i = 0; i < large; ++i) p[i] = INT16_MIN;
+    if (k_narrow(p, large) != expected(p, large)) {
+        fprintf(stderr, "narrow carried sum wrapped at i32 width\n");
+        return 1;
     }
     return munmap(region, bytes + page) != 0;
 }

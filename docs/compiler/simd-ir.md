@@ -360,9 +360,27 @@ rounding error cannot change the quotient, preserving truncation toward zero.
 General packed integer division remains unsupported. SSE2 and Portable keep these shift and
 division expressions scalar.
 
-For a single ARM stream whose bounded-division expression ends in an i32-to-i64
-extension, the reduction computes four useful i32 lanes per chunk. It widens
-both halves into separate i64x2 accumulators before accumulating. Two chunks
+Zero-based ARM reductions with an i64 induction variable over one i16 stream
+can use eight lanes when a bounded local proof separates the per-element i32 add tree into signed
+and unsigned 16-bit contributions. Splitting requires every original i32
+addition and subtraction to stay in range. Truncation boundaries retain their
+wrapping behavior; comparisons and right shifts move to 16 bits only when the
+operand ranges prove the same result. Signed branch facts can prove clamp
+ranges. Division retains its proved i32 product, then packs the quotients.
+Signed and unsigned pairwise sums widen before reaching the carried i64
+accumulators. No input-value promise or bound on the total iteration count is
+added. Other expressions keep the existing wider recipe.
+
+AArch64 reductions can materialize scalar integer comparisons as numeric
+zero or one. A packed comparison first produces an all-ones or zero mask;
+an explicit lane mask converts it to zero or one before arithmetic or widening.
+Both scalar sign and zero extension preserve those numeric Boolean values.
+The initial support covers i32 and i64 predicates without narrowing their operands.
+
+When that proof is unavailable, a single ARM stream whose arithmetic or select
+expression ends in an i32-to-i64 extension can compute four useful i32 lanes per
+chunk. Direct-load sums retain their independent two-lane recurrences. The
+four-lane recipe widens both halves into separate i64x2 accumulators before accumulating. Two chunks
 cover eight elements; the original scalar tail handles the remainder. No
 loop-carried sum is narrowed to i32. Generated constant splats are shared across
 unrolled chunks. Signed narrow round trips use lane-local shifts. Matching

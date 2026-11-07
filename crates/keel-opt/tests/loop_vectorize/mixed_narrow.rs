@@ -38,9 +38,17 @@ fn narrow_mixed_rings_constant_shifts_and_division_vectorize_exactly() {
     assert!(vectorized(&after), "{after}");
     assert!(
         after.to_string().contains("swiden_high"),
-        "four useful i32 lanes: {after}"
+        "widen both halves before carrying the i64 sum: {after}"
     );
     let text = after.to_string();
+    assert!(
+        text.contains("spairwise_add_long"),
+        "eight-lane signed contributions: {text}"
+    );
+    assert!(
+        text.contains("upairwise_add_long"),
+        "eight-lane unsigned contributions: {text}"
+    );
     assert!(text.contains("vsmin"), "{text}");
     assert!(
         !text.contains("vxor"),
@@ -133,7 +141,7 @@ fn narrow_division_handles_negative_divisors_and_large_quotient_boundaries() {
 }
 
 #[test]
-fn four_lane_small_dag_keeps_exact_threshold_and_i64_accumulator_ring() {
+fn small_narrow_dag_keeps_exact_threshold_and_i64_accumulator_ring() {
     let source = "func @k_narrow(ptr,i64)->i64 {
 block0(v0:ptr,v1:i64):
  v2=iconst.i64 0
@@ -173,5 +181,113 @@ block3:
             Outcome::Return(vec![Val::I64(expected as u64)]),
             "n={n}"
         );
+    }
+}
+
+#[test]
+fn eight_lane_recipe_preserves_casts_and_rejects_unproved_demotions() {
+    let cases = [
+        // The intermediate byte cast must wrap outside the usual clamp range.
+        (
+            SOURCE.replace(" -128", " -200").replace(" 127", " 200"),
+            true,
+        ),
+        // The mixed unsigned contribution wraps independently at 16 bits.
+        (SOURCE.replace("iconst.i32 5", "iconst.i32 512"), true),
+        // Shifting a promoted value outside the signed i16 range needs i32 lanes.
+        (SOURCE.replace("sshr v47, v62", "sshr v27, v62"), false),
+        // Splitting an overflowing i32 add tree across the i64 extension is wrong.
+        (
+            SOURCE.replace(
+                "v38 = iadd v32, v37",
+                "v900 = iconst.i32 2147483647\n    v901 = iadd v32, v900\n    v38 = iadd v901, v37",
+            ),
+            false,
+        ),
+        // Negative unsigned contributions are outside this bounded recipe.
+        (
+            SOURCE.replace("v24 = iadd v22, v23", "v24 = isub v22, v23"),
+            false,
+        ),
+    ];
+    let input: Vec<i16> = [
+        i16::MIN,
+        -32767,
+        -21846,
+        -10923,
+        -201,
+        -200,
+        -129,
+        -128,
+        -127,
+        -7,
+        -1,
+        0,
+        1,
+        7,
+        126,
+        127,
+        128,
+        199,
+        200,
+        201,
+        10922,
+        21845,
+        32766,
+        i16::MAX,
+    ]
+    .into_iter()
+    .cycle()
+    .take(257)
+    .collect();
+    for (source, narrow) in cases {
+        let before = keel_ir::parse(&source).unwrap();
+        let after = optimize(&source, VectorTarget::Aarch64Neon);
+        let text = after.to_string();
+        assert_eq!(text.contains("spairwise_add_long"), narrow, "{text}");
+        for n in [0, 1, 7, 8, 9, 15, 16, 17, 31, 257] {
+            assert_eq!(
+                execute(&after, &input[..n], n as u64),
+                execute(&before, &input[..n], n as u64),
+                "n={n}: {source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn packed_quotients_keep_the_scalar_division_source_location() {
+    let mut m = keel_ir::parse(SOURCE).unwrap();
+    let file = m.add_file("narrow.c");
+    let loc = Some(keel_ir::SourceLoc {
+        file,
+        line: 17,
+        col: 9,
+        scope: None,
+    });
+    let f = &mut m.functions[0];
+    for i in f.layout_insts().map(|(_, i)| i).collect::<Vec<_>>() {
+        if matches!(
+            f.inst_data(i),
+            keel_ir::InstData::Binary {
+                op: keel_ir::BinaryOp::Sdiv,
+                ..
+            }
+        ) {
+            f.set_inst_loc(i, loc);
+        }
+    }
+    keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], VectorTarget::Aarch64Neon)
+        .unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let f = &m.functions[0];
+    let shuffles: Vec<_> = f
+        .layout_insts()
+        .map(|(_, i)| i)
+        .filter(|&i| matches!(f.inst_data(i), keel_ir::InstData::VectorShuffle { .. }))
+        .collect();
+    assert!(!shuffles.is_empty(), "{}", m);
+    for i in shuffles {
+        assert_eq!(f.inst_loc(i), loc);
     }
 }

@@ -134,3 +134,63 @@ fn negation_cancels_with_wrapping_semantics_and_traps_stay_observable() {
     assert!(module.to_string().contains(" = udiv"));
     assert!(!module.to_string().contains(" = iadd"));
 }
+
+#[test]
+fn and_or_sums_preserve_wrapping_values_with_intervening_addends() {
+    for ty in ["i8", "i16", "i32", "i64", "i128"] {
+        for (left, right, sum) in [
+            ("v0, v1", "v0, v1", "v3, v4"),
+            ("v1, v0", "v0, v1", "v4, v3"),
+            ("v0, v1", "v1, v0", "v5, v4"),
+            ("v1, v0", "v1, v0", "v4, v5"),
+        ] {
+            let source = format!(
+                "func @f({ty}, {ty}, {ty}) -> {ty} {{\nblock0(v0: {ty}, v1: {ty}, v2: {ty}):\n v3 = and {left}\n v4 = or {right}\n v5 = iadd v2, v3\n v6 = iadd {sum}\n return v6\n}}"
+            );
+            let (original, optimized) = apply(&source);
+            let text = optimized.to_string();
+            assert!(
+                !text.contains(" = and") && !text.contains(" = or"),
+                "{text}"
+            );
+            if ty == "i128" {
+                continue;
+            }
+            let inputs: Vec<u64> = if ty == "i8" {
+                (0..256).collect()
+            } else {
+                vec![0, 1, 127, 128, u64::MAX, 1 << 63, (1 << 63) - 1]
+            };
+            for &x in &inputs {
+                for &y in &inputs {
+                    for z in [0, 17, u64::MAX] {
+                        assert_eq!(
+                            support::execute(&original.functions[0], &[x, y, z]),
+                            support::execute(&optimized.functions[0], &[x, y, z]),
+                            "{source}: {x}, {y}, {z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn separated_bitwise_sums_do_not_duplicate_shared_work_or_match_different_masks() {
+    for pair in ["v0, v1", "v0, v2"] {
+        let source = format!(
+            "func @f(i64, i64, i64) -> i64 {{\nblock0(v0: i64, v1: i64, v2: i64):\n v3 = and v0, v1\n v4 = or {pair}\n v5 = iadd v2, v3\n v6 = iadd v5, v4\n v7 = xor v5, v6\n return v7\n}}"
+        );
+        let (original, optimized) = apply(&source);
+        assert!(optimized.to_string().contains(" = and"), "{optimized}");
+        for x in [0, 1, u64::MAX, 1 << 63] {
+            for y in [0, 123, u64::MAX] {
+                assert_eq!(
+                    support::execute(&original.functions[0], &[x, y, 17]),
+                    support::execute(&optimized.functions[0], &[x, y, 17])
+                );
+            }
+        }
+    }
+}

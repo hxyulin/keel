@@ -14,6 +14,7 @@ use keel_ir::{
     VectorBinaryOp as V, VectorType,
 };
 use std::collections::BTreeMap;
+mod narrow;
 mod scan;
 
 /// Packed 128-bit capabilities used for vectorization profitability. Portable
@@ -159,6 +160,7 @@ struct Candidate {
     // Each expression keeps its scalar ring; only explicit extensions widen.
     widths: FxHashMap<Value, VectorType>,
     divisions: FxHashMap<Value, NarrowDivision>,
+    predicates: FxHashMap<Value, Value>,
 }
 #[derive(Clone, Copy)]
 struct NarrowDivision {
@@ -402,6 +404,40 @@ impl Analyze<'_> {
                 for arg in args {
                     self.expression_width(arg, depth + 1, shape)?;
                 }
+            }
+            D::Convert {
+                op: ConvertOp::Uext | ConvertOp::Sext,
+                arg,
+                ..
+            } if self.conditional
+                && self.target == VectorTarget::Aarch64Neon
+                && matches!(shape.lane_type(), Type::I32 | Type::I64)
+                && self.f.value_type(arg) == Type::I8
+                && def(self.f, arg)
+                    .is_some_and(|i| matches!(self.f.inst_data(i), D::Icmp { .. })) =>
+            {
+                let compare = def(self.f, arg)?;
+                let D::Icmp { args: operands, .. } = *self.f.inst_data(compare) else {
+                    return None;
+                };
+                let predicate_ty = self.f.value_type(operands[0]);
+                if !matches!(predicate_ty, Type::I32 | Type::I64)
+                    || predicate_ty.bytes()? > shape.lane_type().bytes()?
+                    || self.f.inst_block(compare) != self.c.body
+                {
+                    return None;
+                }
+                let predicate_shape = VectorType::ALL_128
+                    .into_iter()
+                    .find(|s| s.lane_type() == predicate_ty)?;
+                for operand in operands {
+                    self.expression_width(operand, depth + 1, predicate_shape)?;
+                }
+                let mask = self.f.resolve(arg);
+                self.allowed.insert(compare);
+                self.c.widths.insert(mask, predicate_shape);
+                self.c.vectors.insert(mask);
+                self.c.predicates.insert(v, mask);
             }
             D::Select { args } if self.conditional => {
                 let mask = self.f.resolve(args[0]);
@@ -718,6 +754,7 @@ fn analyze(
         widening_inputs: FxHashMap::default(),
         widths: FxHashMap::default(),
         divisions: FxHashMap::default(),
+        predicates: FxHashMap::default(),
     };
     let mut a = Analyze {
         f,
@@ -1049,7 +1086,6 @@ fn split_narrow_sum(
     };
     if target != VectorTarget::Aarch64Neon
         || c.shape != VectorType::I64x2
-        || c.divisions.is_empty()
         || c.addresses.len() != 1
         || !c.extra_sums.is_empty()
     {
@@ -1063,7 +1099,23 @@ fn split_narrow_sum(
     } else {
         args[0]
     });
+    if c.vectors
+        .iter()
+        .any(|&v| f.value_type(v) == Type::I64 && v != wide && v != update)
+    {
+        return None;
+    }
+    if let Some(mask) = c.predicates.get(&wide) {
+        return (c.widths[mask] == VectorType::I32x4).then_some((wide, wide, ConvertOp::UwidenLow));
+    }
     let &(input, op) = c.widening_inputs.get(&wide)?;
+    // Direct-load sums already have four independent cheap recurrences. The
+    // split recipe helps arithmetic DAGs but regressed that streaming case.
+    if c.divisions.is_empty()
+        && def(f, input).is_some_and(|i| matches!(f.inst_data(i), D::Load { .. }))
+    {
+        return None;
+    }
     if f.value_type(input) != Type::I32
         || c.vectors
             .iter()
@@ -1094,6 +1146,12 @@ fn reduce_body(
     remaining: Value,
     count: Value,
 ) {
+    if target == VectorTarget::Aarch64Neon
+        && let Some(plan) = narrow::Plan::find(f, c)
+    {
+        plan.emit(f, c, setup, vector, remaining, count);
+        return;
+    }
     let Output::Sum {
         accumulator,
         initial,
@@ -1142,6 +1200,11 @@ fn reduce_body(
             arg: zero,
         },
     );
+    let numeric_ones: FxHashMap<_, _> = [VectorType::I32x4, VectorType::I64x2]
+        .into_iter()
+        .filter(|shape| c.predicates.values().any(|mask| c.widths[mask] == *shape))
+        .map(|shape| (shape, reduction_splat(f, setup, shape, 1)))
+        .collect();
     let sums: Vec<_> = (0..unroll as usize * reductions.len() * halves)
         .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
         .collect();
@@ -1264,15 +1327,22 @@ fn reduce_body(
         }
         for i in f.block_insts(c.body).to_vec() {
             let result = f.inst_results(i).first().copied().map(|v| f.resolve(v));
-            if split.is_some_and(|(wide, _, _)| result == Some(wide) || result == Some(update)) {
+            if split.is_some_and(|(wide, input, _)| {
+                result == Some(update) || wide != input && result == Some(wide)
+            }) {
                 continue;
             }
             if !result.is_some_and(|v| c.vectors.contains(&v)) {
                 continue;
             }
-            let shape = result
-                .and_then(|v| c.widths.get(&v).copied())
-                .unwrap_or(c.shape);
+            let shape =
+                if split.is_some_and(|(wide, input, _)| wide == input && result == Some(wide)) {
+                    VectorType::I32x4
+                } else {
+                    result
+                        .and_then(|v| c.widths.get(&v).copied())
+                        .unwrap_or(c.shape)
+                };
             if let D::Select { args } = *f.inst_data(i) {
                 let mask = f.resolve(args[0]);
                 if narrow_selects
@@ -1482,6 +1552,28 @@ fn reduce_body(
                         mapping[&f.resolve(args[2])],
                     ],
                 },
+                D::Convert { .. } if c.predicates.contains_key(&result.unwrap()) => {
+                    let mask = c.predicates[&result.unwrap()];
+                    let predicate_shape = c.widths[&mask];
+                    let boolean_inst = f.append_inst(
+                        vector,
+                        D::VectorBinary {
+                            op: V::And,
+                            args: [mapping[&mask], numeric_ones[&predicate_shape]],
+                        },
+                    );
+                    f.set_inst_loc(boolean_inst, f.inst_loc(i));
+                    let boolean = f.first_result(boolean_inst);
+                    if predicate_shape == shape {
+                        mapping.insert(result.unwrap(), boolean);
+                        continue;
+                    }
+                    D::Convert {
+                        op: ConvertOp::UwidenLow,
+                        ty: Type::Vector(shape),
+                        arg: boolean,
+                    }
+                }
                 D::Convert { .. } if c.widening_inputs.contains_key(&result.unwrap()) => {
                     let (input, op) = c.widening_inputs[&result.unwrap()];
                     D::Convert {

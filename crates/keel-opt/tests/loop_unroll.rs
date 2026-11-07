@@ -684,3 +684,71 @@ fn calls_and_locations_outside_the_loop_do_not_block_unrolling() {
 
 #[path = "loop_unroll/exact.rs"]
 mod exact;
+
+#[test]
+fn affine_parity_streams_preserve_seeds_wrapping_and_load_order() {
+    for ty in [Type::I32, Type::I64] {
+        let minimum = if ty == Type::I32 {
+            i32::MIN as i64
+        } else {
+            i64::MIN
+        };
+        for coefficient in [0, 1, -1, 2, 31, minimum] {
+            let source = kernel(ty).replace(
+                "v18 = iadd v6,v17",
+                &format!(
+                    "v31 = iconst.{ty} {coefficient}\n v32 = imul v6,v31\n v18 = iadd v32,v17"
+                ),
+            );
+            let before = keel_ir::parse(&source).unwrap();
+            let after = optimize(&source, &["loop-unroll"]);
+            assert_eq!(loads(&after.functions[0]), 3, "{after}");
+            for n in [0, 1, 2, 3, 7, 8, 17] {
+                let memory: HashMap<_, _> = (0..n)
+                    .map(|i| {
+                        (
+                            4096 + i * ty.bytes().unwrap() as u64,
+                            (i.wrapping_mul(1234567) ^ u64::MAX) & mask(ty),
+                        )
+                    })
+                    .collect();
+                for seed in [0, 1, 127, u64::MAX] {
+                    let args = [4096, n, 131, seed];
+                    let original = execute(&before.functions[0], &args, &memory, None);
+                    let result = execute(&after.functions[0], &args, &memory, None);
+                    let expected = (0..n).fold(seed, |s, i| {
+                        s.wrapping_mul(coefficient as u64).wrapping_add(
+                            (memory[&(4096 + i * ty.bytes().unwrap() as u64)] ^ 131)
+                                .wrapping_mul(i + 1),
+                        )
+                    }) & mask(ty);
+                    assert_eq!(
+                        result.0, expected,
+                        "{ty}, k={coefficient}, seed={seed}, n={n}"
+                    );
+                    assert_eq!(
+                        result, original,
+                        "{ty}, k={coefficient}, seed={seed}, n={n}"
+                    );
+                }
+            }
+            let mut again = after.clone();
+            keel_opt::run_passes(&mut again, &["loop-unroll"]).unwrap();
+            assert_eq!(again.to_string(), after.to_string());
+        }
+    }
+}
+
+#[test]
+fn affine_streams_reject_nonconstant_coefficients_and_coupled_terms() {
+    for source in [
+        kernel(Type::I64).replace("v18 = iadd v6,v17", "v32 = imul v6,v2\n v18 = iadd v32,v17"),
+        kernel(Type::I64).replace(
+            "v18 = iadd v6,v17",
+            "v31 = iconst.i64 31\n v32 = imul v6,v31\n v33 = xor v17,v6\n v18 = iadd v32,v33",
+        ),
+    ] {
+        let after = optimize(&source, &["loop-unroll"]);
+        assert_eq!(loads(&after.functions[0]), 1, "{after}");
+    }
+}

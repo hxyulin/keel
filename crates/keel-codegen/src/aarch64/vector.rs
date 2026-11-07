@@ -242,6 +242,37 @@ impl FunctionCompiler<'_> {
         // Exact static permutations are single native instructions. Operand
         // producers remain in place; all sources are captured before d writes.
         let n = shape.lanes();
+        // Narrowed vectors keep their useful lanes in one 64-bit half. Join
+        // those halves as doublewords instead of inserting each scalar lane.
+        if shape.bytes() == 16 {
+            for high in [false, true] {
+                let start = if high { n / 2 } else { 0 };
+                if lanes
+                    .iter()
+                    .copied()
+                    .eq((start..start + n / 2).chain(n + start..n + start + n / 2))
+                {
+                    let (opcode, name) = if high {
+                        (Opcode::ZIP2_asimdperm_only, "zip2")
+                    } else {
+                        (Opcode::ZIP1_asimdperm_only, "zip1")
+                    };
+                    self.native(
+                        opcode,
+                        [
+                            (FieldId::Q, 1),
+                            (FieldId::size, 3),
+                            (FieldId::Rd, d.into()),
+                            (FieldId::Rn, a.into()),
+                            (FieldId::Rm, b.into()),
+                        ],
+                        |out| write!(out, "{name}\tv{d}.2d, v{a}.2d, v{b}.2d"),
+                    );
+                    self.def_done(result, d);
+                    return;
+                }
+            }
+        }
         if n >= 2 {
             for (opcode, name, kind) in [
                 (Opcode::ZIP1_asimdperm_only, "zip1", 0),

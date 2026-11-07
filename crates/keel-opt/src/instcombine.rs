@@ -596,6 +596,58 @@ fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Optio
     None
 }
 
+/// Match the same unordered operands of an AND/OR pair. Their wrapping sum
+/// equals the sum of the operands, at every integer width.
+fn and_or_sum(func: &Function, a: Value, b: Value) -> Option<[Value; 2]> {
+    let (left_op, left) = binary(func, a)?;
+    let (right_op, right) = binary(func, b)?;
+    if matches!(
+        (left_op, right_op),
+        (BinaryOp::And, BinaryOp::Or) | (BinaryOp::Or, BinaryOp::And)
+    ) && (left == right || left == [right[1], right[0]])
+    {
+        Some(left)
+    } else {
+        None
+    }
+}
+
+/// Look through one single-use add to catch a separated AND/OR pair without
+/// expanding shared computations or scanning an unbounded expression tree.
+fn bitwise_sum(func: &mut Function, inst: Inst, a: Value, b: Value, uses: Uses) -> Option<Fold> {
+    if let Some(args) = and_or_sum(func, a, b) {
+        return Some(Fold::Data(InstData::Binary {
+            op: BinaryOp::Iadd,
+            args,
+        }));
+    }
+    for (inner, other) in [(a, b), (b, a)] {
+        if let Some((BinaryOp::Iadd, terms)) = binary(func, inner) {
+            for i in 0..2 {
+                if let Some(args) = and_or_sum(func, terms[i], other)
+                    && uses.single(func, inner)
+                    && uses.single(func, terms[i])
+                    && uses.single(func, other)
+                {
+                    let sum = func.insert_inst(
+                        InsertPoint::Before(inst),
+                        InstData::Binary {
+                            op: BinaryOp::Iadd,
+                            args,
+                        },
+                    );
+                    func.set_inst_loc(sum, func.inst_loc(inst));
+                    return Some(Fold::Data(InstData::Binary {
+                        op: BinaryOp::Iadd,
+                        args: [func.inst_results(sum)[0], terms[1 - i]],
+                    }));
+                }
+            }
+        }
+    }
+    None
+}
+
 fn algebra(
     func: &mut Function,
     inst: Inst,
@@ -649,6 +701,9 @@ fn algebra(
         }
     }
     if op == BinaryOp::Iadd {
+        if let Some(fold) = bitwise_sum(func, inst, a, b, uses) {
+            return Some(fold);
+        }
         for (a, b) in [(a, b), (b, a)] {
             if let Some((BinaryOp::Isub, [left, right])) = binary(func, a)
                 && b == right

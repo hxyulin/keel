@@ -27,10 +27,14 @@ fn source_rings_and_predicate_widths_are_explicit_on_native_targets() {
             for f in &m.functions {
                 let text = f.to_string();
                 assert!(text.contains("widen_low.i64x2"), "{text}");
-                assert!(
-                    !text.contains("load.i32x4"),
-                    "must read exactly two i32 elements: {text}"
-                );
+                if target == VectorTarget::X86Sse2 {
+                    assert!(!text.contains("load.i32x4"), "two active i32 lanes: {text}");
+                } else if text.contains("load.i32x4") {
+                    assert!(
+                        text.contains("widen_high.i64x2"),
+                        "every loaded lane must widen before accumulation: {text}"
+                    );
+                }
                 if f.name.starts_with("wrap_") {
                     assert!(text.contains("i32x4"));
                 }

@@ -1,5 +1,7 @@
 #[path = "module_cleanup/constant_args.rs"]
 mod constant_args;
+#[path = "module_cleanup/devirtualize.rs"]
+mod devirtualize;
 
 use keel_ir::{Module, parse, verify_module};
 

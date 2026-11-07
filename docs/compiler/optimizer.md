@@ -132,6 +132,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
+| `loop-matmul` | Guarded four-column tiling of bounded wrapping i32 matrix products on AArch64 |
+| `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
@@ -207,6 +209,8 @@ becomes constant. Rules include:
   extension of a zero extension, and truncation of an extension collapse;
   zero extension of a sign extension and extension after truncation stay unless
   possible-bits facts prove the truncated value fits the retained range;
+- the wrapping identity `(x & y) + (x | y) = x + y`, including a pair
+  separated by one single-use addition, without expanding shared computations;
 - wrapping cancellation such as `(x+y)-x` and `x+(-x)`, and grouping of two
   constants in an associative chain whose inner result has one use;
 - a bounded three-producer possible-bits query that removes redundant masks
@@ -516,6 +520,52 @@ this way, because the seeding loads can come before its start; its markers do
 not stop other slots. Limits are 64 blocks, 2,048 instructions and
 eight fields (`cargo test -p keel-opt --test stack_cache`).
 
+## Constant-table call versioning
+
+Full runs `devirtualize-const-table` before its first inlining round. It turns a
+call through a local constant function-pointer table into a switch of direct
+calls. The table has at most eight entries, each a zero-addend pointer to a
+local, nonweak, single-block leaf of at most twelve instructions. Targets have
+matching scalar signatures, no explicit aggregate transport, no variadics or
+returns-twice behavior, and no noinline/optnone or special frame attributes.
+Subsequent ordinary inlining exposes the selected body; this pass does not
+speculate target instructions.
+
+The native eight-byte pointer layout must be explicit. An index AND mask
+proves every table access in bounds; the pointer load's width and alignment are
+also proved from the defined object. That load can then be marked `notrap` and
+removed by DCE. Mutable, interposable, TLS, weak or underaligned tables,
+nonzero-addend entries, unsupported targets, volatile loads and modules with
+assembly decline. At most eight sites per function are versioned. Call-site
+contracts and function mutation policies are preserved. Balanced and Size do
+not run this pass.
+
+## Guarded matrix tiling
+
+Full runs `loop-matmul` before its first inlining round on AArch64 with the
+native 64-bit data layout. It recognizes a complete three-loop, square i32
+matrix product with zero-based unit induction, a zero-seeded wrapping sum,
+and row-major `row*n + column` addresses. Every normalized instruction must
+belong to that recipe, apart from integer constants. Loads and stores must
+be nonvolatile and have no observable fault. No memory or arithmetic operation
+from an unmatched body is moved.
+
+The original graph remains as the fallback. The vector path requires
+`4 <= n <= 46340`, nonwrapping pointer ranges, and an output range disjoint
+from both input ranges. The dimension cap keeps the original signed i32
+indices nonnegative without overflow. The inputs may alias each other.
+A private helper accumulates four output columns in i32x4 registers, then
+handles remaining columns with scalar products. It never reads the output
+buffer. Small sizes, overlapping output, and failed range checks execute
+the original loop in its original store order.
+
+Recognition is limited to four ordinary parameters (three pointers and an
+i32 dimension), at most 96 input instructions and 16 blocks. At most four
+functions per module are tiled. Functions with stack slots, source locations,
+special frame attributes, or a disabled vectorization policy decline.
+Modules with assembly decline. Other targets, Balanced, and Size do not run
+this transform. This is a bounded loop-nest recipe, not a general tiler.
+
 ## Module cleanup
 
 `constant-args` substitutes an integer or floating literal into a local body
@@ -538,18 +588,25 @@ its Fast-definition policy; frontends choose compacting cleanup explicitly.
 ### loop-unroll
 
 `loop-unroll` runs in Full after `loop-reduce-multi` and before `loop-rotate`.
-It accepts a loop with a two-instruction unsigned header test, one
-straight-line body and one external preheader, carrying an induction variable
-from zero by one and one wrapping sum `iadd(sum, term)`. The term may use the
-induction variable and one or two ordinary loads. Stores, calls, volatile or
-atomic accesses, division, floating point, other liveouts, nested loops and
-source locations in the loop reject it.
+It accepts a zero-based unit-step counted innermost loop, including one
+nested inside another loop. A two-instruction signed or unsigned header leads
+to a straight-line body with one wrapping i32/i64 reduction and up to two
+independent additive auxiliary recurrences. Stores, calls, volatile or atomic
+accesses, division, floating point, other liveouts and source locations in the
+loop reject it. Budgets limit the original body to twenty instructions, two
+loads and sixteen live scalar values.
 
-The paired loop carries `(iv, lane0, lane1)` and enters two body copies only
-when unsigned `bound - iv >= 2`, which keeps both increments in range without
-wrapping. The lanes combine once with wrapping addition, then the original loop
-handles the remaining iteration. Loads of the second iteration run only after
-both iterations are known to exist.
+An additive update `sum + term` uses independent even and odd accumulators.
+For a constant-affine update `k*sum + term`, each parity stream uses coefficient
+`k*k`; their final combination is `k*even + odd`. The streams start with zero
+and the original seed respectively, preserving arbitrary seeds, zero trips and
+wrapping coefficients without a modular inverse. Byte and halfword loads are
+admitted for affine updates; additive updates retain their i32/i64 load policy.
+
+The pair guard checks `bound - iv >= 2` in the original signedness, keeping
+increments in range. Both complete body copies run in their original order,
+including loads. The original loop handles the final odd iteration. No
+loop-carried floating-point operation is reassociated.
 
 ### loop-unroll-exact
 
