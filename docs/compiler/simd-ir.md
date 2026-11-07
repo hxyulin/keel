@@ -356,16 +356,21 @@ the destination width. Source loads still read exactly the active lanes.
 For an i32 signed dividend explicitly extended from i8 or i16, a constant
 nonzero divisor with magnitude 2 through 32768 can use a bounded reciprocal.
 The matcher proves the 32-bit product cannot overflow and the reciprocal
-rounding error cannot change the quotient. It computes the magnitude, divides,
-and restores the sign, preserving truncation toward zero. General packed
-integer division remains unsupported. SSE2 and Portable keep these shift and
+rounding error cannot change the quotient, preserving truncation toward zero.
+General packed integer division remains unsupported. SSE2 and Portable keep these shift and
 division expressions scalar.
 
 For a single ARM stream whose bounded-division expression ends in an i32-to-i64
 extension, the reduction computes four useful i32 lanes per chunk. It widens
 both halves into separate i64x2 accumulators before accumulating. Two chunks
 cover eight elements; the original scalar tail handles the remainder. No
-loop-carried sum is narrowed to i32.
+loop-carried sum is narrowed to i32. Generated constant splats are shared across
+unrolled chunks. Signed narrow round trips use lane-local shifts. Matching
+integer min/max selects use packed operations, and upper halves widen directly.
+When a nonexact reciprocal's bounded product fits signed i32, division uses
+signed multiplication,
+arithmetic shifting and a negative-input correction. Other reciprocal plans keep
+the magnitude-based calculation.
 
 ## Baseline NEON semantic extensions
 

@@ -165,6 +165,7 @@ struct NarrowDivision {
     multiplier: i64,
     shift: i64,
     negative: bool,
+    signed_product: bool,
 }
 
 // For |n| <= 2^(bits-1), choose a reciprocal whose rounding error is less
@@ -202,6 +203,7 @@ fn narrow_division(f: &Function, numerator: Value, divisor: Value) -> Option<Nar
                 multiplier: multiplier as i64,
                 shift: i64::from(shift),
                 negative: divisor < 0,
+                signed_product: error != 0 && maximum * multiplier <= i32::MAX as u64,
             });
         }
     }
@@ -933,6 +935,34 @@ fn emit(f: &mut Function, b: Block, d: D) -> Value {
 fn iconst(f: &mut Function, b: Block, ty: Type, n: i64) -> Value {
     emit(f, b, D::iconst(ty, n))
 }
+// Share generated literals across casts and unrolled chunks. Insert before the
+// setup jump when emission has already moved into the loop body.
+fn reduction_splat(f: &mut Function, setup: Block, shape: VectorType, n: i64) -> Value {
+    for &i in f.block_insts(setup) {
+        if let D::VectorSplat { ty, arg } = *f.inst_data(i)
+            && ty == Type::Vector(shape)
+            && int_const(f, arg) == Some(n)
+        {
+            return f.first_result(i);
+        }
+    }
+    let point = f
+        .block_insts(setup)
+        .last()
+        .copied()
+        .filter(|&i| f.inst_data(i).is_terminator())
+        .map(keel_ir::InsertPoint::Before)
+        .unwrap_or(keel_ir::InsertPoint::End(setup));
+    let scalar = f.insert_inst(point, D::iconst(shape.lane_type(), n));
+    let splat = f.insert_inst(
+        point,
+        D::VectorSplat {
+            ty: Type::Vector(shape),
+            arg: f.first_result(scalar),
+        },
+    );
+    f.first_result(splat)
+}
 fn bin(f: &mut Function, b: Block, op: B, a: Value, c: Value) -> Value {
     emit(f, b, D::Binary { op, args: [a, c] })
 }
@@ -972,6 +1002,35 @@ fn branch(
             ],
         },
     );
+}
+
+// Integer min/max selects can use one packed operation. Literal arms may
+// have distinct SSA definitions after branch normalization.
+fn reduction_minmax(f: &Function, args: [Value; 3]) -> Option<V> {
+    let D::Icmp {
+        cond,
+        args: compared,
+    } = *f.inst_data(def(f, args[0])?)
+    else {
+        return None;
+    };
+    let same = |a: Value, b: Value| {
+        f.resolve(a) == f.resolve(b)
+            || (f.value_type(a) == f.value_type(b)
+                && int_const(f, a).is_some_and(|n| int_const(f, b) == Some(n)))
+    };
+    let direct = same(args[1], compared[0]) && same(args[2], compared[1]);
+    let reversed = same(args[1], compared[1]) && same(args[2], compared[0]);
+    if !direct && !reversed {
+        return None;
+    }
+    Some(match (cond, direct) {
+        (IntCC::Slt | IntCC::Sle, true) | (IntCC::Sgt | IntCC::Sge, false) => V::Smin,
+        (IntCC::Sgt | IntCC::Sge, true) | (IntCC::Slt | IntCC::Sle, false) => V::Smax,
+        (IntCC::Ult | IntCC::Ule, true) | (IntCC::Ugt | IntCC::Uge, false) => V::Umin,
+        (IntCC::Ugt | IntCC::Uge, true) | (IntCC::Ult | IntCC::Ule, false) => V::Umax,
+        _ => return None,
+    })
 }
 
 /// Use every i32 lane only when one terminal extension feeds the i64 sum.
@@ -1101,14 +1160,19 @@ fn reduce_body(
             },
             _ => v,
         };
-        let splat = emit(
-            f,
-            setup,
-            D::VectorSplat {
-                ty: Type::Vector(c.widths.get(&v).copied().unwrap_or(c.shape)),
-                arg: scalar,
-            },
-        );
+        let shape = c.widths.get(&v).copied().unwrap_or(c.shape);
+        let splat = if let Some(n) = int_const(f, scalar) {
+            reduction_splat(f, setup, shape, n)
+        } else {
+            emit(
+                f,
+                setup,
+                D::VectorSplat {
+                    ty: Type::Vector(shape),
+                    arg: scalar,
+                },
+            )
+        };
         invariants.insert(v, splat);
         if narrow_selects
             && f.value_type(scalar) == Type::I64
@@ -1132,16 +1196,7 @@ fn reduce_body(
     casts.sort_by_key(|(v, _)| **v);
     for (&v, cast) in casts {
         let splat = |f: &mut Function, n| {
-            let shape = c.widths.get(&v).copied().unwrap_or(c.shape);
-            let scalar = iconst(f, setup, shape.lane_type(), n);
-            emit(
-                f,
-                setup,
-                D::VectorSplat {
-                    ty: Type::Vector(shape),
-                    arg: scalar,
-                },
-            )
+            reduction_splat(f, setup, c.widths.get(&v).copied().unwrap_or(c.shape), n)
         };
         let mask = splat(f, (1i64 << cast.bits) - 1);
         let sign = cast.signed.then(|| splat(f, 1i64 << (cast.bits - 1)));
@@ -1279,76 +1334,108 @@ fn reduce_body(
                 D::Binary { op: B::Sdiv, args } if c.divisions.contains_key(&result.unwrap()) => {
                     let plan = c.divisions[&result.unwrap()];
                     let input = mapping[&f.resolve(args[0])];
-                    let splat = |f: &mut Function, n| {
-                        let scalar = iconst(f, vector, Type::I32, n);
+                    let splat = |f: &mut Function, n| reduction_splat(f, setup, shape, n);
+                    let quotient = if plan.signed_product {
+                        // The bounded signed product cannot overflow. For a
+                        // nonexact reciprocal, a negative nonzero product has
+                        // a fractional part, so adding one after arithmetic
+                        // shifting restores truncation toward zero.
+                        let multiplier = splat(f, plan.multiplier);
+                        let product = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Imul,
+                                args: [input, multiplier],
+                            },
+                        );
+                        let shift = splat(f, plan.shift);
+                        let quotient = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Sshr,
+                                args: [product, shift],
+                            },
+                        );
+                        let shift31 = splat(f, 31);
+                        let correction = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Ushr,
+                                args: [input, shift31],
+                            },
+                        );
                         emit(
                             f,
                             vector,
-                            D::VectorSplat {
-                                ty: Type::Vector(shape),
-                                arg: scalar,
+                            D::VectorBinary {
+                                op: V::Iadd,
+                                args: [quotient, correction],
+                            },
+                        )
+                    } else {
+                        let shift31 = splat(f, 31);
+                        let sign = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Sshr,
+                                args: [input, shift31],
+                            },
+                        );
+                        let biased = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Xor,
+                                args: [input, sign],
+                            },
+                        );
+                        let magnitude = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Isub,
+                                args: [biased, sign],
+                            },
+                        );
+                        let multiplier = splat(f, plan.multiplier);
+                        let product = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Imul,
+                                args: [magnitude, multiplier],
+                            },
+                        );
+                        let shift = splat(f, plan.shift);
+                        let quotient = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Ushr,
+                                args: [product, shift],
+                            },
+                        );
+                        let biased = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Xor,
+                                args: [quotient, sign],
+                            },
+                        );
+                        emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Isub,
+                                args: [biased, sign],
                             },
                         )
                     };
-                    let shift31 = splat(f, 31);
-                    let sign = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Sshr,
-                            args: [input, shift31],
-                        },
-                    );
-                    let biased = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Xor,
-                            args: [input, sign],
-                        },
-                    );
-                    let magnitude = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Isub,
-                            args: [biased, sign],
-                        },
-                    );
-                    let multiplier = splat(f, plan.multiplier);
-                    let product = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Imul,
-                            args: [magnitude, multiplier],
-                        },
-                    );
-                    let shift = splat(f, plan.shift);
-                    let quotient = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Ushr,
-                            args: [product, shift],
-                        },
-                    );
-                    let biased = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Xor,
-                            args: [quotient, sign],
-                        },
-                    );
-                    let quotient = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::Isub,
-                            args: [biased, sign],
-                        },
-                    );
                     if plan.negative {
                         let zero = splat(f, 0);
                         D::VectorBinary {
@@ -1378,6 +1465,16 @@ fn reduce_body(
                         mapping[&f.resolve(args[1])],
                     ],
                 },
+                D::Select { args }
+                    if target == VectorTarget::Aarch64Neon
+                        && shape == VectorType::I32x4
+                        && reduction_minmax(f, args).is_some() =>
+                {
+                    D::VectorBinary {
+                        op: reduction_minmax(f, args).unwrap(),
+                        args: [mapping[&f.resolve(args[1])], mapping[&f.resolve(args[2])]],
+                    }
+                }
                 D::Select { args } => D::VectorSelect {
                     args: [
                         select_mask(f, vector, c, &mapping, args[0], shape),
@@ -1413,33 +1510,56 @@ fn reduce_body(
                             },
                         );
                     }
-                    let masked = emit(
-                        f,
-                        vector,
-                        D::VectorBinary {
-                            op: V::And,
-                            args: [input, mask],
-                        },
-                    );
-                    // Sign extension in the destination ring:
-                    // ((x & low_mask) ^ sign_bit) - sign_bit.
-                    // No cross-lane packing or saturating conversion occurs.
-                    if let Some(sign) = sign {
-                        let biased = emit(
+                    // Signed truncation followed by extension is a lane-local
+                    // shift pair. This avoids three mask constants/operations.
+                    if sign.is_some()
+                        && target == VectorTarget::Aarch64Neon
+                        && shape == VectorType::I32x4
+                    {
+                        let shift = reduction_splat(
+                            f,
+                            setup,
+                            shape,
+                            i64::from(shape.lane_type().bytes().unwrap() * 8 - cast.bits),
+                        );
+                        let shifted = emit(
                             f,
                             vector,
                             D::VectorBinary {
-                                op: V::Xor,
-                                args: [masked, sign],
+                                op: V::Shl,
+                                args: [input, shift],
                             },
                         );
                         D::VectorBinary {
-                            op: V::Isub,
-                            args: [biased, sign],
+                            op: V::Sshr,
+                            args: [shifted, shift],
                         }
                     } else {
-                        mapping.insert(v, masked);
-                        continue;
+                        let masked = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::And,
+                                args: [input, mask],
+                            },
+                        );
+                        if let Some(sign) = sign {
+                            let biased = emit(
+                                f,
+                                vector,
+                                D::VectorBinary {
+                                    op: V::Xor,
+                                    args: [masked, sign],
+                                },
+                            );
+                            D::VectorBinary {
+                                op: V::Isub,
+                                args: [biased, sign],
+                            }
+                        } else {
+                            mapping.insert(v, masked);
+                            continue;
+                        }
                     }
                 }
                 _ => continue,
@@ -1450,22 +1570,21 @@ fn reduce_body(
         }
         if let Some((_, input, op)) = split {
             let value = mapping[&input];
-            let high = emit(
-                f,
-                vector,
-                D::VectorShuffle {
-                    args: [value, value],
-                    lanes: vec![2, 3, 2, 3],
-                },
-            );
-            for (half, input) in [value, high].into_iter().enumerate() {
+            for half in 0..2 {
+                let op = if half == 0 {
+                    op
+                } else if op == ConvertOp::SwidenLow {
+                    ConvertOp::SwidenHigh
+                } else {
+                    ConvertOp::UwidenHigh
+                };
                 let widened = emit(
                     f,
                     vector,
                     D::Convert {
                         op,
                         ty: Type::Vector(c.shape),
-                        arg: input,
+                        arg: value,
                     },
                 );
                 let sum = sums[chunk * halves + half];

@@ -37,8 +37,14 @@ fn narrow_mixed_rings_constant_shifts_and_division_vectorize_exactly() {
     let after = optimize(SOURCE, VectorTarget::Aarch64Neon);
     assert!(vectorized(&after), "{after}");
     assert!(
-        after.to_string().contains("vshuffle"),
+        after.to_string().contains("swiden_high"),
         "four useful i32 lanes: {after}"
+    );
+    let text = after.to_string();
+    assert!(text.contains("vsmin"), "{text}");
+    assert!(
+        !text.contains("vxor"),
+        "signed casts and bounded division: {text}"
     );
     let mut again = after.clone();
     keel_opt::run_passes_for_target(
@@ -110,9 +116,16 @@ fn narrow_division_handles_negative_divisors_and_large_quotient_boundaries() {
             let before = keel_ir::parse(&source).unwrap();
             let after = optimize(&source, VectorTarget::Aarch64Neon);
             assert!(vectorized(&after), "d={divisor}: {after}");
+            let exhaustive: Vec<_>;
+            let values = if narrow == "i16" && matches!(divisor, -7 | 3 | 7 | 127) {
+                exhaustive = (i16::MIN..=i16::MAX).collect();
+                exhaustive.as_slice()
+            } else {
+                input.as_slice()
+            };
             assert_eq!(
-                execute(&before, &input, 65),
-                execute(&after, &input, 65),
+                execute(&before, values, values.len() as u64),
+                execute(&after, values, values.len() as u64),
                 "d={divisor}"
             );
         }
@@ -145,7 +158,7 @@ block3:
  return v5
 }";
     let after = optimize(source, VectorTarget::Aarch64Neon);
-    assert!(after.to_string().contains("vshuffle"), "{after}");
+    assert!(after.to_string().contains("swiden_high"), "{after}");
     let input: Vec<i16> = [i16::MIN, i16::MAX, 21, -28, 35, 42, 49, 56]
         .into_iter()
         .cycle()

@@ -17,7 +17,7 @@ fn packed_roundtrips_support_each_width_and_signedness_on_both_targets() {
                 f.layout_insts().any(|(_, i)| matches!(
                     f.inst_data(i),
                     keel_ir::InstData::VectorBinary {
-                        op: keel_ir::VectorBinaryOp::And,
+                        op: keel_ir::VectorBinaryOp::And | keel_ir::VectorBinaryOp::Sshr,
                         ..
                     }
                 )),
