@@ -336,10 +336,12 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
     let tools = Tools {
         baseline: resolve(&options.baseline)?,
         candidate: resolve(&options.candidate)?,
-        out: options
-            .out
-            .clone()
-            .unwrap_or_else(|| root.join("target/keel-suite/codegen-diff")),
+        out: root.join(
+            options
+                .out
+                .as_deref()
+                .unwrap_or_else(|| Path::new("target/keel-suite/codegen-diff")),
+        ),
         icount: options.icount,
         sysroots,
         candidate_isel: options.candidate_isel.clone(),
@@ -424,8 +426,20 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
         fs::write(file, serde_json::to_string_pretty(&report)? + "\n")
             .with_context(|| file.display().to_string())?;
     }
-    let changed = report.objects.iter().any(|o| o.status == Status::Changed);
-    Ok(!(options.expect_identical && changed))
+    Ok(comparison_succeeded(
+        &report.objects,
+        options.expect_identical,
+    ))
+}
+
+// Compilation failure is never an equivalence result, even when both sides fail.
+fn comparison_succeeded(objects: &[Object], expect_identical: bool) -> bool {
+    objects.iter().all(|o| {
+        o.status != Status::Failed
+            && o.baseline.error.is_none()
+            && o.candidate.error.is_none()
+            && (!expect_identical || o.status == Status::Identical)
+    })
 }
 
 fn binary(path: &Path) -> Result<Binary> {
@@ -1067,7 +1081,19 @@ fn print_report(root: &Path, report: &Report, out: &Path, show: usize) {
     let changed: usize = report.summary.iter().map(|s| s.changed).sum();
     let shown = out.strip_prefix(root).unwrap_or(out);
     println!();
-    if changed == 0 {
+    let failed = report
+        .objects
+        .iter()
+        .filter(|o| {
+            o.status == Status::Failed || o.baseline.error.is_some() || o.candidate.error.is_some()
+        })
+        .count();
+    if failed != 0 {
+        println!(
+            "{} {failed} of {total} object comparisons failed",
+            fail_mark()
+        );
+    } else if changed == 0 {
         println!("{} all {total} compared objects identical", ok_mark());
     } else {
         println!("{} {changed} of {total} objects changed", fail_mark());
@@ -1117,6 +1143,49 @@ _g:
 .Lsum_end:
 \t.cfi_endproc
 ";
+
+    #[test]
+    fn failed_compiles_are_not_equivalent_outputs() {
+        for status in [Status::Identical, Status::Changed, Status::Failed] {
+            for errors in [[false, false], [true, false], [false, true], [true, true]] {
+                let object = Object {
+                    suite: "fixture".into(),
+                    source: "fixture.c".into(),
+                    target: "aarch64-apple-darwin",
+                    config: "keel-O".into(),
+                    status,
+                    baseline: Side {
+                        error: errors[0].then(|| "compiler failed".into()),
+                        ..Side::default()
+                    },
+                    candidate: Side {
+                        error: errors[1].then(|| "compiler failed".into()),
+                        ..Side::default()
+                    },
+                    functions_identical: 0,
+                    functions: Vec::new(),
+                    metrics_error: None,
+                };
+                let objects = [object];
+                if errors.into_iter().any(|e| e) || status == Status::Failed {
+                    assert!(
+                        !comparison_succeeded(&objects, false),
+                        "{status:?} {errors:?}"
+                    );
+                    assert!(
+                        !comparison_succeeded(&objects, true),
+                        "{status:?} {errors:?}"
+                    );
+                } else {
+                    assert!(comparison_succeeded(&objects, false));
+                    assert_eq!(
+                        comparison_succeeded(&objects, true),
+                        status == Status::Identical
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn finds_functions_on_both_targets() {
