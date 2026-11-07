@@ -16,7 +16,9 @@ use keel_ir::{Block, BlockCall, EntityRef, Function, InstData, ValueDef};
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     loop {
-        let round = fold_branches(func) | skip_forwarding_blocks(func);
+        let round = crate::if_convert::fold_count_guards(func)
+            | fold_branches(func)
+            | skip_forwarding_blocks(func);
         let round = round | remove_unreachable(func) | merge_blocks(func);
         if !round {
             return changed;

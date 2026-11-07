@@ -395,3 +395,125 @@ fn signed_shift_i32_mask_boundaries_match_independent_scalar_oracle() {
         }
     }
 }
+
+#[test]
+fn bounded_count_roundtrips_and_sign_boundary_negative_control() {
+    for op in ["clz", "ctz", "popcnt"] {
+        let source = format!(
+            "func @f(i64) -> i64 {{
+block0(v0: i64):
+ v1 = {op} v0
+ v2 = trunc.i32 v1
+ v3 = sext.i64 v2
+ return v3
+}}"
+        );
+        let (before, after) = optimize(&source);
+        assert!(!after.to_string().contains("sext"), "{after}");
+        assert!(!after.to_string().contains("trunc"), "{after}");
+        for x in [0, 1, 127, 128, 1 << 63, u64::MAX] {
+            assert_eq!(
+                execute(&before.functions[0], &[x]),
+                execute(&after.functions[0], &[x])
+            );
+        }
+    }
+    // The i8 sign bit is set for 128. A sign-extension round trip cannot
+    // become the original positive i64 value, even though zero-extension can.
+    let source = "func @f(i64) -> i64 {
+block0(v0: i64):
+ v1 = iconst.i64 255
+ v2 = and v0, v1
+ v3 = trunc.i8 v2
+ v4 = sext.i64 v3
+ return v4
+}";
+    let (before, after) = optimize(source);
+    for x in 0..256 {
+        assert_eq!(
+            execute(&before.functions[0], &[x]),
+            execute(&after.functions[0], &[x]),
+            "{x}"
+        );
+    }
+    assert!(after.to_string().contains("sext"));
+}
+
+#[test]
+fn defined_count_zero_guards_fold_without_general_if_conversion() {
+    for op in ["clz", "ctz"] {
+        for zero in [64, 63] {
+            let source = format!(
+                "func @f(i64) -> i64 {{
+block0(v0: i64):
+ brif v0, block1, block2
+block1:
+ v1 = {op} v0
+ v2 = trunc.i32 v1
+ v3 = sext.i64 v2
+ jump block3(v3)
+block2:
+ v4 = iconst.i64 {zero}
+ jump block3(v4)
+block3(v5: i64):
+ return v5
+}}"
+            );
+            let before = keel_ir::parse(&source).unwrap();
+            let mut after = before.clone();
+            keel_opt::run_passes(
+                &mut after,
+                &["instcombine", "dce", "simplify-cfg", "phi-simplify", "dce"],
+            )
+            .unwrap();
+            keel_ir::verify_module(&after).unwrap();
+            assert_eq!(!after.to_string().contains("brif"), zero == 64, "{after}");
+            for x in [0, 1, 2, 1 << 63, u64::MAX] {
+                assert_eq!(
+                    execute(&before.functions[0], &[x]),
+                    execute(&after.functions[0], &[x]),
+                    "{op}, {zero}, {x}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn count_guard_fold_respects_polarity_source_and_arm_effects() {
+    let source = "func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 0
+ v3 = icmp.eq v0, v2
+ brif v3, block2, block1
+block1:
+ v4 = ctz v0
+ jump block3(v4)
+block2:
+ v5 = iconst.i64 64
+ jump block3(v5)
+block3(v6: i64):
+ return v6
+}";
+    for (source, folded) in [
+        (source.to_owned(), true),
+        (source.replace("ctz v0", "ctz v1"), false),
+        (
+            source.replace("block1:\n v4", "block1:\n v7 = sdiv v1, v0\n v4"),
+            false,
+        ),
+    ] {
+        let before = keel_ir::parse(&source).unwrap();
+        let mut after = before.clone();
+        keel_opt::run_passes(&mut after, &["simplify-cfg", "dce"]).unwrap();
+        keel_ir::verify_module(&after).unwrap();
+        assert_eq!(!after.to_string().contains("brif"), folded, "{after}");
+        for x in [0, 1, 2, u64::MAX] {
+            assert_eq!(
+                support::outcome(&before.functions[0], &[x, 17]),
+                support::outcome(&after.functions[0], &[x, 17]),
+                "x={x}"
+            );
+        }
+    }
+}

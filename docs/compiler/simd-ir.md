@@ -189,6 +189,18 @@ promise is needed. Cheap trip-count checks reject short ranges before pointer-ra
 checks. Simple expressions use four independent accumulators, larger expressions
 or stream sets use two. Fixed-offset loads share a pointer advanced once per group;
 a countdown controls the vector loop. The original scalar tail handles the remainder.
+
+The opt-in `loop-dot` pass handles read-only floating dot products on the native
+128-bit targets. It accepts zero-based unsigned i64 counted loops with f32 or
+f64 products from two contiguous streams and one scalar accumulator. Batches of
+eight compute products in vectors, extract lanes in input order, then apply the
+original left-to-right scalar additions. No sum reassociation or fused multiply
+add is introduced. Every load must be nonvolatile and carry `notrap` or `trap_ub`.
+Range guards reject wrapping byte counts or pointer ranges. The original loop
+handles those inputs, short ranges and the tail. Other recurrences, observable
+loads and functions with debugger variable metadata stay scalar. Select this
+pass in a custom pipeline before strength reduction and loop rotation.
+
 Fast includes `fast-loop-reduce`, with the same transformation but an eligibility cap
 of 256 instructions, 16 blocks, one stream address and eight expression values.
 These are compile-effort policies, independent of selection and allocation tiers.
@@ -213,7 +225,8 @@ range even for nonzero starts; disjoint accessed subranges can therefore still
 fall back to scalar execution.
 
 The first cost gate uses packed operation availability, fixed register pressure
-limits (24 expression values, four streams), and a trip-count threshold. It is
+limits (24 expression values, or 48 for the bounded division recipe below,
+and four streams), and a trip-count threshold. It is
 not a full target cost model. `VectorTarget::{Portable,Aarch64Neon,X86Sse2}`
 configures `run_passes_for_target` or a `Pipeline` context; optimizer APIs
 without a target default to the portable intersection. The driver supplies the selected target
@@ -333,8 +346,20 @@ single-use scalar load and splat with an exact-width `ld1r`, and a one-step
 low-lane widening followed by a single-use adjacent packed add with
 `saddw`/`uaddw`. These covers preserve custom allocation constraints and
 separate source lines; shared values, volatile reads, and unsupported address
-selection keep their original instructions. Compound narrowing and packed
-division are outside this subset.
+selection keep their original instructions. General packed integer division
+remains outside this subset.
+
+Full ARM reductions also accept i32 constant shifts and nested integer
+truncation/extension chains in their original arithmetic widths. A narrowed
+intermediate becomes a mask and, for signed extension, a sign adjustment in
+the destination width. Source loads still read exactly the active lanes.
+For an i32 signed dividend explicitly extended from i8 or i16, a constant
+nonzero divisor with magnitude 2 through 32768 can use a bounded reciprocal.
+The matcher proves the 32-bit product cannot overflow and the reciprocal
+rounding error cannot change the quotient. It computes the magnitude, divides,
+and restores the sign, preserving truncation toward zero. General packed
+integer division remains unsupported. SSE2 and Portable keep these shift and
+division expressions scalar.
 
 ## Baseline NEON semantic extensions
 

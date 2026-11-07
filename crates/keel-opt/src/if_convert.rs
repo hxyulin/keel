@@ -5,13 +5,100 @@
 use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
-    BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, Type,
-    UnaryOp, Value,
+    BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
+    Type, UnaryOp, Value, ValueDef,
 };
 
 const ARM_BUDGET: usize = 8;
 const SELECT_BUDGET: usize = 8;
 const BLOCK_BUDGET: usize = 8;
+
+/// Remove `x ? clz/ctz(x) : width` diamonds without enabling general
+/// if-conversion. Counts are defined at zero in IR. Each arm must contain
+/// exactly its value and a jump, with no parameters or other predecessors.
+pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
+    let mut changed = false;
+    for head in f.blocks().collect::<Vec<_>>() {
+        let Some(&term) = f.block_insts(head).last() else {
+            continue;
+        };
+        let D::Brif { cond, dests } = f.inst_data(term).clone() else {
+            continue;
+        };
+        let mut source = f.resolve(cond);
+        let mut nonzero = 0;
+        if let ValueDef::Result(test, 0) = f.value_def(source)
+            && let D::Icmp {
+                cond: cc @ (IntCC::Eq | IntCC::Ne),
+                args: [a, b],
+            } = *f.inst_data(test)
+            && crate::ir_match::int_const(f, b) == Some(0)
+        {
+            source = f.resolve(a);
+            nonzero = usize::from(cc == IntCC::Eq);
+        }
+        let arms = [dests[nonzero].block, dests[1 - nonzero].block];
+        if arms[0] == arms[1]
+            || arms.contains(&head)
+            || dests.iter().any(|d| !d.args.is_empty())
+            || arms
+                .iter()
+                .any(|&b| !f.block_params(b).is_empty() || f.block_insts(b).len() != 2)
+        {
+            continue;
+        }
+        let cfg = ControlFlowGraph::compute(f);
+        if arms.iter().any(|&b| cfg.preds(b) != [head]) {
+            continue;
+        }
+        let count = f.block_insts(arms[0])[0];
+        let literal = f.block_insts(arms[1])[0];
+        let D::Unary {
+            op: UnaryOp::Clz | UnaryOp::Ctz,
+            arg,
+        } = *f.inst_data(count)
+        else {
+            continue;
+        };
+        if f.resolve(arg) != source || f.resolve(f.first_result(count)) != f.first_result(count) {
+            continue;
+        }
+        let D::Iconst { imm, ty } = *f.inst_data(literal) else {
+            continue;
+        };
+        if f.resolve(f.first_result(literal)) != f.first_result(literal)
+            || Some(imm) != f.value_type(source).bytes().map(|n| i64::from(n * 8))
+            || ty != f.value_type(f.first_result(count))
+        {
+            continue;
+        }
+        let jumps: Vec<_> = arms
+            .iter()
+            .map(|&b| f.inst_data(f.block_insts(b)[1]))
+            .collect();
+        let (D::Jump { dest: yes }, D::Jump { dest: no }) = (jumps[0], jumps[1]) else {
+            continue;
+        };
+        if yes.block == head
+            || arms.contains(&yes.block)
+            || yes.block != no.block
+            || yes.args.len() != 1
+            || no.args.len() != 1
+            || f.resolve(yes.args[0]) != f.first_result(count)
+            || f.resolve(no.args[0]) != f.resolve(f.first_result(literal))
+        {
+            continue;
+        }
+        let dest = yes.clone();
+        // Keep both definitions available to any dominated external use.
+        // CFG cleanup will remove their now-unreachable, jump-only arms.
+        f.move_inst(count, InsertPoint::Before(term));
+        f.move_inst(literal, InsertPoint::Before(term));
+        *f.inst_data_mut(term) = D::Jump { dest };
+        changed = true;
+    }
+    changed
+}
 
 pub fn run(f: &mut Function) -> bool {
     let mut changed = false;

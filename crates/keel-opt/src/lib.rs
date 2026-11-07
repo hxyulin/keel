@@ -44,9 +44,11 @@ mod internal_fast_calls;
 mod ir_match;
 mod known_bits;
 mod load_reuse;
+mod loop_dot;
 mod loop_rotate;
 mod loop_strength_reduce;
 mod loop_unroll;
+mod loop_unroll_exact;
 mod loop_vectorize;
 pub mod private_aggregate;
 mod tail_calls;
@@ -357,9 +359,11 @@ pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
     |f, _| if_convert::run(f),
 );
 pub(crate) static LOAD_REUSE: &dyn Pass = &load_reuse::LoadReuse;
+pub(crate) static LOOP_DOT: &dyn Pass = &loop_dot::LoopDot;
 pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
 pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
 pub(crate) static LOOP_UNROLL: &dyn Pass = &loop_unroll::LoopUnroll;
+pub(crate) static LOOP_UNROLL_EXACT: &dyn Pass = &loop_unroll_exact::LoopUnrollExact;
 pub(crate) static LOOP_VECTORIZE: &dyn Pass = &loop_vectorize::LoopVectorize;
 pub(crate) static LOOP_REDUCE: &dyn Pass = &loop_vectorize::LoopReduce;
 pub(crate) static LOOP_REDUCE_MULTI: &dyn Pass = &loop_vectorize::MultiLoopReduce;
@@ -407,6 +411,8 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_ROTATE,
     LOOP_STRENGTH_REDUCE,
     LOOP_UNROLL,
+    LOOP_UNROLL_EXACT,
+    LOOP_DOT,
     LOOP_VECTORIZE,
     LOOP_REDUCE,
     LOOP_REDUCE_MULTI,
@@ -706,7 +712,7 @@ const FULL_ROUND: [&str; 17] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 26] = [
+const FULL_EPILOGUE: [&str; 28] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -725,6 +731,8 @@ const FULL_EPILOGUE: [&str; 26] = [
     "simplify-cfg",
     "known-bits",
     "simplify-cfg",
+    "dce",
+    "loop-unroll-exact",
     "dce",
     "empty-calls",
     "dce",

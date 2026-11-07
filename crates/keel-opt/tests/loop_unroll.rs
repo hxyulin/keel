@@ -681,3 +681,6 @@ fn calls_and_locations_outside_the_loop_do_not_block_unrolling() {
     let before = keel_ir::parse(&inside).unwrap().to_string();
     assert_eq!(before, optimize(&inside, &["loop-unroll"]).to_string());
 }
+
+#[path = "loop_unroll/exact.rs"]
+mod exact;

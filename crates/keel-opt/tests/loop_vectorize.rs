@@ -8,6 +8,8 @@ mod loop_reduce_affine;
 mod loop_reduce_casts;
 #[path = "loop_vectorize/loop_reduce_multi.rs"]
 mod loop_reduce_multi;
+#[path = "loop_vectorize/mixed_narrow.rs"]
+mod mixed_narrow;
 #[path = "loop_vectorize/packed_clamp.rs"]
 mod packed_clamp;
 

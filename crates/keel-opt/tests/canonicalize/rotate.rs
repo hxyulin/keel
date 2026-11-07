@@ -152,3 +152,78 @@ block0(v0: i64, v1: i64):
         }
     );
 }
+
+#[test]
+fn variable_complementary_counts_preserve_casts_masks_and_zero_counts() {
+    for (ty, width) in [("i32", 32), ("i64", 64)] {
+        for right in ["isub v4, v3", "ineg v3"] {
+            let expr = if right.starts_with("ineg") {
+                "v5 = ineg v3".to_owned()
+            } else {
+                format!("v5 = {right}")
+            };
+            let source = format!(
+                "func @f({ty}, i64) -> {ty} {{
+block0(v0: {ty}, v1: i64):
+ v2 = iconst.i64 {}
+ v3 = and v1, v2
+ v4 = iconst.i64 {width}
+ {expr}
+ v6 = and v5, v2
+ v7 = trunc.i8 v3
+ v8 = sext.i64 v7
+ v9 = shl v0, v8
+ v10 = trunc.i32 v6
+ v11 = uext.i64 v10
+ v12 = ushr v0, v11
+ v13 = or v12, v9
+ return v13
+}}",
+                width - 1
+            );
+            let original = keel_ir::parse(&source).unwrap();
+            let m = canonical(&source);
+            assert!(
+                m.to_string().contains("rotl") || m.to_string().contains("rotr"),
+                "{m}"
+            );
+            for x in [0, 1, 0x8000_0000, 1 << 63, u64::MAX, 0x1234_5678_9abc_def0] {
+                for count in [0, 1, width as u64 - 1, width as u64, 127, 128, u64::MAX] {
+                    assert_eq!(
+                        super::support::execute(&original.functions[0], &[x, count]),
+                        super::support::execute(&m.functions[0], &[x, count]),
+                        "{ty}, {right}, {x}, {count}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn variable_rotate_rejects_wrong_masks_sources_and_complements() {
+    let source = "func @f(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = iconst.i64 63
+ v4 = and v1, v3
+ v5 = iconst.i64 64
+ v6 = isub v5, v4
+ v7 = and v6, v3
+ v8 = shl v0, v4
+ v9 = ushr v0, v7
+ v10 = or v8, v9
+ return v10
+}";
+    for bad in [
+        source.replace("iconst.i64 64", "iconst.i64 63"),
+        source.replace("ushr v0", "sshr v0"),
+        source.replace("ushr v0", "ushr v2"),
+        source.replace("isub v5, v4", "isub v5, v2"),
+        source.replace("v7 = and v6, v3", "v7 = and v6, v5"),
+    ] {
+        assert!(
+            !canonical(&bad).to_string().contains("rotr")
+                && !canonical(&bad).to_string().contains("rotl")
+        );
+    }
+}

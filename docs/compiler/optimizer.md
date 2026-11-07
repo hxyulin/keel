@@ -83,6 +83,9 @@ reassociation, instruction creation or removal, or motion. Its form is:
   `(is_integer_literal, value_id)`, so a single literal is on the right.
 - Integer comparisons sort the same way and reverse the predicate on a swap:
   `icmp.slt 37, x` becomes `icmp.sgt x, 37`.
+- Complementary left/logical-right shifts of the same i32/i64 source become
+  rotates. Variable counts may pass through masks and integer casts that
+  preserve their low count bits; constant pairs require nonzero in-range counts.
 - Floating-point operand order, noncommutative operand order, select arms,
   edge order, memory effects and trapping behavior are unchanged.
 
@@ -122,8 +125,10 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `gcm` | Global code motion, the scheduler for floating instructions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
+| `loop-dot` (opt-in) | Batch floating dot products while preserving scalar addition order; see [SIMD IR](simd-ir.md) |
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |
+| `loop-unroll-exact` | Fully unroll tiny literal-trip loops in scalar operation order |
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
@@ -200,13 +205,19 @@ becomes constant. Rules include:
   pairs (`x & ~x = 0`), for all widths;
 - integer cast chains: successive truncations or equal extensions, sign
   extension of a zero extension, and truncation of an extension collapse;
-  zero extension of a sign extension and extension after truncation stay;
+  zero extension of a sign extension and extension after truncation stay unless
+  possible-bits facts prove the truncated value fits the retained range;
 - wrapping cancellation such as `(x+y)-x` and `x+(-x)`, and grouping of two
   constants in an associative chain whose inner result has one use;
 - a bounded three-producer possible-bits query that removes redundant masks
   and shifts and decides comparisons against type or mask bounds;
 - constant shift pairs, equality through invertible wrapping operations,
   zero-test selects and grouping of single-use offsets.
+
+`simplify-cfg` also removes private `x ? clz(x) : width` and
+`x ? ctz(x) : width` diamonds. Both counts already return the type width at
+zero. Each arm must contain only the matching count or literal and its jump;
+this fold does not enable general if-conversion.
 
 An AND whose literal covers every source bit of a widening zero extension is
 removed, and sign extension of an AND that clears the source sign bit becomes
@@ -534,6 +545,16 @@ when unsigned `bound - iv >= 2`, which keeps both increments in range without
 wrapping. The lanes combine once with wrapping addition, then the original loop
 handles the remaining iteration. Loads of the second iteration run only after
 both iterations are known to exist.
+
+### loop-unroll-exact
+
+Full runs `loop-unroll-exact` after loop rotation and dead-code cleanup. It
+accepts counted header/body loops and rotated one-block loops with at most eight
+literal iterations. Each loop may clone at most 128 instructions, within a
+256-instruction function budget. Integer operations and nonvolatile loads stay
+in iteration order; the pass does not reassociate recurrences. Calls, stores,
+floating operations, unsupported control flow and debugger locations reject the
+candidate. The final induction update must not wrap in its comparison domain.
 
 ### if-convert
 

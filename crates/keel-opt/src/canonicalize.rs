@@ -1,11 +1,11 @@
-//! Structural normalization and recognition of complementary constant rotates.
+//! Structural normalization and recognition of complementary rotates.
 //!
 //! Resolve operands; put integer literals last, then order equivalent integer
 //! operand pairs by value ID. Comparisons reverse their predicate on a swap.
 //! Floating-point operand order and noncommutative operations are preserved.
 
 use crate::scratch::Scratch;
-use keel_ir::{BinaryOp, Block, Function, InstData, Type, Value, ValueDef};
+use keel_ir::{BinaryOp, Block, ConvertOp, Function, InstData, Type, UnaryOp, Value, ValueDef};
 
 fn literal(func: &Function, value: Value) -> bool {
     match func.value_def(func.resolve(value)) {
@@ -24,9 +24,9 @@ fn out_of_order(func: &Function, a: Value, b: Value) -> bool {
     }
 }
 
-// Only full-width, nonzero constant shifts are eligible. In particular, do
-// not use hardware-masked counts to recognize out-of-range IR shifts.
-fn shift(func: &Function, value: Value, expected: BinaryOp) -> Option<(Value, Value, i64)> {
+// Keep the shifted value at its full width; arithmetic right shifts do not
+// form rotates. Count expressions are interpreted using IR's modulo rule.
+fn shift(func: &Function, value: Value, expected: BinaryOp) -> Option<(Value, Value)> {
     let value = func.resolve(value);
     let ValueDef::Result(inst, 0) = func.value_def(value) else {
         return None;
@@ -38,15 +38,61 @@ fn shift(func: &Function, value: Value, expected: BinaryOp) -> Option<(Value, Va
     if op != expected || func.value_type(value) != func.value_type(source) {
         return None;
     }
-    Some((source, count, crate::ir_match::int_const(func, count)?))
+    Some((source, count))
+}
+
+/// A variable count as `sign * base + offset`, modulo the shifted width.
+/// Integer conversions preserve the low five/six bits, even sign extensions.
+/// Stop after six producers, enough for C's mask/trunc/subtract/mask/extend.
+fn variable_count(
+    func: &Function,
+    value: Value,
+    mask: i64,
+    depth: u32,
+) -> Option<(Value, bool, i64)> {
+    let value = func.resolve(value);
+    if depth == 0 || crate::ir_match::int_const(func, value).is_some() {
+        return None;
+    }
+    let ValueDef::Result(inst, 0) = func.value_def(value) else {
+        return Some((value, false, 0));
+    };
+    let next = |v| variable_count(func, v, mask, depth - 1);
+    match *func.inst_data(inst) {
+        InstData::Convert {
+            op: ConvertOp::Trunc | ConvertOp::Uext | ConvertOp::Sext,
+            arg,
+            ..
+        } if func.value_type(arg).is_int() => next(arg),
+        InstData::Unary {
+            op: UnaryOp::Ineg,
+            arg,
+        } => {
+            let (base, negative, offset) = next(arg)?;
+            Some((base, !negative, offset.wrapping_neg() & mask))
+        }
+        InstData::Binary { op, args: [a, b] } => {
+            let literal = |v| crate::ir_match::int_const(func, v);
+            match (op, literal(a), literal(b)) {
+                (BinaryOp::And, _, Some(n)) if n & mask == mask => next(a),
+                (BinaryOp::And, Some(n), _) if n & mask == mask => next(b),
+                (BinaryOp::Isub, Some(n), _) => {
+                    let (base, negative, offset) = next(b)?;
+                    Some((base, !negative, n.wrapping_sub(offset) & mask))
+                }
+                _ => Some((value, false, 0)),
+            }
+        }
+        _ => Some((value, false, 0)),
+    }
 }
 
 fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {
     for [left, right] in [args, [args[1], args[0]]] {
-        let Some((x, _, l)) = shift(func, left, BinaryOp::Shl) else {
+        let Some((x, left_count)) = shift(func, left, BinaryOp::Shl) else {
             continue;
         };
-        let Some((y, count, r)) = shift(func, right, BinaryOp::Ushr) else {
+        let Some((y, count)) = shift(func, right, BinaryOp::Ushr) else {
             continue;
         };
         let width = match func.value_type(x) {
@@ -54,7 +100,38 @@ fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {
             Type::I64 => 64,
             _ => continue,
         };
-        if x == y && l > 0 && l < width && r > 0 && r < width && l + r == width {
+        if x != y {
+            continue;
+        }
+        let complementary = match (
+            crate::ir_match::int_const(func, left_count),
+            crate::ir_match::int_const(func, count),
+        ) {
+            (Some(l), Some(r)) => l > 0 && l < width && r > 0 && r < width && l + r == width,
+            _ => {
+                let mask = width - 1;
+                if let (Some((a, an, ac)), Some((b, bn, bc))) = (
+                    variable_count(func, left_count, mask, 6),
+                    variable_count(func, count, mask, 6),
+                ) && a == b
+                    && an != bn
+                    && ac.wrapping_add(bc) & mask == 0
+                {
+                    // Prefer the base count over C's mask/cast/complement
+                    // chain when its low bits already give the rotation.
+                    if ac == 0 && func.value_type(a).bytes().is_some_and(|n| n <= 8) {
+                        return Some(InstData::Binary {
+                            op: if an { BinaryOp::Rotr } else { BinaryOp::Rotl },
+                            args: [x, a],
+                        });
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        if complementary {
             return Some(InstData::Binary {
                 op: BinaryOp::Rotr,
                 args: [x, count],

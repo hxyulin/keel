@@ -67,6 +67,7 @@ rules! {
     ConstantAddress = "constant-address",
     PointerRoundTrip = "pointer-round-trip",
     ExtensionChain = "extension-chain",
+    BoundedRoundTrip = "bounded-round-trip",
     CompareSelf = "compare-self",
     CompareNarrowZero = "compare-narrow-zero",
     CompareOfCompare = "compare-of-compare",
@@ -1158,6 +1159,23 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             {
                 let original = func.resolve(original);
                 let from = func.value_type(original);
+                // A truncation followed by extension is lossless when all
+                // possible source bits fit below the retained sign bit (or
+                // below the full retained width for zero extension).
+                if full
+                    && inner_op == ConvertOp::Trunc
+                    && matches!(op, ConvertOp::Sext | ConvertOp::Uext)
+                    && from == ty
+                {
+                    let retained = if op == ConvertOp::Sext {
+                        mask(func.value_type(arg)) >> 1
+                    } else {
+                        mask(func.value_type(arg))
+                    };
+                    if possible(func, original, DEPTH) & !retained == 0 {
+                        return Some((Rule::BoundedRoundTrip, Fold::Value(original)));
+                    }
+                }
                 let combined = match (op, inner_op) {
                     (ConvertOp::Trunc, _) if ty == from => {
                         return Some((Rule::ExtensionChain, Fold::Value(original)));

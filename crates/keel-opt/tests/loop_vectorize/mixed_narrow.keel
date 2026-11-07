@@ -1,0 +1,66 @@
+func @k_narrow(ptr, i64) -> i64 cc(c) no_semantic_interposition {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 0
+    jump block1(v2, v2)
+block1(v4: i64, v19: i64):
+    v6 = icmp.ugt v1, v4
+    brif v6, block2, block4
+block2:
+    v73 = iconst.i64 1
+    v9 = shl v4, v73
+    v10 = ptradd v0, v9
+    v11 = load.i16 trap_ub v10
+    v47 = sext.i32 v11
+    v48 = iconst.i32 -128
+    v49 = icmp.slt v47, v48
+    brif v49, block11, block7
+block4:
+    return v19
+block7:
+    v51 = iconst.i32 127
+    v52 = icmp.sgt v47, v51
+    brif v52, block9, block12(v47)
+block9:
+    v80 = iconst.i32 127
+    jump block12(v80)
+block11:
+    v81 = iconst.i32 -128
+    jump block12(v81)
+block12(v46: i32):
+    v56 = trunc.i8 v46
+    v13 = trunc.i8 v11
+    v15 = iconst.i32 8
+    v16 = sshr v47, v15
+    v17 = trunc.i8 v16
+    v61 = uext.i32 v13
+    v62 = iconst.i32 3
+    v63 = imul v61, v62
+    v64 = sext.i32 v17
+    v65 = iconst.i32 5
+    v66 = imul v64, v65
+    v67 = iadd v63, v66
+    v68 = uext.i32 v11
+    v69 = iconst.i32 2
+    v70 = sshr v68, v69
+    v71 = iadd v67, v70
+    v72 = trunc.i16 v71
+    v20 = sext.i32 v56
+    v21 = iconst.i32 7
+    v22 = imul v20, v21
+    v23 = uext.i32 v72
+    v24 = iadd v22, v23
+    v27 = imul v47, v62
+    v28 = trunc.i16 v27
+    v29 = sext.i32 v28
+    v31 = sdiv v29, v21
+    v32 = isub v24, v31
+    v35 = sshr v47, v62
+    v36 = trunc.i8 v35
+    v37 = uext.i32 v36
+    v38 = iadd v32, v37
+    v39 = sext.i64 v38
+    v40 = iadd v19, v39
+    v82 = iconst.i64 1
+    v42 = iadd v4, v82
+    jump block1(v42, v40)
+}

@@ -39,6 +39,9 @@ impl VectorTarget {
             {
                 V::Imul
             }
+            B::Shl if self == Self::Aarch64Neon && ty == Type::I32 => V::Shl,
+            B::Ushr if self == Self::Aarch64Neon && ty == Type::I32 => V::Ushr,
+            B::Sshr if self == Self::Aarch64Neon && ty == Type::I32 => V::Sshr,
             B::Fadd => V::Fadd,
             B::Fsub => V::Fsub,
             B::Fmul => V::Fmul,
@@ -155,7 +158,56 @@ struct Candidate {
     widening_inputs: FxHashMap<Value, (Value, ConvertOp)>,
     // Each expression keeps its scalar ring; only explicit extensions widen.
     widths: FxHashMap<Value, VectorType>,
+    divisions: FxHashMap<Value, NarrowDivision>,
 }
+#[derive(Clone, Copy)]
+struct NarrowDivision {
+    multiplier: i64,
+    shift: i64,
+    negative: bool,
+}
+
+// For |n| <= 2^(bits-1), choose a reciprocal whose rounding error is less
+// than 1/d. Then floor(n*m/2^shift) is exactly floor(n/d), including the
+// largest numerator and remainders immediately below a multiple of d.
+fn narrow_division(f: &Function, numerator: Value, divisor: Value) -> Option<NarrowDivision> {
+    if f.value_type(numerator) != Type::I32 {
+        return None;
+    }
+    let D::Convert {
+        op: ConvertOp::Sext,
+        arg,
+        ..
+    } = *f.inst_data(def(f, numerator)?)
+    else {
+        return None;
+    };
+    let bits = match f.value_type(arg) {
+        Type::I8 => 8,
+        Type::I16 => 16,
+        _ => return None,
+    };
+    let divisor = int_const(f, divisor)?;
+    let d = divisor.unsigned_abs();
+    if !(2..=32768).contains(&d) {
+        return None;
+    }
+    let maximum = 1u64 << (bits - 1);
+    for shift in bits..32 {
+        let power = 1u64 << shift;
+        let multiplier = power.div_ceil(d);
+        let error = multiplier * d - power;
+        if maximum * error < power && maximum * multiplier <= u64::from(u32::MAX) {
+            return Some(NarrowDivision {
+                multiplier: multiplier as i64,
+                shift: i64::from(shift),
+                negative: divisor < 0,
+            });
+        }
+    }
+    None
+}
+
 struct Reduction {
     accumulator: Value,
     initial: Value,
@@ -330,7 +382,20 @@ impl Analyze<'_> {
                 self.c.stream_bytes = bytes;
                 self.address(addr)?;
             }
+            D::Binary { op: B::Sdiv, args }
+                if self.conditional
+                    && self.target == VectorTarget::Aarch64Neon
+                    && matches!(self.c.output, Output::Sum { .. }) =>
+            {
+                let plan = narrow_division(self.f, args[0], args[1])?;
+                self.expression_width(args[0], depth + 1, shape)?;
+                self.c.divisions.insert(v, plan);
+            }
             D::Binary { op, args } => {
+                if matches!(op, B::Shl | B::Ushr | B::Sshr) && int_const(self.f, args[1]).is_none()
+                {
+                    return None;
+                }
                 self.target.binary(op, shape.lane_type())?;
                 for arg in args {
                     self.expression_width(arg, depth + 1, shape)?;
@@ -419,9 +484,10 @@ impl Analyze<'_> {
                 op: ConvertOp::Uext | ConvertOp::Sext,
                 arg,
                 ..
-            } if self.casts && shape == self.c.shape => {
-                // Keep lane count and address stride unchanged. A narrow value
-                // may only occur as the private intermediate of a round trip.
+            } if self.casts => {
+                // Preserve each scalar arithmetic ring. The private truncation
+                // becomes a destination-width mask/sign extension; a smaller
+                // input is widened before masking, without changing stream stride.
                 let narrow = def(self.f, arg)?;
                 let D::Convert {
                     op: ConvertOp::Trunc,
@@ -432,13 +498,20 @@ impl Analyze<'_> {
                     return None;
                 };
                 if self.f.inst_block(narrow) != self.c.body
-                    || self.f.value_type(input) != self.c.shape.lane_type()
+                    || self.f.value_type(input).bytes()? > shape.lane_type().bytes()?
+                    || !matches!(
+                        self.f.value_type(input),
+                        Type::I8 | Type::I16 | Type::I32 | Type::I64
+                    )
                     || !matches!(ty, Type::I8 | Type::I16 | Type::I32)
-                    || ty.bytes()? >= self.c.shape.lane_type().bytes()?
+                    || ty.bytes()? >= shape.lane_type().bytes()?
                 {
                     return None;
                 }
-                self.expression(input, depth + 1)?;
+                let source_shape = VectorType::ALL_128
+                    .into_iter()
+                    .find(|s| s.lane_type() == self.f.value_type(input))?;
+                self.expression_width(input, depth + 1, source_shape)?;
                 self.allowed.insert(narrow);
                 self.c.casts.insert(
                     v,
@@ -642,6 +715,7 @@ fn analyze(
         stream_bytes: shape.lane_type().bytes()?,
         widening_inputs: FxHashMap::default(),
         widths: FxHashMap::default(),
+        divisions: FxHashMap::default(),
     };
     let mut a = Analyze {
         f,
@@ -702,7 +776,7 @@ fn analyze(
         .collect::<FxHashSet<_>>()
         .len()
         > 4
-        || a.c.vectors.len() > 24
+        || a.c.vectors.len() > if a.c.divisions.is_empty() { 24 } else { 48 }
     {
         return None;
     }
@@ -1001,12 +1075,13 @@ fn reduce_body(
     casts.sort_by_key(|(v, _)| **v);
     for (&v, cast) in casts {
         let splat = |f: &mut Function, n| {
-            let scalar = iconst(f, setup, c.shape.lane_type(), n);
+            let shape = c.widths.get(&v).copied().unwrap_or(c.shape);
+            let scalar = iconst(f, setup, shape.lane_type(), n);
             emit(
                 f,
                 setup,
                 D::VectorSplat {
-                    ty: Type::Vector(c.shape),
+                    ty: Type::Vector(shape),
                     arg: scalar,
                 },
             )
@@ -1137,6 +1212,90 @@ fn reduce_body(
                     mapping.insert(result.unwrap(), loaded);
                     continue;
                 }
+                D::Binary { op: B::Sdiv, args } if c.divisions.contains_key(&result.unwrap()) => {
+                    let plan = c.divisions[&result.unwrap()];
+                    let input = mapping[&f.resolve(args[0])];
+                    let splat = |f: &mut Function, n| {
+                        let scalar = iconst(f, vector, Type::I32, n);
+                        emit(
+                            f,
+                            vector,
+                            D::VectorSplat {
+                                ty: Type::Vector(shape),
+                                arg: scalar,
+                            },
+                        )
+                    };
+                    let shift31 = splat(f, 31);
+                    let sign = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Sshr,
+                            args: [input, shift31],
+                        },
+                    );
+                    let biased = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Xor,
+                            args: [input, sign],
+                        },
+                    );
+                    let magnitude = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Isub,
+                            args: [biased, sign],
+                        },
+                    );
+                    let multiplier = splat(f, plan.multiplier);
+                    let product = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Imul,
+                            args: [magnitude, multiplier],
+                        },
+                    );
+                    let shift = splat(f, plan.shift);
+                    let quotient = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Ushr,
+                            args: [product, shift],
+                        },
+                    );
+                    let biased = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Xor,
+                            args: [quotient, sign],
+                        },
+                    );
+                    let quotient = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::Isub,
+                            args: [biased, sign],
+                        },
+                    );
+                    if plan.negative {
+                        let zero = splat(f, 0);
+                        D::VectorBinary {
+                            op: V::Isub,
+                            args: [zero, quotient],
+                        }
+                    } else {
+                        mapping.insert(result.unwrap(), quotient);
+                        continue;
+                    }
+                }
                 D::Binary { op, args } => D::VectorBinary {
                     op: target.binary(op, shape.lane_type()).unwrap(),
                     args: args.map(|v| mapping[&f.resolve(v)]),
@@ -1178,12 +1337,24 @@ fn reduce_body(
                     let v = result.unwrap();
                     let cast = c.casts[&v];
                     let (mask, sign) = cast_masks[&v];
+                    let mut input = mapping[&cast.input];
+                    if f.value_type(input) != Type::Vector(shape) {
+                        input = emit(
+                            f,
+                            vector,
+                            D::Convert {
+                                op: ConvertOp::UwidenLow,
+                                ty: Type::Vector(shape),
+                                arg: input,
+                            },
+                        );
+                    }
                     let masked = emit(
                         f,
                         vector,
                         D::VectorBinary {
                             op: V::And,
-                            args: [mapping[&cast.input], mask],
+                            args: [input, mask],
                         },
                     );
                     // Sign extension in the destination ring:
