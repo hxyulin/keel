@@ -203,3 +203,42 @@ fn incompatible_sections_retention_and_default_relro_still_reject_or_remain_dist
         }
     }
 }
+
+#[test]
+fn const_pointer_array_objects_keep_outer_qualifiers_and_typedefs() {
+    let source = r#"
+int anchor;
+int f(int x) {return x;}
+int (*const functions[2])(int)={f,f};
+int *const pointers[2]={&anchor,&anchor};
+int *const nested[1][2]={{&anchor,&anchor}};
+typedef int *const CP;
+CP aliases[2]={&anchor,&anchor};
+typedef int (*const CF)(int);
+CF function_aliases[2]={f,f};
+typedef const int CI;
+CI value=7;
+const int *mutable_pointers[2]={&anchor,&anchor};
+int (*mutable_functions[2])(int)={f,f};
+"#;
+    for target in [Target::X86_64LinuxGnu, Target::Aarch64LinuxGnu] {
+        let m = module(source, target);
+        for (name, expected) in [
+            ("functions", true),
+            ("pointers", true),
+            ("nested", true),
+            ("aliases", true),
+            ("function_aliases", true),
+            ("value", true),
+            ("mutable_pointers", false),
+            ("mutable_functions", false),
+        ] {
+            let object = m.data.iter().find(|d| d.name == name).unwrap();
+            assert_eq!(
+                object.init.as_ref().unwrap().constant,
+                expected,
+                "{name}, {target:?}"
+            );
+        }
+    }
+}

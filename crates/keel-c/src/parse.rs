@@ -1633,7 +1633,10 @@ impl<'a> Parser<'a> {
                     format!("`{name}`: objects of type `{what}` are not supported"),
                 ));
             }
-            let is_const = d.is_const || (spec.is_const && base);
+            // Array declarators clear the pointer-only flag above, but their
+            // elements can still be const pointers (including through typedefs).
+            let is_const =
+                d.is_const || (spec.is_const && base) || d.sugar.is_const(&self.typedefs);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if file_scope && spec.register_storage {
                 self.stack_pointer_declaration(spec, &d, label)?;
