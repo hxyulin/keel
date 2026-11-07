@@ -361,6 +361,12 @@ and restores the sign, preserving truncation toward zero. General packed
 integer division remains unsupported. SSE2 and Portable keep these shift and
 division expressions scalar.
 
+For a single ARM stream whose bounded-division expression ends in an i32-to-i64
+extension, the reduction computes four useful i32 lanes per chunk. It widens
+both halves into separate i64x2 accumulators before accumulating. Two chunks
+cover eight elements; the original scalar tail handles the remainder. No
+loop-carried sum is narrowed to i32.
+
 ## Baseline NEON semantic extensions
 
 Portable integer binary operations include `vsmin/vsmax/vumin/vumax`,

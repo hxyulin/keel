@@ -974,10 +974,58 @@ fn branch(
     );
 }
 
+/// Use every i32 lane only when one terminal extension feeds the i64 sum.
+fn split_narrow_sum(
+    f: &Function,
+    c: &Candidate,
+    target: VectorTarget,
+) -> Option<(Value, Value, ConvertOp)> {
+    let Output::Sum {
+        accumulator,
+        update,
+        ..
+    } = c.output
+    else {
+        return None;
+    };
+    if target != VectorTarget::Aarch64Neon
+        || c.shape != VectorType::I64x2
+        || c.divisions.is_empty()
+        || c.addresses.len() != 1
+        || !c.extra_sums.is_empty()
+    {
+        return None;
+    }
+    let D::Binary { op: B::Iadd, args } = *f.inst_data(def(f, update)?) else {
+        return None;
+    };
+    let wide = f.resolve(if f.resolve(args[0]) == accumulator {
+        args[1]
+    } else {
+        args[0]
+    });
+    let &(input, op) = c.widening_inputs.get(&wide)?;
+    if f.value_type(input) != Type::I32
+        || c.vectors
+            .iter()
+            .any(|&v| f.value_type(v) == Type::I64 && v != wide && v != update)
+    {
+        return None;
+    }
+    Some((
+        wide,
+        input,
+        if op == ConvertOp::Sext {
+            ConvertOp::SwidenLow
+        } else {
+            ConvertOp::UwidenLow
+        },
+    ))
+}
+
 /// Unroll a read-only reduction into independent wrapping recurrences. Stream
-/// pointers advance once per group; fixed 16-byte offsets expose load addressing
-/// modes without a chain of post-increment loads. A countdown avoids carrying an
-/// otherwise unused element induction through the vector body.
+/// pointers advance once per group; fixed offsets expose load addressing modes.
+/// A countdown avoids carrying an otherwise unused element induction variable.
 fn reduce_body(
     f: &mut Function,
     c: &Candidate,
@@ -1002,13 +1050,22 @@ fn reduce_body(
             .iter()
             .map(|r| (r.accumulator, r.initial, r.update)),
     );
-    let unroll = if reductions.len() == 1 && c.vectors.len() <= 8 && c.addresses.len() <= 2 {
+    // Keep the expression in i32x4, then widen both halves before adding to
+    // any carried sum. An i32 accumulator would wrap before the scalar i64 sum.
+    let split = split_narrow_sum(f, c, target);
+    let halves = if split.is_some() { 2 } else { 1 };
+    let lanes = i64::from(c.shape.lanes()) * halves as i64;
+    let unroll = if split.is_some() {
+        // Existing entry guards require eight elements for i64x2 sums.
+        // Two four-lane chunks fit that threshold, including tiny DAGs.
+        2
+    } else if reductions.len() == 1 && c.vectors.len() <= 8 && c.addresses.len() <= 2 {
         4
     } else {
         2
     };
     let ty = f.value_type(c.iv);
-    let group = i64::from(c.shape.lanes()) * unroll;
+    let group = lanes * unroll;
     let shift = iconst(f, setup, ty, i64::from(group.trailing_zeros()));
     let groups = bin(f, setup, B::Ushr, count, shift);
     let length = bin(f, setup, B::Shl, groups, shift);
@@ -1026,7 +1083,7 @@ fn reduce_body(
             arg: zero,
         },
     );
-    let sums: Vec<_> = (0..unroll as usize * reductions.len())
+    let sums: Vec<_> = (0..unroll as usize * reductions.len() * halves)
         .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
         .collect();
     let mut invariants = FxHashMap::default();
@@ -1144,7 +1201,7 @@ fn reduce_body(
                     f,
                     vector,
                     Type::I64,
-                    chunk as i64 * i64::from(c.shape.lanes()) * i64::from(c.stream_bytes),
+                    chunk as i64 * lanes * i64::from(c.stream_bytes),
                 );
                 bin(f, vector, B::Ptradd, p, offset)
             };
@@ -1152,6 +1209,9 @@ fn reduce_body(
         }
         for i in f.block_insts(c.body).to_vec() {
             let result = f.inst_results(i).first().copied().map(|v| f.resolve(v));
+            if split.is_some_and(|(wide, _, _)| result == Some(wide) || result == Some(update)) {
+                continue;
+            }
             if !result.is_some_and(|v| c.vectors.contains(&v)) {
                 continue;
             }
@@ -1203,7 +1263,11 @@ fn reduce_body(
                     let loaded = reduction_load(
                         f,
                         vector,
-                        c.shape,
+                        if split.is_some() {
+                            VectorType::I32x4
+                        } else {
+                            c.shape
+                        },
                         shape,
                         ty,
                         flags,
@@ -1384,7 +1448,39 @@ fn reduce_body(
             f.set_inst_loc(new, f.inst_loc(i));
             mapping.insert(result.unwrap(), f.first_result(new));
         }
-        next_sums.extend(reductions.iter().map(|&(_, _, update)| mapping[&update]));
+        if let Some((_, input, op)) = split {
+            let value = mapping[&input];
+            let high = emit(
+                f,
+                vector,
+                D::VectorShuffle {
+                    args: [value, value],
+                    lanes: vec![2, 3, 2, 3],
+                },
+            );
+            for (half, input) in [value, high].into_iter().enumerate() {
+                let widened = emit(
+                    f,
+                    vector,
+                    D::Convert {
+                        op,
+                        ty: Type::Vector(c.shape),
+                        arg: input,
+                    },
+                );
+                let sum = sums[chunk * halves + half];
+                next_sums.push(emit(
+                    f,
+                    vector,
+                    D::VectorBinary {
+                        op: V::Iadd,
+                        args: [sum, widened],
+                    },
+                ));
+            }
+        } else {
+            next_sums.extend(reductions.iter().map(|&(_, _, update)| mapping[&update]));
+        }
     }
     let step = iconst(f, vector, ty, group);
     let next = bin(f, vector, B::Isub, remaining, step);
@@ -1397,7 +1493,7 @@ fn reduce_body(
             f,
             vector,
             Type::I64,
-            unroll * i64::from(c.shape.lanes()) * i64::from(c.stream_bytes),
+            unroll * lanes * i64::from(c.stream_bytes),
         );
         args.push(bin(f, vector, B::Ptradd, pointers[&base], step));
     }
@@ -1408,7 +1504,7 @@ fn reduce_body(
     let mut tail = vec![end];
     for (index, &(_, initial, _)) in reductions.iter().enumerate() {
         let mut sum = next_sums[index];
-        for chunk in 1..unroll as usize {
+        for chunk in 1..unroll as usize * halves {
             sum = emit(
                 f,
                 finish,

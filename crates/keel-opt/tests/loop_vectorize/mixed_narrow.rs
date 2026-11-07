@@ -36,6 +36,10 @@ fn reference(input: &[i16]) -> i64 {
 fn narrow_mixed_rings_constant_shifts_and_division_vectorize_exactly() {
     let after = optimize(SOURCE, VectorTarget::Aarch64Neon);
     assert!(vectorized(&after), "{after}");
+    assert!(
+        after.to_string().contains("vshuffle"),
+        "four useful i32 lanes: {after}"
+    );
     let mut again = after.clone();
     keel_opt::run_passes_for_target(
         &mut again,
@@ -112,5 +116,49 @@ fn narrow_division_handles_negative_divisors_and_large_quotient_boundaries() {
                 "d={divisor}"
             );
         }
+    }
+}
+
+#[test]
+fn four_lane_small_dag_keeps_exact_threshold_and_i64_accumulator_ring() {
+    let source = "func @k_narrow(ptr,i64)->i64 {
+block0(v0:ptr,v1:i64):
+ v2=iconst.i64 0
+ v3=iconst.i64 9223372036854775800
+ jump block1(v2,v3)
+block1(v4:i64,v5:i64):
+ v6=icmp.ult v4,v1
+ brif v6,block2,block3
+block2:
+ v7=iconst.i64 1
+ v8=shl v4,v7
+ v9=ptradd v0,v8
+ v10=load.i16 trap_ub v9
+ v11=sext.i32 v10
+ v12=iconst.i32 7
+ v13=sdiv v11,v12
+ v14=sext.i64 v13
+ v15=iadd v5,v14
+ v16=iadd v4,v7
+ jump block1(v16,v15)
+block3:
+ return v5
+}";
+    let after = optimize(source, VectorTarget::Aarch64Neon);
+    assert!(after.to_string().contains("vshuffle"), "{after}");
+    let input: Vec<i16> = [i16::MIN, i16::MAX, 21, -28, 35, 42, 49, 56]
+        .into_iter()
+        .cycle()
+        .take(65536)
+        .collect();
+    for n in [0, 1, 7, 8, 9, 15, 16, 17, 65536] {
+        let expected = input[..n]
+            .iter()
+            .fold(i64::MAX - 7, |s, &x| s.wrapping_add(i64::from(x) / 7));
+        assert_eq!(
+            execute(&after, &input[..n], n as u64),
+            Outcome::Return(vec![Val::I64(expected as u64)]),
+            "n={n}"
+        );
     }
 }
