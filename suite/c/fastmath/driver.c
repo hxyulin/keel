@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-void fm_div(const float *, const float *, float *, unsigned);
+void fm_div(const float *, const float *, float *, unsigned long long);
 void fm_normalize(const float *, const float *, const float *, float *,
-                  unsigned);
-float fm_dot(const float *, const float *, unsigned);
+                  unsigned long long);
+float fm_dot(const float *, const float *, unsigned long long);
 static volatile float sink;
 static double now(void) {
   struct timespec t;

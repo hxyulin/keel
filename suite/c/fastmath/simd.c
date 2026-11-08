@@ -43,8 +43,8 @@ static V invroot(V x) {
 #else
 #error Unsupported SIMD target
 #endif
-void fm_div(const float *a, const float *b, float *out, unsigned n) {
-  unsigned i = 0;
+void fm_div(const float *a, const float *b, float *out, unsigned long long n) {
+  unsigned long long i = 0;
   for (; i + 4 <= n; i += 4) {
 #ifdef FAST_APPROX
     V r = mul(load(a + i), reciprocal(load(b + i)));
@@ -57,8 +57,8 @@ void fm_div(const float *a, const float *b, float *out, unsigned n) {
     out[i] = a[i] / b[i];
 }
 void fm_normalize(const float *x, const float *y, const float *z, float *out,
-                  unsigned n) {
-  unsigned i = 0;
+                  unsigned long long n) {
+  unsigned long long i = 0;
   for (; i + 4 <= n; i += 4) {
     V a = load(x + i), b = load(y + i), c = load(z + i);
     V s = add(add(mul(a, a), mul(b, b)), mul(c, c));
@@ -72,8 +72,8 @@ void fm_normalize(const float *x, const float *y, const float *z, float *out,
   for (; i < n; ++i)
     out[i] = x[i] / sqrtf(x[i] * x[i] + y[i] * y[i] + z[i] * z[i]);
 }
-float fm_dot(const float *a, const float *b, unsigned n) {
-  unsigned i = 0;
+float fm_dot(const float *a, const float *b, unsigned long long n) {
+  unsigned long long i = 0;
   float sum = 0, lanes[4];
 #ifdef FAST_APPROX
   V acc0 = zero(), acc1 = zero();

@@ -415,7 +415,9 @@ pub(super) fn run_observed_policy_budgeted(
             ))
         } else if let Some(&t) = templates.get(&decl.name) {
             let callee = template(&frozen, &module.functions, t);
-            if decl.sig != callee.sig {
+            if caller.attrs.fast_math != callee.attrs.fast_math {
+                Some(("floating math mode mismatch", "math_mode_mismatch"))
+            } else if decl.sig != callee.sig {
                 Some(("ABI signature mismatch", "abi_signature_mismatch"))
             } else if !caller
                 .attrs

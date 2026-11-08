@@ -545,10 +545,12 @@ python3 suite/c/fastmath/run.py --keel target/release/keel \
   --out target/fastmath-baseline
 ```
 
-The six rows are scalar C compiled by Clang/LLVM at `-O3` with strict math
+The seven rows are scalar C compiled by Clang/LLVM at `-O3` with strict math
 or `-ffast-math`, handwritten four-lane SIMD C with strict math or fast math,
-and the same scalar C through Keel with and without `-O`. Keel has no
-fast-math mode yet. The handwritten paths use SSE on x86-64 and NEON on
+and the same scalar C through Keel with and without `-O`, plus
+`keel-fast` using `-O -ffast-math`. Counts use unsigned 64-bit integers to
+exercise the native counted-loop matcher. The compiler mode is described in
+[function attributes](../docs/compiler/function-attributes.md#floating-point-math-mode). The handwritten paths use SSE on x86-64 and NEON on
 AArch64. They establish a portable ISA baseline, not the ceiling for AVX,
 AVX-512 or wider/unrolled NEON implementations. There is no handwritten
 assembly row yet. Kernel assembly and objects remain in the output directory

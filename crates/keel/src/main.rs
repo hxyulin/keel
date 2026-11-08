@@ -1,9 +1,9 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
-//! keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
-//! keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
+//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
+//! keel cc [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
+//! keel opt [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -44,9 +44,9 @@ mod wasm;
 mod x86_options;
 
 const USAGE: &str = "usage:
-  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
-  keel cc [-O0|-O1|-O2|-O3|-Os] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
-  keel opt [-O0|-O1|-O2|-O3|-Os] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
+  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
+  keel cc [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
+  keel opt [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
   keel compile|cc [--codegen-report <new-report.json>] <input> [-o <output>]
@@ -123,6 +123,7 @@ struct Options {
     output: Option<String>,
     opt_report: Option<String>,
     codegen_report: Option<String>,
+    fast_math: bool,
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
     optimizer: keel_opt::OptimizeOptions,
@@ -173,6 +174,9 @@ impl Options {
         }
         if self.optimization == keel_opt::OptimizationTier::Size {
             defines.push(("__OPTIMIZE_SIZE__".into(), Some("1".into())));
+        }
+        if self.fast_math {
+            defines.push(("__FAST_MATH__".into(), Some("1".into())));
         }
         // Explicit -D/-U overrides compiler-provided macros.
         defines.extend(self.defines.iter().cloned());
@@ -232,6 +236,12 @@ impl Options {
 
     /// Explicit pipelines override tier presets, independently of flag order.
     fn optimize(&self, module: &mut Module) -> Result<(), String> {
+        if self.fast_math {
+            for function in &mut module.functions {
+                function.attrs.fast_math = true;
+            }
+            module.sync_function_attrs();
+        }
         let names: Vec<_> = self
             .passes
             .as_ref()
@@ -381,6 +391,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "-fbuiltin" => opts.no_builtin = false,
+            "-ffast-math" => opts.fast_math = true,
+            "-fno-fast-math" => opts.fast_math = false,
             "-fno-builtin" => opts.no_builtin = true,
             "-ffreestanding" => {
                 opts.freestanding = true;
@@ -708,6 +720,9 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     if opts.optimizer.print_function.is_some() && !opts.optimizer.print_changed {
         return Err("`--opt-function` needs `--print-changed`".into());
     }
+    if opts.fast_math && (opts.emit_wasm || opts.target == Some(Target::Wasm32UnknownUnknown)) {
+        return Err("`-ffast-math` currently requires a native target".into());
+    }
     if opts.emit_ir && opts.emit_object {
         return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
     }
@@ -876,6 +891,8 @@ fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, Stri
 // The flags each subcommand that uses `parse_options` accepts.
 const ASM_METRICS_FLAGS: &[&str] = &["-o", "--target", "--cpu-level", "--target-features"];
 const COMPILE_FLAGS: &[&str] = &[
+    "-ffast-math",
+    "-fno-fast-math",
     "-o",
     "--internalize",
     "-O",
@@ -917,6 +934,8 @@ const COMPILE_FLAGS: &[&str] = &[
     "--cpu-level",
 ];
 const CC_FLAGS: &[&str] = &[
+    "-ffast-math",
+    "-fno-fast-math",
     "-o",
     "-flto",
     "--internalize",
@@ -977,6 +996,8 @@ const CC_FLAGS: &[&str] = &[
     "--cpu-level",
 ];
 const OPT_FLAGS: &[&str] = &[
+    "-ffast-math",
+    "-fno-fast-math",
     "-o",
     "-p",
     "--opt-tier",

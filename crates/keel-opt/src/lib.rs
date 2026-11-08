@@ -29,6 +29,7 @@ mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
 mod dce;
 mod fast;
+mod fast_math;
 mod function_policy;
 mod gcm;
 mod gvn;
@@ -265,6 +266,11 @@ impl Pass for BuiltinPass {
 // The registry. Each pass is one named static; `PASSES` lists them in
 // `keel passes` order. Code that needs a particular pass uses its static, so
 // a pass's name decides nothing but its lookup.
+pub(crate) static FAST_MATH: &dyn Pass = &BuiltinPass::new(
+    "fast-math",
+    "simplify finite floating algebra and contract native multiply/add in fast_math functions",
+    fast_math::run,
+);
 pub(crate) static FAST_CFG: &dyn Pass = &fast::Cfg;
 pub(crate) static FAST_LOCAL: &dyn Pass = &fast::Local;
 pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
@@ -365,6 +371,7 @@ pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
     |f, _| if_convert::run(f),
 );
 pub(crate) static LOAD_REUSE: &dyn Pass = &load_reuse::LoadReuse;
+pub(crate) static FAST_LOOP_DOT: &dyn Pass = &loop_dot::FastLoopDot;
 pub(crate) static LOOP_DOT: &dyn Pass = &loop_dot::LoopDot;
 pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
 pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
@@ -409,6 +416,7 @@ pub static PASSES: &[&dyn Pass] = &[
     MEMORY_EXPAND,
     STACK_NOTRAP,
     CONST_FOLD,
+    FAST_MATH,
     SIMPLIFY_CFG,
     GVN,
     DCE,
@@ -428,6 +436,7 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_UNROLL,
     LOOP_UNROLL_EXACT,
     LOOP_DOT,
+    FAST_LOOP_DOT,
     LOOP_VECTORIZE,
     LOOP_REDUCE,
     LOOP_REDUCE_MULTI,
@@ -649,7 +658,7 @@ const RELEASE_ROUND_MEMORY: [&str; 6] = [
     "dce",
 ];
 /// Known-bit, call and reachability cleanup closing Balanced and Size.
-const RELEASE_EPILOGUE: [&str; 12] = [
+const RELEASE_EPILOGUE: [&str; 13] = [
     "constant-args",
     "known-bits",
     "canonicalize",
@@ -660,6 +669,7 @@ const RELEASE_EPILOGUE: [&str; 12] = [
     "dce",
     "unused-functions",
     "private-aggregate-cleanup",
+    "fast-math",
     "internal-fast-calls",
     "tail-calls",
 ];
@@ -712,7 +722,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
     run_passes(module, tier.pipeline())
 }
 
-const FULL_ROUND: [&str; 17] = [
+const FULL_ROUND: [&str; 18] = [
     "inline-cheap-reserve",
     "simplify-cfg",
     "canonicalize",
@@ -728,11 +738,12 @@ const FULL_ROUND: [&str; 17] = [
     "dce",
     "gcm",
     "adjacent-abs",
+    "fast-loop-dot",
     "loop-vectorize",
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 31] = [
+const FULL_EPILOGUE: [&str; 32] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -760,6 +771,7 @@ const FULL_EPILOGUE: [&str; 31] = [
     "unused-functions",
     "dce",
     "private-aggregate-cleanup",
+    "fast-math",
     "internal-fast-calls",
     "tail-calls",
     "branch-facts",

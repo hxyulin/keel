@@ -21,7 +21,7 @@ block0(v0: i32):
 
 The printer writes them in this order: `weak constructor used retain
 destructor noninterposable no_semantic_interposition inlinehint alwaysinline
-noinline noreturn nounwind cold hot optnone flatten no_instrument_function
+noinline fast_math noreturn nounwind cold hot optnone flatten no_instrument_function
 no_profile_instrument_function naked interrupt`. The parser rejects duplicate and malformed tokens. The verifier rejects
 `alwaysinline` with `noinline`, and `noreturn` with `returns_twice`, on declarations,
 definitions and callee records. It requires direct callee attributes to agree
@@ -341,3 +341,34 @@ Intent describes the eventual link destination, not the immediate output format.
 The command still emits assembly, IR or an object as requested; it does not link
 an executable or implement PIC/PIE relocation modes. These intent flags are native
 C compilation options and are rejected for Wasm and other subcommands.
+
+## Floating-point math mode
+
+`fast_math` belongs to a function body. It permits finite-only algebra,
+reassociation and fused multiply-add contraction. Inputs and intermediate
+floating results are assumed finite. The compiler need not preserve NaNs,
+infinities, signed zero, dynamic rounding modes or floating exception state.
+This permission does not change integer, pointer, memory or ABI rules.
+It does not enable process-wide flush-to-zero or promise a universal error bound.
+Subnormal results can still suffer rounding and underflow from reassociation;
+this mode supplies no special accuracy guarantee for them.
+
+Native `cc`, `compile` and `opt` accept `-ffast-math` to mark every input
+function. `-fno-fast-math` is the default; the last flag wins. Disabling the
+command-line flag does not revoke permissions already stored in input IR or
+undo earlier transformations. C preprocessing defines `__FAST_MATH__=1` when
+the flag is enabled. Wasm rejects the flag for now.
+
+The mode survives text serialization and module merging. Merging declaration
+attributes does not change the destination body's math mode. Both optional
+and mandatory inlining reject different modes, in either direction, so a
+strict body cannot acquire relaxed arithmetic from its caller. An
+`alwaysinline` requirement across that boundary is diagnosed.
+
+The first implementation enables finite scalar identities and AArch64 scalar
+FMA in Balanced, Size and Full pipelines. Full also enables independent SIMD
+dot accumulators on AArch64 NEON and x86 SSE2. Passes still obey function-local
+optimization policy and optimization levels; `-O0` records the permission
+without performing optional transformations. x86 FMA contraction and reciprocal
+estimate substitution are not enabled by this implementation. Explicit
+approximation intrinsics keep their existing semantics in either mode.

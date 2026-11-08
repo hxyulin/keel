@@ -262,6 +262,9 @@ impl Signature {
 /// Function symbol binding, promises and optimization policy, separate from ABI types.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
+    /// Permit finite-only floating algebra, reassociation and contraction.
+    /// NaNs, infinities, signed zero and floating exception state are not preserved.
+    pub fast_math: bool,
     /// Ordered x86 ISA permission edits, independent of optimization policy.
     pub target_features: crate::X86TargetFeatures,
     /// Scoped semantic promises, independent of the ABI signature.
@@ -314,6 +317,7 @@ pub struct FunctionAttrs {
 }
 
 impl FunctionAttrs {
+    /// Merge declaration promises while preserving the destination body's math mode.
     pub fn merge(&mut self, other: Self) {
         self.target_features.append(&other.target_features);
         self.contract = self.contract.intersect(&other.contract);
@@ -387,6 +391,7 @@ impl fmt::Display for FunctionAttrs {
             (self.inlinehint, "inlinehint"),
             (self.alwaysinline, "alwaysinline"),
             (self.noinline, "noinline"),
+            (self.fast_math, "fast_math"),
             (self.noreturn, "noreturn"),
             (self.nounwind, "nounwind"),
             (self.cold, "cold"),

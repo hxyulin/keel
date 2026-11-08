@@ -372,6 +372,9 @@ fn expand_required_calls(
                 if decl.attrs.noinline {
                     return Err(fail("noinline conflicts with always_inline"));
                 }
+                if caller.attrs.fast_math != callee.attrs.fast_math {
+                    return Err(fail("floating math mode mismatch"));
+                }
                 if decl.sig != callee.sig {
                     return Err(fail("ABI signature mismatch"));
                 }

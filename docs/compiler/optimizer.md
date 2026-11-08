@@ -125,6 +125,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `gcm` | Global code motion, the scheduler for floating instructions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
+| `fast-math` | Finite scalar algebra and AArch64 scalar contraction, only in `fast_math` functions |
+| `fast-loop-dot` | Full-tier SIMD dot accumulation, only in `fast_math` functions |
 | `loop-dot` (opt-in) | Batch floating dot products while preserving scalar addition order; see [SIMD IR](simd-ir.md) |
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |

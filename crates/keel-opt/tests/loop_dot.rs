@@ -177,3 +177,27 @@ fn wrapping_ranges_take_original_scalar_path() {
         .count();
     assert_eq!(vectors, 4);
 }
+
+#[test]
+fn relaxed_dot_uses_vector_recurrences_and_preserves_seed_and_tails() {
+    for ty in ["f32", "f64"] {
+        let src = source(ty);
+        let src = src.replacen(" {\n", " fast_math {\n", 1);
+        for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+            let m = optimize(&src, target);
+            assert!(m.to_string().contains("vfadd"), "{m}");
+            let left: Vec<_> = (0..101).map(|i| (i as f64 - 50.0) / 8.0).collect();
+            let right: Vec<_> = (0..101).map(|i| (i % 7) as f64 / 4.0).collect();
+            for n in [0, 1, 7, 8, 9, 16, 17, 101] {
+                let expected = 3.5
+                    + left[..n]
+                        .iter()
+                        .zip(&right[..n])
+                        .map(|(a, b)| a * b)
+                        .sum::<f64>();
+                let actual = execute(&m, &left[..n], &right[..n], 3.5).as_f64().unwrap();
+                assert_eq!(actual, expected, "{ty}, {target:?}, n={n}");
+            }
+        }
+    }
+}

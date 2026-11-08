@@ -194,8 +194,10 @@ The opt-in `loop-dot` pass handles read-only floating dot products on the native
 128-bit targets. It accepts zero-based unsigned i64 counted loops with f32 or
 f64 products from two contiguous streams and one scalar accumulator. Batches of
 eight compute products in vectors, extract lanes in input order, then apply the
-original left-to-right scalar additions. No sum reassociation or fused multiply
-add is introduced. Every load must be nonvolatile and carry `notrap` or `trap_ub`.
+original left-to-right scalar additions in strict functions. In `fast_math`
+functions it instead uses one independent vector accumulator per chunk and
+reduces them once before the scalar tail. The Full pipeline schedules this
+relaxed recipe through `fast-loop-dot`, which does nothing to strict functions. Every load must be nonvolatile and carry `notrap` or `trap_ub`.
 Range guards reject wrapping byte counts or pointer ranges. The original loop
 handles those inputs, short ranges and the tail. Other recurrences, observable
 loads and functions with debugger variable metadata stay scalar. Select this

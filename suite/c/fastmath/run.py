@@ -34,7 +34,7 @@ def main():
               'sources': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in (source / n for n in ('scalar.c', 'simd.c', 'driver.c', 'run.py'))},
               'commands': [], 'samples': [], 'summary': [],
-              'keel_fast_math': 'unsupported; Keel rows use strict arithmetic'}
+              'keel_fast_math': 'function-scoped finite algebra, reassociation and contraction'}
 
     def save():
         (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -61,6 +61,7 @@ def main():
         'hand-fast': ('simd.c', [clang, '-O3', '-ffast-math', '-DFAST_APPROX']),
         'keel': ('scalar.c', [keel, 'cc']),
         'keel-O': ('scalar.c', [keel, 'cc', '-O']),
+        'keel-fast': ('scalar.c', [keel, 'cc', '-O', '-ffast-math']),
     }
     for name, (file, command) in configs.items():
         obj = out / (name + '.o')

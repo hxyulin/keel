@@ -1,4 +1,4 @@
-//! Ordered floating dot products: packed loads/products, scalar left folds.
+//! Floating dot products: ordered scalar folds or explicitly relaxed SIMD sums.
 //!
 //! Only read-only, zero-based unsigned i64 loops over two contiguous streams
 //! qualify. Reordered loads must be nonvolatile and either notrap or trap_ub.
@@ -12,6 +12,24 @@ use keel_ir::{
     Type, Value, VectorBinaryOp, VectorType,
 };
 
+pub(crate) struct FastLoopDot;
+impl crate::Pass for FastLoopDot {
+    fn name(&self) -> &'static str {
+        "fast-loop-dot"
+    }
+    fn description(&self) -> &'static str {
+        "vectorize reassociated dot products in fast_math functions"
+    }
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
+    }
+    fn deterministic(&self) -> bool {
+        true
+    }
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        f.attrs.fast_math && LoopDot.run(f, context)
+    }
+}
 pub(crate) struct LoopDot;
 impl crate::Pass for LoopDot {
     fn name(&self) -> &'static str {
@@ -234,6 +252,14 @@ fn transform(f: &mut Function, c: Candidate) {
         f.append_block_param(body, Type::Ptr),
         f.append_block_param(body, Type::Ptr),
     ];
+    let relaxed = f.attrs.fast_math;
+    let accumulators: Vec<_> = if relaxed {
+        (0..GROUP / i64::from(c.shape.lanes()))
+            .map(|_| f.append_block_param(body, Type::Vector(c.shape)))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let bytes = c
         .shape
         .lane_type()
@@ -280,6 +306,26 @@ fn transform(f: &mut Function, c: Candidate) {
     let group_shift = integer(f, guard, i64::from(GROUP.trailing_zeros()));
     let groups = bin(f, guard, B::Ushr, c.bound, group_shift);
     let end = bin(f, guard, B::Shl, groups, group_shift);
+    let mut initial = vec![groups, c.seed, c.streams[0].base, c.streams[1].base];
+    if relaxed {
+        let zero = emit(
+            f,
+            guard,
+            D::Fconst {
+                ty: c.shape.lane_type(),
+                bits: 0,
+            },
+        );
+        let zero = emit(
+            f,
+            guard,
+            D::VectorSplat {
+                ty: Type::Vector(c.shape),
+                arg: zero,
+            },
+        );
+        initial.extend(accumulators.iter().map(|_| zero));
+    }
     f.append_inst(
         guard,
         D::Brif {
@@ -287,7 +333,7 @@ fn transform(f: &mut Function, c: Candidate) {
             dests: [
                 BlockCall {
                     block: body,
-                    args: vec![groups, c.seed, c.streams[0].base, c.streams[1].base],
+                    args: initial,
                 },
                 BlockCall {
                     block: c.header,
@@ -330,16 +376,71 @@ fn transform(f: &mut Function, c: Candidate) {
         ));
     }
     let mut total = sum;
-    for product in products {
-        for lane in 0..c.shape.lanes() {
-            let value = emit(f, body, D::VectorExtract { arg: product, lane });
-            total = bin(f, body, B::Fadd, total, value);
+    let mut next_accumulators = Vec::new();
+    if relaxed {
+        for (acc, product) in accumulators.iter().zip(products) {
+            next_accumulators.push(emit(
+                f,
+                body,
+                D::VectorBinary {
+                    op: VectorBinaryOp::Fadd,
+                    args: [*acc, product],
+                },
+            ));
+        }
+    } else {
+        for product in products {
+            for lane in 0..c.shape.lanes() {
+                let value = emit(f, body, D::VectorExtract { arg: product, lane });
+                total = bin(f, body, B::Fadd, total, value);
+            }
         }
     }
     let stride = integer(f, body, GROUP * i64::from(bytes));
     let next_pointers = pointers.map(|p| bin(f, body, B::Ptradd, p, stride));
     let one = integer(f, body, 1);
     let next_groups = bin(f, body, B::Isub, groups_left, one);
+    let mut back_args = vec![next_groups, total, next_pointers[0], next_pointers[1]];
+    let exit = if relaxed {
+        let reduce = f.create_block();
+        let mut vectors = next_accumulators.iter().copied();
+        let mut packed = vectors
+            .next()
+            .expect("eight-element group has vector accumulators");
+        for other in vectors {
+            packed = emit(
+                f,
+                reduce,
+                D::VectorBinary {
+                    op: VectorBinaryOp::Fadd,
+                    args: [packed, other],
+                },
+            );
+        }
+        for lane in 0..c.shape.lanes() {
+            let value = emit(f, reduce, D::VectorExtract { arg: packed, lane });
+            total = bin(f, reduce, B::Fadd, total, value);
+        }
+        f.append_inst(
+            reduce,
+            D::Jump {
+                dest: BlockCall {
+                    block: c.header,
+                    args: vec![end, total],
+                },
+            },
+        );
+        back_args.extend(next_accumulators);
+        BlockCall {
+            block: reduce,
+            args: vec![],
+        }
+    } else {
+        BlockCall {
+            block: c.header,
+            args: vec![end, total],
+        }
+    };
     f.append_inst(
         body,
         D::Brif {
@@ -347,12 +448,9 @@ fn transform(f: &mut Function, c: Candidate) {
             dests: [
                 BlockCall {
                     block: body,
-                    args: vec![next_groups, total, next_pointers[0], next_pointers[1]],
+                    args: back_args,
                 },
-                BlockCall {
-                    block: c.header,
-                    args: vec![end, total],
-                },
+                exit,
             ],
         },
     );
