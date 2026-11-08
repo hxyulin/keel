@@ -158,6 +158,15 @@ pub(crate) fn debug_check_stamp(func: &Function) {
     }
 }
 
+/// Release an analysis owned by a temporary function before its storage dies.
+pub(crate) fn forget(func: &Function) {
+    CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .remove(&(func as *const Function as usize))
+    });
+}
+
 /// Drops every cached analysis; the pipeline ends with this.
 pub(crate) fn clear() {
     let entries = CACHE.with(|cache| std::mem::take(&mut *cache.borrow_mut()));

@@ -1,4 +1,5 @@
 //! Fold comparisons established by a dominating conditional edge.
+mod ranges;
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Function, InstData, IntCC, ValueDef};
 
@@ -81,4 +82,10 @@ pub fn run(f: &mut Function) -> bool {
         crate::dce::run(f);
     }
     changed
+}
+
+/// Explicit range propagation leaves the default exact-comparison pass intact.
+pub fn run_ranges(f: &mut Function) -> bool {
+    let changed = run(f);
+    ranges::run(f) || changed
 }

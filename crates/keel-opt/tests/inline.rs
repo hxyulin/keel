@@ -1,3 +1,5 @@
+#[path = "inline/call_specialization.rs"]
+mod call_specialization;
 #[path = "inline/leaf_switch_inline.rs"]
 mod leaf_switch_inline;
 #[path = "inline/public_required_inline.rs"]

@@ -398,6 +398,11 @@ pub(crate) static BRANCH_FACTS: &dyn Pass = &BuiltinPass::new(
     "fold integer comparisons known from dominating edges",
     |f, _| branch_facts::run(f),
 );
+pub(crate) static RANGE_FACTS: &dyn Pass = &BuiltinPass::new(
+    "range-facts",
+    "fold bounded signed and unsigned ranges on dominating edges",
+    |f, _| branch_facts::run_ranges(f),
+);
 pub(crate) static OUTLINE_COLD: &dyn Pass = &outline_cold::OutlineCold;
 pub(crate) static EMPTY_CALLS: &dyn Pass = &module_cleanup::EmptyCalls;
 pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions;
@@ -450,6 +455,7 @@ pub static PASSES: &[&dyn Pass] = &[
     TAIL_CALLS,
     OUTLINE_COLD,
     BRANCH_FACTS,
+    RANGE_FACTS,
     CONSTANT_ARGS,
     EMPTY_CALLS,
     UNUSED_FUNCTIONS,

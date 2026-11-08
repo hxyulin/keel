@@ -141,6 +141,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
 | `branch-facts` | Fold repeated or complementary integer comparisons established by dominating edges |
+| `range-facts` (opt-in) | Extend branch facts with scoped constant bounds and bounded integer arithmetic |
 | `outline-cold` | Tail-outline bounded terminal panic records into private cold helpers |
 | `fast-cfg`, `fast-local`, `fast-loop-reduce` | The bounded Fast tier; see [Fast](#fast-tier) |
 
@@ -326,6 +327,24 @@ The binding-aware variants also admit public definitions that carry a
 `noninterposable` or `no_semantic_interposition` promise. Limits, exclusions
 and skip reports are owned by
 [function attributes](function-attributes.md#inliner-policy-and-hard-boundaries).
+
+Full can reconsider a legal callee rejected for its block or instruction count
+when a call supplies integer literals. It simplifies an acyclic private template
+copy before admission. The selected body must fit the existing five-instruction
+call-cost allowance; larger selected paths retain the call. The original
+definition and ABI stay unchanged. Existing
+binding, math-mode, target-feature and function-policy checks still apply.
+Costing uses the simplified template while preserving the existing cheap-call
+exemption and pipeline-wide growth budgets. No
+specialized module definitions are created. Balanced and Size retain their
+existing admission rules.
+
+This speculative work is bounded per inliner invocation: 64 distinct contexts,
+at most four per callee, 64 laid-out blocks and 256 instructions per input body,
+with separate arena and metadata limits. Templates with source locations,
+debugger homes or explicit aggregate parameter transport decline. Failed
+contexts are cached too. Temporary templates release their address-keyed
+analyses before their storage dies. Cloned calls still wait for the next round.
 
 The signature must match exactly. Each site gets fresh blocks, values and
 stack slots, remapped symbol and signature tables, and a continuation whose
@@ -692,10 +711,20 @@ values). Division by zero and signed MIN/-1 still trap; signed MIN % -1 is zero.
 ## Terminal panic records
 
 Full runs `branch-facts` and `outline-cold` after tail-call cleanup. Branch facts
-use canonical integer comparisons and their complements, preserving signedness.
+use canonical integer comparisons and their complements. The opt-in
+`range-facts` pass also propagates scoped signed/unsigned constant bounds for
+i8 through i64. They also track zero/nonzero conditions and
+bounded add/subtract expressions when their endpoints stay in the relevant
+integer domain. Bitwise AND supplies an unsigned upper bound. Signed and
+unsigned intervals only constrain each other when their sign region is known;
+a wrapped endpoint never becomes a nonwrapping bound. Each expression query
+visits at most sixteen definitions. No default tier schedules `range-facts`.
+
 Only a unique incoming conditional edge establishes a new fact; joins, loops
-with another predecessor, and duplicate branch destinations do not. A fold
-runs CFG cleanup and DCE so unreachable panic records stop consuming storage.
+with another predecessor, and duplicate branch destinations do not. Facts are
+restored on leaving each dominator subtree. This is neither a loop fixed point
+nor a general relational range solver. A fold runs CFG cleanup and DCE so
+unreachable panic records stop consuming storage.
 
 Cold outlining accepts a private Fast function with at most 256 laid-out
 instructions and 4096 instruction/value arena entries. It moves a terminal trap

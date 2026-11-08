@@ -151,6 +151,8 @@ pub(super) fn run_observed_policy_budgeted(
     // profitability); the event stream uses these decisions, not a later probe.
     let mut templates = FxHashMap::default();
     let mut rejected = FxHashMap::default();
+    let mut specialization_only = FxHashSet::default();
+    let mut specialized = super::specialize::Cache::default();
     for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f, admit_noninterposable);
         let profitability = if legality.is_none() && !flatten {
@@ -167,6 +169,16 @@ pub(super) fn run_observed_policy_budgeted(
             legality.or(profitability)
         };
         if let Some(reason) = reason {
+            if cheap_reserve
+                && matches!(
+                    reason,
+                    "profitability_blocks" | "profitability_instructions"
+                )
+                && super::specialize::eligible(f)
+            {
+                templates.insert(f.name.clone(), index);
+                specialization_only.insert(index);
+            }
             rejected.insert(f.name.clone(), reason);
         } else {
             templates.insert(f.name.clone(), index);
@@ -380,6 +392,16 @@ pub(super) fn run_observed_policy_budgeted(
             || templates
                 .get(&decl.name)
                 .is_some_and(|&t| template(&frozen, &module.functions, t).attrs.alwaysinline);
+        let specialization = templates.get(&decl.name).copied().and_then(|t| {
+            (specialization_only.contains(&t)
+                && !caller.attrs.optnone
+                && !decl.attrs.noinline
+                && !decl.attrs.optnone
+                && keel_ir::FunctionPolicy::resolve(&caller.attrs)
+                    .is_ok_and(|p| p.permits_inlining()))
+            .then(|| specialized.get(t, template(&frozen, &module.functions, t), caller, call))
+            .flatten()
+        });
         let reason = if caller.sig.returns_twice || caller.personality.is_some() {
             Some((
                 "unsupported caller",
@@ -414,7 +436,10 @@ pub(super) fn run_observed_policy_budgeted(
                 "recursive_wrapper_caller_size",
             ))
         } else if let Some(&t) = templates.get(&decl.name) {
-            let callee = template(&frozen, &module.functions, t);
+            let callee = specialization.map_or_else(
+                || template(&frozen, &module.functions, t),
+                |s| specialized.bodies[s].function.as_ref(),
+            );
             if caller.attrs.fast_math != callee.attrs.fast_math {
                 Some(("floating math mode mismatch", "math_mode_mismatch"))
             } else if decl.sig != callee.sig {
@@ -451,7 +476,7 @@ pub(super) fn run_observed_policy_budgeted(
                             && !roots.contains(&callee.name)))
             } {
                 Some(("size profitability", "size_profitability"))
-            } else if !caller.attrs.flatten && flatten {
+            } else if (!caller.attrs.flatten && flatten) || specialization_only.contains(&t) {
                 profitability_reason(callee, admit_noninterposable)
                     .map(|r| ("profitability threshold", r))
             } else {
@@ -494,14 +519,19 @@ pub(super) fn run_observed_policy_budgeted(
             continue;
         }
         let callee_index = templates[&decl.name];
-        let callee = template(&frozen, &module.functions, callee_index);
+        let callee = specialization.map_or_else(
+            || template(&frozen, &module.functions, callee_index),
+            |s| specialized.bodies[s].function.as_ref(),
+        );
         // Bound net layout growth before cleanup. The entry jump replaces
         // the removed call; each cloned return becomes one jump. The
         // continuation only receives moved instructions and parameters.
         // Counting all callee instructions also covers unreachable blocks
         // that the dominator traversal may omit. Snapshot IR is additional.
-        let (cost, stack_cost) =
-            *template_costs[callee_index].get_or_insert_with(|| inline_cost(callee));
+        let (cost, stack_cost) = specialization.map_or_else(
+            || *template_costs[callee_index].get_or_insert_with(|| inline_cost(callee)),
+            |s| specialized.bodies[s].cost,
+        );
         let InstData::Call { args, .. } = caller.inst_data(call) else {
             unreachable!("only direct calls reach the budget check")
         };
@@ -569,9 +599,16 @@ pub(super) fn run_observed_policy_budgeted(
             frozen[index] = Some(Box::new(caller.clone()));
         }
         // A recursive call was rejected above, so the callee is another function.
-        let (caller, callee) = match frozen[callee_index].as_deref() {
-            Some(callee) => (&mut module.functions[index], callee),
-            None => two_functions(&mut module.functions, index, callee_index),
+        let (caller, callee) = if let Some(s) = specialization {
+            (
+                &mut module.functions[index],
+                specialized.bodies[s].function.as_ref(),
+            )
+        } else {
+            match frozen[callee_index].as_deref() {
+                Some(callee) => (&mut module.functions[index], callee),
+                None => two_functions(&mut module.functions, index, callee_index),
+            }
         };
         inline_call(caller, call, callee);
         if let Some(before) = before {

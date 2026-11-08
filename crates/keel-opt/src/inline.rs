@@ -14,6 +14,7 @@ mod cost;
 mod eligibility;
 mod required;
 mod schedule;
+mod specialize;
 
 pub(crate) use cost::CHEAP_MODULE_GROWTH;
 pub use required::{
