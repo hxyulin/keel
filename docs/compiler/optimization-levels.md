@@ -103,8 +103,10 @@ call-padding removal, smaller epilogues and profitable return sharing.
 `KEEL_TARGET_BYTE_SIZE=1` enables an experimental target byte estimate for
 optional Size inlining. It scans at most 128 IR instructions, estimates fixed
 four-byte AArch64 instructions (including wide-constant materialization), and
-uses bounded x86 instruction allowances. Duplicated bodies have a 32-byte
-allowance; a removable single-use private body has 512 bytes. Inline assembly,
+uses bounded x86 instruction allowances. Duplicated bodies have a 64-byte
+allowance, including credit for eliminating call and frame overhead. Removable
+single-use private bodies bypass this filter because their out-of-line code
+disappears. Inline assembly,
 and intrinsics have no estimate and remain calls. Portable targets keep the
 existing IR policy. Required
 inlining and flatten retain their contracts. This is an admission filter, not

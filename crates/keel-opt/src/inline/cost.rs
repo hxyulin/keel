@@ -755,10 +755,10 @@ mod budget_tests {
 /// Bounded emission estimate, not an object-size promise. Single-use private
 /// bodies can disappear; duplicated bodies get only a small call-site allowance.
 pub(super) fn size_bytes_fit(f: &Function, target: crate::VectorTarget, removable: bool) -> bool {
-    if target == crate::VectorTarget::Portable {
+    if removable || target == crate::VectorTarget::Portable {
         return true;
     }
-    target_bytes(f, target).is_some_and(|bytes| bytes <= if removable { 512 } else { 32 })
+    target_bytes(f, target).is_some_and(|bytes| bytes <= 64)
 }
 
 fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
@@ -826,6 +826,15 @@ mod byte_tests {
         assert_eq!(target_bytes(f, crate::VectorTarget::Aarch64Neon), Some(20));
         assert_eq!(target_bytes(f, crate::VectorTarget::X86Sse2), Some(11));
         assert_eq!(target_bytes(f, crate::VectorTarget::Portable), None);
+    }
+    #[test]
+    fn removable_body_does_not_need_a_byte_allowance() {
+        let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
+        assert!(size_bytes_fit(
+            &module.functions[0],
+            crate::VectorTarget::Aarch64Neon,
+            true
+        ));
     }
     #[test]
     fn negative_constant_uses_movn_allowance() {
