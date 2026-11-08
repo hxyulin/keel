@@ -33,6 +33,7 @@ fn run_observed_policy(
             admit_noninterposable,
             cheap_reserve,
             cost: InlineCost::Default,
+            ..InlinePolicy::DEFAULT
         },
         None,
     )
@@ -63,6 +64,7 @@ pub(super) fn run_observed_policy_budgeted(
         admit_noninterposable,
         cheap_reserve,
         cost: cost_policy,
+        target,
     } = policy;
     let flatten = module.functions.iter().any(|f| f.attrs.flatten);
     let roots = if cost_policy == InlineCost::Size {
@@ -468,7 +470,13 @@ pub(super) fn run_observed_policy_budgeted(
                     }),
                     _ => false,
                 };
-                code_insts(callee).take(129).count() > 128
+                let removable = callee.local
+                    && calls.get(&callee.name) == Some(&1)
+                    && !roots.contains(&callee.name);
+                let byte_reject = std::env::var_os("KEEL_TARGET_BYTE_SIZE").is_some()
+                    && !super::cost::size_bytes_fit(callee, target, removable);
+                byte_reject
+                    || code_insts(callee).take(129).count() > 128
                     || !(callee.attrs.inlinehint
                         || constant
                         || (callee.local

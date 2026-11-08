@@ -751,3 +751,90 @@ mod budget_tests {
         assert_eq!(budget_verdict(&cheap, &caller, &full, true), denied);
     }
 }
+
+/// Bounded emission estimate, not an object-size promise. Single-use private
+/// bodies can disappear; duplicated bodies get only a small call-site allowance.
+pub(super) fn size_bytes_fit(f: &Function, target: crate::VectorTarget, removable: bool) -> bool {
+    if target == crate::VectorTarget::Portable {
+        return true;
+    }
+    target_bytes(f, target).is_some_and(|bytes| bytes <= if removable { 512 } else { 32 })
+}
+
+fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
+    use crate::VectorTarget;
+    let arm = match target {
+        VectorTarget::Aarch64Neon => true,
+        VectorTarget::X86Sse2 => false,
+        _ => return None,
+    };
+    let mut bytes = 0usize;
+    for (count, inst) in code_insts(f).enumerate() {
+        if count >= 128 {
+            return None;
+        }
+        bytes += match f.inst_data(inst) {
+            InstData::InlineAsm { .. } | InstData::Intrinsic { .. } => return None,
+            InstData::Iconst { imm, ty } if arm => {
+                let bits = if *ty == keel_ir::Type::I64 { 64 } else { 32 };
+                let words = bits / 16;
+                let nonzero = (0..words)
+                    .filter(|i| ((*imm as u64 >> (16 * i)) & 65535) != 0)
+                    .count();
+                let nonones = (0..words)
+                    .filter(|i| ((*imm as u64 >> (16 * i)) & 65535) != 65535)
+                    .count();
+                4 * nonzero.min(nonones).max(1)
+            }
+            InstData::Iconst { .. } => 10,
+            InstData::Call { .. } | InstData::CallIndirect { .. } => {
+                if arm {
+                    4
+                } else {
+                    5
+                }
+            }
+            InstData::Return { .. } => {
+                if arm {
+                    4
+                } else {
+                    1
+                }
+            }
+            _ => {
+                if arm {
+                    4
+                } else {
+                    6
+                }
+            }
+        };
+    }
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod byte_tests {
+    use super::*;
+    #[test]
+    fn wide_constants_have_target_specific_costs() {
+        let module = keel_ir::parse(
+            "func @f() -> i64 {\nblock0:\n v0=iconst.i64 1311768467463790320\n return v0\n }",
+        )
+        .unwrap();
+        let f = &module.functions[0];
+        assert_eq!(target_bytes(f, crate::VectorTarget::Aarch64Neon), Some(20));
+        assert_eq!(target_bytes(f, crate::VectorTarget::X86Sse2), Some(11));
+        assert_eq!(target_bytes(f, crate::VectorTarget::Portable), None);
+    }
+    #[test]
+    fn negative_constant_uses_movn_allowance() {
+        let module =
+            keel_ir::parse("func @f() -> i64 {\nblock0:\n v0=iconst.i64 -1\n return v0\n }")
+                .unwrap();
+        assert_eq!(
+            target_bytes(&module.functions[0], crate::VectorTarget::Aarch64Neon),
+            Some(8)
+        );
+    }
+}

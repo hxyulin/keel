@@ -100,8 +100,18 @@ less alignment padding, eligible scalar leaf-frame removal, unused leaf
 call-padding removal, smaller epilogues and profitable return sharing.
 `--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
 
-Size does not guarantee the smallest machine code: there is no target
-byte-cost model for inlining, selection or allocation, and losing profitable
+`KEEL_TARGET_BYTE_SIZE=1` enables an experimental target byte estimate for
+optional Size inlining. It scans at most 128 IR instructions, estimates fixed
+four-byte AArch64 instructions (including wide-constant materialization), and
+uses bounded x86 instruction allowances. Duplicated bodies have a 32-byte
+allowance; a removable single-use private body has 512 bytes. Inline assembly,
+and intrinsics have no estimate and remain calls. Portable targets keep the
+existing IR policy. Required
+inlining and flatten retain their contracts. This is an admission filter, not
+a prediction of final object size after selection and allocation.
+
+Size does not guarantee the smallest machine code: selection and allocation
+have no target byte-cost model, and losing profitable
 inlining can make a program larger. Unwind emission is independent of `-Os`; see [unwind metadata](../linking/unwind.md)
 for explicit enable/disable flags.
 

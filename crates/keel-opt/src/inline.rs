@@ -120,12 +120,14 @@ struct InlinePolicy {
     admit_noninterposable: bool,
     cheap_reserve: bool,
     cost: InlineCost,
+    target: crate::VectorTarget,
 }
 impl InlinePolicy {
     const DEFAULT: Self = Self {
         admit_noninterposable: false,
         cheap_reserve: false,
         cost: InlineCost::Default,
+        target: crate::VectorTarget::Portable,
     };
     const NONINTERPOSABLE: Self = Self {
         admit_noninterposable: true,
@@ -139,6 +141,10 @@ fn run_scheduled(
     context: &mut ModuleContext<'_>,
     policy: InlinePolicy,
 ) -> Option<bool> {
+    let policy = InlinePolicy {
+        target: context.target,
+        ..policy
+    };
     let callers = enabled_callers(module, context);
     let report =
         run_observed_policy_scoped(module, context.sites.as_deref_mut(), policy, Some(&callers));
