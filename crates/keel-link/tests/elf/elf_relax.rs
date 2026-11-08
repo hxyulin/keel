@@ -97,6 +97,59 @@ fn ordinary_got_relocations_and_noncanonical_forms_keep_the_got() {
 }
 
 #[test]
+fn pooled_pointer_targets_survive_got_relaxation() {
+    let source = got_object(
+        ".text\n.globl _start\n_start: mov rax,qword ptr [rip+answer@GOTPCREL]\nmov rax,qword ptr [rax]\nmov edi,dword ptr [rax]\nmov eax,60\nsyscall\n.data\n.globl answer\nanswer: .quad second\n",
+        object::elf::R_X86_64_REX_GOTPCRELX,
+    );
+    let constants = assemble(
+        ".section .rodata.first,\"aM\",@progbits,8\n.globl first\nfirst: .quad 42\n.section .rodata.second,\"aM\",@progbits,8\n.globl second\nsecond: .quad 42\n",
+    );
+    for (merge_constants, relax_got) in [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let image = link_with(
+            "combined.o",
+            &[source.clone(), constants.clone()],
+            elf::Options {
+                merge_constants,
+                relax_got,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let file = object::File::parse(image.bytes.as_slice()).unwrap();
+        assert_eq!(
+            value(&file, "first") == value(&file, "second"),
+            merge_constants
+        );
+        assert_eq!(
+            super::word(&image.bytes, value(&file, "answer")),
+            value(&file, "second")
+        );
+        assert_eq!(
+            file.section_by_name(".got").unwrap().size(),
+            if relax_got { 0 } else { 8 }
+        );
+        assert_eq!(
+            file.section_by_name(".text").unwrap().data().unwrap()[1],
+            if relax_got { 0x8d } else { 0x8b }
+        );
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = keel_test_support::TempDir::new("elf-merge-relax");
+            let path = dir.join("combined");
+            std::fs::write(&path, &image.bytes).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(
+                std::process::Command::new(path).status().unwrap().code(),
+                Some(42)
+            );
+        }
+    }
+}
+
+#[test]
 fn overlapping_relocation_fields_keep_the_original_instructions() {
     let mut source = got_object(
         ".text\n.globl _start\n_start: mov rax,qword ptr [rip+answer@GOTPCREL]\nret\n.long answer\n",
