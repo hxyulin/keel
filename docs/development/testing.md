@@ -10,6 +10,7 @@ python3 tools/test.py assembler --unit --quick     # Assembler library unit test
 python3 tools/test.py assembler --quick            # Assembler packages only
 python3 tools/test.py linker --quick               # Linker package only
 python3 tools/test.py assembler linker --quick     # Both components
+python3 tools/test.py ffi --quick                  # C API and native C/C++ consumers
 python3 tools/test.py frontend --consumers --quick # Frontend and downstream tests
 python3 tools/test.py codegen --quick              # Core codegen development check
 python3 tools/test.py optimizer --quick            # Optimizer tests plus program oracles

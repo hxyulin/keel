@@ -437,7 +437,7 @@ class RepositorySelectionTests(unittest.TestCase):
             "docs/compiler/optimizer.md", "docs/targets/x86_64/codegen.md",
         ]
         packages, checks = self.select(*paths)
-        self.assertEqual(packages, {"keel-codegen", "keel-opt", "keel", "keel-c", "keel-asm", "keel-llvm"})
+        self.assertEqual(packages, {"keel-codegen", "keel-opt", "keel", "keel-c", "keel-asm", "keel-llvm", "keel-ffi"})
         self.assertEqual(checks, set())
         self.assertLess(len(packages), len(self.packages))
 

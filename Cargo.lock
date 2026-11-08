@@ -471,6 +471,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel-ffi"
+version = "0.1.0"
+dependencies = [
+ "keel-asm",
+ "keel-codegen",
+ "keel-ir",
+ "keel-opt",
+ "object",
+]
+
+[[package]]
 name = "keel-frontend"
 version = "0.1.0"
 dependencies = [

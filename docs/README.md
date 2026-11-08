@@ -27,6 +27,7 @@ completion ledgers or per-feature progress pages.
 | Area | Reference |
 | --- | --- |
 | Commands, architecture and tests | [Toolchain](toolchain.md), [IR and backend design](compiler/design.md), [testing](development/testing.md), [performance changes](development/performance.md) |
+| Embedding | [C API](../crates/keel-ffi/README.md), [ABI header](../crates/keel-ffi/include/keel.h) |
 | C | [Frontend](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md) |
 | Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md) |
 | LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |

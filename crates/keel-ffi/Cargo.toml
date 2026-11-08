@@ -1,0 +1,21 @@
+[package]
+name = "keel-ffi"
+description = "C API for building and compiling Keel IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
+keel-opt = { path = "../keel-opt" }
+keel-codegen = { path = "../keel-codegen" }
+keel-asm = { path = "../keel-asm" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+object = { version = "0.36", default-features = false, features = ["read", "std"] }

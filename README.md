@@ -7,7 +7,8 @@ object file never invokes Clang.
 <p align="center"><img src="docs/assets/readme-pipeline.svg" alt="Keel toolchain stages: C frontend, optimizer, backend, assembler and linker, and the keel commands that run each span" width="720"></p>
 
 Every stage is also a standalone command, so you can start or stop anywhere in
-the pipeline.
+the pipeline. The experimental [C API](crates/keel-ffi/README.md) embeds IR
+construction, optimization and native object emission in other languages.
 
 Optimization presets `-O0`, `-O1`, `-O2`, `-O3` and `-Os` select distinct
 compiler policies. See [optimization levels](docs/compiler/optimization-levels.md)
