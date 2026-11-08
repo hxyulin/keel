@@ -73,8 +73,16 @@ fn plan(lines: &[String], range: u64) -> Vec<bool> {
             }
         }
         let mut changed = false;
+        let mut inline = false;
         for (i, line) in lines.iter().enumerate() {
-            if long[i] {
+            if line.trim() == "; keel-inline-boundary" {
+                inline = !inline;
+                continue;
+            }
+            // A template may contain numeric labels, unconditional conditions,
+            // and several statements on one line. Only compiler branches may
+            // be rewritten; inline assembly remains an opaque distance barrier.
+            if inline || long[i] {
                 continue;
             }
             if let Some(target) = target(line) {
@@ -226,6 +234,24 @@ mod tests {
 #[cfg(test)]
 mod routes {
     use super::*;
+    #[test]
+    fn inline_branches_stay_opaque_in_both_routes() {
+        for branch in ["b.ne 1f; mov x0, #7", "b.al 1f"] {
+            let original = format!("\tcmp xzr, xzr\n\t{branch}\n1:\n");
+            let marked = format!("\t; keel-inline-boundary\n{original}\t; keel-inline-boundary\n");
+            let mut text = marked.clone();
+            relax_source(&mut text, "test");
+            assert_eq!(text, original, "text route: {branch}");
+            let mut program = Program::new();
+            program.text(&marked);
+            relax_program(&mut program, "test");
+            assert!(
+                matches!(&program.items[..], [Item::Text(text)] if text == &original),
+                "structured route: {branch}"
+            );
+        }
+    }
+
     #[test]
     fn structured_and_text_make_the_same_relaxation_choice() {
         use keel_asm_ir::{Directive, SymbolicInstruction as S};

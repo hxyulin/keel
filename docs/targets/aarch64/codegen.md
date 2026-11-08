@@ -191,9 +191,12 @@ on both structured and text routes. It computes label distances and repeatedly
 expands only branches outside the signed imm19 range until no further branch
 needs expansion. Data widths count in bytes. Alignment uses maximum padding;
 unknown inline assembly boundaries or directives force crossing branches long.
+Inline assembly stays opaque: its branches and compound statements are never
+rewritten by this pass.
 This can conservatively expand a reachable branch. Unconditional branches still
 require the assembler/linker to diagnose distances outside their range.
-Frontend expectation hints do not yet influence block placement.
+`KEEL_EXPECT_LAYOUT=1` separately enables advisory frontend expectations in
+[block layout](../../compiler/design.md#register-allocation).
 
 For an ordinary i32 or i64 `brif` truth test that compare fusion does not
 cover, the backend emits CBZ to the false destination instead of

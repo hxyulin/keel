@@ -175,6 +175,54 @@ fn successor_inline_assembly_keeps_old_flags_even_without_cc_clobber() {
 }
 
 #[test]
+fn inline_numeric_branches_keep_compound_and_always_semantics() {
+    let source = "func @compound() -> i64 {\nblock0:\n v0 = asm \"mov %0, #9\\ncmp xzr, xzr\\n; keel-inline-boundary\\nb.ne 1f; mov %0, #7\\n1:\", \"={x0}\"() -> i64\n return v0\n}\nfunc @always() -> i64 {\nblock0:\n v0 = asm \"mov %0, #9\\nb.al 1f\\nmov %0, #7\\n1:\", \"={x0}\"() -> i64\n return v0\n}\n";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = keel_codegen::Target::Aarch64AppleDarwin;
+    let text = keel_codegen::compile(&module, target).unwrap();
+    let program = keel_codegen::compile_program(&module, target).unwrap();
+    for branch in ["b.ne 1f; mov x0, #7", "b.al 1f"] {
+        assert!(text.contains(branch), "{text}");
+        assert!(
+            program
+                .items
+                .iter()
+                .any(|item| matches!(item, keel_asm_ir::Item::Text(body) if body.contains(branch))),
+            "structured output lost {branch}"
+        );
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        // Keel's Mach-O assembler does not accept numeric inline labels yet.
+        // Clang assembles this opaque template. Darwin treats ';' as a comment.
+        let dir = keel_test_support::TempDir::new("inline-numeric-branches");
+        std::fs::write(dir.join("test.s"), text).unwrap();
+        let output = std::process::Command::new("clang")
+            .arg("-c")
+            .arg(dir.join("test.s"))
+            .arg("-o")
+            .arg(dir.join("test.o"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let oracle = native_oracle::PreparedOracle::new(
+            "inline-numeric-branches",
+            "extern unsigned long compound(void), always(void); int main(void) { return compound() != 9 || always() != 9; }",
+            &["-O2"],
+        );
+        oracle.run(
+            &std::fs::read(dir.join("test.o")).unwrap(),
+            "inline numeric branch semantics",
+        );
+    }
+}
+
+#[test]
 fn aliases_locations_and_call_result_use_the_original_truth_width() {
     let src = "file f0 = \"zero.keel\"\ndecl @poll() -> i32\nfunc @f() -> i64 {\nblock0:\n v0 = call @poll()\n v1 = iconst.i32 1\n brif v1, block1, block2 !f0:8:3\nblock1:\n v2 = iconst.i64 37\n return v2\nblock2:\n v3 = iconst.i64 91\n return v3\n}";
     let mut module = keel_ir::parse(src).unwrap();

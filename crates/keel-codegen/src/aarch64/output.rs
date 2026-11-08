@@ -68,7 +68,14 @@ impl Output {
             normalized.push_str("\t; keel-inline-boundary\n");
         }
         for line in text.lines() {
-            writeln!(normalized, "\t{}", line.trim()).unwrap();
+            let line = line.trim();
+            // A user comment cannot end the relaxer's opaque inline range.
+            let line = if precise && line == "; keel-inline-boundary" {
+                "; user: keel-inline-boundary"
+            } else {
+                line
+            };
+            writeln!(normalized, "\t{line}").unwrap();
         }
         if precise {
             normalized.push_str("\t; keel-inline-boundary\n");
