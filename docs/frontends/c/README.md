@@ -56,6 +56,20 @@ supported, as are `#line`, `#error`, pragma forwarding, `_Pragma`, `__FILE__`,
 and each expansion has a token and work limit. `-D` and `-U` apply in
 command-line order after the predefined macros.
 
+For raw-source batches, `PreprocessCache::preprocess` and
+`BatchCompiler::compile_raw` reuse caller-owned header contents and unexpanded
+lexical tokens. `keel cc -flto --reuse-header-lexing a.c b.c` enables the same
+cache for a CLI invocation. The default keeps the existing per-TU caches.
+Each TU has fresh macros, counters, include search, include guards and pragma
+once state. The first inclusion per TU rereads disk contents and compares
+bytes before reusing tokens, including same-length edits. Canonical paths key
+storage; tokens receive the current include spelling for locations and
+`__FILE__`. No expanded header output is cached. Storage grows with distinct
+headers until the caller clears or drops the cache. Headers must stay stable
+during each call, as with ordinary preprocessing; edits between calls are
+allowed. This opt-in experiment awaits compile-time instruction and RSS
+measurement on application inputs.
+
 The preprocessor runs no external commands and has no Clang fallback. Gaps
 include trigraphs, universal character names in identifiers, C23
 `__VA_OPT__` and newer directives, date and time builtins, dependency output,

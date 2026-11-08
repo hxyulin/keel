@@ -701,3 +701,45 @@ fn directory_canonicalization_preserves_symlink_dotdot_and_spelling() {
         assert_eq!(stats.token_cache_hits, 1);
     }
 }
+
+#[test]
+fn batch_cache_rebinds_alias_locations_and_does_not_retain_once_or_macros() {
+    let root = std::env::temp_dir().join(format!("keel-pp-cache-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let header = root.join("shared.h");
+    std::fs::write(&header, "#pragma once\n#define FROM_HEADER 7\n__FILE__ __BASE_FILE__ __FILE_NAME__ __LINE__ __INCLUDE_LEVEL__ __COUNTER__\n#line 72 \"virtual.h\"\n__FILE__ __LINE__\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&header, root.join("alias.h")).unwrap();
+    #[cfg(not(unix))]
+    std::fs::copy(&header, root.join("alias.h")).unwrap();
+    let opts = PreprocessOptions {
+        include_dirs: vec![root.clone()],
+        ..Default::default()
+    };
+    let mut cache = keel_c::PreprocessCache::new();
+    for name in ["shared.h", "alias.h"] {
+        let src = format!(
+            "#ifdef FROM_HEADER\n#error leaked macro\n#endif\n#include <{name}>\n#include <{name}>\nFROM_HEADER __COUNTER__\n"
+        );
+        let path = root
+            .join(format!("{name}.c"))
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            cache.preprocess(&src, &path, &opts).unwrap(),
+            preprocess(&src, &path, &opts).unwrap()
+        );
+    }
+    #[cfg(unix)]
+    assert_eq!(cache.lexical_hits(), 1);
+    // Invalid lexical content must not return stale tokens from the old entry.
+    std::fs::write(&header, "/* unterminated").unwrap();
+    for name in ["shared.h", "alias.h"] {
+        let src = format!("#include <{name}>\n");
+        let plain = preprocess(&src, "bad.c", &opts).unwrap_err();
+        let reused = cache.preprocess(&src, "bad.c", &opts).unwrap_err();
+        assert_eq!(plain.to_string(), reused.to_string());
+        assert!(reused.file.ends_with(name));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -7,7 +7,9 @@ use bumpalo::{Bump, collections::Vec as BumpVec};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 // The two constants are also used for controlled profiling ablations.
 const CACHE_HEADERS: bool = true;
@@ -67,6 +69,106 @@ struct Macro<'a> {
     has_paste: bool,
 }
 
+/// Caller-owned immutable header and lexical cache for sequential raw-source TUs.
+/// No macros, expanded text, search results, guards or once state survive a call.
+/// Disk headers are read again on first inclusion in each TU and compared byte for
+/// byte, so edits (even with unchanged timestamps/length) invalidate lexical data.
+/// Paths are resolved afresh per TU. Drop or clear the cache to release storage.
+#[derive(Debug, Default)]
+pub struct PreprocessCache {
+    headers: HashMap<(PathBuf, bool), CachedHeader>,
+    lexical_hits: usize,
+}
+
+#[derive(Debug)]
+struct CachedHeader {
+    source: Arc<str>,
+    spellings: String,
+    tokens: Vec<LexicalToken>,
+}
+
+#[derive(Debug)]
+struct LexicalToken {
+    text: Range<usize>,
+    raw_spelling: Option<Range<usize>>,
+    space: bool,
+    line: u32,
+    col: u32,
+}
+
+impl PreprocessCache {
+    /// Creates an empty cache. Reuse it across calls to `preprocess`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Releases all cached headers and resets the reuse counter.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Number of header scans avoided across translation units.
+    pub fn lexical_hits(&self) -> usize {
+        self.lexical_hits
+    }
+
+    /// Preprocesses a raw-source TU with fresh macro and include state.
+    ///
+    /// # Errors
+    /// Returns the same input, include and macro diagnostics as [`preprocess`].
+    /// Included files must remain unchanged during each call, as for `preprocess`.
+    pub fn preprocess(
+        &mut self,
+        src: &str,
+        path: &str,
+        options: &PreprocessOptions,
+    ) -> Result<String, Diagnostic> {
+        preprocess_inner::<false>(src, path, options, Some(self)).map(|(text, _)| text)
+    }
+}
+
+impl CachedHeader {
+    fn new(source: &str, tokens: &[Token<'_>]) -> Self {
+        let mut spellings = String::new();
+        let mut save = |text: &str| {
+            let start = spellings.len();
+            spellings.push_str(text);
+            start..spellings.len()
+        };
+        let tokens = tokens
+            .iter()
+            .map(|t| LexicalToken {
+                text: save(t.text),
+                raw_spelling: t.raw_spelling.map(&mut save),
+                space: t.space,
+                line: t.line,
+                col: t.col,
+            })
+            .collect();
+        Self {
+            source: Arc::from(source),
+            spellings,
+            tokens,
+        }
+    }
+
+    fn restore<'a>(&self, arena: &'a Bump, path: &'a str) -> Box<[Token<'a>]> {
+        let text = arena.alloc_str(&self.spellings);
+        self.tokens
+            .iter()
+            .map(|t| Token {
+                text: &text[t.text.clone()],
+                raw_spelling: t.raw_spelling.as_ref().map(|r| &text[r.clone()]),
+                space: t.space,
+                file: path,
+                line: t.line,
+                col: t.col,
+                hide: &[],
+            })
+            .collect()
+    }
+}
+
 /// Preprocess raw C to text accepted by [`crate::compile`], including line
 /// markers and pragmas. With default options this needs no external compiler.
 /// Included files and include search directories must remain unchanged until
@@ -78,7 +180,7 @@ pub fn preprocess(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<String, Diagnostic> {
-    preprocess_inner::<false>(src, path, options).map(|(text, _)| text)
+    preprocess_inner::<false>(src, path, options, None).map(|(text, _)| text)
 }
 
 /// Counters are collected only by the profiling entry point; the ordinary
@@ -103,12 +205,13 @@ pub fn preprocess_with_stats(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
-    preprocess_inner::<true>(src, path, options)
+    preprocess_inner::<true>(src, path, options, None)
 }
 fn preprocess_inner<const TRACK: bool>(
     src: &str,
     path: &str,
     options: &PreprocessOptions,
+    batch_cache: Option<&mut PreprocessCache>,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
     if options.target == keel_ir::Target::Wasm32UnknownUnknown && options.sysroot.is_some() {
         return Err(Diagnostic {
@@ -128,6 +231,7 @@ fn preprocess_inner<const TRACK: bool>(
         sources: &sources,
         token_buffers: &token_buffers,
         stats: PreprocessStats::default(),
+        batch_cache,
         options,
         in_condition: false,
         macros: HashMap::new(),
@@ -187,6 +291,7 @@ fn preprocess_inner<const TRACK: bool>(
 }
 
 struct Preprocessor<'a, const TRACK: bool> {
+    batch_cache: Option<&'a mut PreprocessCache>,
     stats: PreprocessStats,
     arena: &'a Bump,
     sources: &'a typed_arena::Arena<FileSource>,
@@ -215,6 +320,7 @@ struct Preprocessor<'a, const TRACK: bool> {
 enum FileSource {
     Read(String),
     Embedded(&'static str),
+    Shared(Arc<str>),
     Mapped(memmap2::Mmap),
 }
 #[derive(Clone, Copy)]
@@ -304,6 +410,7 @@ impl FileSource {
         match self {
             Self::Read(text) => Ok(text),
             Self::Embedded(text) => Ok(text),
+            Self::Shared(text) => Ok(text),
             Self::Mapped(map) => simdutf8::basic::from_utf8(map).map_err(|_| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -880,10 +987,30 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
             cached
         } else {
-            if TRACK {
-                self.stats.scanned_files += 1;
-            }
-            let tokens = self.scan_file(src, path)?;
+            let restored = self.batch_cache.as_mut().and_then(|cache| {
+                let header = cache.headers.get(&key)?;
+                if header.source.as_ref() != src {
+                    return None;
+                }
+                let tokens = header.restore(self.arena, path);
+                cache.lexical_hits += 1;
+                Some(tokens)
+            });
+            let tokens = if let Some(tokens) = restored {
+                let owned: &'a [Token<'a>] = self.token_buffers.alloc(tokens);
+                owned
+            } else {
+                if TRACK {
+                    self.stats.scanned_files += 1;
+                }
+                let tokens = self.scan_file(src, path)?;
+                if let Some(cache) = self.batch_cache.as_mut() {
+                    cache
+                        .headers
+                        .insert(key.clone(), CachedHeader::new(src, tokens));
+                }
+                tokens
+            };
             let cached = CachedTokens {
                 tokens,
                 guard: header_guard(tokens),
@@ -1129,6 +1256,19 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
                 FileSource::open(&include.path)
                     .map_err(|e| at.error(format!("{}: {e}", include.path.display())))?
+            };
+            let loaded = if let Some(header) = self
+                .batch_cache
+                .as_ref()
+                .and_then(|cache| cache.headers.get(&key))
+                && header.source.as_ref()
+                    == loaded
+                        .text()
+                        .map_err(|e| at.error(format!("{}: {e}", include.path.display())))?
+            {
+                FileSource::Shared(Arc::clone(&header.source))
+            } else {
+                loaded
             };
             if TRACK && matches!(loaded, FileSource::Mapped(_)) {
                 self.stats.mapped_files += 1;

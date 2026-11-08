@@ -12,6 +12,16 @@ pub struct Input<'a> {
     pub binding: FunctionBinding,
 }
 
+/// One raw-source TU with private preprocessing and compilation policies.
+#[derive(Clone, Copy, Debug)]
+pub struct RawInput<'a> {
+    pub source: &'a str,
+    pub path: &'a str,
+    pub preprocessing: &'a crate::PreprocessOptions,
+    pub options: Options,
+    pub binding: FunctionBinding,
+}
+
 /// A reusable, bounded worker pool. It never uses Rayon's global pool.
 pub struct BatchCompiler {
     pool: rayon::ThreadPool,
@@ -52,6 +62,30 @@ impl BatchCompiler {
             .build()
             .map(|pool| Self { pool })
             .map_err(BatchCompilerError)
+    }
+
+    /// Preprocesses raw inputs in order with a caller-owned lexical cache, then
+    /// compiles successful TUs in parallel. Diagnostics retain input order.
+    /// A failed input does not cancel the remaining inputs.
+    pub fn compile_raw(
+        &self,
+        inputs: &[RawInput<'_>],
+        cache: &mut crate::PreprocessCache,
+    ) -> Vec<Result<keel_ir::Module, Diagnostic>> {
+        let sources: Vec<_> = inputs
+            .iter()
+            .map(|input| cache.preprocess(input.source, input.path, input.preprocessing))
+            .collect();
+        self.pool.install(|| {
+            inputs
+                .par_iter()
+                .zip(sources)
+                .map(|(input, source)| {
+                    let source = source?;
+                    crate::compile_with_binding(&source, input.path, input.options, input.binding)
+                })
+                .collect()
+        })
     }
 
     /// Compiles every input, returning results in input order, including errors.

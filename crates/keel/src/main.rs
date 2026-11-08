@@ -74,6 +74,7 @@ const USAGE: &str = "usage:
   Repeated explicit stage options use the last value.
   compile merges several inputs into one module, as a linker would combine their objects;
   --internalize then makes every other global definition local, so the optimizer sees the whole program.
+  cc -flto --reuse-header-lexing reuses immutable header lexing across raw C inputs.
   cc -flto compiles several C files the same way: each to unoptimized IR, then merged into one output.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier.
@@ -128,6 +129,7 @@ struct Options {
     output: Option<String>,
     opt_report: Option<String>,
     codegen_report: Option<String>,
+    reuse_header_lexing: bool,
     fast_math: bool,
     math_errno: Option<bool>,
     optimization_defaults: Vec<keel_ir::OptimizationOption>,
@@ -425,6 +427,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             supplied.push(flag);
         }
         match flag {
+            "--reuse-header-lexing" => opts.reuse_header_lexing = true,
             "-fbuiltin" => opts.no_builtin = false,
             "-ffast-math" => {
                 opts.fast_math = true;
@@ -1054,6 +1057,7 @@ const CC_FLAGS: &[&str] = &[
     "--emit-ir",
     "-fsemantic-interposition",
     "-fno-semantic-interposition",
+    "--reuse-header-lexing",
     "-fbuiltin",
     "-fno-builtin",
     "-fno-builtin-function",
@@ -1255,11 +1259,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 drop(src);
                 return write_output(&opts, &preprocessed);
             }
-            let mut module = c_module(&opts, &input)?;
+            let mut cache = opts.reuse_header_lexing.then(keel_c::PreprocessCache::new);
+            let mut module = c_module(&opts, &input, cache.as_mut())?;
             if opts.lto {
                 let mut modules = vec![module];
                 for path in &opts.more_inputs {
-                    modules.push(c_module(&opts, path)?);
+                    modules.push(c_module(&opts, path, cache.as_mut())?);
                 }
                 module = merge_inputs(&mut opts, modules)?;
             }
@@ -1398,38 +1403,51 @@ fn with_codegen_report<T>(
 
 /// Preprocesses one C file.
 fn preprocess_c(opts: &Options, input: &str, text: &str) -> Result<String, String> {
+    preprocess_c_cached(opts, input, text, None)
+}
+
+fn preprocess_c_cached(
+    opts: &Options,
+    input: &str,
+    text: &str,
+    cache: Option<&mut keel_c::PreprocessCache>,
+) -> Result<String, String> {
     profiling::scope!("c-preprocessing");
     let target = opts.target()?;
-    keel_c::preprocess(
-        text,
-        input,
-        &keel_c::PreprocessOptions {
-            include_dirs: opts.include_dirs.clone(),
-            system_include_dirs: opts.system_include_dirs.clone(),
-            sysroot: opts.preprocessing_sysroot(target)?,
-            darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
-                (target == Target::Aarch64AppleDarwin)
-                    .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
-                    .flatten()
-            }),
-            defines: opts.preprocessing_defines(),
-            target,
-            x86_baseline: Some(opts.x86_features),
-            dump_macros: opts.dump_macros,
-        },
-    )
+    let preprocessing = keel_c::PreprocessOptions {
+        include_dirs: opts.include_dirs.clone(),
+        system_include_dirs: opts.system_include_dirs.clone(),
+        sysroot: opts.preprocessing_sysroot(target)?,
+        darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
+            (target == Target::Aarch64AppleDarwin)
+                .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
+                .flatten()
+        }),
+        defines: opts.preprocessing_defines(),
+        target,
+        x86_baseline: Some(opts.x86_features),
+        dump_macros: opts.dump_macros,
+    };
+    match cache {
+        Some(cache) => cache.preprocess(text, input, &preprocessing),
+        None => keel_c::preprocess(text, input, &preprocessing),
+    }
     .map_err(|e| e.to_string())
 }
 
 /// Preprocesses one C file unless it is a `.i` file, compiles it to IR and
 /// verifies the result. The source is released before it returns.
-fn c_module(opts: &Options, input: &str) -> Result<Module, String> {
+fn c_module(
+    opts: &Options,
+    input: &str,
+    cache: Option<&mut keel_c::PreprocessCache>,
+) -> Result<Module, String> {
     let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
     let text = src.text().map_err(|e| format!("{input}: {e}"))?;
     let preprocessed = if input.ends_with(".i") {
         None
     } else {
-        Some(preprocess_c(opts, input, text)?)
+        Some(preprocess_c_cached(opts, input, text, cache)?)
     };
     let c_opts = keel_c::Options {
         fast_math: opts.fast_math,

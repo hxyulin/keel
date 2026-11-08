@@ -56,11 +56,11 @@ mod unit;
 mod x86_builtins;
 mod x86_cpu;
 
-pub use batch::{BatchCompiler, BatchCompilerError, Input};
+pub use batch::{BatchCompiler, BatchCompilerError, Input, RawInput};
 pub use library_builtins::{LibraryBuiltin, LibraryBuiltins};
 
 pub use predefined::predefined_macros;
-pub use preprocess::{PreprocessOptions, preprocess};
+pub use preprocess::{PreprocessCache, PreprocessOptions, preprocess};
 #[cfg(feature = "profile")]
 pub use preprocess::{PreprocessStats, preprocess_with_stats};
 
