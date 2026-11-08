@@ -241,6 +241,11 @@ pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) 
             caller.set_inst_loc(new, loc);
         }
     }
+    for (&old, &new) in &values {
+        if let Some(expected) = callee.explicit_value_expectation(old) {
+            caller.set_value_expectation(new, expected);
+        }
+    }
     // Mark each callee slot that has no markers of its own, reusing the
     // callee's entry-block address when it has one.
     for (slot, address) in slots_to_mark(callee) {

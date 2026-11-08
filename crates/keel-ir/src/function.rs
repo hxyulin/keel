@@ -571,6 +571,7 @@ pub struct Function {
     block_insts: ListPool<Inst>,
     insts: Arena<Inst, InstNode>,
     call_contracts: std::collections::BTreeMap<Inst, crate::CallContract>,
+    expectations: std::collections::BTreeMap<Value, i64>,
     inst_facts: std::collections::BTreeMap<Inst, crate::ValueFacts>,
     values: Arena<Value, ValueData>,
     result_pool: Vec<Value>,
@@ -705,6 +706,7 @@ impl Function {
             block_insts: ListPool::default(),
             insts: Arena::new(),
             call_contracts: Default::default(),
+            expectations: Default::default(),
             inst_facts: Default::default(),
             values: Arena::new(),
             result_pool: Vec::new(),
@@ -1174,6 +1176,11 @@ impl Function {
     /// replaced with [`Function::replace_all_uses`]) by then.
     pub fn remove_inst(&mut self, inst: Inst) {
         self.call_contracts.remove(&inst);
+        if !self.expectations.is_empty() {
+            for value in self.inst_results(inst).to_vec() {
+                self.expectations.remove(&value);
+            }
+        }
         self.inst_facts.remove(&inst);
         let block = self.inst_block(inst);
         let index = self.position(inst);
@@ -1250,6 +1257,11 @@ impl Function {
         for i in start..source.len() {
             // Pushing only appends to the pool, so `source` stays valid.
             let inst = self.block_insts.get(source)[i];
+            if !self.expectations.is_empty() {
+                for value in self.inst_results(inst).to_vec() {
+                    self.expectations.remove(&value);
+                }
+            }
             self.inst_facts.remove(&inst);
             self.block_insts.push(&mut dest, inst);
             self.insts[inst].block = to.index() as u32;
@@ -1280,6 +1292,11 @@ impl Function {
     #[inline]
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
         self.call_contracts.remove(&inst);
+        if !self.expectations.is_empty() {
+            for value in self.inst_results(inst).to_vec() {
+                self.expectations.remove(&value);
+            }
+        }
         self.inst_facts.remove(&inst);
         let block = self.insts[inst].block;
         if block != NO_BLOCK && self.block_insts(Block::new(block as usize)).last() == Some(&inst) {
@@ -1351,6 +1368,11 @@ impl Function {
         };
         facts.validate(self.value_type(*value))?;
         if facts.is_unknown() {
+            if !self.expectations.is_empty() {
+                for value in self.inst_results(inst).to_vec() {
+                    self.expectations.remove(&value);
+                }
+            }
             self.inst_facts.remove(&inst);
         } else {
             self.inst_facts.insert(inst, facts);
@@ -1360,6 +1382,11 @@ impl Function {
 
     /// Forget a result promise after a rewrite or a change of scope.
     pub fn clear_inst_facts(&mut self, inst: Inst) {
+        if !self.expectations.is_empty() {
+            for value in self.inst_results(inst).to_vec() {
+                self.expectations.remove(&value);
+            }
+        }
         self.inst_facts.remove(&inst);
     }
 
@@ -1516,6 +1543,7 @@ impl Function {
         }
         self.call_contracts.hash(&mut h);
         self.inst_facts.hash(&mut h);
+        self.expectations.hash(&mut h);
         for var in &self.debug_vars {
             (
                 &var.name,
@@ -1562,6 +1590,11 @@ impl Function {
         let new = self.resolve(new);
         assert_ne!(new, old, "alias cycle");
         assert_eq!(self.value_type(old), self.value_type(new), "type mismatch");
+        if let Some(expected) = self.expectations.remove(&old) {
+            self.expectations
+                .entry(self.resolve(new))
+                .or_insert(expected);
+        }
         self.values[old].def = ValueDef::Alias(new);
     }
 
@@ -1584,6 +1617,55 @@ impl Function {
             InstData::StackAddr { slot } => Some(slot),
             _ => None,
         }
+    }
+
+    /// Attach an advisory expected integer. This never establishes a value fact.
+    /// Whole-function cloning preserves hints. Replacing a value transfers the
+    /// hint; rewriting/removing its defining instruction drops it. CFG edge
+    /// rewrites need no update because the consumer derives preference from
+    /// the current condition and destinations. Conflicting hints are advisory.
+    pub fn set_value_expectation(&mut self, value: Value, expected: i64) {
+        self.expectations.insert(self.resolve(value), expected);
+    }
+
+    /// Explicit layout hint, without inferred constants or comparisons.
+    pub fn explicit_value_expectation(&self, value: Value) -> Option<i64> {
+        self.expectations.get(&self.resolve(value)).copied()
+    }
+
+    /// Expected value for layout only, through aliases, integer widening and
+    /// equality tests. The recursion bound also handles cyclic malformed IR.
+    pub fn value_expectation(&self, value: Value) -> Option<i64> {
+        fn visit(f: &Function, value: Value, depth: u8) -> Option<i64> {
+            if depth == 0 {
+                return None;
+            }
+            let value = f.resolve(value);
+            if let Some(&n) = f.expectations.get(&value) {
+                return Some(n);
+            }
+            let ValueDef::Result(inst, _) = f.value_def(value) else {
+                return None;
+            };
+            match f.inst_data(inst) {
+                InstData::Iconst { imm, .. } => Some(*imm),
+                InstData::Convert {
+                    op: crate::ConvertOp::Sext | crate::ConvertOp::Uext,
+                    arg,
+                    ..
+                } => visit(f, *arg, depth - 1),
+                InstData::Icmp {
+                    cond: cond @ (crate::IntCC::Eq | crate::IntCC::Ne),
+                    args,
+                } => {
+                    let a = visit(f, args[0], depth - 1)?;
+                    let b = visit(f, args[1], depth - 1)?;
+                    Some(i64::from((a == b) == (*cond == crate::IntCC::Eq)))
+                }
+                _ => None,
+            }
+        }
+        visit(self, value, 8)
     }
 
     /// Follows aliases to the value that is actually defined.
@@ -2828,5 +2910,29 @@ mod result_pool_range_tests {
         assert!(std::panic::catch_unwind(|| ResultRange::new(u32::MAX as usize, 1)).is_err());
         let max = u32::MAX as usize;
         assert_eq!(ResultRange::new(max, 0).as_range(), max..max);
+    }
+}
+
+#[cfg(test)]
+mod expectation_tests {
+    use super::*;
+    #[test]
+    fn expectations_follow_aliases_and_current_comparisons() {
+        let mut module = crate::parse("func @f(i64,i64) -> i8 {\nblock0(v0:i64,v1:i64):\n v2=iconst.i64 0\n v3=icmp.ne v0,v2\n return v3\n}").unwrap();
+        let f = &mut module.functions[0];
+        let params = f.block_params(f.entry_block().unwrap()).to_vec();
+        f.set_value_expectation(params[0], 7);
+        let compare = f.block_insts(f.entry_block().unwrap())[1];
+        let result = f.inst_results(compare)[0];
+        assert_eq!(f.value_expectation(result), Some(1));
+        f.replace_all_uses(params[0], params[1]);
+        assert_eq!(f.value_expectation(result), Some(1));
+        let clone = f.clone();
+        assert_eq!(clone.value_expectation(result), Some(1));
+        *f.inst_data_mut(compare) = InstData::Iconst {
+            ty: Type::I8,
+            imm: 0,
+        };
+        assert_eq!(f.value_expectation(result), Some(0));
     }
 }
