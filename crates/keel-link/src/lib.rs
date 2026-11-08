@@ -157,7 +157,7 @@ pub(crate) enum Target {
 pub(crate) struct Linker<'a> {
     objects: Vec<Object<'a>>,
     discarded: BTreeSet<(usize, usize)>,
-    demanded: Option<BTreeSet<(usize, usize)>>,
+    demanded: Option<Vec<Vec<bool>>>,
     outputs: Vec<OutputSection>,
     globals: BTreeMap<String, Target>,
     imports: Vec<(String, i32)>,
@@ -596,7 +596,7 @@ impl Linker<'_> {
             for (si, s) in o.symbols.iter().enumerate() {
                 if s.kind & 0xe == 0
                     && s.value == 0
-                    && self.demanded.as_ref().is_none_or(|d| d.contains(&(oi, si)))
+                    && self.demanded.as_ref().is_none_or(|d| d[oi][si])
                 {
                     let weak = undefined.entry(s.name.clone()).or_insert(true);
                     *weak &= s.desc & 0x40 != 0;

@@ -151,7 +151,7 @@ struct Graph<'a, 'data> {
     unwind_first: Vec<usize>,
     /// The records owned by each code atom, by node id.
     owners: Vec<Vec<Node<'a>>>,
-    demanded: BTreeSet<(usize, usize)>,
+    demanded: Vec<Vec<bool>>,
 }
 impl<'a, 'data> Graph<'a, 'data> {
     fn records(&self, oi: usize, si: usize) -> bool {
@@ -189,7 +189,7 @@ impl<'a, 'data> Graph<'a, 'data> {
             .symbols
             .get(si)
             .ok_or("relocation symbol index out of range")?;
-        self.demanded.insert((oi, si));
+        self.demanded[oi][si] = true;
         let (oi, si) = if s.kind & 1 != 0 || s.kind & 0xe == 0 {
             match linker.globals.get(&s.name) {
                 Some(Target::Definition(o, s)) => (*o, *s),
@@ -288,16 +288,12 @@ impl<'a, 'data> Graph<'a, 'data> {
         let linker = self.linker;
         let s = &linker.objects[oi].sections[si];
         let records = self.records(oi, si);
-        let fixups: Vec<_> = self.parts[oi][si].fixups[ui]
-            .iter()
-            .map(|&at| {
-                read::fixups(&s.relocs[at as usize..], 0..usize::MAX)
-                    .next()
-                    .unwrap()
-            })
-            .collect();
         let mut edges = Vec::new();
-        for fixup in fixups {
+        for i in 0..self.parts[oi][si].fixups[ui].len() {
+            let at = self.parts[oi][si].fixups[ui][i] as usize;
+            let fixup = read::fixups(&s.relocs[at..], 0..usize::MAX)
+                .next()
+                .expect("bucketed fixup exists");
             match fixup? {
                 Fixup::Difference { minus, plus } => {
                     // Native FDE differences use a local metadata anchor. It is
@@ -597,7 +593,11 @@ impl Linker<'_> {
             nodes: 0,
             unwind_first: Vec::new(),
             owners: Vec::new(),
-            demanded: BTreeSet::new(),
+            demanded: self
+                .objects
+                .iter()
+                .map(|o| vec![false; o.symbols.len()])
+                .collect(),
         };
         // Each record's function range. A range joins every atom it covers,
         // so a record and its function stay together.
@@ -666,7 +666,9 @@ impl Linker<'_> {
         }
         // Ownership discovery must not turn metadata's dead references into
         // import/common demand. Edges are demanded only when visited below.
-        g.demanded.clear();
+        for demanded in &mut g.demanded {
+            demanded.fill(false);
+        }
         for (oi, o) in self.objects.iter().enumerate() {
             let mut starts = vec![vec![0]; o.sections.len()];
             for sym in &o.symbols {
