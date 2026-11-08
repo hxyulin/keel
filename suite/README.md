@@ -533,3 +533,59 @@ C files separately, plus a deterministic public-API driver. Both compilers use
 implementation without external assembly or old-format decoders. It does not
 measure an amalgamation or the upstream CLI. The driver checks round trips and
 runs compression and decompression separately on deterministic resident inputs.
+
+### Fast-math kernel baselines
+
+`suite/c/fastmath/run.py` compares division, the x component of 3D
+normalization (structure-of-arrays), and dot product in single precision:
+
+```sh
+cargo build --release -p keel
+python3 suite/c/fastmath/run.py --keel target/release/keel \
+  --out target/fastmath-baseline
+```
+
+The six rows are scalar C compiled by Clang/LLVM at `-O3` with strict math
+or `-ffast-math`, handwritten four-lane SIMD C with strict math or fast math,
+and the same scalar C through Keel with and without `-O`. Keel has no
+fast-math mode yet. The handwritten paths use SSE on x86-64 and NEON on
+AArch64. They establish a portable ISA baseline, not the ceiling for AVX,
+AVX-512 or wider/unrolled NEON implementations. There is no handwritten
+assembly row yet. Kernel assembly and objects remain in the output directory
+for inspection. The approximate SIMD path uses one Newton step after x86
+reciprocal/reciprocal-square-root estimates, or two steps after NEON estimates.
+Its dot product uses two vector accumulators; the strict path retains scalar
+addition order. Scalar tails use division and `sqrtf`.
+
+A common driver is compiled separately with strict math and contraction off.
+No LTO or fast-math link flag is used, so the link does not enable process-wide
+flush-to-zero handling. Inputs are deterministic binary fractions with mixed
+signs and magnitudes from 0.25 through just under 4.25. Denominators are nonzero
+and normal. This is a finite, bounded-domain baseline: it makes no accuracy
+claim for NaNs, infinities, zeros, subnormals or extreme exponents.
+
+Before timing any row, every build checks sizes 1, 3, 4, 7, 8 and 17 plus the
+requested sizes against a long-double oracle. Division and normalization must
+have relative error at most `2e-6`. Dot error divided by the sum of absolute
+products must be at most `5e-5`; this also permits scalar accumulation error.
+On hosts where long double equals double, the oracle still has more precision
+than the float kernels. Each timed invocation checks again before and after
+its loop, outside the measured region. These tolerances are benchmark gates,
+not a proposed compiler fast-math contract.
+
+Defaults are 4099 and 262147 elements, 1000 iterations and five rounds with
+seeded shuffled configuration order. Use `--sizes`, `--iterations` and
+`--rounds` to change them. Timing covers repeated out-of-line kernel calls;
+allocation, input preparation and oracle checks are excluded. Small sizes
+include call overhead. `report.json` records commands, compiler versions,
+source hashes, the Keel binary hash, host, raw samples, numerical error and median/min/max wall time
+per element. Reports and binaries belong under ignored `target/`. These are
+screening measurements, not the application-level performance acceptance gate.
+
+This focused runner uses numerical error checks because the ordinary suite
+runner requires byte-identical output across configurations. It is not part of
+the default application benchmark set.
+
+Run the numerical-gate regressions with
+`python3 -m unittest discover -s suite/c/fastmath -v`. They check a valid
+scalar implementation and reject NaN output and an incorrect reduction.
