@@ -125,8 +125,27 @@ pub fn run(f: &mut Function) -> bool {
                     }
                     pending.push((i, slot, offset, end));
                 }
-                // Even a successful read observes earlier stores. Calls, atomics,
-                // traps and lifetime resets end the overwrite window.
+                InstData::Load { addr, ty, flags } if !flags.volatile && flags.notrap => {
+                    let Some(&(slot, offset)) = addresses.get(&f.resolve(addr)) else {
+                        pending.clear();
+                        continue;
+                    };
+                    let Some(bytes) = ty.bytes() else {
+                        pending.clear();
+                        continue;
+                    };
+                    let end = offset + bytes as usize;
+                    if escaped.contains(&slot) || end > sizes[&slot] {
+                        pending.clear();
+                        continue;
+                    }
+                    // This read cannot fault or observe bytes in a different
+                    // private object or a disjoint range of this object.
+                    pending
+                        .retain(|&(_, s, start, stop)| s != slot || end <= start || offset >= stop);
+                }
+                // Unknown reads, calls, atomics, traps and lifetime resets end
+                // the overwrite window.
                 ref d
                     if !d.is_pinned()
                         && !d.memory_effects().may_read()

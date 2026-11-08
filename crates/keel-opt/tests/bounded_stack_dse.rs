@@ -59,3 +59,38 @@ fn retains_faulting_observable_and_escaped_stores() {
         );
     }
 }
+
+#[test]
+fn retains_pending_writes_only_across_disjoint_notrap_reads() {
+    for (offset, flags, expected) in [
+        (8, "notrap ", 1),
+        (7, "notrap ", 2),
+        (0, "notrap ", 2),
+        (8, "", 2),
+        (8, "volatile notrap ", 2),
+    ] {
+        let middle =
+            format!("v3 = iconst.i64 {offset}\n v4 = ptradd v1, v3\n v5 = load.i64 {flags}v4");
+        assert_eq!(
+            stores(&optimize(&middle, STORE, STORE, "")),
+            expected,
+            "offset {offset}, flags {flags:?}"
+        );
+    }
+    let source = "func @f(i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+ ss1 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = stack_addr ss1
+ store notrap v0, v1
+ v3 = load.i64 notrap v2
+ store notrap v0, v1
+ return v3
+}";
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    keel_opt::run_passes(&mut m, &["bounded-stack-dse"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(stores(&m), 1, "read from a different private slot");
+}

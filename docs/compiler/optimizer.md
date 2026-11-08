@@ -552,7 +552,8 @@ Only in-bounds fixed stack objects whose addresses have no unrecognized uses
 qualify. Pointer stores, volatile and atomic accesses, address escapes, frame
 observers, stack save/restore, assembly and exception continuations exclude
 objects or functions. Debug variable homes and function debug locations exclude
-the function. Reads, calls, pinned instructions, lifetime starts and ends, and
+the function. Proven nontrapping reads of disjoint private stack bytes retain
+pending writes. Other reads, calls, pinned instructions, lifetime starts and ends, and
 instruction source locations clear the pending stores. It never removes a
 potentially trapping store. Run `stack-notrap` first to expose eligible accesses;
 this pass is absent from tier presets pending application A/B evidence.
