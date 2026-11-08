@@ -34,6 +34,12 @@ roles and the frame layout. The rules that differ from AArch64:
 - Not supported: exceptions, i128↔float conversions, i128 overflow multiply
   and `mulhi`, and `switch` on i128.
 
+Native compiler commands also accept `-march=x86-64`, `-march=x86-64-v2`
+and `-march=x86-64-v3` as the corresponding CPU-level baselines. Repeated
+`-march` requests use the last baseline; feature edits remain independent.
+Do not combine `-march` with `--cpu-level`. Other architecture names, including
+`native` and `x86-64-v4`, are rejected. These options require the x86-64 target.
+
 The register-assignment design keeps r10 and r11 reserved, for 12
 allocatable general registers. Frameless scalar C leaves (beyond the size goal
 below) land only if the suite shows no retired-instruction regression.

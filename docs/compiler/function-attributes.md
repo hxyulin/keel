@@ -375,6 +375,28 @@ to omit errno handling, so Linux can vectorize them without a fallback call.
 `-fno-builtin` and per-function builtin disabling still retain ordinary calls.
 Wasm rejects the flag for now.
 
+Native C accepts independent `-fmath-errno` and `-fno-math-errno` controls
+for recognized library square roots. The latter permits direct hardware roots
+without granting relaxed arithmetic. Builtin opt-outs still preserve ordinary
+calls. `-ffast-math` selects no-errno handling; `-fno-fast-math` restores errno
+handling. The last errno-setting flag wins. A later `-fmath-errno` retains
+relaxed arithmetic but suppresses `__FAST_MATH__`. On Darwin, library square
+roots already omit errno handling regardless of this flag.
+
+C functions may request `optimize("fast-math")`, `optimize("no-fast-math")`,
+`optimize("math-errno")` and `optimize("no-math-errno")`. Ordered options and
+redeclarations use the last request for each setting. A fast-math request also
+sets the corresponding errno default; a later errno request changes only errno.
+These function requests override invocation defaults. The body mode is set
+before required inlining, including at `-O0`. Function errno settings affect
+C lowering and cannot restore library calls already lowered in input IR.
+The optimizer resolves serialized math-mode requests before running passes.
+
+Library callers can set `keel_c::Options::fast_math` for the default body mode;
+`compile_with_policies` supplies the separate library errno policy. These
+permissions do not split into independent contraction, finite-only,
+reassociation or reciprocal flags. Those flags remain unsupported.
+
 The mode survives text serialization and module merging. Merging declaration
 attributes does not change the destination body's math mode. Both optional
 and mandatory inlining reject different modes, in either direction, so a

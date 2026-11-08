@@ -44,6 +44,20 @@ fn c_hot_loops_unroll_once_and_match_the_driver() {
     );
     let before = fs::read_to_string(dir.join("before.keel")).unwrap();
     let after = opt("before.keel", "unroll.keel", &["-p", "loop-unroll"]);
+    let disabled = opt(
+        "before.keel",
+        "disabled.keel",
+        &["-p", "loop-unroll", "-fno-unroll-loops"],
+    );
+    let enabled = opt(
+        "before.keel",
+        "enabled.keel",
+        &["-p", "loop-unroll", "-fno-unroll-loops", "-funroll-loops"],
+    );
+    for name in ["hot32", "hot64"] {
+        assert_eq!(function(&disabled, name).matches(" = load.").count(), 1);
+        assert_eq!(function(&enabled, name).matches(" = load.").count(), 3);
+    }
     for name in ["hot32", "hot64"] {
         let (original, unrolled) = (function(&before, name), function(&after, name));
         assert_eq!(original.matches(" = load.").count(), 1, "{original}");

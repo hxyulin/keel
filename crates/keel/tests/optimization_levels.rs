@@ -1,4 +1,6 @@
 //! Public presets must preserve behavior across native targets and stage overrides.
+#[path = "optimization_levels/compatible_flags.rs"]
+mod compatible_flags;
 #[path = "optimization_levels/fast_math.rs"]
 mod fast_math;
 #[path = "optimization_levels/loop_unroll.rs"]

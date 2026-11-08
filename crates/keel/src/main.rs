@@ -88,6 +88,11 @@ const USAGE: &str = "usage:
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
   Initial input verification and canonical restoration always run.
+  -f[no-]inline-functions, -f[no-]unroll-loops and -f[no-]tree-loop-vectorize
+  set optional pass defaults; function optimize attributes override them.
+  -fvectorize and -ftree-vectorize are loop-vectorization aliases, not SLP.
+  Native cc accepts -f[no-]math-errno independently of -f[no-]fast-math.
+  -march=x86-64[-v2|-v3] selects an x86 CPU baseline; do not combine with --cpu-level.
   Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
@@ -124,6 +129,8 @@ struct Options {
     opt_report: Option<String>,
     codegen_report: Option<String>,
     fast_math: bool,
+    math_errno: Option<bool>,
+    optimization_defaults: Vec<keel_ir::OptimizationOption>,
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
     optimizer: keel_opt::OptimizeOptions,
@@ -175,7 +182,7 @@ impl Options {
         if self.optimization == keel_opt::OptimizationTier::Size {
             defines.push(("__OPTIMIZE_SIZE__".into(), Some("1".into())));
         }
-        if self.fast_math {
+        if self.fast_math && self.math_errno != Some(true) {
             defines.push(("__FAST_MATH__".into(), Some("1".into())));
         }
         // Explicit -D/-U overrides compiler-provided macros.
@@ -194,7 +201,7 @@ impl Options {
                 policy = policy.disable(builtin);
             }
         }
-        if self.fast_math {
+        if self.math_errno == Some(false) {
             policy = policy.without_math_errno();
         }
         policy
@@ -239,11 +246,34 @@ impl Options {
 
     /// Explicit pipelines override tier presets, independently of flag order.
     fn optimize(&self, module: &mut Module) -> Result<(), String> {
-        if self.fast_math {
+        if self.fast_math || !self.optimization_defaults.is_empty() {
+            let mut changed = false;
             for function in &mut module.functions {
-                function.attrs.fast_math = true;
+                let local = keel_ir::FunctionPolicy::resolve(&function.attrs)?;
+                let defaults = self
+                    .optimization_defaults
+                    .iter()
+                    .filter(|option| {
+                        // Positive switches do not start optional optimization at O0.
+                        self.optimizes()
+                            || local.level.is_some()
+                            || matches!(option,
+                        keel_ir::OptimizationOption::Options(name) if name.starts_with("-fno-"))
+                    })
+                    .cloned();
+                let mut requests = keel_ir::FunctionOptimization::new(defaults);
+                requests.append(&function.attrs.optimize);
+                changed |= requests != function.attrs.optimize;
+                function.attrs.optimize = requests;
+                let fast_math = local
+                    .fast_math
+                    .unwrap_or(self.fast_math || function.attrs.fast_math);
+                changed |= function.attrs.fast_math != fast_math;
+                function.attrs.fast_math = fast_math;
             }
-            module.sync_function_attrs();
+            if changed {
+                module.sync_function_attrs();
+            }
         }
         let names: Vec<_> = self
             .passes
@@ -375,6 +405,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-O"
         } else if raw.starts_with("--code-model=") || raw.starts_with("-mcmodel=") {
             "--code-model"
+        } else if raw.starts_with("-march=") {
+            "-march"
         } else if raw.starts_with("-fno-builtin-") {
             "-fno-builtin-function"
         } else if raw.starts_with("-I") {
@@ -394,8 +426,48 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "-fbuiltin" => opts.no_builtin = false,
-            "-ffast-math" => opts.fast_math = true,
-            "-fno-fast-math" => opts.fast_math = false,
+            "-ffast-math" => {
+                opts.fast_math = true;
+                opts.math_errno = Some(false);
+            }
+            "-fno-fast-math" => {
+                opts.fast_math = false;
+                opts.math_errno = Some(true);
+            }
+            "-fmath-errno" => opts.math_errno = Some(true),
+            "-fno-math-errno" => opts.math_errno = Some(false),
+            "-finline-functions"
+            | "-fno-inline-functions"
+            | "-finline"
+            | "-fno-inline"
+            | "-funroll-loops"
+            | "-fno-unroll-loops"
+            | "-ftree-vectorize"
+            | "-fno-tree-vectorize"
+            | "-ftree-loop-vectorize"
+            | "-fno-tree-loop-vectorize"
+            | "-fvectorize"
+            | "-fno-vectorize" => {
+                opts.optimization_defaults
+                    .push(keel_ir::OptimizationOption::Options(raw.into()));
+            }
+            "-march" => {
+                let name = raw
+                    .strip_prefix("-march=")
+                    .or_else(|| args.next().map(String::as_str))
+                    .ok_or("`-march` needs x86-64, x86-64-v2 or x86-64-v3")?;
+                let level = match name {
+                    "x86-64" => "v1",
+                    "x86-64-v2" => "v2",
+                    "x86-64-v3" => "v3",
+                    _ => {
+                        return Err(format!(
+                            "unsupported architecture `{name}`; expected x86-64, x86-64-v2 or x86-64-v3"
+                        ));
+                    }
+                };
+                opts.x86_options.set_arch_level(level)?;
+            }
             "-fno-builtin" => opts.no_builtin = true,
             "-ffreestanding" => {
                 opts.freestanding = true;
@@ -894,6 +966,19 @@ fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, Stri
 // The flags each subcommand that uses `parse_options` accepts.
 const ASM_METRICS_FLAGS: &[&str] = &["-o", "--target", "--cpu-level", "--target-features"];
 const COMPILE_FLAGS: &[&str] = &[
+    "-march",
+    "-finline-functions",
+    "-fno-inline-functions",
+    "-finline",
+    "-fno-inline",
+    "-funroll-loops",
+    "-fno-unroll-loops",
+    "-ftree-vectorize",
+    "-fno-tree-vectorize",
+    "-ftree-loop-vectorize",
+    "-fno-tree-loop-vectorize",
+    "-fvectorize",
+    "-fno-vectorize",
     "-ffast-math",
     "-fno-fast-math",
     "-o",
@@ -937,6 +1022,21 @@ const COMPILE_FLAGS: &[&str] = &[
     "--cpu-level",
 ];
 const CC_FLAGS: &[&str] = &[
+    "-fmath-errno",
+    "-fno-math-errno",
+    "-march",
+    "-finline-functions",
+    "-fno-inline-functions",
+    "-finline",
+    "-fno-inline",
+    "-funroll-loops",
+    "-fno-unroll-loops",
+    "-ftree-vectorize",
+    "-fno-tree-vectorize",
+    "-ftree-loop-vectorize",
+    "-fno-tree-loop-vectorize",
+    "-fvectorize",
+    "-fno-vectorize",
     "-ffast-math",
     "-fno-fast-math",
     "-o",
@@ -999,6 +1099,19 @@ const CC_FLAGS: &[&str] = &[
     "--cpu-level",
 ];
 const OPT_FLAGS: &[&str] = &[
+    "-march",
+    "-finline-functions",
+    "-fno-inline-functions",
+    "-finline",
+    "-fno-inline",
+    "-funroll-loops",
+    "-fno-unroll-loops",
+    "-ftree-vectorize",
+    "-fno-tree-vectorize",
+    "-ftree-loop-vectorize",
+    "-fno-tree-loop-vectorize",
+    "-fvectorize",
+    "-fno-vectorize",
     "-ffast-math",
     "-fno-fast-math",
     "-o",
@@ -1319,6 +1432,7 @@ fn c_module(opts: &Options, input: &str) -> Result<Module, String> {
         Some(preprocess_c(opts, input, text)?)
     };
     let c_opts = keel_c::Options {
+        fast_math: opts.fast_math,
         debug_info: opts.ir_lines,
         target: opts.target()?,
         // Code generation rejects the same calls without a C location.

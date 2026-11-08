@@ -166,3 +166,33 @@ fn reciprocal_root_estimates_are_f32_native_and_opt_in() {
         }
     }
 }
+
+#[test]
+fn function_math_options_are_resolved_before_passes_and_roundtrip() {
+    for (attributes, relaxed) in [
+        ("optimize(\"fast-math\")", true),
+        ("fast_math optimize(\"no-fast-math\")", false),
+        ("optimize(\"fast-math,no-fast-math\")", false),
+        ("optimize(\"no-fast-math,-ffast-math\")", true),
+        ("optimize(\"no-math-errno\")", false),
+    ] {
+        let module = optimize(
+            &format!(
+                "func @cancel(f32) -> f32 {attributes} {{\nblock0(v0:f32):\n v1 = fsub v0,v0\n return v1\n}}"
+            ),
+            VectorTarget::X86Sse2,
+        );
+        assert_eq!(module.functions[0].attrs.fast_math, relaxed, "{attributes}");
+        let subtracts = module.functions[0].layout_insts().any(|(_, i)| {
+            matches!(
+                module.functions[0].inst_data(i),
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::Fsub,
+                    ..
+                }
+            )
+        });
+        assert_eq!(subtracts, !relaxed, "{module}");
+        keel_ir::verify_module(&keel_ir::parse(&module.to_string()).unwrap()).unwrap();
+    }
+}

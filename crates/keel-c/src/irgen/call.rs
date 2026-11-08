@@ -273,9 +273,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     fn library_sqrt(&mut self, g: usize, fty: &FuncTy, arg: &Expr<'p>, loc: Loc) -> R<Value> {
         let x = self.val(arg)?;
         self.set_loc(loc);
-        if self.g.p.target == keel_ir::Target::Aarch64AppleDarwin
-            || !self.g.library_builtins.preserves_math_errno()
-        {
+        let policy = keel_ir::FunctionPolicy::resolve(&self.b.function().attrs)
+            .map_err(|message| Error::new(loc, message))?;
+        let math_errno = policy
+            .math_errno
+            .unwrap_or(self.g.library_builtins.preserves_math_errno());
+        if self.g.p.target == keel_ir::Target::Aarch64AppleDarwin || !math_errno {
             return Ok(self.b.ins().fsqrt(x));
         }
         let ty = fty.ret.ir_with_layout(self.g.p.c_layout);

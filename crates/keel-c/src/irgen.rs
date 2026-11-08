@@ -80,6 +80,7 @@ pub struct Gen<'p> {
     files: &'p [&'p str],
     module: Module,
     debug: bool,
+    fast_math: bool,
     library_builtins: crate::LibraryBuiltins,
     library_builtin_symbols: Vec<bool>,
     /// Module source files, by the lexer's file index.
@@ -100,6 +101,11 @@ pub struct Gen<'p> {
 }
 
 impl<'p> Gen<'p> {
+    pub fn fast_math(mut self, enabled: bool) -> Self {
+        self.fast_math = enabled;
+        self
+    }
+
     pub fn new(
         p: &'p Parser<'p>,
         funcs: Vec<FuncDef<'p>>,
@@ -112,6 +118,7 @@ impl<'p> Gen<'p> {
             files,
             module: Module::default(),
             debug,
+            fast_math: false,
             library_builtins: if p.target == keel_ir::Target::Wasm32UnknownUnknown {
                 crate::LibraryBuiltins::disabled()
             } else {
@@ -834,6 +841,10 @@ impl<'p> Gen<'p> {
             weak: global.weak.is_some(),
             ..global.function_attrs.clone()
         };
+        func.attrs.fast_math = keel_ir::FunctionPolicy::resolve(&func.attrs)
+            .map_err(|message| Error::new(def.loc, message))?
+            .fast_math
+            .unwrap_or(self.fast_math);
         func.local = global.internal;
         func.hidden = global.hidden();
         let mut b = FunctionBuilder::with_context(&mut func, std::mem::take(&mut self.context.ssa));

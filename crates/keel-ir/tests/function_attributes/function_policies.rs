@@ -67,3 +67,27 @@ fn ordered_policy_resolution_preserves_switches_and_optnone_wins() {
     }
     assert!(verify_module(&parse("decl @bad() optnone alwaysinline\n").unwrap()).is_err());
 }
+
+#[test]
+fn independent_math_requests_resolve_in_order_without_changing_stored_body_mode() {
+    for (options, fast_math, math_errno) in [
+        ("fast-math,math-errno", Some(true), Some(true)),
+        ("no-fast-math,no-math-errno", Some(false), Some(false)),
+        ("-ffast-math,-fno-fast-math", Some(false), Some(true)),
+        ("no-math-errno", None, Some(false)),
+    ] {
+        let module = parse(&format!(
+            "func @f() optimize({options:?}) {{\nblock0:\n return\n}}\n"
+        ))
+        .unwrap();
+        let attrs = &module.functions[0].attrs;
+        let policy = keel_ir::FunctionPolicy::resolve(attrs).unwrap();
+        assert_eq!(policy.fast_math, fast_math);
+        assert_eq!(policy.math_errno, math_errno);
+        assert!(!attrs.fast_math);
+        assert_eq!(
+            module.to_string(),
+            parse(&module.to_string()).unwrap().to_string()
+        );
+    }
+}

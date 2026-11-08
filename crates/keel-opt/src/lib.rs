@@ -973,6 +973,22 @@ impl<'a> Pipeline<'a> {
         if module.special_entry_contract().is_some() {
             return Ok(());
         }
+        let mut math_changed = false;
+        for function in &mut module.functions {
+            let policy = keel_ir::FunctionPolicy::resolve(&function.attrs).map_err(|message| {
+                OptError::FunctionPolicy {
+                    func: function.name.clone(),
+                    message,
+                }
+            })?;
+            if let Some(enabled) = policy.fast_math {
+                math_changed |= function.attrs.fast_math != enabled;
+                function.attrs.fast_math = enabled;
+            }
+        }
+        if math_changed {
+            module.sync_function_attrs();
+        }
         if let Some(name) = self.options.disabled.iter().find(|&name| {
             find_pass(name).is_none() && !self.passes.iter().any(|pass| pass.name() == name)
         }) {

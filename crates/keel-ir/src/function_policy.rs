@@ -112,6 +112,10 @@ pub struct FunctionPolicy {
     pub unroll: Option<bool>,
     /// Loop vectorization.
     pub vectorize: Option<bool>,
+    /// Body-wide relaxed floating-point permissions.
+    pub fast_math: Option<bool>,
+    /// Whether recognized library math must preserve errno.
+    pub math_errno: Option<bool>,
 }
 impl FunctionPolicy {
     /// Resolve supported GNU options in source order; reject unknown options.
@@ -156,7 +160,11 @@ impl FunctionPolicy {
             self.level = Some(level);
             return Ok(());
         }
-        let option = option.strip_prefix('f').unwrap_or(option);
+        let option = if option == "fast-math" {
+            option
+        } else {
+            option.strip_prefix('f').unwrap_or(option)
+        };
         let (enabled, option) = match option.strip_prefix("no-") {
             Some(option) => (false, option),
             None => (true, option),
@@ -164,7 +172,14 @@ impl FunctionPolicy {
         match option {
             "inline" | "inline-functions" => self.inline = Some(enabled),
             "unroll-loops" => self.unroll = Some(enabled),
-            "tree-vectorize" | "tree-loop-vectorize" => self.vectorize = Some(enabled),
+            "tree-vectorize" | "tree-loop-vectorize" | "vectorize" => {
+                self.vectorize = Some(enabled)
+            }
+            "fast-math" => {
+                self.fast_math = Some(enabled);
+                self.math_errno = Some(!enabled);
+            }
+            "math-errno" => self.math_errno = Some(enabled),
             _ => {
                 return Err(format!(
                     "unsupported function optimization option `{option}`"

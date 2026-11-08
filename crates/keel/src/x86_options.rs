@@ -5,24 +5,37 @@ use keel_asm::x86::{CpuLevel, Features};
 #[derive(Default)]
 pub(crate) struct X86Options {
     level: Option<CpuLevel>,
+    architecture: Option<CpuLevel>,
     modifiers: Vec<String>,
 }
 impl X86Options {
     pub(crate) fn set_level(&mut self, name: &str) -> Result<(), String> {
+        if self.architecture.is_some() {
+            return Err("--cpu-level and -march cannot be combined".into());
+        }
         if self.level.is_some() {
             return Err("--cpu-level may only be specified once".into());
         }
         self.level = Some(CpuLevel::parse(name)?);
         Ok(())
     }
+    /// GCC architecture requests replace earlier baselines; feature edits stay independent.
+    pub(crate) fn set_arch_level(&mut self, name: &str) -> Result<(), String> {
+        if self.level.is_some() {
+            return Err("--cpu-level and -march cannot be combined".into());
+        }
+        self.architecture = Some(CpuLevel::parse(name)?);
+        Ok(())
+    }
     pub(crate) fn push_features(&mut self, source: &str) {
         self.modifiers.push(source.into());
     }
     pub(crate) fn supplied(&self) -> bool {
-        self.level.is_some() || !self.modifiers.is_empty()
+        self.level.is_some() || self.architecture.is_some() || !self.modifiers.is_empty()
     }
     pub(crate) fn resolve(&self) -> Result<Features, String> {
-        self.level
+        self.architecture
+            .or(self.level)
             .map(Features::for_level)
             .unwrap_or_default()
             .with_feature_lists(self.modifiers.iter().map(String::as_str))

@@ -65,6 +65,7 @@ pub fn compile(
     let parse_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
     let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+        .fast_math(opts.fast_math)
         .run()
         .map_err(|e| diagnostic(&files, e))?;
     crate::apply_function_binding(&mut module, opts.target, crate::FunctionBinding::default());

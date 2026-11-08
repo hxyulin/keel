@@ -116,6 +116,8 @@ impl std::error::Error for Diagnostic {}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Options {
+    /// Default relaxed floating-point mode; explicit function policies override it.
+    pub fast_math: bool,
     /// Debug info: source locations for instructions, and types and
     /// variables. Named locals then live in memory, as without
     /// optimization in C compilers, so a debugger can show and change
@@ -180,6 +182,14 @@ pub fn compile_with_policies(
     binding: FunctionBinding,
     builtins: LibraryBuiltins,
 ) -> Result<keel_ir::Module, Diagnostic> {
+    if opts.target == keel_ir::Target::Wasm32UnknownUnknown && opts.fast_math {
+        return Err(Diagnostic {
+            file: path.into(),
+            line: 1,
+            col: 1,
+            message: "fast math requires a native target".into(),
+        });
+    }
     if opts.target == keel_ir::Target::Wasm32UnknownUnknown
         && binding == FunctionBinding::NoSemanticInterposition
     {
@@ -209,6 +219,7 @@ pub fn compile_with_policies(
     parsed.map_err(|e| diagnostic(&files, e))?;
     let funcs = std::mem::take(&mut parser.funcs);
     let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+        .fast_math(opts.fast_math)
         .with_library_builtins(builtins)
         .run()
         .map_err(|e| diagnostic(&files, e))?;

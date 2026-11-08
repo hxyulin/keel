@@ -56,6 +56,33 @@ Wasm keeps its separate `--wasm-opt basic` contract and rejects native levels.
 Required frontend inlining, initial IR verification and legal code generation
 still run at `-O0`.
 
+## Compatible optimization switches
+
+Native `cc`, `compile` and `opt` accept `-finline-functions`, `-funroll-loops`
+and `-ftree-loop-vectorize`, with their `-fno-` forms. `-finline` is an alias
+for `-finline-functions`; `-ftree-vectorize` and Clang's `-fvectorize` control
+Keel's loop vectorization. These names do not enable SLP vectorization.
+
+The last switch for a family wins, independently of where `-O` appears.
+They supply defaults before each function's `optimize(...)` requests, so explicit
+function requests override them. Enabling a family adds its existing bounded
+pass when the chosen tier omits it. Positive switches do not start optional
+optimization at `-O0` or with an empty explicit pipeline, unless a function has
+an explicit optimization preset. Disabling a family also filters explicit
+`-p` pipelines. `optnone`, legality checks, growth limits and required inlining
+retain their existing behavior. The switches select Keel's passes, not the
+GCC or Clang pass lists.
+
+For example:
+
+```sh
+keel cc -O3 -fno-unroll-loops -fno-vectorize input.c -o scalar.s
+keel cc -O2 -funroll-loops input.c -o unrolled.s
+```
+
+`cc` also accepts `-fmath-errno` and `-fno-math-errno`; see
+[floating-point mode](function-attributes.md#floating-point-math-mode).
+
 ## Size policy
 
 The Size pipeline runs two bounded helper-inlining rounds interleaved with
