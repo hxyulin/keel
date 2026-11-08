@@ -8,6 +8,7 @@ mod groups;
 mod input;
 mod lifecycle;
 mod notes;
+mod relax;
 mod reloc;
 pub mod relocatable;
 mod script;
@@ -60,6 +61,8 @@ impl Machine {
 
 #[derive(Debug)]
 pub struct Options {
+    /// Relax eligible x86-64 GOTPCRELX address loads. Disabled by default.
+    pub relax_got: bool,
     /// Collect unreachable ELF input sections. Disabled by default.
     pub gc_sections: bool,
     /// Owned GNU linker script text for bounded static x86-64 final linking.
@@ -76,6 +79,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            relax_got: false,
             gc_sections: false,
             script: None,
             max_page_size: None,
@@ -234,6 +238,9 @@ fn resolve_options(mut options: Options) -> Result<ResolvedOptions> {
     }
     validate_entry(&options.entry)?;
     let arm = options.machine == Machine::Aarch64;
+    if options.relax_got && (arm || script.is_some()) {
+        return Err("GOT relaxation requires default-layout x86-64 ELF output".into());
+    }
     let page = options
         .max_page_size
         .unwrap_or(if arm { 65536 } else { PAGE });
@@ -344,7 +351,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     merge_metadata(&mut parsed, &mut sframe_targets, options.gc_sections)?;
     let Parsed {
         mut sections,
-        units,
+        mut units,
         unwind_sections,
         sframe_section,
         warnings,
@@ -355,6 +362,9 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         allocate_commons(&mut sections, &units, &globals, commons)?;
     let bounds = bounds::symbols(&sections, &units, &globals)?;
     let imports = plan_imports(&units, &globals, &bounds, libraries)?;
+    if options.relax_got {
+        relax::got_loads(&mut sections, &mut units, &globals, &imports)?;
+    }
     // GOT keys retain selected raw identities, including independent locals.
     // Build after the final symbol/section rewrites; address validation stays lazy.
     let selected = selected::Index::new(&units, &globals, &imports);

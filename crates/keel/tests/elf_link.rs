@@ -448,6 +448,42 @@ fn elf_cli_gc_is_opt_in_and_failure_preserves_output() {
 }
 
 #[test]
+fn elf_cli_got_relaxation_is_explicit_and_rejected_for_partial_links() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("elf-cli-relax-got");
+    std::fs::create_dir_all(&dir).unwrap();
+    let obj = keel_asm::x86::assemble_object(".text\n.globl _start\n_start: ret\n").unwrap();
+    std::fs::write(dir.join("input.o"), obj).unwrap();
+    let mut args = vec![
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "input.o",
+        "-o",
+        "program",
+        "--relax-got",
+    ];
+    let result = invoke(&dir, &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let image = std::fs::read(dir.join("program")).unwrap();
+    args.push("-r");
+    let result = invoke(&dir, &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("--relax-got"));
+    assert_eq!(std::fs::read(dir.join("program")).unwrap(), image);
+    args.push("--no-relax-got");
+    let result = invoke(&dir, &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
 fn sframe_failures_preserve_cli_destination_at_every_validation_stage() {
     use object::{Object, ObjectSection};
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("elf-cli-sframe-review");

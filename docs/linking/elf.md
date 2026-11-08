@@ -50,6 +50,7 @@ link the installed CRT objects explicitly (see
 | `--dynamic-linker PATH` | Interpreter path (default `/lib64/ld-linux-x86-64.so.2`); not opened at link time. |
 | `--rpath PATH`, `-rpath PATH` | Emit `DT_RUNPATH`; repeat to join paths with colons. |
 | `--gc-sections`, `--no-gc-sections` | Opt-in section garbage collection (last option wins). |
+| `--relax-got`, `--no-relax-got` | Opt-in x86-64 GOT-load relaxation (last option wins). |
 | `--` | End of options. |
 | `--target aarch64-apple-darwin` | Use the [Mach-O linker](macho.md) instead. |
 | `--system ...` | Forward to the Clang driver instead. |
@@ -85,8 +86,14 @@ For bounded GNU script final linking through the library API, see
   different objects keep distinct identities.
 - RELA relocations: `R_X86_64_NONE`, `64`, `PC32`, `PLT32`, `GOTPCREL`, `32`,
   `32S`, `PC8`, `PC64`, `GOTPCRELX` and `REX_GOTPCRELX`. Static calls bind directly;
-  GOT loads keep their original instructions and use resolved read-only GOT
-  slots. S + A and S + A - P use ELF64 address arithmetic, which wraps modulo
+  GOT loads use resolved read-only GOT slots by default. With `--relax-got`,
+  canonical `REX_GOTPCRELX` 64-bit RIP-relative MOV address loads for selected
+  section or common definitions become LEA, and no longer need those slots.
+  Imports, undefined weak and absolute symbols, nonstandard addends/prefixes,
+  overlapping relocation fields and other instruction forms keep GOT loads.
+  Relaxation requires the default x86-64 final layout; scripts, AArch64 and
+  partial links reject it. Instruction lengths do not change. S + A and
+  S + A - P use ELF64 address arithmetic, which wraps modulo
   2^64. The wrapped result is then overflow-checked against the field: `32`
   as unsigned, `32S` and the PC-relative fields as signed. A PC-relative
   reference across the top of the address space, or across the
@@ -107,7 +114,7 @@ For bounded GNU script final linking through the library API, see
 Not supported: automatic libc/CRT startup, static libc, PIE, shared-object
 output, native TLS relocations, native IFUNC/GNU-unique definitions, REL
 relocations, other allocated notes, unrestricted GNU scripts, identical-code folding,
-relaxation and source debugging. Runtime-loader IFUNC resolution and
+general relaxation and source debugging. Runtime-loader IFUNC resolution and
 constructors inside input shared libraries do work. Unsupported sections,
 flags, relocations and options are errors. This is not a general GNU ld
 replacement.

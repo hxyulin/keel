@@ -14,6 +14,8 @@ mod elf_lifecycle;
 mod elf_notes;
 #[path = "elf/elf_rel8.rs"]
 mod elf_rel8;
+#[path = "elf/elf_relax.rs"]
+mod elf_relax;
 #[path = "elf/elf_relocatable.rs"]
 mod elf_relocatable;
 #[path = "elf/elf_script.rs"]

@@ -186,6 +186,8 @@ fn native_prefix_consumes_operands_before_selecting_system() {
         "-dead_strip",
         "--gc-sections",
         "--no-gc-sections",
+        "--relax-got",
+        "--no-relax-got",
         "--static",
         "-static",
         "-Bstatic",

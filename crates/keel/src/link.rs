@@ -44,6 +44,8 @@ fn system_selector(args: &[String]) -> Option<usize> {
                         | "--relocatable"
                         | "--gc-sections"
                         | "--no-gc-sections"
+                        | "--relax-got"
+                        | "--no-relax-got"
                         | "--static"
                         | "-static"
                         | "-Bstatic"
@@ -515,6 +517,8 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
             "--gc-sections" => options.gc_sections = true,
             "--no-gc-sections" => options.gc_sections = false,
+            "--relax-got" => options.relax_got = true,
+            "--no-relax-got" => options.relax_got = false,
             "--dynamic-linker" => {
                 options.interpreter = args
                     .next()
@@ -657,11 +661,12 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
     }
     if relocatable
         && (options.gc_sections
+            || options.relax_got
             || !options.runpath.is_empty()
             || options.script.is_some()
             || options.max_page_size.is_some())
     {
-        return Err("partial linking does not support scripts, maximum-page-size overrides, --gc-sections or --rpath".into());
+        return Err("partial linking does not support scripts, maximum-page-size overrides, --gc-sections, --relax-got or --rpath".into());
     }
     if force_static
         && owned.iter().flatten().any(|(_, source)| {
