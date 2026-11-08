@@ -110,7 +110,58 @@ Lk_setjmp_block0:
 	; v32 = icmp.ne v30, v31
 	; brif v32, block2, block1
 	cmp	w9, #0
-	b.ne	Lk_setjmp_block2
+	b.eq	Lk_setjmp_block1
+Lk_setjmp_block2:
+	; v88 = iadd v2, v4
+	ldr	x16, [sp, #0]
+	ldr	x17, [sp, #8]
+	add	x9, x16, x17
+	; v89 = iadd v88, v6
+	ldr	x17, [sp, #16]
+	add	x9, x9, x17
+	; v90 = iadd v89, v8
+	ldr	x17, [sp, #24]
+	add	x9, x9, x17
+	; v91 = iadd v90, v10
+	ldr	x17, [sp, #32]
+	add	x9, x9, x17
+	; v92 = iadd v91, v12
+	ldr	x17, [sp, #40]
+	add	x9, x9, x17
+	; v93 = iadd v92, v14
+	ldr	x17, [sp, #48]
+	add	x9, x9, x17
+	; v94 = iadd v93, v16
+	ldr	x17, [sp, #56]
+	add	x9, x9, x17
+	; v95 = iadd v94, v18
+	ldr	x17, [sp, #64]
+	add	x9, x9, x17
+	; v96 = iadd v95, v20
+	ldr	x17, [sp, #72]
+	add	x9, x9, x17
+	; v97 = iadd v96, v22
+	ldr	x17, [sp, #80]
+	add	x9, x9, x17
+	; v98 = iadd v97, v24
+	ldr	x17, [sp, #88]
+	add	x9, x9, x17
+	; v99 = iadd v98, v26
+	ldr	x17, [sp, #96]
+	add	x9, x9, x17
+	; v100 = iadd v99, v28
+	ldr	x17, [sp, #104]
+	add	x9, x9, x17
+	; return v100
+	mov	x0, x9
+	sub	sp, x29, #80
+	ldp	x27, x28, [sp], #16
+	ldp	x25, x26, [sp], #16
+	ldp	x23, x24, [sp], #16
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_setjmp_block1:
 	; v33 = iconst.i64 101
 	movz	x9, #0x65
@@ -237,57 +288,6 @@ Lk_setjmp_block1:
 	bl	_longjmp
 	; trap
 	brk	#1
-Lk_setjmp_block2:
-	; v88 = iadd v2, v4
-	ldr	x16, [sp, #0]
-	ldr	x17, [sp, #8]
-	add	x9, x16, x17
-	; v89 = iadd v88, v6
-	ldr	x17, [sp, #16]
-	add	x9, x9, x17
-	; v90 = iadd v89, v8
-	ldr	x17, [sp, #24]
-	add	x9, x9, x17
-	; v91 = iadd v90, v10
-	ldr	x17, [sp, #32]
-	add	x9, x9, x17
-	; v92 = iadd v91, v12
-	ldr	x17, [sp, #40]
-	add	x9, x9, x17
-	; v93 = iadd v92, v14
-	ldr	x17, [sp, #48]
-	add	x9, x9, x17
-	; v94 = iadd v93, v16
-	ldr	x17, [sp, #56]
-	add	x9, x9, x17
-	; v95 = iadd v94, v18
-	ldr	x17, [sp, #64]
-	add	x9, x9, x17
-	; v96 = iadd v95, v20
-	ldr	x17, [sp, #72]
-	add	x9, x9, x17
-	; v97 = iadd v96, v22
-	ldr	x17, [sp, #80]
-	add	x9, x9, x17
-	; v98 = iadd v97, v24
-	ldr	x17, [sp, #88]
-	add	x9, x9, x17
-	; v99 = iadd v98, v26
-	ldr	x17, [sp, #96]
-	add	x9, x9, x17
-	; v100 = iadd v99, v28
-	ldr	x17, [sp, #104]
-	add	x9, x9, x17
-	; return v100
-	mov	x0, x9
-	sub	sp, x29, #80
-	ldp	x27, x28, [sp], #16
-	ldp	x25, x26, [sp], #16
-	ldp	x23, x24, [sp], #16
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
 Lk_setjmp_end:
 	.cfi_endproc
 	.section	__TEXT,__text

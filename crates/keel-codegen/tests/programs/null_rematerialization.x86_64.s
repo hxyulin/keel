@@ -227,15 +227,7 @@
 	mov	rsi, rax
 	# brif v3, block2, block1
 	test	esi, esi
-	jne	".Lnull_setjmp_block2"
-.Lnull_setjmp_block1:
-	# v4 = iconst.i32 1
-	mov	esi, 1
-	# call @longjmp(v0, v4)
-	mov	rdi, rbx
-	call	"longjmp"@PLT
-	# trap
-	ud2
+	je	".Lnull_setjmp_block1"
 .Lnull_setjmp_block2:
 	# return v2
 	mov	rax, r12
@@ -244,6 +236,14 @@
 	pop	rbx
 	pop	rbp
 	ret
+.Lnull_setjmp_block1:
+	# v4 = iconst.i32 1
+	mov	esi, 1
+	# call @longjmp(v0, v4)
+	mov	rdi, rbx
+	call	"longjmp"@PLT
+	# trap
+	ud2
 .Lnull_setjmp_end:
 	.cfi_endproc
 	.size "null_setjmp", .-"null_setjmp"

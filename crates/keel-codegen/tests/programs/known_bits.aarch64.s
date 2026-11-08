@@ -60,15 +60,15 @@ Lknown_bits_block2:
 	; v15 = icmp.ule v14, v10
 	; brif v15, block3, block4
 	cmp	x9, #15
-	b.ls	Lknown_bits_block3
-Lknown_bits_block4:
-	; trap
-	brk	#1
+	b.hi	Lknown_bits_block4
 Lknown_bits_block3:
 	; return v4
 	mov	x0, x11
 	ldp	x29, x30, [sp], #16
 	ret
+Lknown_bits_block4:
+	; trap
+	brk	#1
 Lknown_bits_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -123,16 +123,16 @@ Lknown_add_block0:
 	cset	w11, lo
 	; brif v7, block1, block2
 	tst	w11, #255
-	b.ne	Lknown_add_block1
-Lknown_add_block2:
-	; trap
-	brk	#1
+	b.eq	Lknown_add_block2
 Lknown_add_block1:
 	; v8 = trunc.i64 v5
 	; return v8
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
+Lknown_add_block2:
+	; trap
+	brk	#1
 Lknown_add_end:
 	.cfi_endproc
 	.subsections_via_symbols

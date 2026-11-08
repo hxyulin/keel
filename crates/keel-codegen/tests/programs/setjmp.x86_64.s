@@ -91,7 +91,58 @@
 	# v32 = icmp.ne v30, v31
 	# brif v32, block2, block1
 	cmp	esi, 0
-	jne	".Lk_setjmp_block2"
+	je	".Lk_setjmp_block1"
+.Lk_setjmp_block2:
+	# v88 = iadd v2, v4
+	mov	rax, qword ptr [rbp + -448]
+	mov	rcx, qword ptr [rbp + -440]
+	lea	rsi, [rax + rcx * 1]
+	# v89 = iadd v88, v6
+	mov	rcx, qword ptr [rbp + -432]
+	add	rsi, rcx
+	# v90 = iadd v89, v8
+	mov	rcx, qword ptr [rbp + -424]
+	add	rsi, rcx
+	# v91 = iadd v90, v10
+	mov	rcx, qword ptr [rbp + -416]
+	add	rsi, rcx
+	# v92 = iadd v91, v12
+	mov	rcx, qword ptr [rbp + -408]
+	add	rsi, rcx
+	# v93 = iadd v92, v14
+	mov	rcx, qword ptr [rbp + -400]
+	add	rsi, rcx
+	# v94 = iadd v93, v16
+	mov	rcx, qword ptr [rbp + -392]
+	add	rsi, rcx
+	# v95 = iadd v94, v18
+	mov	rcx, qword ptr [rbp + -384]
+	add	rsi, rcx
+	# v96 = iadd v95, v20
+	mov	rcx, qword ptr [rbp + -376]
+	add	rsi, rcx
+	# v97 = iadd v96, v22
+	mov	rcx, qword ptr [rbp + -368]
+	add	rsi, rcx
+	# v98 = iadd v97, v24
+	mov	rcx, qword ptr [rbp + -360]
+	add	rsi, rcx
+	# v99 = iadd v98, v26
+	mov	rcx, qword ptr [rbp + -352]
+	add	rsi, rcx
+	# v100 = iadd v99, v28
+	mov	rcx, qword ptr [rbp + -344]
+	add	rsi, rcx
+	# return v100
+	mov	rax, rsi
+	lea	rsp, [rbp + -40]
+	pop	r15
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_setjmp_block1:
 	# v33 = iconst.i64 101
 	# v34 = imul v0, v33
@@ -214,57 +265,6 @@
 	call	"longjmp"@PLT
 	# trap
 	ud2
-.Lk_setjmp_block2:
-	# v88 = iadd v2, v4
-	mov	rax, qword ptr [rbp + -448]
-	mov	rcx, qword ptr [rbp + -440]
-	lea	rsi, [rax + rcx * 1]
-	# v89 = iadd v88, v6
-	mov	rcx, qword ptr [rbp + -432]
-	add	rsi, rcx
-	# v90 = iadd v89, v8
-	mov	rcx, qword ptr [rbp + -424]
-	add	rsi, rcx
-	# v91 = iadd v90, v10
-	mov	rcx, qword ptr [rbp + -416]
-	add	rsi, rcx
-	# v92 = iadd v91, v12
-	mov	rcx, qword ptr [rbp + -408]
-	add	rsi, rcx
-	# v93 = iadd v92, v14
-	mov	rcx, qword ptr [rbp + -400]
-	add	rsi, rcx
-	# v94 = iadd v93, v16
-	mov	rcx, qword ptr [rbp + -392]
-	add	rsi, rcx
-	# v95 = iadd v94, v18
-	mov	rcx, qword ptr [rbp + -384]
-	add	rsi, rcx
-	# v96 = iadd v95, v20
-	mov	rcx, qword ptr [rbp + -376]
-	add	rsi, rcx
-	# v97 = iadd v96, v22
-	mov	rcx, qword ptr [rbp + -368]
-	add	rsi, rcx
-	# v98 = iadd v97, v24
-	mov	rcx, qword ptr [rbp + -360]
-	add	rsi, rcx
-	# v99 = iadd v98, v26
-	mov	rcx, qword ptr [rbp + -352]
-	add	rsi, rcx
-	# v100 = iadd v99, v28
-	mov	rcx, qword ptr [rbp + -344]
-	add	rsi, rcx
-	# return v100
-	mov	rax, rsi
-	lea	rsp, [rbp + -40]
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
 .Lk_setjmp_end:
 	.cfi_endproc
 	.size "k_setjmp", .-"k_setjmp"

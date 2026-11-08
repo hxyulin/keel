@@ -134,6 +134,7 @@ mod lower_vector;
 mod native;
 mod neon;
 mod output;
+mod overflow_branch;
 mod packed_load;
 mod packed_minmax;
 mod plan;
@@ -3127,6 +3128,13 @@ impl<'a> FunctionCompiler<'a> {
     /// bits from extended operands, which cannot overflow there, and check
     /// that the result fits.
     fn overflow(&mut self, inst: Inst, op: OverflowOp, args: [Value; 2]) {
+        let results = self.func.inst_results(inst);
+        let fused = self.selection.omitted_defs.contains(&results[1]);
+        let destination = if fused {
+            self.def_reg(Some(results[0]))
+        } else {
+            S0
+        };
         let ty = self.ty(args[0]);
         let signed = matches!(op, OverflowOp::Sadd | OverflowOp::Ssub | OverflowOp::Smul);
         let a = self.use_reg(args[0], S0);
@@ -3157,7 +3165,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.mach("cset", [(Reg::w(S2)).into(), Arg::from("ne")]);
             }
             None => {
-                let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(S0, ty));
+                let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(destination, ty));
                 match (op, ty) {
                     (OverflowOp::Uadd | OverflowOp::Sadd, _) => {
                         self.mach("adds", [(rd).into(), (ra).into(), (rb).into()])
@@ -3227,13 +3235,15 @@ impl<'a> FunctionCompiler<'a> {
                     OverflowOp::Sadd | OverflowOp::Ssub => "vs",
                     OverflowOp::Umul | OverflowOp::Smul => "ne",
                 };
-                self.mach("cset", [(Reg::w(S2)).into(), (code).into()]);
+                if !fused {
+                    self.mach("cset", [(Reg::w(S2)).into(), (code).into()]);
+                }
             }
         }
         let results = self.func.inst_results(inst);
         let (value, flag) = (results[0], results[1]);
         if let Some(loc) = self.defined(value) {
-            self.emit_move(loc, Loc::Reg(S0));
+            self.emit_move(loc, Loc::Reg(destination));
         }
         if let Some(loc) = self.defined(flag) {
             self.emit_move(loc, Loc::Reg(S2));

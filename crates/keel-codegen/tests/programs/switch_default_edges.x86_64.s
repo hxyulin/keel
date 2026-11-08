@@ -83,16 +83,16 @@
 .Ltrap_default_block2:
 	# brif v3, block3, block4
 	test	edi, edi
-	jne	".Ltrap_default_block3"
-.Ltrap_default_block4:
-	# trap
-	ud2
+	je	".Ltrap_default_block4"
 .Ltrap_default_block3:
 	# return v0
 	mov	rax, rsi
 	mov	rsp, rbp
 	pop	rbp
 	ret
+.Ltrap_default_block4:
+	# trap
+	ud2
 .Ltrap_default_end:
 	.cfi_endproc
 	.size "trap_default", .-"trap_default"

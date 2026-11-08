@@ -335,9 +335,38 @@ fn allocation_order(
     if order.len() < 3 {
         return (order, weights);
     }
+    let mut cold = vec![false; func.num_blocks()];
+    for &b in &order {
+        cold[b.index()] = func
+            .block_insts(b)
+            .last()
+            .is_some_and(|&i| match func.inst_data(i) {
+                InstData::Trap => true,
+                InstData::ReturnCall { func: callee, .. } => {
+                    let attrs = &func.callee(*callee).attrs;
+                    attrs.noreturn || attrs.cold
+                }
+                _ => false,
+            });
+    }
+    // Propagate only from proven terminal regions; a cycle cannot make
+    // itself cold. Reverse RPO traversal visits colder successors first.
+    let mut pending: Vec<_> = order.iter().copied().filter(|b| cold[b.index()]).collect();
+    while let Some(b) = pending.pop() {
+        for &pred in cfg.preds(b) {
+            if !cold[pred.index()]
+                && !cfg.succs(pred).is_empty()
+                && cfg.succs(pred).iter().all(|s| cold[s.index()])
+            {
+                cold[pred.index()] = true;
+                pending.push(pred);
+            }
+        }
+    }
+    let preference = |b: Block| (!cold[b.index()], weights[b.index()]);
     let reverse = |block: Block| {
         let succs = cfg.succs(block);
-        succs.len() == 2 && weights[succs[0].index()] > weights[succs[1].index()]
+        succs.len() == 2 && preference(succs[0]) > preference(succs[1])
     };
     if !order.iter().copied().any(reverse) {
         return (order, weights);

@@ -203,7 +203,14 @@ Lnull_setjmp_block0:
 	bl	_setjmp
 	mov	x9, x0
 	; brif v3, block2, block1
-	cbnz	w9, Lnull_setjmp_block2
+	cbz	w9, Lnull_setjmp_block1
+Lnull_setjmp_block2:
+	; return v2
+	mov	x0, x20
+	sub	sp, x29, #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lnull_setjmp_block1:
 	; v4 = iconst.i32 1
 	movz	w9, #0x1
@@ -213,13 +220,6 @@ Lnull_setjmp_block1:
 	bl	_longjmp
 	; trap
 	brk	#1
-Lnull_setjmp_block2:
-	; return v2
-	mov	x0, x20
-	sub	sp, x29, #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
 Lnull_setjmp_end:
 	.cfi_endproc
 	.section	__TEXT,__text

@@ -126,26 +126,43 @@ impl FunctionCompiler<'_> {
             } => {
                 // Take the same false edge, with the same landing pads and
                 // edge copies, whether testing a register or a comparison.
-                let test = match func.value_def(func.resolve(cond)) {
-                    // A fused compare-and-swap left eq when it stored.
-                    ValueDef::Result(cas, _)
-                        if self.fused_compares.contains(&func.resolve(cond))
-                            && matches!(func.inst_data(cas), InstData::AtomicCas { .. }) =>
-                    {
-                        BrifTest::Flags("ne")
-                    }
-                    ValueDef::Result(compare, _)
-                        if self.fused_compares.contains(&func.resolve(cond)) =>
-                    {
-                        BrifTest::Flags(invert_cond(self.compare(compare)))
-                    }
-                    _ if !self.has_inline_asm && matches!(self.ty(cond), Type::I32 | Type::I64) => {
-                        let c = self.use_reg(cond, S0);
-                        BrifTest::Zero(reg(c, self.ty(cond)))
-                    }
-                    _ => {
-                        self.test_value(cond);
-                        BrifTest::Flags("eq")
+                let test = if let Some(&(producer, inverted)) =
+                    self.selection.overflow_branches.get(&inst)
+                {
+                    let InstData::Overflow { op, .. } = *func.inst_data(producer) else {
+                        unreachable!("overflow branch producer")
+                    };
+                    let code = match op {
+                        OverflowOp::Uadd => "hs",
+                        OverflowOp::Usub => "lo",
+                        OverflowOp::Sadd | OverflowOp::Ssub => "vs",
+                        _ => unreachable!("selected add/sub overflow"),
+                    };
+                    BrifTest::Flags(if inverted { code } else { invert_cond(code) })
+                } else {
+                    match func.value_def(func.resolve(cond)) {
+                        // A fused compare-and-swap left eq when it stored.
+                        ValueDef::Result(cas, _)
+                            if self.fused_compares.contains(&func.resolve(cond))
+                                && matches!(func.inst_data(cas), InstData::AtomicCas { .. }) =>
+                        {
+                            BrifTest::Flags("ne")
+                        }
+                        ValueDef::Result(compare, _)
+                            if self.fused_compares.contains(&func.resolve(cond)) =>
+                        {
+                            BrifTest::Flags(invert_cond(self.compare(compare)))
+                        }
+                        _ if !self.has_inline_asm
+                            && matches!(self.ty(cond), Type::I32 | Type::I64) =>
+                        {
+                            let c = self.use_reg(cond, S0);
+                            BrifTest::Zero(reg(c, self.ty(cond)))
+                        }
+                        _ => {
+                            self.test_value(cond);
+                            BrifTest::Flags("eq")
+                        }
                     }
                 };
                 // Copy block arguments only on their own edge. A fallthrough

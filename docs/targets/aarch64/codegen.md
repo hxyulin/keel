@@ -56,6 +56,13 @@ return a struct are rejected. A function whose only instruction is a direct
 placed for the callee, is a single `b` with no frame, under the same rule as
 [x86-64](../x86_64/codegen.md#frames). Debug files keep the normal path.
 
+Private Darwin scalar leaves may also use register-only direct Fast tail calls
+without a frame. Unused stack declarations and removed vector values do not
+exclude the argument register bank; surviving stack addresses, calls, unsupported
+instructions, spills, callee saves, debug data and stack arguments still do.
+Full allocation places proven terminal trap regions and cold/no-return tail
+calls behind ordinary successors before assigning instruction positions.
+
 ## Frame
 
 From `sp` up:
@@ -191,7 +198,13 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
 
 ## Integer, float and atomic lowering
 
-- Overflow flags come from the condition flags (`adds` and `cset hs/vs`),
+- A single-use i32/i64 add/sub overflow flag feeding a branch, directly or
+  through `xor flag, 1`, stays in NZCV and branches with `hs`, `lo` or `vs`.
+  Intervening work, extra flag users, debug boundaries, inline assembly and
+  custom operand/constraint claims retain materialization. Selected arithmetic
+  writes its allocated destination directly. Narrow overflow and multiplication
+  retain their separate materialized flag paths.
+- Other overflow flags come from the condition flags (`adds` and `cset hs/vs`),
   from the high half of the product for 64-bit multiplication, and from a
   range check for i8 and i16, computed in 32 bits where it cannot overflow.
 - `fcopysign` has no scalar instruction, so it splices the sign bit in

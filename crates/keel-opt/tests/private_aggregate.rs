@@ -178,10 +178,12 @@ fn cleanup_policy_is_full_only() {
             .pipeline()
             .iter()
             .rev()
-            .take(3)
+            .take(5)
             .copied()
             .collect::<Vec<_>>(),
         [
+            "outline-cold",
+            "branch-facts",
             "tail-calls",
             "internal-fast-calls",
             "private-aggregate-cleanup"

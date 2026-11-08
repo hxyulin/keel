@@ -61,10 +61,7 @@
 	# v15 = icmp.ule v14, v10
 	# brif v15, block3, block4
 	cmp	rsi, 15
-	jbe	".Lknown_bits_block3"
-.Lknown_bits_block4:
-	# trap
-	ud2
+	ja	".Lknown_bits_block4"
 .Lknown_bits_block3:
 	# return v4
 	mov	rax, r8
@@ -73,6 +70,9 @@
 	pop	rbx
 	pop	rbp
 	ret
+.Lknown_bits_block4:
+	# trap
+	ud2
 .Lknown_bits_end:
 	.cfi_endproc
 	.size "known_bits", .-"known_bits"
@@ -123,10 +123,7 @@
 	setb	r8b
 	# brif v7, block1, block2
 	test	r8b, r8b
-	jne	".Lknown_add_block1"
-.Lknown_add_block2:
-	# trap
-	ud2
+	je	".Lknown_add_block2"
 .Lknown_add_block1:
 	# v8 = trunc.i64 v5
 	# return v8
@@ -134,6 +131,9 @@
 	mov	rsp, rbp
 	pop	rbp
 	ret
+.Lknown_add_block2:
+	# trap
+	ud2
 .Lknown_add_end:
 	.cfi_endproc
 	.size "known_add", .-"known_add"

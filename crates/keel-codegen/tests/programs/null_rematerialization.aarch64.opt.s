@@ -184,16 +184,7 @@ Lnull_setjmp_block0:
 	bl	_setjmp
 	mov	x9, x0
 	; brif v3, block2, block1
-	cbnz	w9, Lnull_setjmp_block2
-Lnull_setjmp_block1:
-	; v4 = iconst.i32 1
-	movz	w9, #0x1
-	; call @longjmp(v0, v4)
-	mov	x0, x19
-	mov	x1, x9
-	bl	_longjmp
-	; trap
-	brk	#1
+	cbz	w9, Lnull_setjmp_block1
 Lnull_setjmp_block2:
 	; v1 = iconst.i64 0
 	movz	x9, #0x0
@@ -204,6 +195,15 @@ Lnull_setjmp_block2:
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
+Lnull_setjmp_block1:
+	; v4 = iconst.i32 1
+	movz	w9, #0x1
+	; call @longjmp(v0, v4)
+	mov	x0, x19
+	mov	x1, x9
+	bl	_longjmp
+	; trap
+	brk	#1
 Lnull_setjmp_end:
 	.cfi_endproc
 	.section	__TEXT,__text

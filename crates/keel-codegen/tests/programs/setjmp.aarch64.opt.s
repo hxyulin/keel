@@ -39,7 +39,87 @@ Lk_setjmp_block0:
 	; v32 = icmp.ne v30, v31
 	; brif v32, block2, block1
 	cmp	w9, #0
-	b.ne	Lk_setjmp_block2
+	b.eq	Lk_setjmp_block1
+Lk_setjmp_block2:
+	; v3 = iconst.i64 5
+	movz	x9, #0x5
+	; v4 = imul v0, v3
+	; v1 = iconst.i64 3
+	movz	x10, #0x3
+	; v2 = imul v0, v1
+	mul	x10, x19, x10
+	; v88 = iadd v2, v4
+	madd	x9, x19, x9, x10
+	; v5 = iconst.i64 7
+	movz	x10, #0x7
+	; v6 = imul v0, v5
+	; v89 = iadd v6, v88
+	madd	x9, x19, x10, x9
+	; v7 = iconst.i64 11
+	movz	x10, #0xb
+	; v8 = imul v0, v7
+	; v90 = iadd v8, v89
+	madd	x9, x19, x10, x9
+	; v9 = iconst.i64 13
+	movz	x10, #0xd
+	; v10 = imul v0, v9
+	; v91 = iadd v10, v90
+	madd	x9, x19, x10, x9
+	; v11 = iconst.i64 17
+	movz	x10, #0x11
+	; v12 = imul v0, v11
+	; v92 = iadd v12, v91
+	madd	x9, x19, x10, x9
+	; v13 = iconst.i64 19
+	movz	x10, #0x13
+	; v14 = imul v0, v13
+	; v93 = iadd v14, v92
+	madd	x9, x19, x10, x9
+	; v15 = iconst.i64 23
+	movz	x10, #0x17
+	; v16 = imul v0, v15
+	; v94 = iadd v16, v93
+	madd	x9, x19, x10, x9
+	; v17 = iconst.i64 29
+	movz	x10, #0x1d
+	; v18 = imul v0, v17
+	; v95 = iadd v18, v94
+	madd	x9, x19, x10, x9
+	; v19 = iconst.i64 31
+	movz	x10, #0x1f
+	; v20 = imul v0, v19
+	; v96 = iadd v20, v95
+	madd	x9, x19, x10, x9
+	; v21 = iconst.i64 37
+	movz	x10, #0x25
+	; v22 = imul v0, v21
+	; v97 = iadd v22, v96
+	madd	x9, x19, x10, x9
+	; v23 = iconst.i64 41
+	movz	x10, #0x29
+	; v24 = imul v0, v23
+	; v98 = iadd v24, v97
+	madd	x9, x19, x10, x9
+	; v25 = iconst.i64 43
+	movz	x10, #0x2b
+	; v26 = imul v0, v25
+	; v99 = iadd v26, v98
+	madd	x9, x19, x10, x9
+	; v27 = iconst.i64 47
+	movz	x10, #0x2f
+	; v28 = imul v0, v27
+	; v100 = iadd v28, v99
+	madd	x9, x19, x10, x9
+	; return v100
+	mov	x0, x9
+	sub	sp, x29, #80
+	ldp	x27, x28, [sp], #16
+	ldp	x25, x26, [sp], #16
+	ldp	x23, x24, [sp], #16
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_setjmp_block1:
 	; v33 = iconst.i64 101
 	movz	x9, #0x65
@@ -151,86 +231,6 @@ Lk_setjmp_block1:
 	bl	_longjmp
 	; trap
 	brk	#1
-Lk_setjmp_block2:
-	; v3 = iconst.i64 5
-	movz	x9, #0x5
-	; v4 = imul v0, v3
-	; v1 = iconst.i64 3
-	movz	x10, #0x3
-	; v2 = imul v0, v1
-	mul	x10, x19, x10
-	; v88 = iadd v2, v4
-	madd	x9, x19, x9, x10
-	; v5 = iconst.i64 7
-	movz	x10, #0x7
-	; v6 = imul v0, v5
-	; v89 = iadd v6, v88
-	madd	x9, x19, x10, x9
-	; v7 = iconst.i64 11
-	movz	x10, #0xb
-	; v8 = imul v0, v7
-	; v90 = iadd v8, v89
-	madd	x9, x19, x10, x9
-	; v9 = iconst.i64 13
-	movz	x10, #0xd
-	; v10 = imul v0, v9
-	; v91 = iadd v10, v90
-	madd	x9, x19, x10, x9
-	; v11 = iconst.i64 17
-	movz	x10, #0x11
-	; v12 = imul v0, v11
-	; v92 = iadd v12, v91
-	madd	x9, x19, x10, x9
-	; v13 = iconst.i64 19
-	movz	x10, #0x13
-	; v14 = imul v0, v13
-	; v93 = iadd v14, v92
-	madd	x9, x19, x10, x9
-	; v15 = iconst.i64 23
-	movz	x10, #0x17
-	; v16 = imul v0, v15
-	; v94 = iadd v16, v93
-	madd	x9, x19, x10, x9
-	; v17 = iconst.i64 29
-	movz	x10, #0x1d
-	; v18 = imul v0, v17
-	; v95 = iadd v18, v94
-	madd	x9, x19, x10, x9
-	; v19 = iconst.i64 31
-	movz	x10, #0x1f
-	; v20 = imul v0, v19
-	; v96 = iadd v20, v95
-	madd	x9, x19, x10, x9
-	; v21 = iconst.i64 37
-	movz	x10, #0x25
-	; v22 = imul v0, v21
-	; v97 = iadd v22, v96
-	madd	x9, x19, x10, x9
-	; v23 = iconst.i64 41
-	movz	x10, #0x29
-	; v24 = imul v0, v23
-	; v98 = iadd v24, v97
-	madd	x9, x19, x10, x9
-	; v25 = iconst.i64 43
-	movz	x10, #0x2b
-	; v26 = imul v0, v25
-	; v99 = iadd v26, v98
-	madd	x9, x19, x10, x9
-	; v27 = iconst.i64 47
-	movz	x10, #0x2f
-	; v28 = imul v0, v27
-	; v100 = iadd v28, v99
-	madd	x9, x19, x10, x9
-	; return v100
-	mov	x0, x9
-	sub	sp, x29, #80
-	ldp	x27, x28, [sp], #16
-	ldp	x25, x26, [sp], #16
-	ldp	x23, x24, [sp], #16
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
 Lk_setjmp_end:
 	.cfi_endproc
 	.section	__TEXT,__text

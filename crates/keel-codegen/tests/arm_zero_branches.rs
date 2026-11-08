@@ -2,6 +2,9 @@
 #[allow(dead_code)]
 #[path = "common/codegen.rs"]
 mod codegen;
+#[allow(dead_code)]
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 
 use codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
@@ -258,5 +261,76 @@ fn moves_only_on_the_false_edge_need_no_landing_pad() {
             "{text}"
         );
         assert!(text.contains("\tb\tLf_block2\n"), "{text}");
+    }
+}
+
+#[test]
+fn overflow_branches_preserve_value_polarity_edges_and_spill_transport() {
+    let mut source = String::new();
+    let mut oracle = String::from("#include <assert.h>\n#include <stdint.h>\n");
+    let mut checks = String::new();
+    for bits in [32, 64] {
+        for (op, builtin, signed) in [
+            ("uadd", "add", false),
+            ("usub", "sub", false),
+            ("sadd", "add", true),
+            ("ssub", "sub", true),
+        ] {
+            for inverted in [false, true] {
+                let name = format!("{op}{bits}_{}", u8::from(inverted));
+                let invert = if inverted {
+                    "v4=iconst.i8 1\n v5=xor v3,v4\n"
+                } else {
+                    ""
+                };
+                let (condition, yes, no) = if inverted {
+                    ("v5", "block1(v2)", "block2")
+                } else {
+                    ("v3", "block2", "block1(v2)")
+                };
+                let returned = if bits == 32 {
+                    "v7=uext.i64 v6\n return v7"
+                } else {
+                    "return v6"
+                };
+                source.push_str(&format!("func @{name}(i{bits},i{bits}) -> i64 {{\nblock0(v0:i{bits},v1:i{bits}):\n v2,v3={op}_overflow v0,v1\n {invert} brif {condition},{yes},{no}\nblock1(v6:i{bits}):\n {returned}\nblock2:\n v8=iconst.i64 -1\n return v8\n}}\n"));
+                oracle.push_str(&format!(
+                    "extern uint64_t {name}(uint{bits}_t,uint{bits}_t);\n"
+                ));
+                let ty = if signed {
+                    format!("int{bits}_t")
+                } else {
+                    format!("uint{bits}_t")
+                };
+                checks.push_str(&format!("{{ {ty} result; int overflow=__builtin_{builtin}_overflow(({ty})a,({ty})b,&result); assert({name}((uint{bits}_t)a,(uint{bits}_t)b)==(overflow?UINT64_MAX:(uint64_t)(uint{bits}_t)result)); }}\n"));
+            }
+        }
+    }
+    oracle.push_str(&format!("int main(void) {{ uint64_t values[]={{0,1,2,0x7fffffff,0x80000000,0xffffffff,0x7fffffffffffffffULL,0x8000000000000000ULL,UINT64_MAX}}; for(unsigned i=0;i<9;++i) for(unsigned j=0;j<9;++j){{ uint64_t a=values[i],b=values[j]; {checks} }} }}\n"));
+    let prepared = native_oracle::PreparedOracle::new("overflow-branches", &oracle, &["-O2"]);
+    for pools in [&keel_codegen::aarch64::REGISTERS, &SPILLED] {
+        let (text, object) = compile(&source, SelectionTier::Full, AllocationTier::Full, pools);
+        assert!(!text.contains("cset"), "{text}");
+        assert!(!text.contains("eor"), "{text}");
+        prepared.run(&object, "overflow branches");
+    }
+}
+
+#[test]
+fn overflow_flag_extra_users_and_intervening_work_keep_materialization() {
+    for body in [
+        "v4=uext.i64 v3\n brif v3,block1(v4),block1(v4)",
+        "v4=iadd v2,v0\n brif v3,block1(v4),block1(v4)",
+    ] {
+        let src = format!(
+            "func @f(i64,i64)->i64 {{\nblock0(v0:i64,v1:i64):\n v2,v3=uadd_overflow v0,v1\n {body}\nblock1(v5:i64):\n return v5\n}}"
+        );
+        let (text, _) = compile(
+            &src,
+            SelectionTier::Full,
+            AllocationTier::Full,
+            &keel_codegen::aarch64::REGISTERS,
+        );
+        assert!(text.contains("cset"), "{text}");
     }
 }

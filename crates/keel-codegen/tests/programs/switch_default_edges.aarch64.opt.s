@@ -75,15 +75,15 @@ Ltrap_default_block1:
 	; jump block2(v2)
 Ltrap_default_block2:
 	; brif v3, block3, block4
-	cbnz	w10, Ltrap_default_block3
-Ltrap_default_block4:
-	; trap
-	brk	#1
+	cbz	w10, Ltrap_default_block4
 Ltrap_default_block3:
 	; return v0
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
+Ltrap_default_block4:
+	; trap
+	brk	#1
 Ltrap_default_end:
 	.cfi_endproc
 	.subsections_via_symbols

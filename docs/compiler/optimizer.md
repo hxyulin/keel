@@ -138,6 +138,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
+| `branch-facts` | Fold repeated or complementary integer comparisons established by dominating edges |
+| `outline-cold` | Tail-outline bounded terminal panic records into private cold helpers |
 | `fast-cfg`, `fast-local`, `fast-loop-reduce` | The bounded Fast tier; see [Fast](#fast-tier) |
 
 `-p pass,pass,...` selects any pipeline explicitly, overriding the tier.
@@ -684,3 +686,28 @@ dominator tree or use graph and does no GVN, inlining or loop analysis apart
 from the size-capped `fast-loop-reduce` sum transform (at most 256
 instructions, 16 blocks, one stream address and eight vector-expression
 values). Division by zero and signed MIN/-1 still trap; signed MIN % -1 is zero.
+
+## Terminal panic records
+
+Full runs `branch-facts` and `outline-cold` after tail-call cleanup. Branch facts
+use canonical integer comparisons and their complements, preserving signedness.
+Only a unique incoming conditional edge establishes a new fact; joins, loops
+with another predecessor, and duplicate branch destinations do not. A fold
+runs CFG cleanup and DCE so unreachable panic records stop consuming storage.
+
+Cold outlining accepts a private Fast function with at most 256 laid-out
+instructions and 4096 instruction/value arena entries. It moves a terminal trap
+block containing stack records into a cold, noinline, noreturn helper with the
+same return convention, then tail-calls that helper. Constants and symbol
+addresses are cloned into the helper; at most six scalar live-ins are passed.
+The trap block is limited to 128 instructions. Debug locations, exception edges,
+inline assembly, intrinsics, returns-twice behavior and alwaysinline functions
+prevent outlining. Stack addresses and opaque calls outside the selected block
+also prevent it: tail-calling must not invalidate a captured caller-frame address.
+The helper retains target feature permissions and call declarations, but starts
+with conservative semantic contracts. New helpers are not reconsidered in the
+same invocation, and the pass is idempotent.
+
+This isolates cold records rather than implementing general shrink wrapping.
+The ordinary frame and unwind machinery handles each helper independently.
+Custom pass lists need these passes explicitly; choosing Full includes them.

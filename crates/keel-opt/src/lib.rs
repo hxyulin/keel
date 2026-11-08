@@ -89,9 +89,11 @@ impl From<VectorTarget> for OptimizationContext {
     }
 }
 
+mod branch_facts;
 mod memory_alias;
 mod memory_forward;
 mod module_cleanup;
+mod outline_cold;
 mod phi_simplify;
 mod scratch;
 mod simplify_cfg;
@@ -384,6 +386,12 @@ pub(crate) static CALL_LOAD_REUSE: &dyn Pass = &call_load_reuse::CallLoadReuse;
 pub(crate) static INTERNAL_FAST_CALLS: &dyn Pass = &internal_fast_calls::InternalFastCalls;
 pub(crate) static TAIL_CALLS: &dyn Pass = &tail_calls::TailCalls;
 pub(crate) static CONSTANT_ARGS: &dyn Pass = &constant_args::ConstantArgs;
+pub(crate) static BRANCH_FACTS: &dyn Pass = &BuiltinPass::new(
+    "branch-facts",
+    "fold integer comparisons known from dominating edges",
+    |f, _| branch_facts::run(f),
+);
+pub(crate) static OUTLINE_COLD: &dyn Pass = &outline_cold::OutlineCold;
 pub(crate) static EMPTY_CALLS: &dyn Pass = &module_cleanup::EmptyCalls;
 pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions;
 pub(crate) static COMPACT_UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::CompactUnusedFunctions;
@@ -431,6 +439,8 @@ pub static PASSES: &[&dyn Pass] = &[
     CALL_LOAD_REUSE,
     INTERNAL_FAST_CALLS,
     TAIL_CALLS,
+    OUTLINE_COLD,
+    BRANCH_FACTS,
     CONSTANT_ARGS,
     EMPTY_CALLS,
     UNUSED_FUNCTIONS,
@@ -722,7 +732,7 @@ const FULL_ROUND: [&str; 17] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 29] = [
+const FULL_EPILOGUE: [&str; 31] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -752,6 +762,8 @@ const FULL_EPILOGUE: [&str; 29] = [
     "private-aggregate-cleanup",
     "internal-fast-calls",
     "tail-calls",
+    "branch-facts",
+    "outline-cold",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller

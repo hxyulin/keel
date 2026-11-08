@@ -342,26 +342,38 @@ pub(super) fn argument_bank(
         && module.files.is_empty()
         && func.personality.is_none()
         && incoming == 0
-        && func.num_stack_slots() == 0
+        && !func
+            .layout_insts()
+            .any(|(_, i)| matches!(func.inst_data(i), InstData::StackAddr { .. }))
         && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
         && pools.caller_saved == REGISTERS.caller_saved
         && pools.callee_saved == REGISTERS.callee_saved
         && pools.float_caller_saved == REGISTERS.float_caller_saved
         && pools.float_callee_saved == REGISTERS.float_callee_saved
-        && (0..func.num_values()).all(|i| {
-            matches!(
-                func.value_type(Value::new(i)),
-                Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
-            )
-        })
+        && func
+            .blocks()
+            .flat_map(|b| {
+                func.block_params(b).iter().copied().chain(
+                    func.block_insts(b)
+                        .iter()
+                        .flat_map(|&i| func.inst_results(i).iter().copied()),
+                )
+            })
+            .all(|v| {
+                matches!(
+                    func.value_type(v),
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+                )
+            })
         && !func.layout_insts().any(|(_, i)| {
             let d = func.inst_data(i);
             is_call(func, d)
+                || matches!(d, InstData::ReturnCall { func: callee, .. }
+                    if !register_tail_call(&func.callee(*callee).sig))
                 || matches!(
                     d,
                     InstData::Intrinsic { .. }
                         | InstData::InlineAsm { .. }
-                        | InstData::ReturnCall { .. }
                         | InstData::ReturnCallIndirect { .. }
                         | InstData::LandingPad { .. }
                 )
@@ -527,6 +539,7 @@ impl Covers {
         } else {
             HashMap::default()
         };
+        overflow_branch::select(func, &mut selection, uses);
         let mut fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(
@@ -675,13 +688,28 @@ pub(super) fn frameless(
         && !func.layout_insts().any(|(_, i)| {
             let d = func.inst_data(i);
             is_call(func, d)
+                || matches!(d, InstData::ReturnCall { func: callee, .. }
+                    if !register_tail_call(&func.callee(*callee).sig))
                 || matches!(
                     d,
                     InstData::Intrinsic { .. }
                         | InstData::InlineAsm { .. }
-                        | InstData::ReturnCall { .. }
                         | InstData::ReturnCallIndirect { .. }
                         | InstData::LandingPad { .. }
+                )
+        })
+}
+
+fn register_tail_call(sig: &Signature) -> bool {
+    sig.cc == CallConv::Fast
+        && !sig.variadic
+        && !sig.returns_twice
+        && sig.params.len() <= 6
+        && sig.params.iter().all(|p| {
+            p.purpose == Purpose::Normal
+                && matches!(
+                    p.ty,
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
                 )
         })
 }

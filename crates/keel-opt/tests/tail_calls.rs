@@ -129,6 +129,11 @@ fn release_tiers_recognize_after_signature_finalization() {
         keel_opt::OptimizationTier::Full,
     ] {
         let pipeline = tier.pipeline();
+        let pipeline = if tier == keel_opt::OptimizationTier::Full {
+            &pipeline[..pipeline.len() - 2]
+        } else {
+            pipeline
+        };
         assert_eq!(
             &pipeline[pipeline.len() - 2..],
             &["internal-fast-calls", "tail-calls"]

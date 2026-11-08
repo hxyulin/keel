@@ -2,6 +2,8 @@
 mod constant_args;
 #[path = "module_cleanup/devirtualize.rs"]
 mod devirtualize;
+#[path = "module_cleanup/outline_cold.rs"]
+mod outline_cold;
 
 use keel_ir::{Module, parse, verify_module};
 

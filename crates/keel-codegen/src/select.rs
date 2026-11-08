@@ -141,6 +141,7 @@ pub struct Selection {
     /// Results that get no location: a compare-and-swap's unused flag. The
     /// lowering computes a result only when it has a location.
     pub(crate) omitted_defs: HashSet<Value>,
+    pub(crate) overflow_branches: HashMap<Inst, (Inst, bool)>,
 }
 
 /// The input each result would like to share a register with, if any,

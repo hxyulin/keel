@@ -134,7 +134,13 @@ Lk_cleanup_inst2_begin:
 	bl	_c_may_throw
 Lk_cleanup_inst2_end:
 	mov	x9, x0
-	b	Lk_cleanup_block1
+Lk_cleanup_block1:
+	; return v3
+	mov	x0, x9
+	sub	sp, x29, #16
+	ldr	x19, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_cleanup_block2:
 	; v4, v5 = landingpad cleanup
 	mov	x9, x0
@@ -156,13 +162,6 @@ Lk_cleanup_block2:
 	bl	__Unwind_Resume
 	; trap
 	brk	#1
-Lk_cleanup_block1:
-	; return v3
-	mov	x0, x9
-	sub	sp, x29, #16
-	ldr	x19, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
 Lk_cleanup_end:
 	.cfi_endproc
 	.section	__TEXT,__gcc_except_tab

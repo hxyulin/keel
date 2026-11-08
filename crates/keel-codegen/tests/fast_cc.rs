@@ -318,3 +318,60 @@ fn forwarders_jump_only_when_arguments_are_already_placed() {
         );
     }
 }
+
+#[test]
+fn checked_peek_matches_the_nine_instruction_leaf_shape() {
+    let mut m = keel_ir::parse(include_str!("programs/checked_peek.keel")).unwrap();
+    keel_opt::optimize(&mut m).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Full,
+    };
+    let text = keel_codegen::aarch64::compile_with_pipeline(
+        &m,
+        &keel_codegen::aarch64::REGISTERS,
+        &pipeline,
+    )
+    .unwrap();
+    let hot = text
+        .split("Lchecked_peek_block0:")
+        .nth(1)
+        .unwrap()
+        .split("\tret\n")
+        .next()
+        .unwrap();
+    assert!(hot.contains("adds"), "{hot}");
+    assert!(
+        !hot.contains("cset")
+            && !hot.contains("eor")
+            && !hot.contains("stp")
+            && !hot.contains("sub\tsp"),
+        "{hot}"
+    );
+    let instructions: Vec<_> = hot
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with(';') && !line.ends_with(':'))
+        .collect();
+    assert_eq!(
+        instructions.len(),
+        8,
+        "nine instructions including RET: {instructions:?}"
+    );
+    let program = keel_codegen::aarch64::compile_program_with_pipeline(
+        &m,
+        &keel_codegen::aarch64::REGISTERS,
+        &pipeline,
+    )
+    .unwrap();
+    let parsed = keel_asm::assemble_object(&text).unwrap();
+    let typed = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
+    assert_eq!(parsed, typed);
+    let oracle = native_oracle::PreparedOracle::new(
+        "checked-peek",
+        include_str!("programs/checked_peek.c"),
+        &["-O2"],
+    );
+    oracle.run(&typed, "checked peek hot and panic paths");
+}

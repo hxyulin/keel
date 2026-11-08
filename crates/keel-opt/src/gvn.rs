@@ -210,7 +210,7 @@ fn number(func: &mut Function, reused: Option<&[Value]>) -> bool {
 /// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key. Integer
 /// comparisons reverse their predicate when their operands are swapped.
 /// Most instructions are already in that form and lend themselves.
-fn canonical<'a>(
+pub(crate) fn canonical<'a>(
     func: &Function,
     data: &'a InstData,
     literals: Option<&[Value]>,

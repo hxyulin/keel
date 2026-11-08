@@ -71,6 +71,11 @@ fn promotes_word_helpers_without_extensions_too() {
 fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule() {
     use keel_opt::{OptimizationTier, optimize_with_tier};
     let pipeline = OptimizationTier::Full.pipeline();
+    assert_eq!(
+        &pipeline[pipeline.len() - 2..],
+        &["branch-facts", "outline-cold"]
+    );
+    let pipeline = &pipeline[..pipeline.len() - 2];
     assert_eq!(pipeline.last(), Some(&"tail-calls"));
     assert_eq!(pipeline[pipeline.len() - 2], "internal-fast-calls");
     assert_eq!(

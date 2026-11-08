@@ -34,7 +34,86 @@
 	# v32 = icmp.ne v30, v31
 	# brif v32, block2, block1
 	cmp	esi, 0
-	jne	".Lk_setjmp_block2"
+	je	".Lk_setjmp_block1"
+.Lk_setjmp_block2:
+	# v3 = iconst.i64 5
+	# v4 = imul v0, v3
+	imul	rsi, rbx, 5
+	# v1 = iconst.i64 3
+	# v2 = imul v0, v1
+	imul	rdi, rbx, 3
+	# v88 = iadd v2, v4
+	add	rdi, rsi
+	# v5 = iconst.i64 7
+	# v6 = imul v0, v5
+	imul	rsi, rbx, 7
+	# v89 = iadd v6, v88
+	add	rsi, rdi
+	# v7 = iconst.i64 11
+	# v8 = imul v0, v7
+	imul	rdi, rbx, 11
+	# v90 = iadd v8, v89
+	add	rdi, rsi
+	# v9 = iconst.i64 13
+	# v10 = imul v0, v9
+	imul	rsi, rbx, 13
+	# v91 = iadd v10, v90
+	add	rsi, rdi
+	# v11 = iconst.i64 17
+	# v12 = imul v0, v11
+	imul	rdi, rbx, 17
+	# v92 = iadd v12, v91
+	add	rdi, rsi
+	# v13 = iconst.i64 19
+	# v14 = imul v0, v13
+	imul	rsi, rbx, 19
+	# v93 = iadd v14, v92
+	add	rsi, rdi
+	# v15 = iconst.i64 23
+	# v16 = imul v0, v15
+	imul	rdi, rbx, 23
+	# v94 = iadd v16, v93
+	add	rdi, rsi
+	# v17 = iconst.i64 29
+	# v18 = imul v0, v17
+	imul	rsi, rbx, 29
+	# v95 = iadd v18, v94
+	add	rsi, rdi
+	# v19 = iconst.i64 31
+	# v20 = imul v0, v19
+	imul	rdi, rbx, 31
+	# v96 = iadd v20, v95
+	add	rdi, rsi
+	# v21 = iconst.i64 37
+	# v22 = imul v0, v21
+	imul	rsi, rbx, 37
+	# v97 = iadd v22, v96
+	add	rsi, rdi
+	# v23 = iconst.i64 41
+	# v24 = imul v0, v23
+	imul	rdi, rbx, 41
+	# v98 = iadd v24, v97
+	add	rdi, rsi
+	# v25 = iconst.i64 43
+	# v26 = imul v0, v25
+	imul	rsi, rbx, 43
+	# v99 = iadd v26, v98
+	add	rsi, rdi
+	# v27 = iconst.i64 47
+	# v28 = imul v0, v27
+	imul	rdi, rbx, 47
+	# v100 = iadd v28, v99
+	add	rdi, rsi
+	# return v100
+	mov	rax, rdi
+	lea	rsp, [rbp + -40]
+	pop	r15
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_setjmp_block1:
 	# v33 = iconst.i64 101
 	# v34 = imul v0, v33
@@ -158,85 +237,6 @@
 	call	"longjmp"@PLT
 	# trap
 	ud2
-.Lk_setjmp_block2:
-	# v3 = iconst.i64 5
-	# v4 = imul v0, v3
-	imul	rsi, rbx, 5
-	# v1 = iconst.i64 3
-	# v2 = imul v0, v1
-	imul	rdi, rbx, 3
-	# v88 = iadd v2, v4
-	add	rdi, rsi
-	# v5 = iconst.i64 7
-	# v6 = imul v0, v5
-	imul	rsi, rbx, 7
-	# v89 = iadd v6, v88
-	add	rsi, rdi
-	# v7 = iconst.i64 11
-	# v8 = imul v0, v7
-	imul	rdi, rbx, 11
-	# v90 = iadd v8, v89
-	add	rdi, rsi
-	# v9 = iconst.i64 13
-	# v10 = imul v0, v9
-	imul	rsi, rbx, 13
-	# v91 = iadd v10, v90
-	add	rsi, rdi
-	# v11 = iconst.i64 17
-	# v12 = imul v0, v11
-	imul	rdi, rbx, 17
-	# v92 = iadd v12, v91
-	add	rdi, rsi
-	# v13 = iconst.i64 19
-	# v14 = imul v0, v13
-	imul	rsi, rbx, 19
-	# v93 = iadd v14, v92
-	add	rsi, rdi
-	# v15 = iconst.i64 23
-	# v16 = imul v0, v15
-	imul	rdi, rbx, 23
-	# v94 = iadd v16, v93
-	add	rdi, rsi
-	# v17 = iconst.i64 29
-	# v18 = imul v0, v17
-	imul	rsi, rbx, 29
-	# v95 = iadd v18, v94
-	add	rsi, rdi
-	# v19 = iconst.i64 31
-	# v20 = imul v0, v19
-	imul	rdi, rbx, 31
-	# v96 = iadd v20, v95
-	add	rdi, rsi
-	# v21 = iconst.i64 37
-	# v22 = imul v0, v21
-	imul	rsi, rbx, 37
-	# v97 = iadd v22, v96
-	add	rsi, rdi
-	# v23 = iconst.i64 41
-	# v24 = imul v0, v23
-	imul	rdi, rbx, 41
-	# v98 = iadd v24, v97
-	add	rdi, rsi
-	# v25 = iconst.i64 43
-	# v26 = imul v0, v25
-	imul	rsi, rbx, 43
-	# v99 = iadd v26, v98
-	add	rsi, rdi
-	# v27 = iconst.i64 47
-	# v28 = imul v0, v27
-	imul	rdi, rbx, 47
-	# v100 = iadd v28, v99
-	add	rdi, rsi
-	# return v100
-	mov	rax, rdi
-	lea	rsp, [rbp + -40]
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
 .Lk_setjmp_end:
 	.cfi_endproc
 	.size "k_setjmp", .-"k_setjmp"

@@ -1,0 +1,50 @@
+; expect: exit 0
+; Checked byte access with two disjoint terminal record constructions.
+decl @checked_panic(ptr)
+func @checked_peek(ptr, i64) -> i8 cc(fast) noinline local {
+    ss0 = stack_slot 64, align 16
+    ss1 = stack_slot 96, align 16
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 16
+    v3 = ptradd v0, v2
+    v4 = load.i64 v3
+    v5, v6 = uadd_overflow v1, v4
+    v7 = iconst.i8 1
+    v8 = xor v6, v7
+    brif v8, block1, block2
+block1:
+    v9 = iconst.i64 8
+    v10 = ptradd v0, v9
+    v11 = load.i64 v10
+    v12 = icmp.uge v5, v11
+    brif v12, block3, block4
+block2:
+    v13 = stack_addr ss0
+    v14 = iconst.i64 1
+    store v14, v13
+    call @checked_panic(v13)
+    trap
+block3:
+    v15 = iconst.i8 0
+    return v15
+block4:
+    v16 = icmp.ult v5, v11
+    brif v16, block5, block6
+block5:
+    v17 = load.ptr v0
+    v18 = ptradd v17, v5
+    v19 = load.i8 v18
+    return v19
+block6:
+    v20 = stack_addr ss1
+    v21 = iconst.i64 2
+    store v21, v20
+    call @checked_panic(v20)
+    trap
+}
+
+func @checked_peek_public(ptr, i64) -> i8 uext {
+block0(v0: ptr, v1: i64):
+    v2 = call @checked_peek(v0, v1)
+    return v2
+}
