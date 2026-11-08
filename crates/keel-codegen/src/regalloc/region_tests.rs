@@ -270,3 +270,29 @@ fn free_segment_does_not_overwrite_an_idle_i128_high_half() {
         transfer_tests::check(&input, &actual, seed);
     }
 }
+
+#[test]
+fn two_reads_need_a_free_register_and_restore_stable_homes_at_call() {
+    let module = keel_ir::parse("decl @touch()\nfunc @f(ptr,i64) -> i64 {\nblock0(v0:ptr,v1:i64):\n v2=load.i64 v0\n v3=load.i64 v0\n call @touch()\n v4=iadd v2,v3\n return v4\n}").unwrap();
+    let selection = crate::select::Selection::default();
+    for free in [false, true] {
+        let pools = Pools {
+            caller_saved: if free { &[6] } else { &[] },
+            ..pools()
+        };
+        let input = AllocationInput {
+            func: &module.functions[0],
+            selection: &selection,
+            pools: &pools,
+            is_call: &|d| matches!(d, InstData::Call { .. }),
+            returns_twice: &|_| false,
+        };
+        let (baseline, intervals) = forced_homes(&input);
+        let actual = repair_free(&input, baseline, &intervals);
+        assert_eq!(!actual.edits.is_empty(), free);
+        actual.validate(&input).unwrap();
+        for seed in 0..16 {
+            transfer_tests::check(&input, &actual, seed);
+        }
+    }
+}

@@ -38,7 +38,6 @@ fn repair_inner(
     let f = input.func;
     if f.sig.returns_twice
         || f.personality.is_some()
-        || f.debug_loc.is_some()
         || !f.debug_vars.is_empty()
         || f.layout_insts().any(|(_, d)| input.returns_twice(d))
     {
@@ -104,7 +103,7 @@ fn apply(
     temp: &mut Option<u32>,
     allow_free: bool,
 ) {
-    if region.len() < 4 {
+    if region.len() < if allow_free { 2 } else { 4 } {
         return;
     }
     let f = input.func;
@@ -119,7 +118,7 @@ fn apply(
             if op.kind == OperandKind::Use
                 && !op.part.high
                 && seen.insert(op.part.value)
-                && matches!(op.ty, Type::I64 | Type::Ptr)
+                && matches!(op.ty, Type::I32 | Type::I64 | Type::Ptr)
                 && matches!(alloc.loc(op.part.value), Some(Loc::Stack(_)))
             {
                 *counts.entry(op.part.value).or_insert(0u32) += 1;
@@ -128,7 +127,7 @@ fn apply(
     }
     let Some((&candidate, _)) = counts
         .iter()
-        .filter(|(v, n)| **n >= 4 && !defined.contains(v))
+        .filter(|(v, n)| **n >= if allow_free { 2 } else { 4 } && !defined.contains(v))
         .max_by_key(|(v, n)| (**n, std::cmp::Reverse(v.index())))
     else {
         return;
@@ -168,7 +167,9 @@ fn apply(
     let to = region.last().expect("candidate window is nonempty").1 + 1;
     let owner = intervals
         .iter()
-        .filter(|iv| iv.half == 0 && matches!(f.value_type(iv.value), Type::I64 | Type::Ptr))
+        .filter(|iv| {
+            iv.half == 0 && matches!(f.value_type(iv.value), Type::I32 | Type::I64 | Type::Ptr)
+        })
         .filter_map(|iv| match alloc.loc(iv.value) {
             Some(Loc::Reg(r))
                 if !used[r as usize] && iv.ranges.iter().any(|&(a, b)| a <= from && b >= to) =>
@@ -191,6 +192,9 @@ fn apply(
             })
         })
         .flatten();
+    // Owner save/restore costs two transfers in addition to the load.
+    // Two reads suffice only when the register is genuinely free.
+    let owner = owner.filter(|_| counts[&candidate] >= 4);
     let Some(r) = free.or(owner) else {
         return;
     };

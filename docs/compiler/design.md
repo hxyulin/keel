@@ -768,7 +768,10 @@ Split's cache with Full homes and bounded call-free segments. Windows end at
 calls, constraints, block boundaries or 64 selected instructions. A segment
 loads one spilled i64/pointer at its first use and overrides its reads through
 its last use. A free caller-saved register requires no owner transfer; otherwise
-the idle owner is saved and restored. At least four distinct reads qualify.
+the idle owner is saved and restored. A free register needs two distinct reads;
+displacing an owner needs four. I32, I64 and pointer values qualify. A source
+location alone does not exclude a function; debug variables, personality and
+returns-twice still exclude it.
 This opt-in leaves Adaptive and the default Split policy available for comparison.
 
 `KEEL_EXPECT_LAYOUT=1` enables advisory C `__builtin_expect` layout. The
