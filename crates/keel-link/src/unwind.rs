@@ -1,5 +1,5 @@
 use crate::*;
-use read::Reader;
+use read::{Operation, Reader};
 use write::u32le;
 
 const ENTRIES_PER_PAGE: usize = 511;
@@ -48,7 +48,7 @@ struct Entry {
     encoding: u32,
     lsda: u32,
 }
-impl Linker {
+impl Linker<'_> {
     // This bound includes one gap per pair of input records, all possible
     // personalities and LSDA entries. It is independent of final addresses.
     fn unwind_counts(&self) -> Result<(usize, usize, usize)> {
@@ -56,6 +56,15 @@ impl Linker {
         let mut lsdas = 0usize;
         let mut personalities = BTreeSet::new();
         for (oi, o) in self.objects.iter().enumerate() {
+            records = records
+                .checked_add(o.unwind.len())
+                .ok_or("unwind record count overflow")?;
+            for u in &o.unwind {
+                lsdas += usize::from(u.lsda.is_some());
+                if let Some(si) = u.personality {
+                    personalities.insert(self.got_key(oi, si)?);
+                }
+            }
             for s in &o.sections {
                 if s.segment != "__LD" || s.name != "__compact_unwind" {
                     continue;
@@ -72,8 +81,8 @@ impl Linker {
                         .ok_or("unwind LSDA count overflow")?;
                 }
                 for rel in &s.relocs {
-                    if rel.offset % 32 == 16 {
-                        personalities.insert(self.got_key(oi, rel.symbol)?);
+                    if (rel.offset as usize) % 32 == 16 {
+                        personalities.insert(self.got_key(oi, rel.symbol as usize)?);
                     }
                 }
             }
@@ -101,6 +110,9 @@ impl Linker {
     pub(crate) fn unwind_plan_key(&self) -> Option<Vec<u64>> {
         let mut starts = Vec::new();
         for (oi, o) in self.objects.iter().enumerate() {
+            for u in &o.unwind {
+                starts.push(self.native_unwind_start(oi, u).ok()?);
+            }
             for s in &o.sections {
                 if s.segment != "__LD" || s.name != "__compact_unwind" {
                     continue;
@@ -111,11 +123,15 @@ impl Linker {
                     return None;
                 }
                 for r in &s.relocs {
-                    if r.kind != 0 || r.pc || r.width != 8 || !matches!(r.offset % 32, 0 | 16 | 24)
+                    if r.operation == Operation::Difference
+                        || r.kind != 0
+                        || r.pc
+                        || (r.width as usize) != 8
+                        || !matches!((r.offset as usize) % 32, 0 | 16 | 24)
                     {
                         return None;
                     }
-                    if r.offset % 32 == 0 {
+                    if r.offset.is_multiple_of(32) {
                         starts.push(self.unwind_target(oi, r).ok()?.1);
                     }
                 }
@@ -157,6 +173,17 @@ impl Linker {
                     }
                 }
             }
+            for (oi, o) in self.objects.iter().enumerate() {
+                for u in &o.unwind {
+                    let (start, end) = function_range(self.native_unwind_start(oi, u)?, u.length)?;
+                    entries.push(Entry {
+                        start,
+                        end,
+                        encoding: 0,
+                        lsda: 0,
+                    });
+                }
+            }
             Ok(Layout::new(function_ranges(entries)?.len(), personalities, lsdas)?.size)
         })();
         for (oi, si, data) in originals {
@@ -178,8 +205,11 @@ impl Linker {
                 let fde_starts: BTreeSet<_> = s
                     .relocs
                     .iter()
-                    .filter(|rel| rel.kind == 1 && rel.width == 8)
-                    .map(|rel| rel.offset)
+                    .filter(|rel| {
+                        (rel.kind == 1 || rel.operation == Operation::Difference)
+                            && (rel.width as usize) == 8
+                    })
+                    .map(|rel| rel.offset as usize)
                     .collect();
                 let mut at = 0;
                 while at < s.data.len() {
@@ -288,6 +318,10 @@ impl Linker {
         Ok(out)
     }
 
+    fn native_unwind_start(&self, oi: usize, u: &read::NativeUnwind) -> Result<u64> {
+        let sym = &self.objects[oi].symbols[u.owner];
+        self.symbol_address(oi, sym)
+    }
     fn unwind_entries(&self, fdes: &BTreeMap<u64, u32>) -> Result<(Vec<Entry>, Vec<u32>)> {
         let mut personalities = Vec::new();
         let mut entries = Vec::new();
@@ -300,73 +334,124 @@ impl Linker {
                     return fail("compact unwind size is not a multiple of 32");
                 }
                 let r = Reader(&s.data);
-                // Preserve find's first-match semantics, including malformed
-                // duplicates. Validation still happens in record order below.
                 let mut personality_relocs = BTreeMap::new();
                 for rel in &s.relocs {
-                    if rel.offset % 32 == 16 {
-                        personality_relocs.entry(rel.offset).or_insert(rel);
+                    if (rel.offset as usize) % 32 == 16 {
+                        personality_relocs.entry(rel.offset as usize).or_insert(rel);
                     }
                 }
                 for at in (0..s.data.len()).step_by(32) {
-                    let address = r.u64(at)?;
-                    let (start, end) = function_range(address, r.u32(at + 8)?)?;
-                    let mut encoding = r.u32(at + 12)?;
-                    if encoding & 0x30000000 != 0 {
-                        return fail("input unwind encoding already has personality index");
-                    }
-                    if encoding & 0x0f000000 == 0x03000000 {
-                        encoding = (encoding & !0xffffff)
-                            | *fdes
-                                .get(&address)
-                                .ok_or("DWARF-mode compact unwind entry has no relocated FDE")?;
-                    } else if !matches!(encoding & 0x0f000000, 0 | 0x02000000 | 0x04000000) {
-                        return fail("unknown arm64 compact unwind mode");
-                    }
                     let personality = personality_relocs.get(&(at + 16));
-                    if let Some(rel) = personality {
-                        if !rel.external || rel.kind != 0 || rel.width != 8 {
-                            return fail("unsupported compact personality relocation");
-                        }
-                        let got = self.outputs[self.got_section].address
-                            + self.got[&self.got_key(oi, rel.symbol)?] as u64 * 8;
-                        let offset = u32::try_from(got - BASE)
-                            .map_err(|_| "personality GOT offset exceeds 32 bits")?;
-                        let index = if let Some(i) = personalities.iter().position(|v| *v == offset)
-                        {
-                            i
-                        } else {
-                            personalities.push(offset);
-                            personalities.len() - 1
-                        };
-                        if index >= 3 {
-                            return fail(
-                                "more than three compact unwind personalities require DWARF mode",
-                            );
-                        }
-                        encoding |= ((index + 1) as u32) << 28;
-                    }
-                    let lsda = r.u64(at + 24)?;
-                    if (lsda != 0) != (encoding & 0x40000000 != 0) {
-                        return fail("compact unwind LSDA flag/pointer mismatch");
-                    }
-                    let lsda = if lsda == 0 {
-                        0
-                    } else {
-                        u32::try_from(lsda.checked_sub(BASE).ok_or("LSDA below image")?)
-                            .map_err(|_| "LSDA offset overflow")?
-                    };
-                    entries.push(Entry {
-                        start,
-                        end,
-                        encoding,
-                        lsda,
+                    let invalid_personality = personality.is_some_and(|r| {
+                        r.operation == Operation::Difference
+                            || !r.external
+                            || r.kind != 0
+                            || (r.width as usize) != 8
                     });
+                    let raw = CompactEntry {
+                        object: oi,
+                        address: r.u64(at)?,
+                        length: r.u32(at + 8)?,
+                        encoding: r.u32(at + 12)?,
+                        personality: personality.map(|r| r.symbol as usize),
+                        invalid_personality,
+                        lsda: r.u64(at + 24)?,
+                    };
+                    entries.push(self.compact_entry(raw, fdes, &mut personalities)?);
                 }
+            }
+            for u in &o.unwind {
+                let lsda = if let Some(si) = u.lsda {
+                    self.address(self.symbol_target(oi, si)?)?
+                } else {
+                    0
+                };
+                let raw = CompactEntry {
+                    object: oi,
+                    address: self.native_unwind_start(oi, u)?,
+                    length: u.length,
+                    encoding: u.encoding,
+                    personality: u.personality,
+                    invalid_personality: false,
+                    lsda,
+                };
+                entries.push(self.compact_entry(raw, fdes, &mut personalities)?);
             }
         }
         Ok((function_ranges(entries)?, personalities))
     }
+    fn compact_entry(
+        &self,
+        raw: CompactEntry,
+        fdes: &BTreeMap<u64, u32>,
+        personalities: &mut Vec<u32>,
+    ) -> Result<Entry> {
+        let CompactEntry {
+            object: oi,
+            address,
+            length,
+            mut encoding,
+            personality,
+            invalid_personality,
+            lsda,
+        } = raw;
+        let (start, end) = function_range(address, length)?;
+        if encoding & 0x30000000 != 0 {
+            return fail("input unwind encoding already has personality index");
+        }
+        if encoding & 0x0f000000 == 0x03000000 {
+            encoding = (encoding & !0xffffff)
+                | *fdes
+                    .get(&address)
+                    .ok_or("DWARF-mode compact unwind entry has no relocated FDE")?;
+        } else if !matches!(encoding & 0x0f000000, 0 | 0x02000000 | 0x04000000) {
+            return fail("unknown arm64 compact unwind mode");
+        }
+        if invalid_personality {
+            return fail("unsupported compact personality relocation");
+        }
+        if let Some(si) = personality {
+            let got = self.outputs[self.got_section].address
+                + self.got[&self.got_key(oi, si)?] as u64 * 8;
+            let offset =
+                u32::try_from(got - BASE).map_err(|_| "personality GOT offset exceeds 32 bits")?;
+            let index = if let Some(i) = personalities.iter().position(|v| *v == offset) {
+                i
+            } else {
+                personalities.push(offset);
+                personalities.len() - 1
+            };
+            if index >= 3 {
+                return fail("more than three compact unwind personalities require DWARF mode");
+            }
+            encoding |= ((index + 1) as u32) << 28;
+        }
+        if (lsda != 0) != (encoding & 0x40000000 != 0) {
+            return fail("compact unwind LSDA flag/pointer mismatch");
+        }
+        let lsda = if lsda == 0 {
+            0
+        } else {
+            u32::try_from(lsda.checked_sub(BASE).ok_or("LSDA below image")?)
+                .map_err(|_| "LSDA offset overflow")?
+        };
+        Ok(Entry {
+            start,
+            end,
+            encoding,
+            lsda,
+        })
+    }
+}
+
+struct CompactEntry {
+    object: usize,
+    address: u64,
+    length: u32,
+    encoding: u32,
+    personality: Option<usize>,
+    invalid_personality: bool,
+    lsda: u64,
 }
 
 fn function_range(address: u64, length: u32) -> Result<(u32, u32)> {
@@ -487,8 +572,13 @@ mod tests {
             .position(|s| s.name == "__compact_unwind")
             .unwrap();
         let s = &mut l.objects[0].sections[si];
-        s.data[..8].copy_from_slice(&(BASE + 4).to_le_bytes());
-        let valid = s.relocs.iter().find(|r| r.offset == 16).unwrap().clone();
+        s.data.to_mut()[..8].copy_from_slice(&(BASE + 4).to_le_bytes());
+        let valid = s
+            .relocs
+            .iter()
+            .find(|r| (r.offset as usize) == 16)
+            .unwrap()
+            .clone();
         let mut invalid = valid.clone();
         invalid.width = 4;
         s.relocs = vec![valid.clone(), invalid];
@@ -499,12 +589,14 @@ mod tests {
             l.unwind_entries(&BTreeMap::new()).err().unwrap(),
             "unsupported compact personality relocation"
         );
-        l.objects[0].sections[si].data[12..16].copy_from_slice(&0x05000000u32.to_le_bytes());
+        l.objects[0].sections[si].data.to_mut()[12..16]
+            .copy_from_slice(&0x05000000u32.to_le_bytes());
         assert_eq!(
             l.unwind_entries(&BTreeMap::new()).err().unwrap(),
             "unknown arm64 compact unwind mode"
         );
-        l.objects[0].sections[si].data[12..16].copy_from_slice(&0x02001000u32.to_le_bytes());
+        l.objects[0].sections[si].data.to_mut()[12..16]
+            .copy_from_slice(&0x02001000u32.to_le_bytes());
         l.objects[0].sections[si].relocs = vec![valid];
         assert_eq!(l.unwind_entries(&BTreeMap::new()).unwrap().1, expected.1);
     }
@@ -539,7 +631,7 @@ mod tests {
         let valid = s
             .relocs
             .iter()
-            .find(|r| r.kind == 1 && r.width == 8)
+            .find(|r| r.kind == 1 && (r.width as usize) == 8)
             .unwrap()
             .clone();
         let mut foreign = valid;

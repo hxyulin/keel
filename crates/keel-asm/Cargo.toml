@@ -9,6 +9,7 @@ license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 workspace = true
 
 [dependencies]
+keel-object = { path = "../keel-object" }
 keel-asm-ir = { path = "../keel-asm-ir" }
 keel-util = { path = "../keel-util" }
 memchr = "2"

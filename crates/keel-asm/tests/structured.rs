@@ -466,3 +466,29 @@ fn incremental_macro_fallback_preserves_encoded_words() {
         );
     }
 }
+
+#[test]
+fn incremental_owned_unit_moves_payloads_and_relocates_across_chunks() {
+    let mut assembler =
+        keel_asm::ObjectAssembler::for_target(keel_asm_ir::Target::Aarch64AppleDarwin).unwrap();
+    for text in [
+        ".globl _main\n_main:\nb _other\n",
+        ".globl _other\n_other:\nret\n.data\n.quad _main+8\n",
+    ] {
+        let mut chunk = Program::new();
+        chunk.text(text);
+        assembler.push(chunk);
+    }
+    let object = assembler.finish_object().unwrap();
+    assert!(object.symbols.iter().any(|s| s.name == "_other"));
+    assert!(object.sections.iter().any(|s| !s.fixups.is_empty()));
+    assert_eq!(
+        keel_object::Object::decode(&object.encode().unwrap()).unwrap(),
+        object
+    );
+
+    let assembly = keel_asm::assemble(".globl _main\n_main:\nret\n").unwrap();
+    let pointer = assembly.text.as_ptr();
+    let object = assembly.into_object().unwrap();
+    assert_eq!(object.sections[0].data.as_ptr(), pointer);
+}

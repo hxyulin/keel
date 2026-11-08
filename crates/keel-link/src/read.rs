@@ -1,4 +1,5 @@
-use crate::{Result, fail};
+use crate::{Error, Result, fail};
+use std::borrow::Cow;
 
 pub(crate) struct Reader<'a>(pub &'a [u8]);
 impl<'a> Reader<'a> {
@@ -21,40 +22,68 @@ impl<'a> Reader<'a> {
             .into())
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Operation {
+    #[default]
+    Foreign,
+    Single,
+    Difference,
+    PagePair,
+}
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Reloc {
-    pub offset: usize,
-    pub symbol: usize,
+    pub offset: u32,
+    pub symbol: u32,
     pub external: bool,
     pub pc: bool,
-    pub width: usize,
-    pub kind: u32,
+    pub width: u8,
+    pub kind: u8,
+    /// Zero for foreign Mach-O records; native operations carry explicit addends.
+    pub operation: Operation,
+    pub addend: i64,
+    /// Subtracted symbol ID for a difference, low instruction offset for a pair.
+    pub aux: u32,
 }
-impl Reloc {
-    fn read(r: &Reader<'_>, at: usize) -> Result<Self> {
-        let offset = r.u32(at)? as usize;
-        let bits = r.u32(at + 4)?;
-        Ok(Self {
-            offset,
-            symbol: (bits & 0xffffff) as usize,
-            external: bits & (1 << 27) != 0,
-            pc: bits & (1 << 24) != 0,
-            width: 1 << ((bits >> 25) & 3),
-            kind: bits >> 28,
-        })
-    }
+#[derive(Debug, Clone)]
+pub(crate) struct Symbol {
+    pub name: String,
+    pub kind: u8,
+    pub section: usize,
+    pub desc: u16,
+    pub value: u64,
 }
-pub(crate) const UNSIGNED: u32 = object::macho::ARM64_RELOC_UNSIGNED as u32;
-pub(crate) const SUBTRACTOR: u32 = object::macho::ARM64_RELOC_SUBTRACTOR as u32;
-pub(crate) const ADDEND: u32 = object::macho::ARM64_RELOC_ADDEND as u32;
+fn read_reloc(r: &Reader<'_>, at: usize) -> Result<Reloc> {
+    let offset = r.u32(at)?;
+    let bits = r.u32(at + 4)?;
+    Ok(Reloc {
+        offset,
+        symbol: bits & 0xffffff,
+        external: bits & (1 << 27) != 0,
+        pc: bits & (1 << 24) != 0,
+        width: 1 << ((bits >> 25) & 3),
+        kind: (bits >> 28) as u8,
+        ..Reloc::default()
+    })
+}
+pub(crate) const UNSIGNED: u8 = object::macho::ARM64_RELOC_UNSIGNED;
+pub(crate) const SUBTRACTOR: u8 = object::macho::ARM64_RELOC_SUBTRACTOR;
+pub(crate) const ADDEND: u8 = object::macho::ARM64_RELOC_ADDEND;
 
 /// One relocation after ARM64_RELOC_ADDEND prefixes and
 /// SUBTRACTOR/UNSIGNED pairs are decoded and validated.
 pub(crate) enum Fixup<'a> {
+    Native(&'a Reloc),
     /// `addend` is the signed 24-bit value of a preceding ADDEND, or 0.
-    Single { reloc: &'a Reloc, addend: i64 },
+    Single {
+        reloc: &'a Reloc,
+        addend: i64,
+    },
     /// SUBTRACTOR (`minus`) followed by UNSIGNED (`plus`) at the same field.
-    Difference { minus: &'a Reloc, plus: &'a Reloc },
+    Difference {
+        minus: &'a Reloc,
+        plus: &'a Reloc,
+    },
 }
 
 /// Decode the fixups whose first record lies in `range`. Records outside it
@@ -73,9 +102,12 @@ pub(crate) struct Fixups<'a> {
 }
 impl<'a> Fixups<'a> {
     fn decode(&mut self, r: &'a Reloc) -> Result<Fixup<'a>> {
+        if r.operation != Operation::Foreign {
+            return Ok(Fixup::Native(r));
+        }
         match r.kind {
             ADDEND => {
-                if r.external || r.pc || r.width != 4 {
+                if r.external || r.pc || (r.width as usize) != 4 {
                     return fail("invalid ARM64_RELOC_ADDEND");
                 }
                 let next = self.relocs.get(self.at).ok_or("unpaired ADDEND")?;
@@ -85,7 +117,7 @@ impl<'a> Fixups<'a> {
                 self.at += 1;
                 Ok(Fixup::Single {
                     reloc: next,
-                    addend: ((r.symbol as i32) << 8 >> 8) as i64,
+                    addend: (((r.symbol as usize) as i32) << 8 >> 8) as i64,
                 })
             }
             SUBTRACTOR => {
@@ -93,10 +125,10 @@ impl<'a> Fixups<'a> {
                 if !r.external
                     || r.pc
                     || plus.kind != UNSIGNED
-                    || plus.offset != r.offset
-                    || plus.width != r.width
+                    || (plus.offset as usize) != (r.offset as usize)
+                    || (plus.width as usize) != (r.width as usize)
                     || plus.pc
-                    || !matches!(r.width, 4 | 8)
+                    || !matches!(r.width as usize, 4 | 8)
                 {
                     return fail("invalid SUBTRACTOR/UNSIGNED pair");
                 }
@@ -116,21 +148,21 @@ impl<'a> Iterator for Fixups<'a> {
         loop {
             let r = self.relocs.get(self.at)?;
             self.at += 1;
-            if self.range.contains(&r.offset) {
+            if self.range.contains(&(r.offset as usize)) {
                 return Some(self.decode(r));
             }
         }
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) struct Section {
+pub(crate) struct Section<'a> {
     pub segment: String,
     pub name: String,
     pub address: u64,
     pub size: usize,
     pub alignment: u32,
     pub flags: u32,
-    pub data: Vec<u8>,
+    pub data: Cow<'a, [u8]>,
     pub relocs: Vec<Reloc>,
     pub output: Option<usize>,
     pub offset: usize,
@@ -147,7 +179,7 @@ pub(crate) struct Atom {
     /// Its offset in the output section, once placed.
     pub offset: usize,
 }
-impl Section {
+impl Section<'_> {
     /// The atom that a symbol at `offset` belongs to.
     fn atom(&self, offset: usize) -> Option<&Atom> {
         let i = self.atoms.partition_point(|a| a.start <= offset);
@@ -167,25 +199,116 @@ impl Section {
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) struct Symbol {
+pub(crate) struct Object<'a> {
     pub name: String,
-    pub kind: u8,
-    pub section: usize,
-    pub desc: u16,
-    pub value: u64,
-}
-#[derive(Clone, Debug)]
-pub(crate) struct Object {
-    pub name: String,
-    pub sections: Vec<Section>,
+    pub sections: Vec<Section<'a>>,
     pub symbols: Vec<Symbol>,
+    pub unwind: Vec<NativeUnwind>,
     pub minimum: u32,
     pub debug_bytes: Option<Vec<u8>>,
     /// MH_SUBSECTIONS_VIA_SYMBOLS: no reference between two symbols' bytes
     /// in one section was resolved without a relocation.
     pub subsections: bool,
 }
-impl Object {
+#[derive(Debug, Clone)]
+pub(crate) struct NativeUnwind {
+    pub owner: usize,
+    pub length: u32,
+    pub encoding: u32,
+    pub personality: Option<usize>,
+    pub lsda: Option<usize>,
+}
+impl<'a> Object<'a> {
+    pub(crate) fn from_owned(name: String, object: keel_object::Object) -> Result<Self> {
+        let keel_object::Object {
+            sections,
+            atoms,
+            unwind,
+            symbols,
+            minimum,
+            subsections,
+        } = object;
+        let (symbols, map) = native_symbols(&atoms, symbols)?;
+        let unwind = unwind
+            .into_iter()
+            .map(|u| native_unwind(u, &map))
+            .collect::<Result<_>>()?;
+        let sections = sections
+            .into_iter()
+            .map(|s| {
+                Ok(Section {
+                    segment: s.segment,
+                    name: s.name,
+                    address: 0,
+                    size: s.size,
+                    alignment: s.alignment,
+                    flags: s.flags,
+                    data: Cow::Owned(s.data),
+                    relocs: s
+                        .fixups
+                        .into_iter()
+                        .map(|f| native_fixup(f, &map))
+                        .collect::<Result<_>>()?,
+                    output: None,
+                    offset: 0,
+                    atoms: Vec::new(),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let result = Self {
+            name,
+            sections,
+            symbols,
+            unwind,
+            minimum,
+            subsections,
+            debug_bytes: None,
+        };
+        validate_object(&result)?;
+        Ok(result)
+    }
+    pub(crate) fn from_cache(name: String, cache: keel_object::Cache<'a>) -> Result<Self> {
+        let atoms: Vec<_> = cache.atoms().collect();
+        let (symbols, map) =
+            native_symbols(&atoms, cache.symbols().map(|s| s.to_symbol()).collect())?;
+        let unwind = cache
+            .unwind()
+            .map(|u| native_unwind(u, &map))
+            .collect::<Result<_>>()?;
+        let sections = cache
+            .sections()
+            .map(|s| {
+                Ok(Section {
+                    segment: s.segment.into(),
+                    name: s.name.into(),
+                    address: 0,
+                    size: s.size,
+                    alignment: s.alignment,
+                    flags: s.flags,
+                    data: Cow::Borrowed(s.data),
+                    relocs: s
+                        .fixups()
+                        .map(|f| native_fixup(f, &map))
+                        .collect::<Result<_>>()?,
+                    output: None,
+                    offset: 0,
+                    atoms: Vec::new(),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let result = Self {
+            name,
+            sections,
+            symbols,
+            unwind,
+            minimum: cache.minimum(),
+            subsections: cache.subsections(),
+            debug_bytes: None,
+        };
+        validate_object(&result)?;
+        Ok(result)
+    }
+
     /// Attach owned payloads to an already validated archive summary. Reuse its
     /// symbols and section metadata rather than parsing/allocating them again.
     /// `bytes` must be the unchanged member used to construct this summary.
@@ -200,13 +323,16 @@ impl Object {
                     let section = &mut self.sections[section_index];
                     section_index += 1;
                     if !matches!(section.flags & 255, 1 | 0x12) && section.segment != "__DWARF" {
-                        section.data = r.bytes(r.u32(s + 48)? as usize, section.size)?.to_vec();
+                        section.data = r
+                            .bytes(r.u32(s + 48)? as usize, section.size)?
+                            .to_vec()
+                            .into();
                     }
                     let nr = r.u32(s + 60)? as usize;
                     let ro = r.u32(s + 56)? as usize;
                     section.relocs.reserve(nr);
                     for j in 0..nr {
-                        section.relocs.push(Reloc::read(&r, ro + j * 8)?);
+                        section.relocs.push(read_reloc(&r, ro + j * 8)?);
                     }
                 }
             }
@@ -303,11 +429,13 @@ impl Object {
                         r.bytes(ro, nr.checked_mul(8).ok_or("relocation overflow")?)?;
                         let mut relocs = Vec::new();
                         for j in 0..nr {
-                            let relocation = Reloc::read(&r, ro + j * 8)?;
-                            if relocation.offset & 0x80000000 != 0 {
+                            let relocation = read_reloc(&r, ro + j * 8)?;
+                            if (relocation.offset as usize) & 0x80000000 != 0 {
                                 return fail("scattered/negative relocations are unsupported");
                             }
-                            if relocation.offset + relocation.width > len || zero {
+                            if (relocation.offset as usize) + (relocation.width as usize) > len
+                                || zero
+                            {
                                 return fail("relocation outside file-backed section");
                             }
                             if materialize {
@@ -321,7 +449,7 @@ impl Object {
                             size: len,
                             alignment,
                             flags,
-                            data,
+                            data: Cow::Owned(data),
                             relocs,
                             output: None,
                             offset: 0,
@@ -418,6 +546,7 @@ impl Object {
             symbols,
             minimum,
             debug_bytes,
+            unwind: Vec::new(),
             subsections: r.u32(24)? & 0x2000 != 0,
         })
     }
@@ -425,7 +554,10 @@ impl Object {
 
 /// Validate every member in input order, retaining symbol/section summaries but
 /// borrowing payloads until extraction. Archive indexes are never trusted.
-pub(crate) fn archive<'a>(name: &str, bytes: &'a [u8]) -> Result<(Vec<Object>, Vec<&'a [u8]>)> {
+pub(crate) fn archive<'a>(
+    name: &str,
+    bytes: &'a [u8],
+) -> Result<(Vec<Object<'static>>, Vec<&'a [u8]>)> {
     let r = Reader(bytes);
     if r.bytes(0, 8)? != b"!<arch>\n" {
         return fail("expected BSD ar archive");
@@ -465,4 +597,226 @@ pub(crate) fn archive<'a>(name: &str, bytes: &'a [u8]) -> Result<(Vec<Object>, V
         at = (at + 60 + size + 1) & !1;
     }
     Ok((members, bodies))
+}
+
+/// Owned/cache inputs receive the same structural checks as decoded Mach-O.
+fn validate_object(object: &Object<'_>) -> Result<()> {
+    for section in &object.sections {
+        let kind = section.flags & 255;
+        let zero = matches!(kind, 1 | 0x12);
+        if section.alignment > 16
+            || section.size > 512 * 1024 * 1024
+            || section.address.checked_add(section.size as u64).is_none()
+            || !matches!(
+                kind,
+                0 | 1 | 2 | 3 | 4 | 5 | 9 | 0xb | 0xe | 0x11 | 0x12 | 0x13
+            )
+            || (if zero {
+                !section.data.is_empty()
+            } else {
+                section.data.len() != section.size
+            })
+            || section.name.is_empty()
+            || section.segment.is_empty()
+            || section.name.contains('\0')
+            || section.segment.contains('\0')
+        {
+            return fail("invalid owned section");
+        }
+        let mut previous_end = 0usize;
+        for r in &section.relocs {
+            if (r.operation == Operation::Difference
+                && (r.aux as usize >= object.symbols.len()
+                    || r.kind != 0
+                    || !matches!(r.width as usize, 4 | 8)))
+                || (r.operation == Operation::PagePair
+                    && (!matches!(r.kind, 3 | 5 | 8)
+                        || r.aux as usize + 4 > section.size
+                        || r.offset.checked_add(4) != Some(r.aux)))
+                || zero
+                || !matches!(r.width as usize, 1 | 2 | 4 | 8)
+                || (r.offset as usize)
+                    .checked_add(r.width as usize)
+                    .is_none_or(|end| end > section.size)
+                || r.kind > 10
+                || (r.kind != 10
+                    && if r.external {
+                        (r.symbol as usize) >= object.symbols.len()
+                    } else {
+                        (r.symbol as usize) == 0 || (r.symbol as usize) > object.sections.len()
+                    })
+                || (r.kind == 10 && (r.symbol as usize) > 0xffffff)
+            {
+                return fail("invalid owned relocation");
+            }
+            if r.operation != Operation::Foreign {
+                if (r.offset as usize) < previous_end {
+                    return fail("native fixups must be ordered and nonoverlapping");
+                }
+                previous_end = if r.operation == Operation::PagePair {
+                    r.aux as usize + 4
+                } else {
+                    r.offset as usize + r.width as usize
+                };
+            }
+        }
+    }
+    for s in &object.symbols {
+        let kind = s.kind & 0xe;
+        if s.name.contains('\0')
+            || s.kind & 0xe0 != 0
+            || !matches!(kind, 0 | 2 | 0xe)
+            || (kind != 0xe && s.section != 0)
+            || (kind == 0 && s.kind & 1 == 0)
+            || (kind != 0 && s.desc & 0x100 != 0)
+            || (s.desc & 0x80 != 0 && kind != 0 && (kind != 0xe || s.kind & 1 == 0))
+        {
+            return fail("invalid owned symbol");
+        }
+        if kind == 0xe {
+            let section = object
+                .sections
+                .get(s.section.wrapping_sub(1))
+                .ok_or("invalid owned symbol section")?;
+            if s.value < section.address || s.value - section.address > section.size as u64 {
+                return fail("owned symbol outside its section");
+            }
+        }
+    }
+    Ok(())
+}
+
+struct NativeMap {
+    atoms: Vec<usize>,
+    symbols: usize,
+}
+fn native_symbols(
+    atoms: &[keel_object::Atom],
+    named: Vec<keel_object::Symbol>,
+) -> Result<(Vec<Symbol>, NativeMap)> {
+    use keel_object::Definition;
+    for a in atoms {
+        a.section
+            .checked_add(1)
+            .ok_or("invalid native atom section")?;
+    }
+    let count = named.len();
+    let mut symbols = Vec::with_capacity(count + atoms.len());
+    for s in named {
+        let defined = matches!(s.definition, Definition::Atom(_));
+        if s.name.is_empty()
+            || s.name.contains('\0')
+            || (s.weak_definition && !defined)
+            || (s.weak_reference && !matches!(s.definition, Definition::Undefined))
+            || (s.weak_can_be_hidden && !s.weak_definition)
+            || matches!(s.definition,Definition::Common{size,alignment} if size==0 || alignment>15)
+        {
+            return fail("invalid native linkage symbol");
+        }
+        let (kind, section, value, alignment) = match s.definition {
+            Definition::Undefined => (1, 0, 0, 0),
+            Definition::Common { size, alignment } => (1, 0, size, alignment),
+            Definition::Atom(id) => {
+                let a = atoms.get(id).ok_or("invalid native symbol atom")?;
+                (0xf, a.section as usize + 1, a.offset as u64, 0)
+            }
+        };
+        symbols.push(Symbol {
+            name: s.name,
+            kind: kind | if s.private { 0x10 } else { 0 },
+            section,
+            value,
+            desc: (u16::from(alignment) << 8)
+                | if s.no_dead_strip { 0x20 } else { 0 }
+                | if s.weak_definition { 0x80 } else { 0 }
+                | if s.weak_reference || s.weak_can_be_hidden {
+                    0x40
+                } else {
+                    0
+                },
+        });
+    }
+    let map: Vec<_> = atoms
+        .iter()
+        .map(|a| {
+            let id = symbols.len();
+            symbols.push(Symbol {
+                name: String::new(),
+                kind: 0xe,
+                section: a.section as usize + 1,
+                value: a.offset as u64,
+                desc: if a.boundary { 0 } else { 0x200 } | if a.no_dead_strip { 0x20 } else { 0 },
+            });
+            id
+        })
+        .collect();
+    Ok((
+        symbols,
+        NativeMap {
+            atoms: map,
+            symbols: count,
+        },
+    ))
+}
+fn native_fixup(f: keel_object::Fixup, map: &NativeMap) -> Result<Reloc> {
+    use Operation::{Difference, PagePair, Single};
+    use keel_object::FixupKind as K;
+    let index = |t| map.index(t);
+    let (kind, operation, aux) = match f.kind {
+        K::Pointer64 => (0, Single, 0),
+        K::Branch26 => (2, Single, 0),
+        K::Page21 => (3, Single, 0),
+        K::PageOff12 => (4, Single, 0),
+        K::GotPage21 => (5, Single, 0),
+        K::GotPageOff12 => (6, Single, 0),
+        K::PointerToGot => (7, Single, 0),
+        K::TlvpPage21 => (8, Single, 0),
+        K::TlvpPageOff12 => (9, Single, 0),
+        K::Difference32 { minus } | K::Difference64 { minus } => (
+            0,
+            Difference,
+            u32::try_from(index(minus)?).map_err(|_| "native target exceeds 32 bits")?,
+        ),
+        K::PagePair { low_offset } => (3, PagePair, low_offset),
+        K::GotPagePair { low_offset } => (5, PagePair, low_offset),
+        K::TlvpPagePair { low_offset } => (8, PagePair, low_offset),
+    };
+    Ok(Reloc {
+        offset: f.offset,
+        symbol: u32::try_from(index(f.target)?).map_err(|_| "native target exceeds 32 bits")?,
+        external: true,
+        pc: matches!(kind, 2 | 3 | 5 | 7 | 8),
+        width: f.kind.width() as u8,
+        kind,
+        operation,
+        addend: f.addend,
+        aux,
+    })
+}
+
+fn native_unwind(u: keel_object::Unwind, map: &NativeMap) -> Result<NativeUnwind> {
+    Ok(NativeUnwind {
+        owner: map
+            .atoms
+            .get(u.owner as usize)
+            .copied()
+            .ok_or("invalid native unwind owner")?,
+        length: u.length,
+        encoding: u.encoding,
+        personality: u.personality.map(|t| map.index(t)).transpose()?,
+        lsda: u.lsda.map(|t| map.index(t)).transpose()?,
+    })
+}
+impl NativeMap {
+    fn index(&self, t: keel_object::Target) -> Result<usize> {
+        match t {
+            keel_object::Target::Atom(id) => self
+                .atoms
+                .get(id as usize)
+                .copied()
+                .ok_or_else(|| Error::from("invalid native atom target")),
+            keel_object::Target::Symbol(id) if (id as usize) < self.symbols => Ok(id as usize),
+            _ => fail("invalid native symbol target"),
+        }
+    }
 }

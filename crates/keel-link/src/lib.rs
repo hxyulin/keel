@@ -154,8 +154,8 @@ pub(crate) enum Target {
     SectionBoundary(usize, bool),
     Import(usize),
 }
-pub(crate) struct Linker {
-    objects: Vec<Object>,
+pub(crate) struct Linker<'a> {
+    objects: Vec<Object<'a>>,
     discarded: BTreeSet<(usize, usize)>,
     demanded: Option<BTreeSet<(usize, usize)>>,
     outputs: Vec<OutputSection>,
@@ -216,6 +216,79 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     })
 }
 
+/// An owned AArch64 Darwin unit prepared by keel-asm or decoded from its cache.
+#[derive(Debug)]
+pub struct ObjectInput {
+    pub name: String,
+    pub object: keel_object::Object,
+}
+
+/// Link owned units alongside ordinary object/archive bytes. Section payloads
+/// move into the linker without Mach-O serialization, parsing or copying.
+/// Owned units precede byte inputs in symbol-selection order.
+///
+/// # Errors
+/// Returns a link error for invalid inputs or unresolved symbols. Native debug
+/// maps require Mach-O snapshots and are unsupported for owned inputs.
+pub fn link_objects(
+    objects: Vec<ObjectInput>,
+    inputs: &[Input<'_>],
+    options: Options,
+) -> Result<Executable> {
+    if !objects.is_empty() && options.debug_directory.is_some() {
+        return fail("owned link inputs do not support Darwin debug maps; use Mach-O inputs");
+    }
+    let objects = objects
+        .into_iter()
+        .map(|input| Object::from_owned(input.name, input.object))
+        .collect::<Result<Vec<_>>>()?;
+    let mut image = std::io::Cursor::new(Vec::new());
+    let (artifacts, _) =
+        prepare_with_objects(inputs, objects, options)?.emit_to(&mut image, |image, size| {
+            image.get_mut().reserve(size);
+        })?;
+    Ok(Executable {
+        bytes: image.into_inner(),
+        debug_objects: artifacts.debug_objects,
+        warnings: artifacts.warnings,
+    })
+}
+
+/// Link flat cache entries without copying their input section payloads.
+/// Cache units precede ordinary object/archive byte inputs. The cache bytes
+/// remain borrowed until linking completes. Linker metadata is materialized;
+/// payloads become owned only when relocation or unwind rewriting needs it.
+///
+/// # Errors
+/// Returns a link error for invalid units, unresolved symbols or debug maps.
+pub fn link_caches(
+    caches: &[Input<'_>],
+    inputs: &[Input<'_>],
+    options: Options,
+) -> Result<Executable> {
+    if !caches.is_empty() && options.debug_directory.is_some() {
+        return fail("cached link inputs do not support Darwin debug maps; use Mach-O inputs");
+    }
+    let objects = caches
+        .iter()
+        .map(|input| {
+            let cache = keel_object::Cache::parse(input.bytes)
+                .map_err(|e| Error::from(format!("{}: {e}", input.name)))?;
+            Object::from_cache(input.name.into(), cache)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut image = std::io::Cursor::new(Vec::new());
+    let (artifacts, _) =
+        prepare_with_objects(inputs, objects, options)?.emit_to(&mut image, |image, size| {
+            image.get_mut().reserve(size);
+        })?;
+    Ok(Executable {
+        bytes: image.into_inner(),
+        debug_objects: artifacts.debug_objects,
+        warnings: artifacts.warnings,
+    })
+}
+
 /// Write an unsigned Mach-O image to an empty, seekable output, leaving its
 /// cursor at the end. On error, the sink may contain a partial image. Callers
 /// installing an executable should use a temporary file or `link_signed`.
@@ -244,7 +317,15 @@ fn link_to_hashed<W: std::io::Write + std::io::Seek>(
     prepare_linker(inputs, options)?.emit_to(output, |_, _| {})
 }
 
-fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
+fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker<'static>> {
+    prepare_with_objects(inputs, Vec::new(), options)
+}
+
+fn prepare_with_objects<'a>(
+    inputs: &[Input<'_>],
+    mut objects: Vec<Object<'a>>,
+    options: Options,
+) -> Result<Linker<'a>> {
     if let Some(directory) = &options.debug_directory
         && (!directory.is_absolute() || directory.to_str().is_none_or(|p| p.contains('\0')))
     {
@@ -272,7 +353,6 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
             return fail("dylib interface contains an invalid export name");
         }
     }
-    let mut objects = Vec::new();
     let mut archives = Vec::new();
     let mut archive_bodies = Vec::new();
     for input in inputs {
@@ -324,7 +404,7 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
     l.prepare()?;
     Ok(l)
 }
-impl Linker {
+impl Linker<'_> {
     fn output(&mut self, segment: &str, name: &str, flags: u32, alignment: u32) -> Result<usize> {
         if let Some(id) = self
             .outputs
@@ -625,26 +705,36 @@ impl Linker {
                 for r in &s.relocs {
                     // Dead code's references need no GOT slot or stub, and
                     // their imports may not exist.
-                    if r.external && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9) && s.live_at(r.offset)
+                    if r.external
+                        && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9)
+                        && s.live_at(r.offset as usize)
                     {
                         let sym = o
                             .symbols
-                            .get(r.symbol)
+                            .get(r.symbol as usize)
                             .ok_or("relocation symbol index out of range")?;
                         if r.kind != 2
-                            || matches!(self.symbol_target(oi, r.symbol)?, Target::Import(_))
-                            || self.coalesces(self.symbol_target(oi, r.symbol)?, &sym.name)
+                            || matches!(
+                                self.symbol_target(oi, r.symbol as usize)?,
+                                Target::Import(_)
+                            )
+                            || self.coalesces(self.symbol_target(oi, r.symbol as usize)?, &sym.name)
                         {
                             let next = self.got.len();
-                            self.got.entry(self.got_key(oi, r.symbol)?).or_insert(next);
+                            self.got
+                                .entry(self.got_key(oi, r.symbol as usize)?)
+                                .or_insert(next);
                             self.got_targets.insert(
-                                self.got_key(oi, r.symbol)?,
-                                self.symbol_target(oi, r.symbol)?,
+                                self.got_key(oi, r.symbol as usize)?,
+                                self.symbol_target(oi, r.symbol as usize)?,
                             );
                         }
                         if r.kind == 2
-                            && (matches!(self.symbol_target(oi, r.symbol)?, Target::Import(_))
-                                || self.coalesces(self.symbol_target(oi, r.symbol)?, &sym.name))
+                            && (matches!(
+                                self.symbol_target(oi, r.symbol as usize)?,
+                                Target::Import(_)
+                            ) || self
+                                .coalesces(self.symbol_target(oi, r.symbol as usize)?, &sym.name))
                         {
                             let next = self.stubs.len();
                             self.stubs.entry(sym.name.clone()).or_insert(next);
@@ -653,15 +743,27 @@ impl Linker {
                 }
                 if s.name == "__compact_unwind" {
                     for r in &s.relocs {
-                        if r.offset % 32 == 16 && r.external {
+                        if (r.offset as usize) % 32 == 16 && r.external {
                             let next = self.got.len();
-                            self.got.entry(self.got_key(oi, r.symbol)?).or_insert(next);
+                            self.got
+                                .entry(self.got_key(oi, r.symbol as usize)?)
+                                .or_insert(next);
                             self.got_targets.insert(
-                                self.got_key(oi, r.symbol)?,
-                                self.symbol_target(oi, r.symbol)?,
+                                self.got_key(oi, r.symbol as usize)?,
+                                self.symbol_target(oi, r.symbol as usize)?,
                             );
                         }
                     }
+                }
+            }
+        }
+        for (oi, o) in self.objects.iter().enumerate() {
+            for u in &o.unwind {
+                if let Some(si) = u.personality {
+                    let key = self.got_key(oi, si)?;
+                    let next = self.got.len();
+                    self.got.entry(key.clone()).or_insert(next);
+                    self.got_targets.insert(key, self.symbol_target(oi, si)?);
                 }
             }
         }
@@ -692,7 +794,7 @@ impl Linker {
         Ok(if s.kind & 1 != 0 || s.kind & 0xe == 0 {
             s.name.clone()
         } else {
-            format!("\x01{oi}:{}", s.name)
+            format!("\x01{oi}:{si}")
         })
     }
     fn symbol_target(&self, oi: usize, si: usize) -> Result<Target> {

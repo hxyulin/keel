@@ -407,6 +407,7 @@ dependencies = [
  "keel-c",
  "keel-codegen",
  "keel-ir",
+ "keel-object",
  "keel-opt",
  "keel-test-support",
  "keel-util",
@@ -509,6 +510,7 @@ version = "0.1.0"
 dependencies = [
  "keel-asm",
  "keel-asm-ir",
+ "keel-object",
  "keel-test-support",
  "keel-util",
  "object",
@@ -529,6 +531,13 @@ dependencies = [
  "keel-util",
  "libloading",
  "regex",
+]
+
+[[package]]
+name = "keel-object"
+version = "0.1.0"
+dependencies = [
+ "zerocopy",
 ]
 
 [[package]]
@@ -1264,6 +1273,26 @@ name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
+
+[[package]]
+name = "zerocopy"
+version = "0.8.63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "zmij"

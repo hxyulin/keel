@@ -54,6 +54,59 @@ interfaces. `link` returns a **not yet signed** Mach-O image plus warnings.
 sign it in process, sync it, and atomically install the executable only after
 signing succeeds. `Input.name` is only a diagnostic label and is never opened.
 
+### Owned link inputs and compilation caches
+
+For in-process AArch64 Darwin builds, `Assembly::into_object` or
+`ObjectAssembler::finish_object` returns a semantic `keel_object::Object`.
+`keel_link::link_objects` consumes named `ObjectInput` units alongside ordinary
+Mach-O objects and archives. Owned units precede byte inputs in symbol-selection
+order. Their undefined symbols participate in archive extraction.
+
+The unit separates numeric atoms from named linkage symbols. Atoms carry a
+section-relative location, whether it starts an independently movable boundary,
+and whether it is a dead-strip root. Local assembler names are omitted; global
+and undefined names retain visibility, weak-binding and common-definition rules.
+The linker currently adapts atoms to anonymous local definitions internally.
+
+Fixups name an atom or linkage symbol and carry explicit addends. A difference
+is one operation, and adjacent page/low-word fixups with the same target and
+addend share one operation and target calculation. A pair cannot cross an atom
+boundary. Operations are ordered and nonoverlapping; their ranges are checked
+at ingestion instead of reconstructed during emission. Ordinary Mach-O inputs
+retain prefix/pair decoding and arbitrary-order relocation validation.
+Section buffers move into the linker without synthetic object addresses,
+Mach-O layout, nlist grouping, or writes to hide addends in payload bytes.
+
+Native compact-unwind records carry their owning atom, length, encoding and
+optional personality/LSDA targets directly. Ownership follows this object's
+copy of a function even if a weak linkage name selects another copy. Collection
+keeps a live function's unwind dependencies and discards dead records before
+import and GOT planning. DWARF FDE payloads remain for fallback unwinding.
+Explicit compact-unwind sections whose nonstandard fixups or labels cannot be
+represented directly use the ordinary section path.
+
+`Object::encode` writes cache version 3: a flat, explicitly little-endian header,
+section/atom/symbol/fixup/unwind tables, linkage-name bytes and section payloads.
+Records use fixed-width integers and alignment-one zerocopy types. They contain
+no pointers, Rust enum layouts or host-sized integers. Unknown versions,
+truncated entries, invalid ranges and trailing bytes are rejected. Older cache
+versions must be rebuilt.
+
+`keel_object::Cache::parse` borrows tables, names and payloads from a stable
+immutable byte slice, including an unaligned subslice or mapped file.
+`keel_link::link_caches` accepts named cache bytes alongside ordinary object and
+archive inputs. It materializes mutable linker metadata and borrows section
+bytes, copying a payload when relocation or unwind rewriting needs mutation.
+Output assembly still copies live bytes into output sections. `Object::decode`
+is the owned convenience path.
+
+Cache keys, compiler-version invalidation, dependency tracking and atomic cache
+installation belong to the caller. The CLI continues to use object files.
+Equivalent linked behavior is the contract; byte identity with the Mach-O route
+is not required. Darwin debug maps require original Mach-O snapshots, so the
+owned/cache APIs reject `debug_directory`. Use the Mach-O route for debug maps
+and dSYM generation. ELF owned inputs are not implemented yet.
+
 ## Code signing
 
 The in-process signer implements the narrow linker ad-hoc contract used by

@@ -4,6 +4,8 @@ mod dead_strip;
 mod file_output;
 #[path = "link/native.rs"]
 mod native;
+#[path = "link/owned.rs"]
+mod owned;
 #[path = "link/private_extern.rs"]
 mod private_extern;
 #[path = "link/section_bounds.rs"]

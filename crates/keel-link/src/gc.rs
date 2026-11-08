@@ -5,7 +5,7 @@
 //! MH_SUBSECTIONS_VIA_SYMBOLS splits into atoms that start at its symbols.
 //! Any other section is one atom.
 use crate::{
-    read::{self, Fixup, Reader, Reloc, Section},
+    read::{self, Fixup, Operation, Reader, Reloc, Section},
     *,
 };
 
@@ -14,6 +14,7 @@ use crate::{
 enum Node<'a> {
     Unit(usize, usize, usize),
     Common(&'a str),
+    Unwind(usize, usize),
 }
 /// Where a reference lands, before it is mapped to a node.
 #[derive(Clone, Copy)]
@@ -80,16 +81,15 @@ impl Parts {
         self.fixups = vec![Vec::new(); self.units.len()];
         let mut next_fixup = 0;
         for (at, rel) in s.relocs.iter().enumerate() {
-            let Some(ui) = self.find(rel.offset) else {
+            let Some(ui) = self.find(rel.offset as usize) else {
                 return fail(if self.records {
                     "dead_strip: relocation outside an unwind record"
                 } else {
                     "dead_strip: relocation outside its section"
                 });
             };
-            if rel
-                .offset
-                .checked_add(rel.width)
+            if (rel.offset as usize)
+                .checked_add(rel.width as usize)
                 .is_none_or(|end| end > self.units[ui].end)
             {
                 return fail(if self.records {
@@ -98,12 +98,19 @@ impl Parts {
                     "dead_strip: relocation crosses a linker atom"
                 });
             }
+            if rel.operation == Operation::PagePair
+                && (rel.aux as usize + 4 > self.units[ui].end
+                    || (rel.aux as usize) < self.units[ui].start)
+            {
+                return fail("dead_strip: paired relocation crosses a linker atom");
+            }
             self.relocs[ui].push(at as u32);
             // Decode once in list order, as an ADDEND prefix or a SUBTRACTOR
             // pair takes the next relocation with it.
             if at == next_fixup {
                 self.fixups[ui].push(at as u32);
-                let paired = matches!(rel.kind, read::ADDEND | read::SUBTRACTOR)
+                let paired = rel.operation == Operation::Foreign
+                    && matches!(rel.kind, read::ADDEND | read::SUBTRACTOR)
                     && read::fixups(&s.relocs[at..], 0..usize::MAX)
                         .next()
                         .is_some_and(|f| f.is_ok());
@@ -132,8 +139,8 @@ fn splits(o: &Object, s: &Section) -> bool {
         && s.flags & 0x10000000 == 0
         && !matches!(s.flags & 255, 9 | 0xa)
 }
-struct Graph<'a> {
-    linker: &'a Linker,
+struct Graph<'a, 'data> {
+    linker: &'a Linker<'data>,
     /// `parts[object][section]`.
     parts: Vec<Vec<Parts>>,
     /// `first[object][section]` is the node id of the section's first unit.
@@ -141,11 +148,12 @@ struct Graph<'a> {
     /// Common node ids, after every section's nodes.
     common_ids: BTreeMap<&'a str, usize>,
     nodes: usize,
+    unwind_first: Vec<usize>,
     /// The records owned by each code atom, by node id.
     owners: Vec<Vec<Node<'a>>>,
     demanded: BTreeSet<(usize, usize)>,
 }
-impl<'a> Graph<'a> {
+impl<'a, 'data> Graph<'a, 'data> {
     fn records(&self, oi: usize, si: usize) -> bool {
         self.parts[oi][si].records
     }
@@ -153,6 +161,7 @@ impl<'a> Graph<'a> {
         match node {
             Node::Unit(oi, si, ui) => self.first[oi][si] + ui,
             Node::Common(name) => self.common_ids[name],
+            Node::Unwind(o, r) => self.unwind_first[o] + r,
         }
     }
     fn node(&self, place: Place<'a>) -> Result<Node<'a>> {
@@ -216,10 +225,9 @@ impl<'a> Graph<'a> {
         pointer: bool,
     ) -> Result<Option<Place<'a>>> {
         if r.external {
-            return self.symbol_place(oi, r.symbol);
+            return self.symbol_place(oi, r.symbol as usize);
         }
-        let si = r
-            .symbol
+        let si = (r.symbol as usize)
             .checked_sub(1)
             .ok_or("relocation section ordinal out of range")?;
         let section = self.linker.objects[oi]
@@ -231,7 +239,7 @@ impl<'a> Graph<'a> {
         // the addend cannot change the target node.
         let offset = if pointer {
             Reader(data)
-                .u64(r.offset)?
+                .u64(r.offset as usize)?
                 .checked_sub(section.address)
                 .ok_or("dead_strip: local pointer precedes its input section")? as usize
         } else {
@@ -267,10 +275,10 @@ impl<'a> Graph<'a> {
             && r.external
             && self.linker.objects[oi]
                 .symbols
-                .get(r.symbol)
+                .get(r.symbol as usize)
                 .is_some_and(|s| s.kind & 0xe == 0xe)
         {
-            return Ok(self.definition(oi, r.symbol));
+            return Ok(self.definition(oi, r.symbol as usize));
         }
         self.target(oi, r, data, pointer)
     }
@@ -296,7 +304,7 @@ impl<'a> Graph<'a> {
                     // arithmetic, not a liveness dependency on the anchor's record.
                     let anchor = linker.objects[oi]
                         .symbols
-                        .get(minus.symbol)
+                        .get(minus.symbol as usize)
                         .ok_or("invalid subtractor symbol")?;
                     if !(records
                         && anchor.kind & 0xe == 0xe
@@ -310,6 +318,25 @@ impl<'a> Graph<'a> {
                         edges.push(self.node(p)?);
                     }
                 }
+                Fixup::Native(r) => {
+                    if r.operation == Operation::Difference {
+                        let mut minus = r.clone();
+                        minus.symbol = r.aux;
+                        minus.kind = 1;
+                        let anchor = &linker.objects[oi].symbols[minus.symbol as usize];
+                        if !(records
+                            && anchor.kind & 0xe == 0xe
+                            && anchor.kind & 1 == 0
+                            && anchor.section == si + 1)
+                            && let Some(p) = self.edge(oi, si, &minus, &s.data, false)?
+                        {
+                            edges.push(self.node(p)?);
+                        }
+                    }
+                    if let Some(p) = self.edge(oi, si, r, &s.data, false)? {
+                        edges.push(self.node(p)?);
+                    }
+                }
                 Fixup::Single { reloc: r, .. } => {
                     if r.kind > 9 {
                         return fail(format!(
@@ -317,9 +344,13 @@ impl<'a> Graph<'a> {
                             r.kind
                         ));
                     }
-                    if let Some(p) =
-                        self.edge(oi, si, r, &s.data, r.kind == read::UNSIGNED && r.width == 8)?
-                    {
+                    if let Some(p) = self.edge(
+                        oi,
+                        si,
+                        r,
+                        &s.data,
+                        r.kind == read::UNSIGNED && (r.width as usize) == 8,
+                    )? {
                         edges.push(self.node(p)?);
                     }
                 }
@@ -342,18 +373,26 @@ impl<'a> Graph<'a> {
         let matches: Vec<_> = self.parts[oi][si].relocs[ri]
             .iter()
             .map(|&at| &s.relocs[at as usize])
-            .filter(|r| r.offset == field)
+            .filter(|r| (r.offset as usize) == field)
             .collect();
+        let native_difference =
+            fde && matches.len() == 1 && matches[0].operation == Operation::Difference;
+        let negative_id = if native_difference {
+            matches[0].aux as usize
+        } else {
+            matches.first().map_or(0, |r| r.symbol as usize)
+        };
         let rel = if fde {
-            if matches.len() != 2
-                || matches[0].kind != 1
-                || matches[1].kind != 0
-                || !matches[1].external
-                || !matches[0].external
-                || matches[0].pc
-                || matches[1].pc
-                || matches[0].width != 8
-                || matches[1].width != 8
+            if !native_difference
+                && (matches.len() != 2
+                    || matches[0].kind != 1
+                    || matches[1].kind != 0
+                    || !matches[1].external
+                    || !matches[0].external
+                    || matches[0].pc
+                    || matches[1].pc
+                    || (matches[0].width as usize) != 8
+                    || (matches[1].width as usize) != 8)
             {
                 return fail(
                     "dead_strip: implicit/foreign eh_frame FDE ownership requires native-width SUBTRACTOR/UNSIGNED fixups",
@@ -363,16 +402,23 @@ impl<'a> Graph<'a> {
             // anchor with an offset folded into the payload. Rebuild remaps both.
             let negative = linker.objects[oi]
                 .symbols
-                .get(matches[0].symbol)
+                .get(negative_id)
                 .ok_or("invalid FDE subtractor symbol")?;
             if negative.kind & 0xe != 0xe || negative.kind & 1 != 0 || negative.section != si + 1 {
                 return fail(
                     "dead_strip: FDE subtractor must be a local anchor in its own section",
                 );
             }
-            matches[1]
+            if native_difference {
+                matches[0]
+            } else {
+                matches[1]
+            }
         } else {
-            if matches.len() != 1 || matches[0].kind != 0 || matches[0].pc || matches[0].width != 8
+            if matches.len() != 1
+                || matches[0].kind != 0
+                || matches[0].pc
+                || (matches[0].width as usize) != 8
             {
                 return fail(
                     "dead_strip: compact unwind ownership requires one UNSIGNED function pointer",
@@ -391,9 +437,13 @@ impl<'a> Graph<'a> {
                 && code.flags & 0x80000400 != 0
                 && !matches!(code.flags & 255, 1 | 0x12)
             {
-                let raw = Reader(&s.data).u64(field)?;
+                let raw = if rel.operation != Operation::Foreign {
+                    rel.addend as u64
+                } else {
+                    Reader(&s.data).u64(field)?
+                };
                 let start = if rel.external {
-                    let original = &linker.objects[oi].symbols[rel.symbol];
+                    let original = &linker.objects[oi].symbols[rel.symbol as usize];
                     let sym = if original.kind & 0xe == 0 {
                         let Some(Target::Definition(o, id)) = linker.globals.get(&original.name)
                         else {
@@ -404,7 +454,7 @@ impl<'a> Graph<'a> {
                         original
                     };
                     let raw = if fde {
-                        let negative = &linker.objects[oi].symbols[matches[0].symbol];
+                        let negative = &linker.objects[oi].symbols[negative_id];
                         raw.wrapping_add(s.address + field as u64)
                             .wrapping_sub(negative.value)
                     } else {
@@ -501,7 +551,7 @@ fn atoms(s: &Section, mut starts: Vec<usize>, joined: &mut [(usize, usize)]) -> 
     }
     units
 }
-impl Linker {
+impl Linker<'_> {
     pub(crate) fn collect(&mut self) -> Result<BTreeSet<String>> {
         let commons: BTreeSet<&str> = self
             .objects
@@ -545,6 +595,7 @@ impl Linker {
             first: Vec::new(),
             common_ids: BTreeMap::new(),
             nodes: 0,
+            unwind_first: Vec::new(),
             owners: Vec::new(),
             demanded: BTreeSet::new(),
         };
@@ -585,6 +636,32 @@ impl Linker {
                         )?;
                     }
                 }
+            }
+        }
+        for (oi, o) in self.objects.iter().enumerate() {
+            for (ui, u) in o.unwind.iter().enumerate() {
+                let sym = o.symbols.get(u.owner).ok_or("invalid unwind owner atom")?;
+                let si = sym
+                    .section
+                    .checked_sub(1)
+                    .ok_or("unwind owner is not a definition")?;
+                let sec = o.sections.get(si).ok_or("invalid unwind owner section")?;
+                let start = sym.value;
+                let end = start
+                    .checked_add(u.length as u64)
+                    .ok_or("unwind range overflow")?;
+                if sec.segment != "__TEXT"
+                    || sec.flags & 0x80000400 == 0
+                    || matches!(sec.flags & 255, 1 | 0x12)
+                    || u.length == 0
+                    || end > sec.size as u64
+                {
+                    return fail("native unwind owner range is outside executable section");
+                }
+                if g.parts[oi][si].split {
+                    joined[oi][si].push((start as usize, end as usize));
+                }
+                owned.push((oi, si, start as usize, Node::Unwind(oi, ui)));
             }
         }
         // Ownership discovery must not turn metadata's dead references into
@@ -635,6 +712,15 @@ impl Linker {
                         id
                     })
                     .collect()
+            })
+            .collect();
+        g.unwind_first = self
+            .objects
+            .iter()
+            .map(|o| {
+                let first = nodes;
+                nodes += o.unwind.len();
+                first
             })
             .collect();
         g.common_ids = commons.into_iter().zip(nodes..).collect();
@@ -747,12 +833,27 @@ impl Linker {
                 Node::Common(name) => {
                     commons.insert(name.to_string());
                 }
+                Node::Unwind(oi, ui) => {
+                    let u = &self.objects[oi].unwind[ui];
+                    for si in [u.personality, u.lsda].into_iter().flatten() {
+                        pending.extend(g.symbol(oi, si)?);
+                    }
+                }
             }
         }
+        let unwind_first = std::mem::take(&mut g.unwind_first);
         let demanded = std::mem::take(&mut g.demanded);
         let parts = std::mem::take(&mut g.parts);
         let first = std::mem::take(&mut g.first);
         drop(g);
+        for (oi, o) in self.objects.iter_mut().enumerate() {
+            let mut i = 0;
+            o.unwind.retain(|_| {
+                let keep = live[unwind_first[oi] + i];
+                i += 1;
+                keep
+            });
+        }
         // Rebuild metadata before sizing, preserving original contribution IDs.
         // Remap local metadata symbols and FDE backward CIE pointers; section
         // relocations into these moving records were rejected above.
@@ -786,17 +887,34 @@ impl Linker {
                 }
                 let old_relocs = section.relocs.clone();
                 section.relocs.retain_mut(|rel| {
-                    let Some(ri) = m.find(rel.offset) else {
+                    let Some(ri) = m.find(rel.offset as usize) else {
                         return false;
                     };
                     let Some(at) = mapping[ri] else {
                         return false;
                     };
-                    rel.offset = at + rel.offset - records[ri].start;
+                    let old_field = rel.offset as usize;
+                    rel.offset = (at + (rel.offset as usize) - records[ri].start) as u32;
+                    if rel.operation == Operation::Difference {
+                        let old = &old_symbols[rel.aux as usize];
+                        let old_anchor = (old.value - section.address) as usize;
+                        let new_anchor = m
+                            .find(old_anchor)
+                            .and_then(|ri| {
+                                mapping[ri].map(|at| at + old_anchor - records[ri].start)
+                            })
+                            .unwrap_or(data.len());
+                        rel.addend = rel
+                            .addend
+                            .wrapping_add(old_field as i64)
+                            .wrapping_sub((rel.offset as usize) as i64)
+                            .wrapping_add(new_anchor as i64)
+                            .wrapping_sub(old_anchor as i64);
+                    }
                     true
                 });
                 section.size = data.len();
-                section.data = data;
+                section.data = data.into();
                 for sym in &mut object.symbols {
                     if sym.section != si + 1 {
                         continue;
@@ -808,31 +926,31 @@ impl Linker {
                             .unwrap_or(section.size) as u64;
                 }
                 for rel in old_relocs.iter().filter(|r| r.kind == 1) {
-                    let Some(ri) = m.find(rel.offset) else {
+                    let Some(ri) = m.find(rel.offset as usize) else {
                         continue;
                     };
                     let Some(at) = mapping[ri] else {
                         continue;
                     };
-                    let old = &old_symbols[rel.symbol];
+                    let old = &old_symbols[rel.symbol as usize];
                     if old.kind & 0xe != 0xe || old.kind & 1 != 0 || old.section != si + 1 {
                         return fail(
                             "dead_strip: unwind difference requires a local anchor in its own section",
                         );
                     }
-                    let new_field = at + rel.offset - records[ri].start;
-                    let raw = if rel.width == 8 {
+                    let new_field = at + (rel.offset as usize) - records[ri].start;
+                    let raw = if (rel.width as usize) == 8 {
                         Reader(&section.data).u64(new_field)?
                     } else {
                         Reader(&section.data).u32(new_field)? as u64
                     };
                     let value = raw
-                        .wrapping_add(rel.offset as u64)
+                        .wrapping_add((rel.offset as usize) as u64)
                         .wrapping_sub(new_field as u64)
-                        .wrapping_add(object.symbols[rel.symbol].value)
+                        .wrapping_add(object.symbols[rel.symbol as usize].value)
                         .wrapping_sub(old.value);
-                    section.data[new_field..new_field + rel.width]
-                        .copy_from_slice(&value.to_le_bytes()[..rel.width]);
+                    section.data.to_mut()[new_field..new_field + (rel.width as usize)]
+                        .copy_from_slice(&value.to_le_bytes()[..(rel.width as usize)]);
                 }
             }
         }
@@ -886,7 +1004,7 @@ impl Linker {
 mod tests {
     use super::*;
 
-    fn section(size: usize, relocs: Vec<Reloc>) -> Section {
+    fn section(size: usize, relocs: Vec<Reloc>) -> Section<'static> {
         Section {
             segment: "__TEXT".into(),
             name: "__text".into(),
@@ -894,7 +1012,7 @@ mod tests {
             size,
             alignment: 2,
             flags: 0x80000400,
-            data: vec![0; size],
+            data: vec![0; size].into(),
             relocs,
             output: None,
             offset: 0,
@@ -975,6 +1093,7 @@ mod tests {
             pc: false,
             width: 8,
             kind: read::UNSIGNED,
+            ..Reloc::default()
         };
         let s = section(32, vec![reloc(8), reloc(12)]);
         let mut parts = Parts::whole(&s, true);

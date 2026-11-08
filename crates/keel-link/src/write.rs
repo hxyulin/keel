@@ -1,6 +1,6 @@
 use crate::*;
 use keel_util::leb128;
-use read::{Fixup, Reader, Reloc};
+use read::{Fixup, Operation, Reader, Reloc};
 
 // Most object relocation lists run monotonically through the section (often
 // backwards). Keep those disjoint ranges in a compact vector. Arbitrary input
@@ -147,7 +147,7 @@ impl Segment {
         }
     }
 }
-impl Linker {
+impl Linker<'_> {
     pub(crate) fn emit_to<W: std::io::Write + std::io::Seek>(
         mut self,
         output: &mut W,
@@ -684,7 +684,7 @@ impl Linker {
     }
     pub(crate) fn reloc_target(&self, oi: usize, r: &Reloc) -> Result<(Option<Target>, u64)> {
         if r.external {
-            let t = self.symbol_target(oi, r.symbol)?;
+            let t = self.symbol_target(oi, r.symbol as usize)?;
             Ok((
                 Some(t),
                 if matches!(t, Target::Import(_)) {
@@ -696,7 +696,7 @@ impl Linker {
         } else {
             let s = self.objects[oi]
                 .sections
-                .get(r.symbol.wrapping_sub(1))
+                .get((r.symbol as usize).wrapping_sub(1))
                 .ok_or("relocation section ordinal out of range")?;
             let out = &self.outputs[s.output.ok_or("reference to discarded section")?];
             Ok((None, out.address + s.offset as u64))
@@ -710,10 +710,10 @@ impl Linker {
         if r.external
             && self.objects[oi]
                 .symbols
-                .get(r.symbol)
+                .get(r.symbol as usize)
                 .is_some_and(|s| s.kind & 0xe == 0xe)
         {
-            let t = Target::Definition(oi, r.symbol);
+            let t = Target::Definition(oi, r.symbol as usize);
             return Ok((Some(t), self.address(t)?));
         }
         self.reloc_target(oi, r)
@@ -842,233 +842,279 @@ impl Linker {
         };
         let mut patched = RelocationRanges::default();
         for fixup in read::fixups(&s.relocs, 0..usize::MAX) {
-            let (mut r, extra, plus) = match fixup? {
+            let (r, extra, plus) = match fixup? {
                 Fixup::Single { reloc, addend } => (reloc.clone(), addend, None),
-                Fixup::Difference { minus, plus } => (minus.clone(), 0, Some(plus)),
+                Fixup::Difference { minus, plus } => (minus.clone(), 0, Some(plus.clone())),
+                Fixup::Native(reloc) if reloc.operation == Operation::Difference => {
+                    let mut minus = reloc.clone();
+                    minus.symbol = reloc.aux;
+                    minus.kind = 1;
+                    (minus, 0, Some(reloc.clone()))
+                }
+                Fixup::Native(reloc) => (reloc.clone(), reloc.addend, None),
             };
-            // Dead code is not written, and its targets may not exist.
-            if !s.live_at(r.offset) {
-                if !patched.insert(r.offset, r.offset + r.width) {
+            let low = (r.operation == Operation::PagePair).then(|| {
+                let mut low = r.clone();
+                low.offset = r.aux;
+                low.kind += 1;
+                low.pc = false;
+                low.operation = Operation::Single;
+                low
+            });
+            let mut pair_target = None;
+            for mut r in std::iter::once(r).chain(low) {
+                // Dead code is not written, and its targets may not exist.
+                if !s.live_at(r.offset as usize) {
+                    if r.operation == Operation::Foreign
+                        && !patched
+                            .insert(r.offset as usize, (r.offset as usize) + (r.width as usize))
+                    {
+                        return fail("overlapping relocation locations");
+                    }
+                    continue;
+                }
+                let location = if metadata {
+                    0
+                } else {
+                    self.outputs[s.output.ok_or("missing output section")?].address
+                        + s.place(r.offset as usize)? as u64
+                };
+                let (target, mut value) = if let Some(resolved) = pair_target {
+                    resolved
+                } else {
+                    let resolved = target_of(self, oi, &r)?;
+                    if r.operation == Operation::PagePair {
+                        pair_target = Some(resolved);
+                    }
+                    resolved
+                };
+                let mut difference = false;
+                if let Some(unsigned) = &plus {
+                    let (positive_target, positive) = target_of(self, oi, unsigned)?;
+                    if matches!(positive_target, Some(Target::Import(_))) {
+                        return fail("cannot form a static difference with an imported symbol");
+                    }
+                    if matches!(target, Some(Target::Import(_))) {
+                        return fail("cannot subtract an imported symbol");
+                    }
+                    value = positive.wrapping_sub(value);
+                    r.kind = read::UNSIGNED;
+                    difference = true;
+                }
+                if r.operation == Operation::Foreign
+                    && !patched.insert(r.offset as usize, (r.offset as usize) + (r.width as usize))
+                {
                     return fail("overlapping relocation locations");
                 }
-                continue;
-            }
-            let location = if metadata {
-                0
-            } else {
-                self.outputs[s.output.ok_or("missing output section")?].address
-                    + s.place(r.offset)? as u64
-            };
-            let (target, mut value) = target_of(self, oi, &r)?;
-            let mut difference = false;
-            if let Some(unsigned) = plus {
-                let (positive_target, positive) = target_of(self, oi, unsigned)?;
-                if matches!(positive_target, Some(Target::Import(_))) {
-                    return fail("cannot form a static difference with an imported symbol");
-                }
-                if matches!(target, Some(Target::Import(_))) {
-                    return fail("cannot subtract an imported symbol");
-                }
-                value = positive.wrapping_sub(value);
-                r.kind = read::UNSIGNED;
-                difference = true;
-            }
-            if !patched.insert(r.offset, r.offset + r.width) {
-                return fail("overlapping relocation locations");
-            }
-            match r.kind {
-                0 => {
-                    if r.pc || !matches!(r.width, 4 | 8) || (!difference && r.width != 8) {
-                        return fail("unsupported UNSIGNED relocation width/flags");
-                    }
-                    let raw = if r.width == 8 {
-                        Reader(&data).u64(r.offset)?
-                    } else {
-                        Reader(&data).u32(r.offset)? as i32 as i64 as u64
-                    };
-                    if !r.external && !difference {
-                        let t = &self.objects[oi].sections[r.symbol - 1];
-                        if t.atoms.is_empty() {
-                            value = value.wrapping_sub(t.address).wrapping_add(raw);
-                        } else {
-                            // The pointer holds an input address. In a split
-                            // section it moves with the atom there.
-                            let offset = raw
-                                .checked_sub(t.address)
-                                .ok_or("local pointer precedes its input section")?;
-                            value = value - t.offset as u64 + t.place(offset as usize)? as u64;
-                        }
-                    } else {
-                        value = value.wrapping_add(raw);
-                    }
-                    // The third word of a TLV descriptor is an offset in the
-                    // image's contiguous TLS template, never an ASLR pointer.
-                    let tls_offset = s.flags & 255 == 0x13 && r.offset % 24 == 16;
-                    if tls_offset {
-                        let template = self
-                            .outputs
-                            .iter()
-                            .filter(|s| matches!(s.flags & 255, 0x11 | 0x12))
-                            .map(|s| s.address)
-                            .min()
-                            .ok_or("TLV descriptor without template")?;
-                        let target_section = if r.external {
-                            match target {
-                                Some(Target::Definition(o, sym)) => self.objects[o]
-                                    .sections
-                                    .get(self.objects[o].symbols[sym].section.wrapping_sub(1))
-                                    .ok_or("TLV template needs a section definition")?,
-                                _ => return fail("TLV template must be a local definition"),
-                            }
-                        } else {
-                            &self.objects[oi].sections[r.symbol - 1]
-                        };
-                        if !matches!(target_section.flags & 255, 0x11 | 0x12) {
-                            return fail("TLV offset must reference TLS template data");
-                        }
-                        value = value
-                            .checked_sub(template)
-                            .ok_or("TLV offset precedes template")?;
-                    }
-                    if !metadata && !difference && !tls_offset {
-                        if let Some(Target::Import(import)) = target {
-                            self.binds.insert(location, (import, raw as i64));
-                            value = 0;
-                        } else {
-                            let absolute = matches!(target,Some(Target::Definition(o,s)) if self.objects[o].symbols[s].kind&0xe==2);
-                            if !absolute {
-                                if self.outputs[s.output.unwrap()].segment == "__TEXT" {
-                                    return fail(
-                                        "absolute pointer relocation in read-only __TEXT requires the system linker",
-                                    );
-                                }
-                                self.rebases.insert(location);
-                            }
-                        }
-                    }
-                    if !metadata && !difference && !tls_offset && r.external {
-                        let name = &self.objects[oi].symbols[r.symbol].name;
-                        if target.is_some_and(|t| self.coalesces(t, name)) {
-                            self.weak_binds.insert(location, (name.clone(), raw as i64));
-                        }
-                    }
-                    if r.width == 4
-                        && !((value as i64) >= i32::MIN as i64 && (value as i64) <= u32::MAX as i64)
-                    {
-                        return fail("32-bit difference relocation overflow");
-                    }
-                    data[r.offset..r.offset + r.width]
-                        .copy_from_slice(&value.to_le_bytes()[..r.width]);
-                }
-                2..=9 => {
-                    if !r.external || r.width != 4 {
-                        return fail(
-                            "instruction/GOT relocations require external symbol indexes and width 4",
-                        );
-                    }
-                    if matches!(r.kind, 8 | 9)
-                        && let Some(Target::Definition(o, sym)) = target
-                    {
-                        let definition = &self.objects[o].symbols[sym];
-                        if self.objects[o]
-                            .sections
-                            .get(definition.section.wrapping_sub(1))
-                            .is_none_or(|s| s.flags & 255 != 0x13)
+                match r.kind {
+                    0 => {
+                        if r.pc
+                            || !matches!(r.width as usize, 4 | 8)
+                            || (!difference && (r.width as usize) != 8)
                         {
-                            return fail("TLVP relocation must reference a TLS descriptor");
+                            return fail("unsupported UNSIGNED relocation width/flags");
                         }
+                        let raw = if r.operation != Operation::Foreign {
+                            r.addend as u64
+                        } else if (r.width as usize) == 8 {
+                            Reader(&data).u64(r.offset as usize)?
+                        } else {
+                            Reader(&data).u32(r.offset as usize)? as i32 as i64 as u64
+                        };
+                        if !r.external && !difference {
+                            let t = &self.objects[oi].sections[(r.symbol as usize) - 1];
+                            if t.atoms.is_empty() {
+                                value = value.wrapping_sub(t.address).wrapping_add(raw);
+                            } else {
+                                // The pointer holds an input address. In a split
+                                // section it moves with the atom there.
+                                let offset = raw
+                                    .checked_sub(t.address)
+                                    .ok_or("local pointer precedes its input section")?;
+                                value = value - t.offset as u64 + t.place(offset as usize)? as u64;
+                            }
+                        } else {
+                            value = value.wrapping_add(raw);
+                        }
+                        // The third word of a TLV descriptor is an offset in the
+                        // image's contiguous TLS template, never an ASLR pointer.
+                        let tls_offset = s.flags & 255 == 0x13 && (r.offset as usize) % 24 == 16;
+                        if tls_offset {
+                            let template = self
+                                .outputs
+                                .iter()
+                                .filter(|s| matches!(s.flags & 255, 0x11 | 0x12))
+                                .map(|s| s.address)
+                                .min()
+                                .ok_or("TLV descriptor without template")?;
+                            let target_section = if r.external {
+                                match target {
+                                    Some(Target::Definition(o, sym)) => self.objects[o]
+                                        .sections
+                                        .get(self.objects[o].symbols[sym].section.wrapping_sub(1))
+                                        .ok_or("TLV template needs a section definition")?,
+                                    _ => return fail("TLV template must be a local definition"),
+                                }
+                            } else {
+                                &self.objects[oi].sections[(r.symbol as usize) - 1]
+                            };
+                            if !matches!(target_section.flags & 255, 0x11 | 0x12) {
+                                return fail("TLV offset must reference TLS template data");
+                            }
+                            value = value
+                                .checked_sub(template)
+                                .ok_or("TLV offset precedes template")?;
+                        }
+                        if !metadata && !difference && !tls_offset {
+                            if let Some(Target::Import(import)) = target {
+                                self.binds.insert(location, (import, raw as i64));
+                                value = 0;
+                            } else {
+                                let absolute = matches!(target,Some(Target::Definition(o,s)) if self.objects[o].symbols[s].kind&0xe==2);
+                                if !absolute {
+                                    if self.outputs[s.output.unwrap()].segment == "__TEXT" {
+                                        return fail(
+                                            "absolute pointer relocation in read-only __TEXT requires the system linker",
+                                        );
+                                    }
+                                    self.rebases.insert(location);
+                                }
+                            }
+                        }
+                        if !metadata && !difference && !tls_offset && r.external {
+                            let name = &self.objects[oi].symbols[r.symbol as usize].name;
+                            if target.is_some_and(|t| self.coalesces(t, name)) {
+                                self.weak_binds.insert(location, (name.clone(), raw as i64));
+                            }
+                        }
+                        if (r.width as usize) == 4
+                            && !((value as i64) >= i32::MIN as i64
+                                && (value as i64) <= u32::MAX as i64)
+                        {
+                            return fail("32-bit difference relocation overflow");
+                        }
+                        data.to_mut()
+                            [(r.offset as usize)..(r.offset as usize) + (r.width as usize)]
+                            .copy_from_slice(&value.to_le_bytes()[..(r.width as usize)]);
                     }
-                    let symbol = &self.objects[oi].symbols[r.symbol].name;
-                    if matches!(r.kind, 2 | 3 | 5 | 7 | 8) != r.pc {
-                        return fail("invalid PC-relative relocation flag");
-                    }
-                    let word = Reader(&data).u32(r.offset)?;
-                    if matches!(r.kind, 5..=9) {
-                        value = self.outputs[self.got_section].address
-                            + *self
-                                .got
-                                .get(&self.got_key(oi, r.symbol)?)
-                                .ok_or("missing GOT slot")? as u64
-                                * 8;
-                    } else if matches!(target, Some(Target::Import(_)))
-                        || target.is_some_and(|t| self.coalesces(t, symbol))
-                    {
-                        if r.kind != 2 {
+                    2..=9 => {
+                        if !r.external || (r.width as usize) != 4 {
                             return fail(
-                                "direct page reference to imported/coalesced symbol requires GOT relocation",
+                                "instruction/GOT relocations require external symbol indexes and width 4",
                             );
                         }
-                        value = self.outputs[self.stub_section].address
-                            + self.stubs[symbol] as u64 * 12;
-                    }
-                    let patched = match r.kind {
-                        2 => {
-                            if word & 0x7c000000 != 0x14000000 {
-                                return fail("BRANCH26 does not address B/BL");
+                        if matches!(r.kind, 8 | 9)
+                            && let Some(Target::Definition(o, sym)) = target
+                        {
+                            let definition = &self.objects[o].symbols[sym];
+                            if self.objects[o]
+                                .sections
+                                .get(definition.section.wrapping_sub(1))
+                                .is_none_or(|s| s.flags & 255 != 0x13)
+                            {
+                                return fail("TLVP relocation must reference a TLS descriptor");
                             }
-                            let encoded = (((word & 0x3ffffff) as i32) << 6 >> 4) as i64;
-                            let delta = value as i64 + extra + encoded - location as i64;
-                            if delta % 4 != 0 || !(-(1 << 27)..(1 << 27)).contains(&delta) {
-                                return fail("BRANCH26 out of range (no branch islands yet)");
-                            }
-                            (word & 0xfc000000) | ((delta >> 2) as u32 & 0x3ffffff)
                         }
-                        3 | 5 | 8 => {
-                            if word & 0x9f000000 != 0x90000000 {
-                                return fail("PAGE21 does not address ADRP");
-                            }
-                            let imm = ((word >> 29) & 3) | ((word >> 3) & 0x1ffffc);
-                            let encoded = ((imm as i32) << 11 >> 11) as i64 * 4096;
-                            let page = (((value as i64 + extra) & !4095)
-                                - (location as i64 & !4095))
-                                / 4096
-                                + encoded / 4096;
-                            if !(-(1 << 20)..(1 << 20)).contains(&page) {
-                                return fail("ADRP out of range");
-                            }
-                            (word & !0x60ffffe0)
-                                | (((page as u32) & 3) << 29)
-                                | (((page as u32) & 0x1ffffc) << 3)
+                        let symbol = &self.objects[oi].symbols[r.symbol as usize].name;
+                        if matches!(r.kind, 2 | 3 | 5 | 7 | 8) != r.pc {
+                            return fail("invalid PC-relative relocation flag");
                         }
-                        4 | 6 | 9 => {
-                            let scale = if word & 0x3b000000 == 0x39000000 {
-                                if word & 0x04800000 == 0x04800000 {
-                                    4
-                                } else {
-                                    word >> 30
-                                }
-                            } else if word & 0x7f400000 == 0x11000000 {
-                                0
-                            } else {
+                        let word = Reader(&data).u32(r.offset as usize)?;
+                        if matches!(r.kind, 5..=9) {
+                            value = self.outputs[self.got_section].address
+                                + *self
+                                    .got
+                                    .get(&self.got_key(oi, r.symbol as usize)?)
+                                    .ok_or("missing GOT slot")?
+                                    as u64
+                                    * 8;
+                        } else if matches!(target, Some(Target::Import(_)))
+                            || target.is_some_and(|t| self.coalesces(t, symbol))
+                        {
+                            if r.kind != 2 {
                                 return fail(
-                                    "PAGEOFF12 requires unshifted ADD or unsigned-offset load/store",
+                                    "direct page reference to imported/coalesced symbol requires GOT relocation",
                                 );
-                            };
-                            let old = ((word >> 10) & 4095) << scale;
-                            let off = ((value as i64 + extra + old as i64) as u64 & 4095) as u32;
-                            if off & ((1 << scale) - 1) != 0 {
-                                return fail("unaligned PAGEOFF12 target");
                             }
-                            (word & !0x003ffc00) | ((off >> scale) << 10)
+                            value = self.outputs[self.stub_section].address
+                                + self.stubs[symbol] as u64 * 12;
                         }
-                        7 => {
-                            // POINTER_TO_GOT has no embedded addend. Apple assemblers
-                            // may leave nonzero placeholder words in LSDA/CIE data.
-                            let delta = value as i64 - location as i64;
-                            if i32::try_from(delta).is_err() {
-                                return fail("POINTER_TO_GOT overflow");
+                        let patched = match r.kind {
+                            2 => {
+                                if word & 0x7c000000 != 0x14000000 {
+                                    return fail("BRANCH26 does not address B/BL");
+                                }
+                                let encoded = if r.operation != Operation::Foreign {
+                                    0
+                                } else {
+                                    (((word & 0x3ffffff) as i32) << 6 >> 4) as i64
+                                };
+                                let delta = value as i64 + extra + encoded - location as i64;
+                                if delta % 4 != 0 || !(-(1 << 27)..(1 << 27)).contains(&delta) {
+                                    return fail("BRANCH26 out of range (no branch islands yet)");
+                                }
+                                (word & 0xfc000000) | ((delta >> 2) as u32 & 0x3ffffff)
                             }
-                            delta as u32
-                        }
-                        _ => unreachable!(),
-                    };
-                    data[r.offset..r.offset + 4].copy_from_slice(&patched.to_le_bytes());
-                }
-                _ => {
-                    return fail(format!(
-                        "unsupported arm64 relocation type {} at {:#x} (unsupported TLS/authentication form)",
-                        r.kind, r.offset
-                    ));
+                            3 | 5 | 8 => {
+                                if word & 0x9f000000 != 0x90000000 {
+                                    return fail("PAGE21 does not address ADRP");
+                                }
+                                let imm = ((word >> 29) & 3) | ((word >> 3) & 0x1ffffc);
+                                let encoded = ((imm as i32) << 11 >> 11) as i64 * 4096;
+                                let page = (((value as i64 + extra) & !4095)
+                                    - (location as i64 & !4095))
+                                    / 4096
+                                    + encoded / 4096;
+                                if !(-(1 << 20)..(1 << 20)).contains(&page) {
+                                    return fail("ADRP out of range");
+                                }
+                                (word & !0x60ffffe0)
+                                    | (((page as u32) & 3) << 29)
+                                    | (((page as u32) & 0x1ffffc) << 3)
+                            }
+                            4 | 6 | 9 => {
+                                let scale = if word & 0x3b000000 == 0x39000000 {
+                                    if word & 0x04800000 == 0x04800000 {
+                                        4
+                                    } else {
+                                        word >> 30
+                                    }
+                                } else if word & 0x7f400000 == 0x11000000 {
+                                    0
+                                } else {
+                                    return fail(
+                                        "PAGEOFF12 requires unshifted ADD or unsigned-offset load/store",
+                                    );
+                                };
+                                let old = ((word >> 10) & 4095) << scale;
+                                let off =
+                                    ((value as i64 + extra + old as i64) as u64 & 4095) as u32;
+                                if off & ((1 << scale) - 1) != 0 {
+                                    return fail("unaligned PAGEOFF12 target");
+                                }
+                                (word & !0x003ffc00) | ((off >> scale) << 10)
+                            }
+                            7 => {
+                                // POINTER_TO_GOT has no embedded addend. Apple assemblers
+                                // may leave nonzero placeholder words in LSDA/CIE data.
+                                let delta = value as i64 - location as i64;
+                                if i32::try_from(delta).is_err() {
+                                    return fail("POINTER_TO_GOT overflow");
+                                }
+                                delta as u32
+                            }
+                            _ => unreachable!(),
+                        };
+                        data.to_mut()[(r.offset as usize)..(r.offset as usize) + 4]
+                            .copy_from_slice(&patched.to_le_bytes());
+                    }
+                    _ => {
+                        return fail(format!(
+                            "unsupported arm64 relocation type {} at {:#x} (unsupported TLS/authentication form)",
+                            r.kind,
+                            (r.offset as usize)
+                        ));
+                    }
                 }
             }
         }

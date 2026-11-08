@@ -2,7 +2,9 @@
 
 Native linkers that take input bytes and return an executable image: arm64
 Mach-O through `link` in `lib.rs`, and x86-64 and AArch64 Linux ELF through
-`elf::link`. Neither reads the filesystem; the driver reads inputs and installs
+`elf::link`. `link_objects` also consumes owned AArch64 Darwin linker/cache units from
+keel-asm, moving their payloads without Mach-O encoding or parsing.
+Neither reads the filesystem; the driver reads inputs and installs
 the output. The contracts are in the [Mach-O](../../docs/linking/macho.md),
 [ELF](../../docs/linking/elf.md), [GNU script](../../docs/linking/gnu-scripts.md)
 and [archive](../../docs/linking/archives.md) references.
@@ -32,7 +34,7 @@ links (`-r`) take `relocatable.rs`.
 | Module | Owns |
 | --- | --- |
 | `lib.rs` | Mach-O linker: `link`, `link_signed`, symbol resolution and layout |
-| `read.rs` | Mach-O object and archive reading |
+| `read.rs` | Mach-O object/archive reading and semantic unit adaptation |
 | `extract.rs` | Fixed-point Mach-O archive member extraction |
 | `gc.rs` | Mach-O dead-section collection |
 | `tbd.rs` | Bounded TAPI v4 dylib interfaces |

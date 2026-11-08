@@ -24,7 +24,7 @@ impl<'a> Resolution<'a> {
         }
     }
 
-    fn include(&mut self, object: &'a Object) {
+    fn include(&mut self, object: &'a Object<'_>) {
         // Definitions only accumulate, so previously satisfied references never
         // become unresolved again. Commons and weak definitions satisfy names
         // here; their precedence and duplicate diagnostics belong to prepare.
@@ -100,9 +100,9 @@ fn selection(objects: &[Object], members: &[Object]) -> Vec<usize> {
     selected
 }
 
-pub(crate) fn archives(
-    objects: &mut Vec<Object>,
-    members: Vec<Object>,
+pub(crate) fn archives<'a>(
+    objects: &mut Vec<Object<'a>>,
+    members: Vec<Object<'a>>,
     bodies: Vec<&[u8]>,
     retain_debug: bool,
 ) -> crate::Result<()> {
@@ -128,10 +128,11 @@ pub(crate) fn archives(
 mod tests {
     use super::*;
 
-    fn object(name: &str, symbols: &[(&str, u8, u16, u64)]) -> Object {
+    fn object(name: &str, symbols: &[(&str, u8, u16, u64)]) -> Object<'static> {
         Object {
             name: name.into(),
             sections: Vec::new(),
+            unwind: Vec::new(),
             symbols: symbols
                 .iter()
                 .map(|&(name, kind, desc, value)| Symbol {
@@ -246,6 +247,7 @@ mod tests {
                 .map(|index| Object {
                     name: index.to_string(),
                     sections: Vec::new(),
+                    unwind: Vec::new(),
                     symbols: (0..next() % 10)
                         .map(|_| {
                             let name = match next() % 9 {

@@ -2,8 +2,9 @@
 
 Native assemblers: AArch64 Mach-O and AArch64 ELF from `lib.rs`, and x86-64 ELF
 from `x86`. Both read GNU-style source or a structured `keel_asm_ir::Program`
-and write object files without external tools. `ObjectAssembler::for_target`
-picks the assembler for a `Target`; `x86::Request` sets the x86 syntax,
+and write object files without external tools.
+`ObjectAssembler::finish_object` returns an owned linker/cache unit on AArch64 Darwin.
+`ObjectAssembler::for_target` picks the assembler for a `Target`; `x86::Request` sets the x86 syntax,
 features and binary inputs. The contracts are in the
 [AArch64](../../docs/targets/aarch64/assembler.md) and
 [x86-64](../../docs/targets/x86_64/assembler.md) assembler references.
@@ -23,6 +24,7 @@ features and binary inputs. The contracts are in the
 | `parser/elf.rs` | GNU AArch64 syntax for the shared ELF path |
 | `parser/program.rs` | Structured `Program` input |
 | `macho.rs` | Mach-O object writer |
+| `unit.rs` | Semantic link units: atoms, normalized fixups and direct unwind ownership |
 | `x86/mod.rs` | x86-64 ELF assembler, `Request`, layout loop |
 | `x86/source.rs` | GNU statement scanning and numeric local labels |
 | `x86/encode.rs`, `encode/tables.rs`, `encode/evex.rs` | Form matching and prefix, ModRM and EVEX emission |

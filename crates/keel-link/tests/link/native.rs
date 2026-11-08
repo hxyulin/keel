@@ -67,17 +67,17 @@ _initialized:
             .arg(&init_object),
     );
     let init_bytes = std::fs::read(&init_object).unwrap();
-    let exe = keel_link::link(
-        &[
-            Input {
-                name: "fixture.o",
-                bytes: &bytes,
-            },
-            Input {
-                name: "init.o",
-                bytes: &init_bytes,
-            },
-        ],
+    let owned = keel_asm::assemble(source).unwrap().into_object().unwrap();
+    let cached = owned.encode().unwrap();
+    let exe = keel_link::link_caches(
+        &[Input {
+            name: "fixture.o",
+            bytes: &cached,
+        }],
+        &[Input {
+            name: "init.o",
+            bytes: &init_bytes,
+        }],
         Options {
             dylibs: vec![system],
             ..Options::default()

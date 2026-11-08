@@ -15,6 +15,7 @@ mod fxhash;
 mod generated;
 mod macho;
 mod parser;
+mod unit;
 pub mod x86;
 
 use std::fmt;
@@ -196,6 +197,14 @@ pub struct Assembly {
 }
 
 impl Assembly {
+    /// Prepare an owned AArch64 Darwin linker/cache input without Mach-O encoding.
+    ///
+    /// # Errors
+    /// Returns an error for invalid sections, symbols or relocations.
+    pub fn into_object(self) -> Result<keel_object::Object, Error> {
+        unit::prepare(self)
+    }
+
     /// Write a little-endian arm64 Mach-O relocatable object.
     pub fn to_macho(&self) -> Result<Vec<u8>, Error> {
         macho::write(self)
@@ -494,11 +503,15 @@ impl ProgramAssembler {
     pub fn push(&mut self, program: keel_asm_ir::Program) {
         self.0.push(program)
     }
+    /// Finish without object-file encoding.
+    ///
+    /// # Errors
+    /// Returns an assembly or layout error.
+    pub fn finish_assembly(self) -> Result<Assembly, Error> {
+        parser::assemble_compact(&self.0)
+    }
     pub fn finish(self) -> Result<Vec<u8>, Error> {
-        let assembly = parser::assemble_compact(&self.0)?;
-        // Release the program before the Mach-O writer allocates.
-        drop(self);
-        assembly.to_macho()
+        self.finish_assembly()?.to_macho()
     }
 }
 
@@ -1028,6 +1041,21 @@ impl ObjectAssembler {
                 assembler.push_with_binary_inputs(program, resolver)
             }
             _ => self.push(program),
+        }
+    }
+
+    /// Finish an owned linker/cache unit without Mach-O encoding.
+    ///
+    /// # Errors
+    /// Returns an assembly error, or an error for ELF targets, which do not yet
+    /// support owned link inputs.
+    pub fn finish_object(self) -> Result<keel_object::Object, Error> {
+        match self.0 {
+            ObjectBackend::MachO(assembler) => assembler.finish_assembly()?.into_object(),
+            _ => Err(Error::new(
+                0,
+                "owned link inputs currently support AArch64 Mach-O only",
+            )),
         }
     }
 
