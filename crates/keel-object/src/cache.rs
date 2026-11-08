@@ -4,6 +4,12 @@
 use crate::{Atom, Definition, Fixup, FixupKind as K, Object, Section, Symbol, Target, Unwind};
 use zerocopy::byteorder::little_endian::{I64, U16, U32, U64};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+#[cfg(all(
+    target_arch = "aarch64",
+    target_endian = "little",
+    target_feature = "neon"
+))]
+mod neon;
 const MAGIC: [u8; 8] = *b"KEELOBJ\0";
 const VERSION: u32 = 3;
 #[derive(Debug, Clone, Copy, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
@@ -319,8 +325,24 @@ impl<'a> Cache<'a> {
             if count(s.data.count.get())? != if zero { 0 } else { size } {
                 return Err("invalid cached section size".into());
             }
-            let mut previous_end = 0usize;
-            for r in table::<FixupRecord>(source, s.fixups)? {
+            let records = table::<FixupRecord>(source, s.fixups)?;
+            #[cfg(not(all(
+                target_arch = "aarch64",
+                target_endian = "little",
+                target_feature = "neon"
+            )))]
+            let (checked, mut previous_end) = (0usize, 0usize);
+            #[cfg(all(
+                target_arch = "aarch64",
+                target_endian = "little",
+                target_feature = "neon"
+            ))]
+            let (checked, mut previous_end) = if zero {
+                (0, 0)
+            } else {
+                neon::prefix(records, size, cache.atoms.len(), cache.symbols.len())
+            };
+            for r in &records[checked..] {
                 let f = fixup(r)?;
                 if (f.offset as usize) < previous_end {
                     return Err("cache fixups must be ordered and nonoverlapping".into());
