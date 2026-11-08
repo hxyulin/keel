@@ -224,6 +224,10 @@ impl<'data> Linker<'data> {
         let mut linkedit = Vec::new();
         let mut ranges = Vec::new();
         let mut rebase = Vec::new();
+        // Contributions append independently; dyld needs one record per
+        // address in file order, so sort and deduplicate once after merging.
+        self.rebases.sort_unstable();
+        self.rebases.dedup();
         for &addr in &self.rebases {
             let (seg, off) = segment_offset(&segments, addr)?;
             rebase.push(0x11);
@@ -1357,7 +1361,7 @@ impl<'data> Linker<'data> {
                 _ => {
                     if !matches!(target,Target::Definition(o,s) if self.objects[o].symbols[s].kind&0xe==2)
                     {
-                        self.rebases.insert(addr);
+                        self.rebases.push(addr);
                     }
                     self.address(target)?
                 }
@@ -1709,6 +1713,60 @@ mod tests {
         addend.width = 8;
         check(vec![pointer, addend, branch], "invalid ARM64_RELOC_ADDEND");
     }
+    #[test]
+    fn got_and_stub_discovery_tracks_uses_independently() {
+        let source = ".subsections_via_symbols\n.globl _main\n_main:\n\
+            bl _local\nbl _local\n\
+            adrp x0,_local@GOTPAGE\nldr x0,[x0,_local@GOTPAGEOFF]\n\
+            adrp x0,_puts@GOTPAGE\nldr x0,[x0,_puts@GOTPAGEOFF]\n\
+            bl _puts\nbl _puts\nbl _weak\nbl _weak\n\
+            adrp x0,_weak@GOTPAGE\nldr x0,[x0,_weak@GOTPAGEOFF]\nret\n\
+            _local:\nret\n.globl _weak\n.weak_definition _weak\n_weak:\nret\n\
+            _dead:\nbl _missing\nret\n";
+        let assembly = keel_asm::assemble(source).unwrap();
+        let bytes = assembly.to_macho().unwrap();
+        for native in [false, true] {
+            let options = Options {
+                dead_strip: true,
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::from(["_puts".into()]),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Options::default()
+            };
+            let mut linker = if native {
+                prepare_with_objects(
+                    &[],
+                    vec![
+                        Object::from_owned("uses".into(), assembly.clone().into_object().unwrap())
+                            .unwrap(),
+                    ],
+                    options,
+                )
+                .unwrap()
+            } else {
+                prepare_linker(
+                    &[Input {
+                        name: "uses",
+                        bytes: &bytes,
+                    }],
+                    options,
+                )
+                .unwrap()
+            };
+            assert_eq!(linker.got.len(), 3, "native={native}");
+            assert_eq!(
+                linker.stubs.keys().map(String::as_str).collect::<Vec<_>>(),
+                ["_puts", "_weak"]
+            );
+            assert_eq!(linker.imports.len(), 1, "dead imports stay absent");
+            linker.layout().unwrap();
+            linker.relocate().unwrap();
+            linker.make_got_stubs().unwrap();
+        }
+    }
+
     fn relocation_fixture(workers: usize, invalid: bool) -> Result<Linker<'static>> {
         let sources = if invalid {
             vec![

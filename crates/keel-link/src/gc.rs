@@ -241,6 +241,7 @@ impl<'a, 'data> Graph<'a, 'data> {
             }
         }
     }
+    #[inline]
     fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<NodeId>> {
         let cached = self.targets[oi]
             .get(si)
@@ -248,6 +249,9 @@ impl<'a, 'data> Graph<'a, 'data> {
         if let Some(node) = cached {
             return Ok(*node);
         }
+        self.resolve_symbol(oi, si)
+    }
+    fn resolve_symbol(&mut self, oi: usize, si: usize) -> Result<Option<NodeId>> {
         let node = self
             .symbol_place(oi, si)?
             .map(|p| self.node(p))
@@ -384,6 +388,15 @@ impl<'a, 'data> Graph<'a, 'data> {
         let s = &linker.objects[oi].sections[si];
         let records = self.records(oi, si);
         edges.clear();
+        // Ordered buckets contain validated native operations, one per record.
+        // Their symbol IDs need no object-format prefix/pair decoding.
+        if let Buckets::Ordered(ranges) = &self.parts[oi][si].buckets {
+            let range = ranges[ui].clone();
+            for r in &s.relocs[range] {
+                self.native_edges(oi, si, r, edges)?;
+            }
+            return Ok(());
+        }
         let mut i = 0;
         while let Some(at) = self.parts[oi][si].buckets.fixup(ui, i) {
             i += 1;
@@ -410,25 +423,7 @@ impl<'a, 'data> Graph<'a, 'data> {
                         edges.push(node);
                     }
                 }
-                Fixup::Native(r) => {
-                    if r.operation == Operation::Difference {
-                        let mut minus = r.clone();
-                        minus.symbol = r.aux;
-                        minus.kind = 1;
-                        let anchor = &linker.objects[oi].symbols[minus.symbol as usize];
-                        if !(records
-                            && anchor.kind & 0xe == 0xe
-                            && anchor.kind & 1 == 0
-                            && anchor.section == si + 1)
-                            && let Some(node) = self.edge_node(oi, si, &minus, &s.data, false)?
-                        {
-                            edges.push(node);
-                        }
-                    }
-                    if let Some(node) = self.edge_node(oi, si, r, &s.data, false)? {
-                        edges.push(node);
-                    }
-                }
+                Fixup::Native(r) => self.native_edges(oi, si, r, edges)?,
                 Fixup::Single { reloc: r, .. } => {
                     if r.kind > 9 {
                         return fail(format!(
@@ -447,6 +442,48 @@ impl<'a, 'data> Graph<'a, 'data> {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+    #[inline]
+    fn native_edges(
+        &mut self,
+        oi: usize,
+        si: usize,
+        r: &Reloc,
+        edges: &mut Vec<NodeId>,
+    ) -> Result<()> {
+        let s = &self.linker.objects[oi].sections[si];
+        let records = self.records(oi, si);
+        // Native references use validated symbol IDs. Ordinary contributions
+        // need only the cached graph node; metadata retains its own-copy rule.
+        if !records && r.external {
+            if r.operation == Operation::Difference
+                && let Some(node) = self.symbol(oi, r.aux as usize)?
+            {
+                edges.push(node);
+            }
+            if let Some(node) = self.symbol(oi, r.symbol as usize)? {
+                edges.push(node);
+            }
+            return Ok(());
+        }
+        if r.operation == Operation::Difference {
+            let mut minus = r.clone();
+            minus.symbol = r.aux;
+            minus.kind = 1;
+            let anchor = &self.linker.objects[oi].symbols[minus.symbol as usize];
+            if !(records
+                && anchor.kind & 0xe == 0xe
+                && anchor.kind & 1 == 0
+                && anchor.section == si + 1)
+                && let Some(node) = self.edge_node(oi, si, &minus, &s.data, false)?
+            {
+                edges.push(node);
+            }
+        }
+        if let Some(node) = self.edge_node(oi, si, r, &s.data, false)? {
+            edges.push(node);
         }
         Ok(())
     }
@@ -1012,7 +1049,8 @@ impl Linker<'_> {
                 }
                 let records = &m.units;
                 let object = &mut self.objects[oi];
-                let old_symbols = object.symbols.clone();
+                // Rewriting metadata changes symbol values, never names or flags.
+                let old_values: Vec<_> = object.symbols.iter().map(|s| s.value).collect();
                 let section = &mut object.sections[si];
                 let mut mapping = vec![None; records.len()];
                 let mut data = Vec::new();
@@ -1033,7 +1071,12 @@ impl Linker<'_> {
                         data[at + 4..at + 8].copy_from_slice(&delta.to_le_bytes());
                     }
                 }
-                let old_relocs = section.relocs.clone();
+                let subtractors: Vec<_> = section
+                    .relocs
+                    .iter()
+                    .filter(|r| r.kind == 1)
+                    .cloned()
+                    .collect();
                 section.relocs.retain_mut(|rel| {
                     let Some(ri) = m.find(rel.offset as usize) else {
                         return false;
@@ -1044,8 +1087,7 @@ impl Linker<'_> {
                     let old_field = rel.offset as usize;
                     rel.offset = (at + (rel.offset as usize) - records[ri].start) as u32;
                     if rel.operation == Operation::Difference {
-                        let old = &old_symbols[rel.aux as usize];
-                        let old_anchor = (old.value - section.address) as usize;
+                        let old_anchor = (old_values[rel.aux as usize] - section.address) as usize;
                         let new_anchor = m
                             .find(old_anchor)
                             .and_then(|ri| {
@@ -1073,14 +1115,14 @@ impl Linker<'_> {
                             .and_then(|ri| mapping[ri].map(|at| at + offset - records[ri].start))
                             .unwrap_or(section.size) as u64;
                 }
-                for rel in old_relocs.iter().filter(|r| r.kind == 1) {
+                for rel in &subtractors {
                     let Some(ri) = m.find(rel.offset as usize) else {
                         continue;
                     };
                     let Some(at) = mapping[ri] else {
                         continue;
                     };
-                    let old = &old_symbols[rel.symbol as usize];
+                    let old = &object.symbols[rel.symbol as usize];
                     if old.kind & 0xe != 0xe || old.kind & 1 != 0 || old.section != si + 1 {
                         return fail(
                             "dead_strip: unwind difference requires a local anchor in its own section",
@@ -1096,7 +1138,7 @@ impl Linker<'_> {
                         .wrapping_add((rel.offset as usize) as u64)
                         .wrapping_sub(new_field as u64)
                         .wrapping_add(object.symbols[rel.symbol as usize].value)
-                        .wrapping_sub(old.value);
+                        .wrapping_sub(old_values[rel.symbol as usize]);
                     section.data.to_mut()[new_field..new_field + (rel.width as usize)]
                         .copy_from_slice(&value.to_le_bytes()[..(rel.width as usize)]);
                 }

@@ -173,7 +173,7 @@ pub(crate) struct Linker<'a> {
     unwind_section: usize,
     common_section: usize,
     private_commons: BTreeSet<String>,
-    rebases: BTreeSet<u64>,
+    rebases: Vec<u64>,
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
     warnings: Vec<String>,
@@ -412,7 +412,7 @@ fn prepare_with_objects<'a>(
         unwind_section: 0,
         common_section: 0,
         private_commons: BTreeSet::new(),
-        rebases: BTreeSet::new(),
+        rebases: Vec::new(),
         binds: BTreeMap::new(),
         options,
         warnings: Vec::new(),
@@ -730,6 +730,10 @@ impl Linker<'_> {
             })
             .collect();
         for (oi, o) in self.objects.iter().enumerate() {
+            // GOT use and branch use are independent: a static branch may need
+            // no entry, while a later page or personality reference still does.
+            let mut got_seen = vec![false; o.symbols.len()];
+            let mut branch_seen = vec![false; o.symbols.len()];
             for (si, s) in o.sections.iter().enumerate() {
                 if self.discarded.contains(&(oi, si)) || s.segment == "__DWARF" {
                     continue;
@@ -741,57 +745,64 @@ impl Linker<'_> {
                         && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9)
                         && s.live_at(r.offset as usize)
                     {
+                        let symbol = r.symbol as usize;
                         let sym = o
                             .symbols
-                            .get(r.symbol as usize)
+                            .get(symbol)
                             .ok_or("relocation symbol index out of range")?;
-                        if r.kind != 2
-                            || matches!(
-                                self.symbol_target(oi, r.symbol as usize)?,
-                                Target::Import(_)
-                            )
-                            || self.coalesces(self.symbol_target(oi, r.symbol as usize)?, &sym.name)
-                        {
-                            let next = self.got.len();
-                            self.got
-                                .entry(self.got_key(oi, r.symbol as usize)?)
-                                .or_insert(next);
-                            self.got_targets.insert(
-                                self.got_key(oi, r.symbol as usize)?,
-                                self.symbol_target(oi, r.symbol as usize)?,
-                            );
+                        if r.kind == 2 && branch_seen[symbol] || r.kind != 2 && got_seen[symbol] {
+                            continue;
                         }
-                        if r.kind == 2
-                            && (matches!(
-                                self.symbol_target(oi, r.symbol as usize)?,
-                                Target::Import(_)
-                            ) || self
-                                .coalesces(self.symbol_target(oi, r.symbol as usize)?, &sym.name))
-                        {
-                            let next = self.stubs.len();
-                            self.stubs.entry(sym.name.clone()).or_insert(next);
+                        let target = self.symbol_target(oi, symbol)?;
+                        let stub = r.kind == 2
+                            && (matches!(target, Target::Import(_))
+                                || self.coalesces(target, &sym.name));
+                        if (r.kind != 2 || stub) && !got_seen[symbol] {
+                            let key = self.got_key(oi, symbol)?;
+                            let next = self.got.len();
+                            self.got.entry(key.clone()).or_insert(next);
+                            self.got_targets.insert(key, target);
+                            got_seen[symbol] = true;
+                        }
+                        if r.kind == 2 {
+                            branch_seen[symbol] = true;
+                            if stub {
+                                let next = self.stubs.len();
+                                self.stubs.entry(sym.name.clone()).or_insert(next);
+                            }
                         }
                     }
                 }
                 if s.name == "__compact_unwind" {
                     for r in &s.relocs {
                         if (r.offset as usize) % 32 == 16 && r.external {
-                            let next = self.got.len();
-                            self.got
-                                .entry(self.got_key(oi, r.symbol as usize)?)
-                                .or_insert(next);
-                            self.got_targets.insert(
-                                self.got_key(oi, r.symbol as usize)?,
-                                self.symbol_target(oi, r.symbol as usize)?,
-                            );
+                            let symbol = r.symbol as usize;
+                            let seen = got_seen
+                                .get_mut(symbol)
+                                .ok_or("relocation symbol index out of range")?;
+                            if !*seen {
+                                let key = self.got_key(oi, symbol)?;
+                                let next = self.got.len();
+                                self.got.entry(key.clone()).or_insert(next);
+                                self.got_targets
+                                    .insert(key, self.symbol_target(oi, symbol)?);
+                                *seen = true;
+                            }
                         }
                     }
                 }
             }
         }
         for (oi, o) in self.objects.iter().enumerate() {
+            let mut seen = vec![false; o.symbols.len()];
             for u in &o.unwind {
                 if let Some(si) = u.personality {
+                    let done = seen
+                        .get_mut(si)
+                        .ok_or("invalid unwind personality symbol")?;
+                    if std::mem::replace(done, true) {
+                        continue;
+                    }
                     let key = self.got_key(oi, si)?;
                     let next = self.got.len();
                     self.got.entry(key.clone()).or_insert(next);

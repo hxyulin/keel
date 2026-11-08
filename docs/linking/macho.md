@@ -55,7 +55,8 @@ sign it in process, sync it, and atomically install the executable only after
 signing succeeds. `Input.name` is only a diagnostic label and is never opened.
 
 Large links use scoped workers for owned/cache input adaptation, per-object
-GC preparation, relocation and output page hashing. Small stages stay serial.
+GC preparation, relocation, DWARF FDE decoding and output page hashing.
+Small stages stay serial.
 Native contributions that exceed a worker's share split at validated fixup
 boundaries; balanced contributions, foreign relocation pairs and unwind payloads
 stay whole. Workers read shared metadata and
@@ -63,6 +64,17 @@ return private results in input order, preserving layout and diagnostic order.
 Page hashing reads immutable output spans, including zero-filled gaps, without
 assembling another complete image buffer. Archive selection, global symbol
 selection, the GC reachability walk and final layout remain ordered and serial.
+
+GC walks validated native fixup ranges directly and resolves each referenced
+symbol's graph node lazily. Foreign records use the object-format pair decoder.
+GOT/stub discovery tracks each symbol's branch and GOT uses independently,
+so repeated references do not rebuild keys or repeat map updates. A static branch
+can still be followed by a GOT reference to the same symbol.
+
+Relocation workers append rebase addresses to flat buffers. Emission sorts and
+deduplicates the merged addresses once. Unwind generation decodes each object's
+FDEs independently, then builds a sorted flat address index. Equal function
+addresses retain the later input FDE; decoding errors retain input order.
 
 ### Owned link inputs and compilation caches
 

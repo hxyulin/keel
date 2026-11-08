@@ -193,70 +193,14 @@ impl Linker<'_> {
     }
 
     pub(crate) fn unwind(&self) -> Result<Vec<u8>> {
-        let mut fdes = BTreeMap::new();
-        for o in &self.objects {
-            for s in &o.sections {
-                if s.name != "__eh_frame" || s.data.is_empty() {
-                    continue;
-                }
-                let output = &self.outputs[s.output.ok_or("eh_frame discarded")?];
-                // Membership is by offset after filtering: an earlier foreign
-                // relocation at the same offset must not hide a native one.
-                let fde_starts: BTreeSet<_> = s
-                    .relocs
-                    .iter()
-                    .filter(|rel| {
-                        (rel.kind == 1 || rel.operation == Operation::Difference)
-                            && (rel.width as usize) == 8
-                    })
-                    .map(|rel| rel.offset as usize)
-                    .collect();
-                let mut at = 0;
-                while at < s.data.len() {
-                    let r = Reader(&s.data);
-                    let length = r.u32(at)? as usize;
-                    if length == 0 {
-                        at += 4;
-                        continue;
-                    }
-                    if length == 0xffffffff || length < 4 || at + 4 + length > s.data.len() {
-                        return fail("unsupported/malformed DWARF FDE length");
-                    }
-                    let cie = r.u32(at + 4)?;
-                    if cie != 0 {
-                        // Keel emits explicit pointer differences with native
-                        // width PC-relative FDE starts (DW_EH_PE_pcrel).
-                        // Never silently copy implicit assembler FDE fixups.
-                        if !fde_starts.contains(&(at + 8)) {
-                            return fail(format!(
-                                "{}: implicit/foreign eh_frame FDE fixups require the system linker",
-                                o.name
-                            ));
-                        }
-                        let cie_at = (at + 4)
-                            .checked_sub(cie as usize)
-                            .ok_or("invalid FDE CIE pointer")?;
-                        validate_cie(&s.data, cie_at)?;
-                        if length < 21 {
-                            return fail("truncated native-width FDE");
-                        }
-                        let field = output.address + s.offset as u64 + at as u64 + 8;
-                        let start = field.wrapping_add(r.u64(at + 8)?);
-                        let offset = u32::try_from(
-                            s.offset
-                                .checked_add(at)
-                                .ok_or("DWARF FDE offset overflow")?,
-                        )
-                        .map_err(|_| "DWARF unwind FDE offset exceeds 32 bits")?;
-                        if offset >= 1 << 24 {
-                            return fail("DWARF unwind FDE offset exceeds 24 bits");
-                        }
-                        fdes.insert(start, offset);
-                    }
-                    at += 4 + length;
-                }
-            }
-        }
+        let bytes = self
+            .objects
+            .iter()
+            .flat_map(|o| &o.sections)
+            .filter(|s| s.name == "__eh_frame")
+            .map(|s| s.data.len())
+            .sum();
+        let fdes = self.unwind_fdes(crate::parallel::workers(bytes, 64 * 1024))?;
         let (ranges, personalities) = self.unwind_entries(&fdes)?;
         let sentinel = ranges.last().map_or(0, |e| e.end);
         let layout = Layout::new(
@@ -318,11 +262,108 @@ impl Linker<'_> {
         Ok(out)
     }
 
+    // Decode independent object contributions before restoring input order.
+    // A later FDE at the same function address wins, as in ordered map insertion.
+    fn unwind_fdes(&self, workers: usize) -> Result<Vec<(u64, u32)>> {
+        let parts = crate::parallel::map_with_workers(
+            self.objects.iter().collect(),
+            |o| {
+                o.sections
+                    .iter()
+                    .filter(|s| s.name == "__eh_frame")
+                    .map(|s| s.data.len())
+                    .sum()
+            },
+            workers,
+            |o| -> Result<Vec<(u64, u32)>> {
+                let mut fdes = Vec::new();
+                for s in &o.sections {
+                    if s.name != "__eh_frame" || s.data.is_empty() {
+                        continue;
+                    }
+                    let output = &self.outputs[s.output.ok_or("eh_frame discarded")?];
+                    // Membership is by offset after filtering: an earlier foreign
+                    // relocation at the same offset must not hide a native one.
+                    let mut fde_starts: Vec<_> = s
+                        .relocs
+                        .iter()
+                        .filter(|rel| {
+                            (rel.kind == 1 || rel.operation == Operation::Difference)
+                                && (rel.width as usize) == 8
+                        })
+                        .map(|rel| rel.offset as usize)
+                        .collect();
+                    fde_starts.sort_unstable();
+                    fde_starts.dedup();
+                    let mut at = 0;
+                    while at < s.data.len() {
+                        let r = Reader(&s.data);
+                        let length = r.u32(at)? as usize;
+                        if length == 0 {
+                            at += 4;
+                            continue;
+                        }
+                        if length == 0xffffffff || length < 4 || at + 4 + length > s.data.len() {
+                            return fail("unsupported/malformed DWARF FDE length");
+                        }
+                        let cie = r.u32(at + 4)?;
+                        if cie != 0 {
+                            // Keel emits explicit pointer differences with native
+                            // width PC-relative FDE starts (DW_EH_PE_pcrel).
+                            // Never silently copy implicit assembler FDE fixups.
+                            if fde_starts.binary_search(&(at + 8)).is_err() {
+                                return fail(format!(
+                                    "{}: implicit/foreign eh_frame FDE fixups require the system linker",
+                                    o.name
+                                ));
+                            }
+                            let cie_at = (at + 4)
+                                .checked_sub(cie as usize)
+                                .ok_or("invalid FDE CIE pointer")?;
+                            validate_cie(&s.data, cie_at)?;
+                            if length < 21 {
+                                return fail("truncated native-width FDE");
+                            }
+                            let field = output.address + s.offset as u64 + at as u64 + 8;
+                            let start = field.wrapping_add(r.u64(at + 8)?);
+                            let offset = u32::try_from(
+                                s.offset
+                                    .checked_add(at)
+                                    .ok_or("DWARF FDE offset overflow")?,
+                            )
+                            .map_err(|_| "DWARF unwind FDE offset exceeds 32 bits")?;
+                            if offset >= 1 << 24 {
+                                return fail("DWARF unwind FDE offset exceeds 24 bits");
+                            }
+                            fdes.push((start, offset));
+                        }
+                        at += 4 + length;
+                    }
+                }
+                Ok(fdes)
+            },
+        );
+        let mut fdes = Vec::new();
+        for part in parts {
+            fdes.extend(part?);
+        }
+        fdes.sort_by_key(|&(start, _)| start);
+        fdes.dedup_by(|later, earlier| {
+            if later.0 == earlier.0 {
+                *earlier = *later;
+                true
+            } else {
+                false
+            }
+        });
+        Ok(fdes)
+    }
+
     fn native_unwind_start(&self, oi: usize, u: &read::NativeUnwind) -> Result<u64> {
         let sym = &self.objects[oi].symbols[u.owner];
         self.symbol_address(oi, sym)
     }
-    fn unwind_entries(&self, fdes: &BTreeMap<u64, u32>) -> Result<(Vec<Entry>, Vec<u32>)> {
+    fn unwind_entries(&self, fdes: &[(u64, u32)]) -> Result<(Vec<Entry>, Vec<u32>)> {
         let mut personalities = Vec::new();
         let mut entries = Vec::new();
         for (oi, o) in self.objects.iter().enumerate() {
@@ -383,7 +424,7 @@ impl Linker<'_> {
     fn compact_entry(
         &self,
         raw: CompactEntry,
-        fdes: &BTreeMap<u64, u32>,
+        fdes: &[(u64, u32)],
         personalities: &mut Vec<u32>,
     ) -> Result<Entry> {
         let CompactEntry {
@@ -401,9 +442,10 @@ impl Linker<'_> {
         }
         if encoding & 0x0f000000 == 0x03000000 {
             encoding = (encoding & !0xffffff)
-                | *fdes
-                    .get(&address)
-                    .ok_or("DWARF-mode compact unwind entry has no relocated FDE")?;
+                | fdes
+                    .binary_search_by_key(&address, |&(start, _)| start)
+                    .map(|i| fdes[i].1)
+                    .map_err(|_| "DWARF-mode compact unwind entry has no relocated FDE")?;
         } else if !matches!(encoding & 0x0f000000, 0 | 0x02000000 | 0x04000000) {
             return fail("unknown arm64 compact unwind mode");
         }
@@ -582,23 +624,23 @@ mod tests {
         let mut invalid = valid.clone();
         invalid.width = 4;
         s.relocs = vec![valid.clone(), invalid];
-        let expected = l.unwind_entries(&BTreeMap::new()).unwrap();
+        let expected = l.unwind_entries(&[]).unwrap();
         assert_eq!(expected.1, vec![0x1000]);
         l.objects[0].sections[si].relocs.reverse();
         assert_eq!(
-            l.unwind_entries(&BTreeMap::new()).err().unwrap(),
+            l.unwind_entries(&[]).err().unwrap(),
             "unsupported compact personality relocation"
         );
         l.objects[0].sections[si].data.to_mut()[12..16]
             .copy_from_slice(&0x05000000u32.to_le_bytes());
         assert_eq!(
-            l.unwind_entries(&BTreeMap::new()).err().unwrap(),
+            l.unwind_entries(&[]).err().unwrap(),
             "unknown arm64 compact unwind mode"
         );
         l.objects[0].sections[si].data.to_mut()[12..16]
             .copy_from_slice(&0x02001000u32.to_le_bytes());
         l.objects[0].sections[si].relocs = vec![valid];
-        assert_eq!(l.unwind_entries(&BTreeMap::new()).unwrap().1, expected.1);
+        assert_eq!(l.unwind_entries(&[]).unwrap().1, expected.1);
     }
 
     #[test]
@@ -647,6 +689,83 @@ mod tests {
         foreign.width = 4;
         l.objects[0].sections[si].relocs.push(foreign);
         assert!(l.unwind().err().unwrap().contains("implicit/foreign"));
+    }
+
+    #[test]
+    fn parallel_fde_index_preserves_duplicate_winners_and_first_error() {
+        let sources = [
+            ".globl _main\n_main:\n.cfi_startproc\n.cfi_def_cfa x28,16\nret\n.cfi_endproc\n",
+            ".globl _helper\n_helper:\n.cfi_startproc\n.cfi_def_cfa x28,16\nret\n.cfi_endproc\n",
+        ];
+        let bytes: Vec<_> = sources
+            .iter()
+            .map(|s| keel_asm::assemble_object(s).unwrap())
+            .collect();
+        let inputs: Vec<_> = bytes
+            .iter()
+            .map(|bytes| Input {
+                name: "fde.o",
+                bytes,
+            })
+            .collect();
+        let mut l = prepare_linker(
+            &inputs,
+            Options {
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::new(),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        for output in &mut l.outputs {
+            output.address = BASE + PAGE as u64;
+        }
+        let mut sections = Vec::new();
+        for oi in 0..l.objects.len() {
+            let si = l.objects[oi]
+                .sections
+                .iter()
+                .position(|s| s.name == "__eh_frame")
+                .unwrap();
+            l.relocate_section(oi, si).unwrap();
+            sections.push(si);
+        }
+        let distinct = l.unwind_fdes(1).unwrap();
+        assert_eq!(distinct.len(), 2);
+        for workers in [2, 8] {
+            assert_eq!(l.unwind_fdes(workers).unwrap(), distinct);
+        }
+        // Both FDEs now describe the first function. Keep the later input's
+        // offset even when decoding finishes in a different worker order.
+        let second = &mut l.objects[1].sections[sections[1]];
+        let at = second
+            .relocs
+            .iter()
+            .find(|r| r.kind == 1 && r.width == 8)
+            .unwrap()
+            .offset as usize;
+        let field = BASE + PAGE as u64 + second.offset as u64 + at as u64;
+        second.data.to_mut()[at..at + 8]
+            .copy_from_slice(&distinct[0].0.wrapping_sub(field).to_le_bytes());
+        let expected = vec![(distinct[0].0, (second.offset + at - 8) as u32)];
+        for workers in [1, 2, 8] {
+            assert_eq!(l.unwind_fdes(workers).unwrap(), expected);
+        }
+        // The second input has an invalid CIE pointer, but the first input's
+        // malformed length must win for every worker count.
+        l.objects[1].sections[sections[1]].data.to_mut()[at - 4..at]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        l.objects[0].sections[sections[0]].data.to_mut()[..4]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        for workers in [1, 2, 8] {
+            assert_eq!(
+                l.unwind_fdes(workers).unwrap_err(),
+                "unsupported/malformed DWARF FDE length"
+            );
+        }
     }
 
     #[test]
