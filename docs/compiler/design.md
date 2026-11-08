@@ -736,8 +736,18 @@ at one instruction do not qualify. Functions without qualifying values skip cach
 construction. Vector locations stay unchanged; returns-twice functions use Full.
 Dirty cache values return to their stack homes at block edges. This is an
 opportunity filter, not a profitability guarantee or a hard work budget. It does
-not keep cache values across loop backedges or split global register owners.
-Fast, Full and Split remain independently selectable. Runtime gains are unproven.
+not keep cache values across loop backedges.
+
+After caching, untouched blocks can temporarily displace one idle i64 or pointer
+register owner. A bounded call-free window needs at least four distinct reads of
+a spilled scalar and no definition of that value. The owner must remain live but
+unused throughout the candidate's first-to-last-use window. Save the owner, load
+the candidate, override its reads, then restore the owner. Stack homes and vector
+locations stay unchanged. Existing instruction or edge edits exclude the whole
+block; calls, constraints and opaque sequences end a window. Debug, personality
+and returns-twice functions skip displacement. The four-use threshold is a static
+opportunity filter, not a runtime profitability proof. Fast, Full and Split remain
+independently selectable. Application runtime gains are unproven.
 
 **Rematerialization.** Under `experimental-regalloc`,
 `RematerializingAllocator` wraps Fast or Full and replaces some spill homes

@@ -137,7 +137,8 @@ pub(super) fn allocate_adaptive(input: &AllocationInput<'_>) -> Allocation {
     if !allowed.iter().any(|&yes| yes) {
         return alloc;
     }
-    cache_spills_filtered(input, alloc, &intervals, true, Some(&allowed))
+    let alloc = cache_spills_filtered(input, alloc, &intervals, true, Some(&allowed));
+    super::region::repair(input, alloc, &intervals)
 }
 
 // A conservative opportunity gate, not a profitability proof. Count distinct
