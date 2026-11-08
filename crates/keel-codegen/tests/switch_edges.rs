@@ -184,3 +184,58 @@ block2(v6:i64):
         );
     }
 }
+
+#[test]
+fn bounded_switches_keep_flag_definitions_for_opaque_observers() {
+    use keel_codegen::{SelectionOptions, Target};
+    for target in Target::NATIVE {
+        let observers = if target == Target::X86_64LinuxGnu {
+            vec![
+                "v3 = asm \"sete %b0\", \"=r\"() -> i8\n v4 = uext.i64 v3",
+                "v4 = intrinsic x86_rflags_read()",
+            ]
+        } else {
+            vec!["v3 = asm \"cset %w0, eq\", \"=r\"() -> i8\n v4 = uext.i64 v3"]
+        };
+        for (index, observer) in observers.iter().enumerate() {
+            let source = format!(
+                "func @f(i64) -> i64 cc(c) {{\nblock0(v0:i64):\n v1 = iconst.i64 7\n v2 = and v0,v1\n switch v2, block2, [0:block1,1:block1,2:block1,3:block1,4:block1,5:block1,6:block1]\nblock1:\n {observer}\n return v4\nblock2:\n v5 = iconst.i64 13\n return v5\n}}"
+            );
+            let module = keel_ir::parse(&source).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            let assembly =
+                keel_codegen::compile_with_options(&module, target, SelectionOptions::ALL).unwrap();
+            assert!(
+                assembly.contains("\tcmp\t"),
+                "flag definition disappeared: {assembly}"
+            );
+            if target != Target::Aarch64AppleDarwin || Target::host() != Some(target) {
+                continue;
+            }
+            let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+                .join(format!("switch-opaque-flags-{index}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            // Set EQ before calling f. Its switch must replace those flags,
+            // and its case's inline assembly observes the original table CMP.
+            let wrapper = "\n.globl _invoke\n_invoke:\n stp x29,x30,[sp,#-16]!\n mov x29,sp\n cmp xzr,xzr\n bl _f\n ldp x29,x30,[sp],#16\n ret\n";
+            std::fs::write(dir.join("f.s"), assembly + wrapper).unwrap();
+            std::fs::write(dir.join("driver.c"), "extern unsigned long invoke(unsigned long); int main(void){for(unsigned long i=0;i<256;i++){unsigned long k=i&7;unsigned long expected=k==7?13:k==6;if(invoke(i)!=expected)return 1;}return 0;}").unwrap();
+            let build = std::process::Command::new("clang")
+                .current_dir(&dir)
+                .args(["f.s", "driver.c", "-o", "run"])
+                .output()
+                .unwrap();
+            assert!(
+                build.status.success(),
+                "{}",
+                String::from_utf8_lossy(&build.stderr)
+            );
+            assert!(
+                std::process::Command::new(dir.join("run"))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+    }
+}

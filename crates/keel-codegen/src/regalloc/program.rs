@@ -715,11 +715,16 @@ block0(v0: i64, v1: i64):
         let func = &module.functions[0];
         let block = func.entry_block().unwrap();
         let call = func.block_insts(block)[0];
-        let pools = Pools { float_callee_saved: &[8], ..POOLS };
+        let pools = Pools {
+            float_callee_saved: &[8],
+            ..POOLS
+        };
         let mut selection = Selection::default();
         selection.preserved_call_gprs.insert(call, 1 << 9);
         let input = AllocationInput {
-            func, pools: &pools, selection: &selection,
+            func,
+            pools: &pools,
+            selection: &selection,
             is_call: &|data| matches!(data, InstData::Call { .. }),
             returns_twice: &|_| false,
         };
@@ -727,8 +732,11 @@ block0(v0: i64, v1: i64):
         input.for_each_clobber_for_type(call, Type::F64, |loc| scalar.push(loc));
         assert_eq!(scalar, [Loc::Reg(10), Loc::FReg(20)]);
         let mut vector = Vec::new();
-        input.for_each_clobber_for_type(call, func.value_type(func.block_params(block)[0]), |loc| vector.push(loc));
+        input.for_each_clobber_for_type(
+            call,
+            func.value_type(func.block_params(block)[0]),
+            |loc| vector.push(loc),
+        );
         assert_eq!(vector, [Loc::Reg(10), Loc::FReg(20), Loc::FReg(8)]);
     }
-
 }

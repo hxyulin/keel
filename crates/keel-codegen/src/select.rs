@@ -881,6 +881,7 @@ impl Selection {
             None => std::borrow::Cow::Owned(crate::fold::use_counts(func)),
         };
         let facts = crate::value_bits::ValueBits::new(func);
+        let opaque_flags = std::cell::OnceCell::new();
         // Reverse block/instruction order gives larger consumers first choice
         // without allocating another entry for every instruction. Block ownership
         // is already stored in Function; no Inst-to-Block hash table is needed.
@@ -905,6 +906,20 @@ impl Selection {
                     if switch.jump_table()
                         && let Some(bounds) = facts.unsigned_bounds(*arg)
                         && switch.bound(bounds)
+                        && !*opaque_flags.get_or_init(|| {
+                            func.layout_insts().any(|(_, i)| {
+                                matches!(
+                                    func.inst_data(i),
+                                    InstData::InlineAsm { .. }
+                                        | InstData::X86RflagsRegion { .. }
+                                        | InstData::Intrinsic {
+                                            id: keel_ir::Intrinsic::X86RflagsRead
+                                                | keel_ir::Intrinsic::X86RflagsSwap,
+                                            ..
+                                        }
+                                )
+                            })
+                        })
                     {
                         plan.claim(Cover::BoundedSwitch, inst);
                         plan.switch_bounds.insert(inst, bounds);

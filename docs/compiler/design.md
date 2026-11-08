@@ -766,7 +766,8 @@ no optional optimizer pass or cached CFG stamp supplies a proof. The
 `bounded-switch` cover uses these unsigned bounds to omit a table check only when
 every possible input has a table slot. It adds at most two default entries, costing
 at most eight bytes in exchange for two ARM instructions. Unknown ranges keep
-the original check. `aarch64-rotate-immediate` selects masked constant i32/i64
+the original check. Functions with inline assembly or explicit flag observers
+also retain it. `aarch64-rotate-immediate` selects masked constant i32/i64
 rotations as immediate ROR, leaving a shared count literal live for other uses.
 Both covers support the existing `--isel` ablation controls and need tree selection.
 
