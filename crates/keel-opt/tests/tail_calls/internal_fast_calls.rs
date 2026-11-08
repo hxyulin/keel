@@ -85,8 +85,9 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
             .count(),
         1
     );
-    assert_eq!(pipeline[pipeline.len() - 3], "private-aggregate-cleanup");
-    assert_eq!(pipeline[pipeline.len() - 4], "dce");
+    assert_eq!(pipeline[pipeline.len() - 3], "fast-math");
+    assert_eq!(pipeline[pipeline.len() - 4], "private-aggregate-cleanup");
+    assert_eq!(pipeline[pipeline.len() - 5], "dce");
     let source = SOURCE.replace("cc(c) local", "cc(c) noinline local");
     for tier in [OptimizationTier::Fast, OptimizationTier::Full] {
         let mut m = parse(&source).unwrap();
