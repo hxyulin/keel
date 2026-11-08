@@ -573,14 +573,19 @@ impl Linker<'_> {
                 s.output = Some(id);
                 s.offset = offset;
             }
-            if self.options.debug_directory.is_none()
-                && self.objects[oi]
+        }
+        if self.options.debug_directory.is_none()
+            && self.objects.iter().any(|object| {
+                object
                     .sections
                     .iter()
-                    .any(|s| s.segment == "__DWARF")
-            {
-                self.warnings.push(format!("{}: DWARF input omitted; request --debug-map or --dsym to retain source debugging",self.objects[oi].name));
-            }
+                    .any(|section| section.segment == "__DWARF")
+            })
+        {
+            self.warnings.push(
+                "DWARF input omitted; request --debug-map or --dsym to retain source debugging"
+                    .into(),
+            );
         }
         self.common_section = self.output("__DATA", "__common", 1, 3)?;
         for (name, (size, alignment, private)) in commons {

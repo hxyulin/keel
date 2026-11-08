@@ -275,7 +275,9 @@ lldb program
 ```
 
 `__DWARF` is retained only with `--debug-map DIR` or `--dsym PATH`; otherwise a
-DWARF-omission warning is printed (runtime unwind is handled independently).
+single DWARF-omission warning is returned per link, regardless of the number
+of selected objects or archive members (runtime unwind is handled independently).
+The CLI prints that warning.
 The linker writes exact, content-named object snapshots (including selected
 archive members) to the debug directory and emits `N_SO`, `N_OSO`, `N_FUN`,
 `N_GSYM` and `N_STSYM` debug-map records mapping object addresses to executable

@@ -4,7 +4,7 @@
 	.p2align	2
 _forward:
 Lforward_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v7=x10 v10=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v10=x9 v11=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -15,12 +15,10 @@ Lforward_begin:
 	mov	x10, x1
 	mov	x11, x2
 Lforward_block0:
-	; brif v2, block3(v1), block3(v0)
+	; v11 = select v2, v1, v0
 	tst	w11, #255
-	b.ne	Lforward_block3
-	mov	x10, x9
-Lforward_block3:
-	; v9 = imul v7, v7
+	csel	x10, x10, x9, ne
+	; v9 = imul v11, v11
 	; v10 = iadd v0, v9
 	madd	x9, x10, x10, x9
 	; return v10

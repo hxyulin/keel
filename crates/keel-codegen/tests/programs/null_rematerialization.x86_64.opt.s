@@ -51,18 +51,18 @@
 	mov	r9, r14
 	call	"null_observe"@PLT
 	mov	rsi, rax
-	# brif v5, block1(v4, v6), block1(v6, v4)
+	# v14 = select v5, v4, v6
 	test	bl, bl
-	je	".Lnull_probe_inst6_else"
-	mov	rdi, r14
-	mov	r8, r12
-	jmp	".Lnull_probe_block1"
-.Lnull_probe_inst6_else:
-	mov	rdi, r12
-	mov	r8, r14
-.Lnull_probe_block1:
-	# v10 = ptrtoint.i64 v8
-	# v11 = ptrtoint.i64 v9
+	mov	rax, r12
+	cmovne	rax, r14
+	mov	rdi, rax
+	# v15 = select v5, v6, v4
+	test	bl, bl
+	mov	rax, r14
+	cmovne	rax, r12
+	mov	r8, rax
+	# v10 = ptrtoint.i64 v14
+	# v11 = ptrtoint.i64 v15
 	# v12 = iadd v10, v11
 	add	rdi, r8
 	# v13 = iadd v7, v12

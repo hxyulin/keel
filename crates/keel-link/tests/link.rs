@@ -996,3 +996,46 @@ fn link_errors_are_std_errors() {
     let error = error.downcast_ref::<keel_link::Error>().unwrap();
     assert_eq!(*error, "explicit libSystem TBD interface is required");
 }
+
+#[test]
+fn omitted_dwarf_warns_once_for_multiple_selected_archive_members() {
+    let main = object(
+        ".globl _main\n_main: b _helper\n.section __DWARF,__debug_str,regular,debug\n.asciz \"main\"\n",
+    );
+    let helper = object(
+        ".globl _helper\n_helper: ret\n.section __DWARF,__debug_str,regular,debug\n.asciz \"helper\"\n",
+    );
+    let bytes = archive(&[("entry.o", main), ("helper.o", helper)]);
+    let image = keel_link::link(
+        &[Input {
+            name: "lib.a",
+            bytes: &bytes,
+        }],
+        options(),
+    )
+    .unwrap();
+    assert_eq!(
+        image
+            .warnings
+            .iter()
+            .filter(|warning| warning.contains("DWARF input omitted"))
+            .count(),
+        1
+    );
+    let mut retained = options();
+    retained.debug_directory = Some(std::env::temp_dir().join("keel-warning-debug"));
+    let image = keel_link::link(
+        &[Input {
+            name: "lib.a",
+            bytes: &bytes,
+        }],
+        retained,
+    )
+    .unwrap();
+    assert!(
+        !image
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("DWARF input omitted"))
+    );
+}

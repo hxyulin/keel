@@ -218,11 +218,35 @@ Object emission supports AArch64 Mach-O, AArch64 ELF and x86-64 ELF. These nativ
 targets use 64-bit little-endian pointers. Function-local x86 feature permissions
 also reach the object encoder. Stable built-in pipeline policies are exposed;
 custom Rust selection/allocation callbacks and structured assembly-program
-callbacks remain Rust APIs. The standalone C frontend, linker, disassembler,
+callbacks remain Rust APIs. The standalone C frontend, disassembler,
 WebAssembly emission and JIT loading are outside this compiler-facing interface.
 Experimental pressure scheduling and adaptive spill-repair policies have no C
 option; compilation retains the Rust defaults. Caller-managed parallel codegen
 jobs and executors also have no C wrapper.
+
+## Link a macOS executable
+
+`keel_link_signed` accepts named object/archive byte spans and explicit `.tbd`
+paths. Set `keel_link_options.sdk_root` to the SDK root and pass the SDK's
+`usr/lib/libSystem.tbd` path. The SDK root resolves TBD reexports. Input names
+are diagnostic labels; the linker never opens them as paths.
+
+Set `KEEL_LINK_DEAD_STRIP` to discard unreachable code/data. The output path is
+replaced atomically after linking and ad-hoc signing. This uses the arm64 macOS
+linker directly, with macOS 11.0 as the minimum version, without invoking a host
+linker or `codesign`. Other executable formats and retained debug maps are not
+exposed through this C entry point.
+
+This call needs no module. Both output buffer slots are required. On success it
+returns an owned newline-separated warning buffer, possibly empty, and a null
+error buffer. On failure it returns a null warning buffer and an owned diagnostic
+buffer. Destroy either returned buffer with `keel_buffer_destroy`. Nothing is
+printed by the linker itself. The header documents the null-output exception.
+DWARF omitted from selected inputs produces one warning per link.
+
+For small leaf functions, `keel_codegen_options.unwind = 1` requests only
+required unwind tables. The default (`0`) retains full unwind coverage and can
+require an AArch64 frame even for a leaf. This is independent of optimization.
 
 ## Tern integration requirements
 

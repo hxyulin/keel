@@ -374,3 +374,64 @@ fn compiler_api_records_floats_varargs_and_atomics_execute() {
     );
     std::fs::remove_dir_all(work).expect("remove compiler API directory");
 }
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn c_api_links_in_memory_object_and_archive_with_sdk() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let exe = std::env::current_exe().unwrap();
+    let deps = exe.parent().unwrap();
+    let work = std::env::temp_dir().join(format!("keel-ffi-c-link-{}", std::process::id()));
+    std::fs::create_dir_all(&work).unwrap();
+    let object = work.join("main.o");
+    let helper = work.join("helper.o");
+    let archive = work.join("helpers.a");
+    std::fs::write(
+        &object,
+        keel_asm::assemble_object(".globl _main\n_main: b _helper\n").unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &helper,
+        keel_asm::assemble_object(".globl _helper\n_helper: mov w0,#0\nret\n").unwrap(),
+    )
+    .unwrap();
+    execute(Command::new("ar").arg("rcs").arg(&archive).arg(&helper));
+    let sdk = Command::new("xcrun")
+        .args(["--sdk", "macosx", "--show-sdk-path"])
+        .output()
+        .unwrap();
+    assert!(
+        sdk.status.success(),
+        "macOS SDK required for C linking test"
+    );
+    let sdk = String::from_utf8(sdk.stdout).unwrap();
+    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    let client = work.join("link-client");
+    let program = work.join("program");
+    // Exercise the static archive used by a self-hosted frontend.
+    execute(
+        Command::new(&cc)
+            .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic"])
+            .arg(root.join("tests/link_client.c"))
+            .arg("-I")
+            .arg(root.join("include"))
+            .arg(deps.join("libkeel_ffi.a"))
+            .args(["-liconv", "-lresolv", "-o"])
+            .arg(&client),
+    );
+    execute(
+        Command::new(&client)
+            .arg(&object)
+            .arg(&archive)
+            .arg(sdk.trim())
+            .arg(&program),
+    );
+    execute(&mut Command::new(&program));
+    execute(
+        Command::new("codesign")
+            .args(["--verify", "--strict"])
+            .arg(&program),
+    );
+    std::fs::remove_dir_all(work).unwrap();
+}

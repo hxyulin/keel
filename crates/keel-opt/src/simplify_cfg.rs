@@ -58,6 +58,8 @@ pub(crate) fn fold_branches(func: &mut Function) -> bool {
             let dest = dest.clone();
             *func.inst_data_mut(term) = InstData::Jump { dest };
             changed = true;
+        } else if crate::if_convert::fold_same_destination(func, term) {
+            changed = true;
         }
     }
     changed

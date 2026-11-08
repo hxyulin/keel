@@ -26,62 +26,54 @@
 	mov	qword ptr [rbp + -56], rsi
 .Lremat_probe_block0:
 	# v2 = iconst.i64 0
-	xor	r13d, r13d
+	xor	eax, eax
+	mov	qword ptr [rbp + -48], rax
 	# v3 = iconst.i64 17
 	mov	r14d, 17
 	# v4 = iconst.i64 31
 	mov	r15d, 31
 	# v5 = iconst.i64 255
-	mov	ebx, 255
+	mov	r12d, 255
 	# v6 = iconst.i64 65535
-	mov	r12d, 65535
-	# v7 = stack_addr ss1
-	# store notrap v1, v7
-	mov	rax, qword ptr [rbp + -56]
-	mov	qword ptr [rbp + -48], rax
+	mov	ebx, 65535
 	# call @clobber()
 	call	"clobber"@PLT
 	# v8 = select v0, v2, v1
 	mov	rax, qword ptr [rbp + -64]
 	test	rax, rax
+	mov	rcx, qword ptr [rbp + -48]
 	mov	rdx, qword ptr [rbp + -56]
 	mov	rax, rdx
-	cmovne	rax, r13
-	mov	rsi, rax
+	cmovne	rax, rcx
+	mov	r13, rax
 	# v9 = call @remat_sum(v8, v3, v4, v5, v6, v2, v3, v4, v5, v6)
 	mov	qword ptr [rsp], r14
 	mov	qword ptr [rsp + 8], r15
-	mov	qword ptr [rsp + 16], rbx
-	mov	qword ptr [rsp + 24], r12
-	mov	rdi, rsi
+	mov	qword ptr [rsp + 16], r12
+	mov	qword ptr [rsp + 24], rbx
+	mov	rdi, r13
 	mov	rsi, r14
 	mov	rdx, r15
-	mov	rcx, rbx
-	mov	r8, r12
-	mov	r9, r13
+	mov	rcx, r12
+	mov	r8, rbx
+	mov	r9, qword ptr [rbp + -48]
 	call	"remat_sum"@PLT
 	mov	rsi, rax
-	# brif v0, block1(v2, v3), block1(v1, v4)
+	# v18 = select v0, v3, v4
 	mov	rax, qword ptr [rbp + -64]
 	test	rax, rax
-	je	".Lremat_probe_inst10_else"
-	mov	rdi, r13
-	mov	r8, r14
-	jmp	".Lremat_probe_block1"
-.Lremat_probe_inst10_else:
-	mov	rdi, qword ptr [rbp + -56]
-	mov	r8, r15
-.Lremat_probe_block1:
-	# v13 = load.i64 v7
-	mov	r9, qword ptr [rbp + -48]
-	# v14 = iadd v9, v10
-	add	rsi, rdi
-	# v15 = iadd v11, v14
-	add	r8, rsi
-	# v16 = iadd v13, v15
-	add	r9, r8
+	mov	rax, r15
+	cmovne	rax, r14
+	mov	rdi, rax
+	# v14 = iadd v8, v9
+	add	r13, rsi
+	# v15 = iadd v14, v18
+	add	r13, rdi
+	# v16 = iadd v1, v15
+	mov	rax, qword ptr [rbp + -56]
+	lea	rsi, [rax + r13 * 1]
 	# return v16
-	mov	rax, r9
+	mov	rax, rsi
 	lea	rsp, [rbp + -40]
 	pop	r15
 	pop	r14

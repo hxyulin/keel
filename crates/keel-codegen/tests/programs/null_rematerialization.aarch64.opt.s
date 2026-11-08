@@ -4,7 +4,7 @@
 	.p2align	2
 _null_probe:
 Lnull_probe_begin:
-	; regalloc: v0=x19 v1=x20 v2=x21 v3=x9 v4=x22 v5=x19 v6=x20 v7=x9 v8=x10 v9=x11 v10=x10 v11=x11 v12=x10 v13=x9
+	; regalloc: v0=x19 v1=x20 v2=x21 v3=x9 v4=x22 v5=x19 v6=x20 v7=x9 v10=x10 v11=x11 v12=x10 v13=x9 v14=x10 v15=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -47,18 +47,14 @@ Lnull_probe_block0:
 	mov	x7, x22
 	bl	_null_observe
 	mov	x9, x0
-	; brif v5, block1(v4, v6), block1(v6, v4)
+	; v14 = select v5, v4, v6
 	tst	w19, #255
-	b.eq	Lnull_probe_inst6_else
-	mov	x10, x22
-	mov	x11, x20
-	b	Lnull_probe_block1
-Lnull_probe_inst6_else:
-	mov	x10, x20
-	mov	x11, x22
-Lnull_probe_block1:
-	; v10 = ptrtoint.i64 v8
-	; v11 = ptrtoint.i64 v9
+	csel	x10, x22, x20, ne
+	; v15 = select v5, v6, v4
+	tst	w19, #255
+	csel	x11, x20, x22, ne
+	; v10 = ptrtoint.i64 v14
+	; v11 = ptrtoint.i64 v15
 	; v12 = iadd v10, v11
 	add	x10, x10, x11
 	; v13 = iadd v7, v12

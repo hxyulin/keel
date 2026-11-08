@@ -708,12 +708,13 @@
 	mov	rdi, r11
 .Lmax64_block0:
 	# v2 = icmp.sgt v0, v1
-	# brif v2, block1(v0), block1(v1)
+	# v4 = select v2, v0, v1
+	mov	rdx, rdi
+	mov	r11, rsi
 	cmp	rsi, rdi
-	jg	".Lmax64_block1"
-	mov	rsi, rdi
-.Lmax64_block1:
-	# return v3
+	cmovg	rdx, r11
+	mov	rsi, rdx
+	# return v4
 	mov	rax, rsi
 	mov	rsp, rbp
 	pop	rbp

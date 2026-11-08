@@ -500,3 +500,45 @@ fn x86_feature_permissions_reach_the_object_assembler() {
         keel_buffer_destroy(output);
     }
 }
+
+#[test]
+fn default_optimization_selects_same_destination_arguments() {
+    let src = "func @max_add(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v3 = icmp.sgt v0, v1
+ brif v3, block1(v0), block1(v1)
+block1(v2: i64):
+ v4 = iconst.i64 7
+ v5 = iadd v2, v4
+ return v5
+}";
+    let mut m = module();
+    // SAFETY: The module, text, and disjoint output slot remain live throughout.
+    unsafe {
+        assert_eq!(keel_module_load_ir(&mut *m, src.as_ptr(), src.len()), OK);
+        assert_eq!(keel_module_optimize(&mut *m), OK);
+        let mut buffer = ptr::null_mut();
+        assert_eq!(keel_module_emit_ir(&mut *m, &mut buffer), OK);
+        let ir = String::from_utf8_lossy(&(*buffer).0);
+        assert!(!ir.contains("brif"), "{ir}");
+        assert!(ir.contains("select"), "{ir}");
+        keel_buffer_destroy(buffer);
+        for unwind in [0, 1] {
+            let options = KeelCodegenOptions {
+                unwind,
+                ..Default::default()
+            };
+            assert_eq!(
+                keel_module_emit_assembly(&mut *m, 1, options, &mut buffer),
+                OK
+            );
+            let assembly = String::from_utf8_lossy(&(*buffer).0);
+            assert!(assembly.contains("csel"), "{assembly}");
+            assert!(!assembly.contains("b.gt"), "{assembly}");
+            if unwind == 1 {
+                assert!(!assembly.contains("stp x29"), "{assembly}");
+            }
+            keel_buffer_destroy(buffer);
+        }
+    }
+}

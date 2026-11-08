@@ -4,7 +4,7 @@
 	.p2align	2
 _remat_probe:
 Lremat_probe_begin:
-	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x25 v7=x26 v8=x9 v9=x9 v10=x10 v11=x11 v13=x12 v14=x9 v15=x9 v16=x9
+	; regalloc: v0=x19 v1=x20 v2=x21 v3=x22 v4=x23 v5=x24 v6=x25 v8=x26 v9=x9 v14=x9 v15=x9 v16=x9 v18=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -23,7 +23,7 @@ Lremat_probe_begin:
 	stp	x25, x26, [sp, #-16]!
 	.cfi_offset x25, -80
 	.cfi_offset x26, -72
-	sub	sp, sp, #32
+	sub	sp, sp, #16
 	mov	x19, x0
 	mov	x20, x1
 Lremat_probe_block0:
@@ -37,18 +37,15 @@ Lremat_probe_block0:
 	movz	x24, #0xff
 	; v6 = iconst.i64 65535
 	movz	x25, #0xffff
-	; v7 = stack_addr ss1
-	; store notrap v1, v7
-	str	x20, [sp, #16]
 	; call @clobber()
 	bl	_clobber
 	; v8 = select v0, v2, v1
 	cmp	x19, #0
-	csel	x9, x21, x20, ne
+	csel	x26, x21, x20, ne
 	; v9 = call @remat_sum(v8, v3, v4, v5, v6, v2, v3, v4, v5, v6)
 	str	x24, [sp, #0]
 	str	x25, [sp, #8]
-	mov	x0, x9
+	mov	x0, x26
 	mov	x1, x22
 	mov	x2, x23
 	mov	x3, x24
@@ -58,23 +55,15 @@ Lremat_probe_block0:
 	mov	x7, x23
 	bl	_remat_sum
 	mov	x9, x0
-	; brif v0, block1(v2, v3), block1(v1, v4)
-	cbz	x19, Lremat_probe_inst10_else
-	mov	x10, x21
-	mov	x11, x22
-	b	Lremat_probe_block1
-Lremat_probe_inst10_else:
-	mov	x10, x20
-	mov	x11, x23
-Lremat_probe_block1:
-	; v13 = load.i64 v7
-	ldr	x12, [sp, #16]
-	; v14 = iadd v9, v10
+	; v18 = select v0, v3, v4
+	cmp	x19, #0
+	csel	x10, x22, x23, ne
+	; v14 = iadd v8, v9
+	add	x9, x26, x9
+	; v15 = iadd v14, v18
 	add	x9, x9, x10
-	; v15 = iadd v11, v14
-	add	x9, x11, x9
-	; v16 = iadd v13, v15
-	add	x9, x12, x9
+	; v16 = iadd v1, v15
+	add	x9, x20, x9
 	; return v16
 	mov	x0, x9
 	sub	sp, x29, #64

@@ -218,6 +218,11 @@ becomes constant. Rules include:
 - constant shift pairs, equality through invertible wrapping operations,
   zero-test selects and grouping of single-use offsets.
 
+`simplify-cfg` folds a `brif` whose two edges reach the same non-self block
+into a jump with one select per differing argument. This does not move or
+speculate instructions. It accepts at most eight canonical scalar integer or
+pointer parameters; identical arguments need no select.
+
 `simplify-cfg` also removes private `x ? clz(x) : width` and
 `x ? ctz(x) : width` diamonds. Both counts already return the type width at
 zero. Each arm must contain only the matching count or literal and its jump;

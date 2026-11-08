@@ -24,7 +24,7 @@ block3(v7: i64, v8: i64):
 }";
     let original = keel_ir::parse(src).unwrap();
     let optimized = optimize(src);
-    assert_eq!(optimized.functions[0].blocks().count(), 2);
+    assert_eq!(optimized.functions[0].blocks().count(), 1);
     for a in [0, 1, 7, u64::MAX] {
         for b in [0, 2, 9, u64::MAX] {
             for condition in [0, 1] {
@@ -54,7 +54,7 @@ block2:
     return v3
 }";
     let optimized = optimize(src);
-    assert_eq!(optimized.functions[0].blocks().count(), 2);
+    assert_eq!(optimized.functions[0].blocks().count(), 1);
     assert_eq!(execute(&optimized.functions[0], &[40, 99, 0]), 99);
     assert_eq!(execute(&optimized.functions[0], &[40, 99, 1]), 40);
 }
@@ -170,7 +170,7 @@ fn merging_long_chain_preserves_instruction_order_and_external_parameter_uses() 
 }
 
 #[test]
-fn merging_preserves_duplicate_branch_edges_and_diamond_join() {
+fn merging_folds_parallel_edges_and_preserves_diamond_join() {
     let src = "func @f(i64, i64, i8) -> i64 {
 block0(v0: i64, v1: i64, v2: i8):
     jump block1
@@ -193,7 +193,7 @@ block6(v11: i64):
 }";
     let original = keel_ir::parse(src).unwrap();
     let optimized = optimize(src);
-    assert_eq!(optimized.functions[0].blocks().count(), 5);
+    assert_eq!(optimized.functions[0].blocks().count(), 4);
     for a in [0, 7, u64::MAX] {
         for b in [0, 11, u64::MAX] {
             for cond in [0, 1] {
@@ -330,4 +330,39 @@ block4(v4: i32):
         keel_ir::InstData::LandingPad { .. }
     ));
     assert_eq!(optimized.to_string(), optimize(src).to_string());
+}
+
+#[test]
+fn same_destination_arguments_become_parallel_selects_in_default_pipeline() {
+    let src = "func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v3 = icmp.sgt v0, v1
+    brif v3, block1(v0, v1), block1(v1, v0)
+block1(v2: i64, v4: i64):
+    v5 = isub v2, v4
+    v6 = iconst.i64 7
+    v7 = iadd v5, v6
+    return v7
+}";
+    let mut module = keel_ir::parse(src).unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(module.functions[0].blocks().count(), 1);
+    assert!(!module.functions[0].layout_insts().any(|(_, i)| matches!(
+        module.functions[0].inst_data(i),
+        keel_ir::InstData::Brif { .. }
+    )));
+    for a in [0, 1, i64::MAX as u64, i64::MIN as u64, u64::MAX] {
+        for b in [0, 1, i64::MAX as u64, i64::MIN as u64, u64::MAX] {
+            let (hi, lo) = if (a as i64) > (b as i64) {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            assert_eq!(
+                execute(&module.functions[0], &[a, b]),
+                hi.wrapping_sub(lo).wrapping_add(7)
+            );
+        }
+    }
 }

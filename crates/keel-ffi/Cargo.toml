@@ -13,6 +13,7 @@ keel-ir = { path = "../keel-ir" }
 keel-opt = { path = "../keel-opt" }
 keel-codegen = { path = "../keel-codegen" }
 keel-asm = { path = "../keel-asm" }
+keel-link = { path = "../keel-link" }
 
 [lints]
 workspace = true

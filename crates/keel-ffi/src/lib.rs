@@ -711,8 +711,10 @@ pub unsafe extern "C" fn keel_buffer_destroy(buffer: *mut KeelBuffer) {
 mod abi;
 mod advanced;
 mod atomics;
+mod linking;
 mod numeric;
 mod pipeline;
+pub use linking::{KeelLinkInput, KeelLinkOptions, KeelString, keel_link_signed};
 mod systems;
 
 #[cfg(test)]

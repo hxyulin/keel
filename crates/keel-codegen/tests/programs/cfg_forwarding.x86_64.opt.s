@@ -16,12 +16,12 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Lforward_block0:
-	# brif v2, block3(v1), block3(v0)
+	# v11 = select v2, v1, v0
 	test	r8b, r8b
-	jne	".Lforward_block3"
-	mov	rdi, rsi
-.Lforward_block3:
-	# v9 = imul v7, v7
+	mov	rax, rsi
+	cmovne	rax, rdi
+	mov	rdi, rax
+	# v9 = imul v11, v11
 	imul	rdi, rdi
 	# v10 = iadd v0, v9
 	add	rsi, rdi

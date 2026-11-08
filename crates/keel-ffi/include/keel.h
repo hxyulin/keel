@@ -72,6 +72,41 @@ enum {
     KEEL_INTERNAL_PANIC = 4,
     KEEL_POISONED = 5
 };
+/* Module-independent linking. All strings are nonempty UTF-8 byte spans,
+ * without NUL. Object/archive names are diagnostic labels, never file paths.
+ * TBD paths are explicit filesystem paths; sdk_root resolves their reexports.
+ * Inputs, including nested spans, are borrowed only for this call.
+ * Supports thin arm64 macOS Mach-O objects and archives. No host linker or
+ * codesign subprocess is used. The executable gets an ad-hoc signature.
+ * Uses the Rust linker's default minimum macOS version (11.0).
+ */
+typedef struct { const uint8_t *data; size_t length; } keel_string;
+typedef struct {
+    keel_string name;
+    const uint8_t *data;
+    size_t length;
+} keel_link_input;
+enum { KEEL_LINK_DEAD_STRIP = 1 };
+typedef struct {
+    keel_string sdk_root;
+    keel_string output_path;
+    uint32_t flags; /* KEEL_LINK_DEAD_STRIP or zero. Unknown bits are rejected. */
+} keel_link_options;
+/* Both output slots are required, distinct, writable, and free of live buffers.
+ * Unlike module operations, this call writes outputs on BOTH success and failure:
+ * success: owned newline-separated warnings buffer (possibly empty), null error;
+ * failure: null warnings, owned diagnostic buffer. Destroy returned buffers with
+ * keel_buffer_destroy. No diagnostics are printed by the linker itself.
+ * Null output slots return KEEL_INVALID_ARGUMENT without writing either slot.
+ * Invalid spans/options return KEEL_INVALID_ARGUMENT; link/TBD/I/O failures
+ * return KEEL_COMPILATION_FAILED. Unexpected unwinds return KEEL_INTERNAL_PANIC.
+ * The output path is replaced atomically only after successful linking/signing.
+ * This operation is independent of modules and does not poison any module.
+ */
+keel_status keel_link_signed(const keel_link_input *inputs, size_t input_count,
+    const keel_string *tbd_paths, size_t tbd_count,
+    const keel_link_options *options, keel_buffer **warnings, keel_buffer **error);
+
 typedef uint32_t keel_type;
 enum { KEEL_I8 = 1, KEEL_I16 = 2, KEEL_I32 = 3, KEEL_I64 = 4, KEEL_PTR = 5, KEEL_I128 = 6, KEEL_F32 = 7, KEEL_F64 = 8, KEEL_F80 = 9 };
 typedef uint32_t keel_binary_op;

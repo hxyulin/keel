@@ -122,15 +122,7 @@ pub fn run(f: &mut Function) -> bool {
             continue;
         }
         if dests[0].block == dests[1].block {
-            let join = dests[0].block;
-            if join == head || !canonical_params(f, join) || dests[0].args.len() > SELECT_BUDGET {
-                continue;
-            }
-            let args = selects(f, term, cond, &dests[0].args, &dests[1].args);
-            *f.inst_data_mut(term) = D::Jump {
-                dest: BlockCall { block: join, args },
-            };
-            changed = true;
+            changed |= fold_same_destination(f, term);
             continue;
         }
         let paths = [
@@ -203,6 +195,30 @@ pub fn run(f: &mut Function) -> bool {
     }
     changed
 }
+/// Fold parallel edges without speculating any instructions. Keep the same
+/// scalar select budget and non-self-edge policy as general if-conversion.
+pub(crate) fn fold_same_destination(f: &mut Function, term: Inst) -> bool {
+    let D::Brif { cond, dests } = f.inst_data(term) else {
+        return false;
+    };
+    if dests[0].block != dests[1].block
+        || dests[0].block == f.inst_block(term)
+        || !canonical_params(f, dests[0].block)
+        || dests[0].args.len() > SELECT_BUDGET
+    {
+        return false;
+    }
+    let (cond, dests) = (*cond, dests.clone());
+    let args = selects(f, term, cond, &dests[0].args, &dests[1].args);
+    *f.inst_data_mut(term) = D::Jump {
+        dest: BlockCall {
+            block: dests[0].block,
+            args,
+        },
+    };
+    true
+}
+
 fn canonical_params(f: &Function, b: Block) -> bool {
     f.block_params(b).iter().all(|&v| {
         f.resolve(v) == v

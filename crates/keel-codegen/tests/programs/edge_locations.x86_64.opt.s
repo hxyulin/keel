@@ -16,15 +16,12 @@
 	mov	rsi, rdi
 	mov	rdi, r11
 .Ledge_locations_block0:
-	# brif v0, block1(v1), block1(v2)
+	# v5 = select v0, v1, v2
 	test	rsi, rsi
-	je	".Ledge_locations_inst0_else"
-	mov	rsi, rdi
-	jmp	".Ledge_locations_block1"
-.Ledge_locations_inst0_else:
-	mov	rsi, r8
-.Ledge_locations_block1:
-	# v4 = iadd v1, v3
+	mov	rax, r8
+	cmovne	rax, rdi
+	mov	rsi, rax
+	# v4 = iadd v1, v5
 	add	rdi, rsi
 	# return v4
 	mov	rax, rdi

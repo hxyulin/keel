@@ -4,7 +4,7 @@
 	.p2align	2
 _edge_locations:
 Ledge_locations_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x9 v4=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v4=x9 v5=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -15,14 +15,10 @@ Ledge_locations_begin:
 	mov	x10, x1
 	mov	x11, x2
 Ledge_locations_block0:
-	; brif v0, block1(v1), block1(v2)
-	cbz	x9, Ledge_locations_inst0_else
-	mov	x9, x10
-	b	Ledge_locations_block1
-Ledge_locations_inst0_else:
-	mov	x9, x11
-Ledge_locations_block1:
-	; v4 = iadd v1, v3
+	; v5 = select v0, v1, v2
+	cmp	x9, #0
+	csel	x9, x10, x11, ne
+	; v4 = iadd v1, v5
 	add	x9, x10, x9
 	; return v4
 	mov	x0, x9

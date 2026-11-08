@@ -602,7 +602,7 @@ Lswap_loop_end:
 	.p2align	2
 _max64:
 Lmax64_begin:
-	; regalloc: v0=x9 v1=x10 v3=x9
+	; regalloc: v0=x9 v1=x10 v4=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -613,12 +613,10 @@ Lmax64_begin:
 	mov	x10, x1
 Lmax64_block0:
 	; v2 = icmp.sgt v0, v1
-	; brif v2, block1(v0), block1(v1)
+	; v4 = select v2, v0, v1
 	cmp	x9, x10
-	b.gt	Lmax64_block1
-	mov	x9, x10
-Lmax64_block1:
-	; return v3
+	csel	x9, x9, x10, gt
+	; return v4
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
 	ret
