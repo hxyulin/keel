@@ -26,12 +26,14 @@ mod metadata;
 mod packed_absolute;
 mod parallel_copy;
 pub mod regalloc;
+mod schedule;
 pub mod select;
 mod stack_frame;
 mod symbols;
 mod sysv;
 mod text;
 pub mod tuning;
+mod value_bits;
 mod vector;
 pub mod x86_64;
 

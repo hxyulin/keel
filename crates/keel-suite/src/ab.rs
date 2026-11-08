@@ -57,6 +57,12 @@ pub struct Options {
     /// selection choices, for example `all,-x86-mask-test`.
     #[arg(long, value_name = "LIST")]
     candidate_isel: Option<String>,
+    /// Override only the candidate's register allocator.
+    #[arg(long, value_name = "TIER")]
+    candidate_regalloc: Option<String>,
+    /// Enable the candidate's bounded pressure scheduler.
+    #[arg(long)]
+    candidate_pressure_schedule: bool,
     /// Build the candidate as one program: merge the units' IR, make every
     /// symbol but `main` local, and optimize it at once.
     #[arg(long)]
@@ -93,6 +99,25 @@ pub struct Options {
     python: PathBuf,
 }
 
+impl Options {
+    fn candidate_flags(&self) -> Vec<String> {
+        let mut flags = Vec::new();
+        if let Some(list) = &self.candidate_isel {
+            flags.extend(["--isel".into(), list.clone()]);
+        }
+        if let Some(tier) = &self.candidate_regalloc {
+            flags.extend(["--regalloc".into(), tier.clone()]);
+        }
+        if self.candidate_pressure_schedule {
+            flags.push("--schedule-pressure".into());
+        }
+        if self.candidate_lto {
+            flags.push(build::LTO.into());
+        }
+        flags
+    }
+}
+
 /// One of the two compilers.
 #[derive(Serialize)]
 struct Keel {
@@ -117,6 +142,7 @@ struct Plan {
     work: String,
     arms: [&'static str; 3],
     apps: Vec<PlanApp>,
+    candidate_flags: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -314,6 +340,7 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
         seed: options.seed,
         work: out.join("slots").display().to_string(),
         arms: ARMS,
+        candidate_flags: options.candidate_flags(),
         apps,
     };
     let plan_file = out.join("plan.json");
@@ -524,15 +551,8 @@ fn prepare(
     let mut asm = Vec::new();
     for (keel, prefix) in keels.iter().zip(["ab-base", "ab-cand"]) {
         let mut flags = config.flags.clone();
-        if let Some(list) = options
-            .candidate_isel
-            .as_ref()
-            .filter(|_| prefix == "ab-cand")
-        {
-            flags.extend(["--isel".into(), list.clone()]);
-        }
-        if options.candidate_lto && prefix == "ab-cand" {
-            flags.push(build::LTO.into());
+        if prefix == "ab-cand" {
+            flags.extend(options.candidate_flags());
         }
         let config = Config {
             name: format!("{prefix}-{}", config.name),
@@ -954,13 +974,15 @@ fn trailer(
             )
         })
         .unwrap_or_default();
-    let lto = if options.candidate_lto { " --lto" } else { "" };
+    let flags = options.candidate_flags().join(" ");
+    let candidate = if flags.is_empty() {
+        keels[1].label.clone()
+    } else {
+        format!("{} {flags}", keels[1].label)
+    };
     [
         format!("AB-Baseline: {}", keels[0].label),
-        match &options.candidate_isel {
-            Some(list) => format!("AB-Candidate: {} --isel {list}{lto}", keels[1].label),
-            None => format!("AB-Candidate: {}{lto}", keels[1].label),
-        },
+        format!("AB-Candidate: {candidate}"),
         format!("AB-Host: {host}"),
         format!(
             "AB-Protocol: {config}, {} workloads, {} function-padded placements x {} rounds, ABBA with an identical-image control, {metric}",
@@ -1063,6 +1085,56 @@ fn print_report(workloads: &[Workload], verdict: &Verdict, identical: &[String],
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn candidate_backend_flags_are_explicit_in_the_trailer() {
+        use clap::Parser as _;
+        let cli = crate::Cli::try_parse_from([
+            "keel-suite",
+            "ab",
+            "--baseline",
+            "a",
+            "--candidate",
+            "b",
+            "--candidate-regalloc",
+            "ion",
+            "--candidate-pressure-schedule",
+            "--candidate-isel",
+            "all",
+        ])
+        .unwrap();
+        let crate::Command::Ab(options) = cli.command else {
+            panic!("expected AB command");
+        };
+        assert_eq!(
+            options.candidate_flags(),
+            ["--isel", "all", "--regalloc", "ion", "--schedule-pressure"]
+        );
+        let a = Keel {
+            label: "a".into(),
+            path: "a".into(),
+            sha256: "a".into(),
+        };
+        let b = Keel {
+            label: "b".into(),
+            path: "b".into(),
+            sha256: "b".into(),
+        };
+        let workloads = [workload("kernel", &[0.9], &[1.0])];
+        let verdict = verdict(&workloads);
+        let text = trailer(
+            [&a, &b],
+            "test",
+            "cycles",
+            "keel-O",
+            &options,
+            &workloads,
+            &verdict,
+        );
+        assert!(
+            text.contains("AB-Candidate: b --isel all --regalloc ion --schedule-pressure"),
+            "{text}"
+        );
+    }
 
     /// A workload whose candidate and control are at fixed ratios at every
     /// placement and round, around a baseline that drifts between rounds.

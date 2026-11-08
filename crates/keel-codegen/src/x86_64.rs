@@ -384,7 +384,8 @@ pub(crate) fn compile_output(
         let boundary = (!debug)
             .then(|| aggregate_boundary::lower(original))
             .flatten();
-        let func = vector::lower(boundary.as_ref().unwrap_or(original), features);
+        let lowered = vector::lower(boundary.as_ref().unwrap_or(original), features);
+        let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
         let mut compiler = FunctionCompiler::new(
             &func,
             &symbols,
@@ -1561,6 +1562,7 @@ impl<'a> FunctionCompiler<'a> {
             // covers own the covered `ptradd`, which never reaches here.
             Some(
                 Cover::OffsetAddress
+                | Cover::BoundedSwitch
                 | Cover::IndexedAddress
                 | Cover::ZeroTest
                 | Cover::X86DivisionRemainder
@@ -1571,7 +1573,8 @@ impl<'a> FunctionCompiler<'a> {
                 | Cover::X86SelectCompare,
             ) => return false,
             Some(
-                cover @ (Cover::Aarch64Ubfx
+                cover @ (Cover::Aarch64RotateImmediate
+                | Cover::Aarch64Ubfx
                 | Cover::Aarch64MultiplyShift
                 | Cover::Aarch64Abs
                 | Cover::Aarch64AbsDiff
@@ -3817,7 +3820,12 @@ impl<'a> FunctionCompiler<'a> {
         let x = self.use_reg(arg, S0);
         let x = self.extend(S0, x, ty, false);
         let width = wide_ty(ty);
-        let plan = SwitchPlan::new(cases, mask);
+        let mut plan = SwitchPlan::new(cases, mask);
+        let bounded = self
+            .selection
+            .switch_bounds
+            .get(&inst)
+            .is_some_and(|&range| plan.bound(range));
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
@@ -3849,8 +3857,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.emit(Opcode::Sub, [asm_arg(rax), asm_arg(sub)]);
             }
-            self.emit(Opcode::Cmp, [asm_arg(rax), asm_arg(span)]);
-            self.emit(Opcode::Jcc(7), [asm_arg(&targets[0])]);
+            if !bounded {
+                self.emit(Opcode::Cmp, [asm_arg(rax), asm_arg(span)]);
+                self.emit(Opcode::Jcc(7), [asm_arg(&targets[0])]);
+            }
             let table = format!(".L{}_{inst}_table", self.func.name);
             // Offsets from the table to each target, so the table needs no
             // relocations: position independent.

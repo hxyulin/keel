@@ -67,6 +67,7 @@ const USAGE: &str = "usage:
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
+  --schedule-pressure opts into bounded integer pressure scheduling before selection.
   --isel / --isel-tier and --regalloc override preset stages in either order.
   --isel-tier baseline|covers|trees|full: baseline runs no optional pass or cover; -O0 uses covers.
   --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
@@ -129,6 +130,7 @@ struct Options {
     inline_allowance: usize,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
+    pressure_schedule: bool,
     #[cfg(feature = "experimental-regalloc")]
     remat: u8,
     tuning: keel_codegen::tuning::TuningCpu,
@@ -210,6 +212,7 @@ impl Options {
         emission.x86_code_model = self.x86_code_model;
         emission.function_sections = self.function_sections;
         emission.data_sections = self.data_sections;
+        emission.pressure_schedule = self.pressure_schedule;
         emission
     }
 
@@ -555,6 +558,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     };
                 }
             }
+            "--schedule-pressure" => opts.pressure_schedule = true,
             "--regalloc" => {
                 explicit_allocation = true;
                 opts.allocation = match args.next().map(String::as_str) {
@@ -903,6 +907,7 @@ const COMPILE_FLAGS: &[&str] = &[
     "--opt-function",
     "--opt-tier",
     "--regalloc",
+    "--schedule-pressure",
     "--remat",
     "--isel-tier",
     "--tune",
@@ -962,6 +967,7 @@ const CC_FLAGS: &[&str] = &[
     "--opt-function",
     "--opt-tier",
     "--regalloc",
+    "--schedule-pressure",
     "--remat",
     "--isel-tier",
     "--tune",

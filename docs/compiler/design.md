@@ -631,9 +631,9 @@ from Apple arm64 that matter to a frontend:
 ## Register allocation
 
 **Linear scan** (Poletto & Sarkar 1999), in `keel-codegen/src/regalloc.rs`.
-It runs in one pass over sorted intervals, needs no interference graph, and
-is easy to follow, which matters more here than the last few percent that
-graph colouring would give.
+It assigns registers over sorted live intervals without building an interference
+graph. Fast and Full retain this implementation as independently selectable
+references for allocator experiments.
 
 Allocation is selected through `RegisterAllocator`, independently of
 `InstructionSelector` and IR optimization tiers. `CodegenPipeline` pairs any
@@ -648,10 +648,28 @@ Fast and the other `-O` levels use Full.
 | `Local` | `experimental-regalloc` | Block-local register cache: cross-block values keep stack homes, and local homes appear only on eviction |
 | `Split` | `experimental-regalloc` | Linear scan, then spilled values stay in registers that are free at both ends of a lowering sequence, written back to their homes at block edges. Functions with vectors or `returns_twice` calls use Full |
 
-All tiers share liveness, ABI constraints and the spill machinery, and every
-allocation passes `Allocation::validate` before emission. The experimental
+All tiers share liveness, selected operands, ABI clobber contracts and emission
+machinery. Every allocation passes `Allocation::validate` before emission. The experimental
 tiers stay only while they build, pass clippy and pass the
 [experimental codegen lane](../development/testing.md#experimental-codegen-features).
+
+Selected operands publish their exact IR type and early-use/late-definition
+position. They still describe lowering sequences, not individual machine
+instructions. ABI shuffles, FLAGS effects and internal scratch temporaries remain
+encapsulated. Registers reserved by an emitter remain outside every allocator's
+pools. Typed clobber enumeration distinguishes scalar FP preservation from full
+SIMD preservation across calls; supported native ABIs preserve no entire vector
+value in their callee-saved SIMD registers.
+
+`EmissionOptions::pressure_schedule` (CLI `--schedule-pressure`) opts into bounded
+integer scheduling before target selection. At each position it examines at most
+64 instructions and moves only ready wrapping i32/i64 operations that strictly
+reduce live-value pressure. It preserves arithmetic dependencies and memory order;
+it can complete a reduction before an ordinary call. Debug locations, function
+policies requesting None/Fast/Size, inline assembly, EH, returns-twice and opaque
+intrinsics disable it. Producer facts survive moves. The default pipeline does not
+schedule. Prepared private Fast-convention ARM call chains retain their original
+order.
 
 Full runs these steps; Fast shares the first two and builds one range per
 value.
@@ -732,23 +750,25 @@ allocation unchanged. Its tests run with
 including native AArch64 fixtures for calls, `setjmp`, stack restore and
 `invoke`. No performance gain is claimed for any mode.
 
-Known gaps: no interval splitting outside the experimental Split tier (a
-value spilled anywhere is spilled everywhere). Layout uses loop depth but no
-execution counts; equally nested paths and switch cases keep their original
-DFS successor order. Prologues are not moved onto cold call paths.
-
-**Decisions.** The register-assignment design moves register effects, fixed
-operands and ABI preferences into a shared policy. Its settled choices: x86-64
-keeps r10 and r11 reserved, for 12 allocatable general registers. Frameless
-x86-64 scalar C leaves land only if the suite shows no retired-instruction
-regression. On AArch64, x0–x7 become allocatable and leaves frameless on
-Darwin first, and on Linux after the ARM container interoperability test
-runs. Values with no preference take x0–x7 after x9–x15, once both orders are
-measured. The Fast tier gets register effects and fixed operands but no ABI
-preferences. The FullAffinity tier was deleted. Before x0–x7 are allocatable,
-the AArch64 indirect call must read its target as part of the argument copy.
+Known gaps: production Full still gives each value one location, so a value
+spilled anywhere is spilled everywhere. Layout uses loop depth without execution
+counts. Prologues are not moved onto cold call paths. The ordinary scalar C-ABI
+pools contain 17 ARM and nine x86 GPRs; qualifying private scalar Fast-convention
+ARM leaves can additionally use x0–x7. Broader pools require explicit internal
+fixed-register, temporary and ABI-copy effects, followed by measurement.
 
 ## Instruction selection
+
+Scalar bit facts are queried lazily from the exact immutable final function.
+They infer zero/one bits through constants, masks, shifts and integer extension or
+truncation. Phi nodes, unsupported operations and deep expressions return unknown;
+no optional optimizer pass or cached CFG stamp supplies a proof. The
+`bounded-switch` cover uses these unsigned bounds to omit a table check only when
+every possible input has a table slot. It adds at most two default entries, costing
+at most eight bytes in exchange for two ARM instructions. Unknown ranges keep
+the original check. `aarch64-rotate-immediate` selects masked constant i32/i64
+rotations as immediate ROR, leaving a shared count literal live for other uses.
+Both covers support the existing `--isel` ablation controls and need tree selection.
 
 **Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
 binary root/child patterns and register affinities; `build.rs` generates

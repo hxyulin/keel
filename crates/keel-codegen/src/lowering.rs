@@ -129,6 +129,24 @@ impl SwitchPlan {
         self.values.len() >= 4 && self.span < 3 * self.values.len() as u64 && self.span < 4096
     }
 
+    /// Drop a bounds check only when a proven range fits the table. At most
+    /// two extra default entries cost eight bytes, matching the two removed
+    /// ARM instructions. Unknown or wide ranges retain the original plan.
+    pub(crate) fn bound(&mut self, (lower, upper): (u64, u64)) -> bool {
+        if !self.jump_table() {
+            return false;
+        }
+        let min = self.min.min(lower);
+        let max = (self.min + self.span).max(upper);
+        let span = max - min;
+        if span >= 4096 || span - self.span > 2 {
+            return false;
+        }
+        self.min = min;
+        self.span = span;
+        true
+    }
+
     /// The destination of each table entry from `min` to `min + span`, as an
     /// index into the switch destinations, where 0 is the default.
     pub(crate) fn table(&self) -> impl Iterator<Item = usize> + '_ {

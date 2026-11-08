@@ -57,6 +57,11 @@ covers! {
     /// A multiply by a tuned constant as shift and add.
     Aarch64MultiplyShift = "aarch64-multiply-shift", AARCH64;
 
+    /// A proven small unsigned switch range, including default table entries.
+    BoundedSwitch = "bounded-switch", None;
+    /// Scalar constant rotations as one immediate ROR.
+    Aarch64RotateImmediate = "aarch64-rotate-immediate", AARCH64;
+
     // Backend stage.
     /// A single-use compare re-emitted at its conditional branch.
     CompareBranch = "compare-branch", None;

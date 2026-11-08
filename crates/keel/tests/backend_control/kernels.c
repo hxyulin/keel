@@ -71,3 +71,10 @@ U FN(branch_loop)(const U *p, unsigned n, U mask) {
   }
   return x;
 }
+
+U FN(across)(const U *p, U seed) {
+  U a = p[0], b = p[1], c = p[2], d = p[3], e = p[4], f = p[5];
+  U g = p[6], h = p[7], i = p[8], j = p[9], k = p[10], l = p[11];
+  U result = callback(seed);
+  return a + b + c + d + e + f + g + h + i + j + k + l + result;
+}

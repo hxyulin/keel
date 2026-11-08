@@ -196,6 +196,11 @@ fn cache_spills(
                         operands.push(Operand {
                             part,
                             kind,
+                            position: match kind {
+                                OperandKind::Use => OperandPosition::Early,
+                                OperandKind::Def => OperandPosition::Late,
+                            },
+                            ty: func.value_type(value),
                             float: func.value_type(value).is_float(),
                             constraint: input.selection.constraint(inst, part, kind),
                         });

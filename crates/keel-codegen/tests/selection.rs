@@ -287,3 +287,66 @@ fn comparison_canonicalization_exposes_aarch64_immediates() {
         assert!(!after.contains("\tmovz\t"), "{after}");
     }
 }
+
+#[test]
+fn scalar_immediate_rotates_mask_counts_and_preserve_shared_literals() {
+    use keel_codegen::cover::Cover;
+    use std::{fmt::Write as _, fs, process::Command};
+    let mut source = String::new();
+    let mut driver = String::from("#include <stdint.h>\n");
+    let counts = [-1i64, 0, 1, 31, 32, 63, 64, 65];
+    let mut calls = String::new();
+    for width in [32u32, 64] {
+        for op in ["rotl", "rotr"] {
+            for (index, count) in counts.into_iter().enumerate() {
+                let name = format!("f{width}_{op}_{index}");
+                writeln!(source, "func @{name}(i{width}) -> i{width} cc(c) {{\nblock0(v0:i{width}):\n v1 = iconst.i{width} {count}\n v2 = {op} v0, v1\n v3 = xor v2, v1\n return v3\n}}").unwrap();
+                writeln!(driver, "extern uint{width}_t {name}(uint{width}_t);").unwrap();
+                let amount = count as u64 & u64::from(width - 1);
+                let other = (u64::from(width) - amount) & u64::from(width - 1);
+                let expression = if op == "rotl" {
+                    format!("(v<<{amount})|(v>>{other})")
+                } else {
+                    format!("(v>>{amount})|(v<<{other})")
+                };
+                writeln!(calls, "{{uint{width}_t v=(uint{width}_t)x; uint{width}_t expected=({expression})^(uint{width}_t)({count}LL); if({name}(v)!=expected)return 1;}}").unwrap();
+            }
+        }
+    }
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let mut ablated = SelectionOptions::ALL;
+    ablated.covers.remove(Cover::Aarch64RotateImmediate);
+    for (index, options) in [SelectionOptions::ALL, ablated].into_iter().enumerate() {
+        let assembly = compile_with_options(&module, Target::Aarch64AppleDarwin, options).unwrap();
+        if index == 0 {
+            let rotates: Vec<_> = assembly
+                .lines()
+                .filter(|l| l.starts_with("\tror\t"))
+                .collect();
+            assert_eq!(rotates.len(), 32);
+            assert!(rotates.iter().all(|l| l.contains('#')), "{rotates:?}");
+        }
+        if Target::host() == Some(Target::Aarch64AppleDarwin) {
+            let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+                .join(format!("rotate-immediate-{index}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("f.s"), assembly).unwrap();
+            let code = format!(
+                "{driver}\nint main(void) {{uint64_t x=1;for(unsigned i=0;i<1000;i++){{x^=x<<13;x^=x>>7;x^=x<<17;{calls}}}return 0;}}"
+            );
+            fs::write(dir.join("driver.c"), code).unwrap();
+            let build = Command::new("clang")
+                .current_dir(&dir)
+                .args(["-O2", "f.s", "driver.c", "-o", "run"])
+                .output()
+                .unwrap();
+            assert!(
+                build.status.success(),
+                "{}",
+                String::from_utf8_lossy(&build.stderr)
+            );
+            assert!(Command::new(dir.join("run")).status().unwrap().success());
+        }
+    }
+}

@@ -62,3 +62,9 @@ U hand_dispatch(const unsigned char *op, const U *data, unsigned n) {
   } while (--n);
   return x ^ y;
 }
+
+U hand_across(const U *p, U seed) {
+  U sum = 0;
+  for (unsigned i = 0; i < 12; i++) sum += p[i];
+  return sum + callback(seed);
+}

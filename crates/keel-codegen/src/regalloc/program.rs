@@ -32,6 +32,55 @@ pub enum OperandKind {
     Def,
 }
 
+/// A lowering sequence reads all early operands before writing late operands.
+/// Internal machine instructions still use globally reserved scratch registers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperandPosition {
+    Early,
+    Late,
+}
+
+/// The semantic motion contract shared by scheduling and allocation clients.
+/// This does not describe a sequence's internal physical register effects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SequenceMotion {
+    /// Nontrapping wrapping integer arithmetic, with no memory or flag input.
+    Integer,
+    /// Retain its position relative to other anchored sequences.
+    Anchored,
+}
+
+impl SequenceMotion {
+    pub(crate) fn of(func: &Function, inst: Inst) -> Self {
+        use keel_ir::BinaryOp;
+        if matches!(
+            func.inst_data(inst),
+            InstData::Binary {
+                op: BinaryOp::Iadd
+                    | BinaryOp::Isub
+                    | BinaryOp::Imul
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::Xor
+                    | BinaryOp::Shl
+                    | BinaryOp::Ushr
+                    | BinaryOp::Sshr
+                    | BinaryOp::Rotl
+                    | BinaryOp::Rotr,
+                ..
+            }
+        ) && func
+            .inst_results(inst)
+            .first()
+            .is_some_and(|&v| matches!(func.value_type(v), Type::I32 | Type::I64))
+        {
+            Self::Integer
+        } else {
+            Self::Anchored
+        }
+    }
+}
+
 /// Requirements at a selected instruction's boundary. Internal fixed and tied
 /// machine operands are handled by lowering using the globally reserved regs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +97,9 @@ pub enum Constraint {
 pub struct Operand {
     pub part: ValuePart,
     pub kind: OperandKind,
+    pub position: OperandPosition,
+    /// Exact IR width, including vectors and the independently allocated i128 halves.
+    pub ty: Type,
     pub float: bool,
     pub constraint: Constraint,
 }
@@ -87,6 +139,11 @@ impl AllocationInput<'_> {
                 visit(Operand {
                     part,
                     kind,
+                    position: match kind {
+                        OperandKind::Use => OperandPosition::Early,
+                        OperandKind::Def => OperandPosition::Late,
+                    },
+                    ty,
                     float: ty.is_float() || ty.is_vector(),
                     constraint: self.selection.constraint(inst, part, kind),
                 });
@@ -98,6 +155,16 @@ impl AllocationInput<'_> {
             if self.func.resolve(v) == v && !self.selection.omitted_defs.contains(&v) {
                 emit(v, OperandKind::Def);
             }
+        }
+    }
+
+    /// Only plain, unclaimed arithmetic has a motion proof. A custom selector
+    /// or a target cover may hide memory, flags or helper calls in its sequence.
+    pub fn motion(&self, inst: Inst) -> SequenceMotion {
+        if self.selection.is_free(inst) && !self.selection.has_operand_override(inst) {
+            SequenceMotion::of(self.func, inst)
+        } else {
+            SequenceMotion::Anchored
         }
     }
 
@@ -121,6 +188,18 @@ impl AllocationInput<'_> {
             }
         }
     }
+    /// Destruction of a value of `ty`, including partial SIMD preservation.
+    /// The supported ABIs preserve at most scalar FP contents across calls;
+    /// no callee-saved SIMD register preserves an entire vector value.
+    pub fn for_each_clobber_for_type(&self, inst: Inst, ty: Type, mut visit: impl FnMut(Loc)) {
+        self.for_each_clobber(inst, &mut visit);
+        if ty.is_vector() && (self.is_call)(self.func.inst_data(inst)) {
+            for &register in self.pools.float_callee_saved {
+                visit(Loc::FReg(register));
+            }
+        }
+    }
+
     pub fn returns_twice(&self, inst: Inst) -> bool {
         (self.returns_twice)(self.func.inst_data(inst))
     }
@@ -599,6 +678,17 @@ block0(v0: i64, v1: i64):
         assert_eq!(operands[0], operands[2]);
         assert_eq!(operands[1], operands[3]);
         assert_eq!(operands[4].kind, OperandKind::Def);
+        assert!(
+            operands[..4]
+                .iter()
+                .all(|op| op.position == OperandPosition::Early)
+        );
+        assert!(
+            operands[4..]
+                .iter()
+                .all(|op| op.position == OperandPosition::Late)
+        );
+        assert!(operands.iter().all(|op| op.ty == Type::I128));
         assert!(operands[5].part.high);
     }
     #[test]
@@ -619,4 +709,26 @@ block0(v0: i64, v1: i64):
             vec![Value::new(1), Value::new(0), Value::new(0)]
         );
     }
+    #[test]
+    fn vector_clobbers_include_scalar_preserved_simd_without_losing_gpr_proofs() {
+        let module = keel_ir::parse("decl @callee(i64) -> i64\nfunc @f(i64x2,i64) -> i64 {\nblock0(v0:i64x2,v1:i64):\n v2 = call @callee(v1)\n return v2\n}").unwrap();
+        let func = &module.functions[0];
+        let block = func.entry_block().unwrap();
+        let call = func.block_insts(block)[0];
+        let pools = Pools { float_callee_saved: &[8], ..POOLS };
+        let mut selection = Selection::default();
+        selection.preserved_call_gprs.insert(call, 1 << 9);
+        let input = AllocationInput {
+            func, pools: &pools, selection: &selection,
+            is_call: &|data| matches!(data, InstData::Call { .. }),
+            returns_twice: &|_| false,
+        };
+        let mut scalar = Vec::new();
+        input.for_each_clobber_for_type(call, Type::F64, |loc| scalar.push(loc));
+        assert_eq!(scalar, [Loc::Reg(10), Loc::FReg(20)]);
+        let mut vector = Vec::new();
+        input.for_each_clobber_for_type(call, func.value_type(func.block_params(block)[0]), |loc| vector.push(loc));
+        assert_eq!(vector, [Loc::Reg(10), Loc::FReg(20), Loc::FReg(8)]);
+    }
+
 }

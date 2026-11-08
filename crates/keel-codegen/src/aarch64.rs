@@ -324,7 +324,8 @@ pub(crate) fn compile_output(
             continue;
         }
         let _function_profile = crate::backend_profile::function(&original.name);
-        let func = vector::lower(original);
+        let lowered = vector::lower(original);
+        let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
         let mut compiler = FunctionCompiler::new_for_target(
             &func,
             &symbols,
@@ -1526,6 +1527,15 @@ impl<'a> FunctionCompiler<'a> {
         use crate::select::Machine;
         let ty = self.ty(matched.args[0]);
         let a = self.use_reg(matched.args[0], S0);
+        if let Machine::RorImmediate { amount } = matched.machine {
+            let d = self.def_reg(result);
+            self.mach(
+                "ror",
+                [reg(d, ty).into(), reg(a, ty).into(), Arg::imm(amount)],
+            );
+            self.def_done(result, d);
+            return;
+        }
         if let Machine::Ubfx { lsb, width } = matched.machine {
             let d = self.def_reg(result);
             self.native(
@@ -1694,7 +1704,9 @@ impl<'a> FunctionCompiler<'a> {
                 let add = self.widening_adds[&inst];
                 self.vector_widening_add(add, result);
             }
-            Some(Cover::Aarch64Ubfx | Cover::Aarch64MultiplyShift) => {
+            Some(
+                Cover::Aarch64Ubfx | Cover::Aarch64MultiplyShift | Cover::Aarch64RotateImmediate,
+            ) => {
                 let matched = self.selection.matches[&inst].clone();
                 self.selected(result, matched);
             }
@@ -1702,6 +1714,7 @@ impl<'a> FunctionCompiler<'a> {
             // covers own the covered `ptradd`, which never reaches here.
             Some(
                 Cover::OffsetAddress
+                | Cover::BoundedSwitch
                 | Cover::IndexedAddress
                 | Cover::ZeroTest
                 | Cover::CompareBranch
@@ -3969,6 +3982,7 @@ impl<'a> FunctionCompiler<'a> {
         site: Option<Inst>,
     ) {
         // Allocation identity remains `inst`; only assembly identities vary.
+        let allocation_inst = inst;
         let inst = site.map_or_else(|| inst.to_string(), |site| format!("{inst}_tail{site}"));
         let ty = self.ty(arg);
         let is64 = ty == Type::I64;
@@ -3976,7 +3990,12 @@ impl<'a> FunctionCompiler<'a> {
         let mask = u64::MAX >> (64 - 8 * ty.bytes().expect("integer"));
         let x = self.use_reg(arg, S0);
         let x = self.extend(S0, x, ty, false);
-        let plan = SwitchPlan::new(cases, mask);
+        let mut plan = SwitchPlan::new(cases, mask);
+        let bounded = self
+            .selection
+            .switch_bounds
+            .get(&allocation_inst)
+            .is_some_and(|&range| plan.bound(range));
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
@@ -3995,8 +4014,10 @@ impl<'a> FunctionCompiler<'a> {
                 self.mach("sub", [(reg(S0, ty)).into(), (reg(x, ty)).into(), (sub)]);
                 S0
             };
-            self.mach("cmp", [(reg(idx, ty)).into(), Arg::imm(span)]);
-            self.conditional("hi", Name::Text(&targets[0]));
+            if !bounded {
+                self.mach("cmp", [(reg(idx, ty)).into(), Arg::imm(span)]);
+                self.conditional("hi", Name::Text(&targets[0]));
+            }
             let table = format!("L{}_{inst}_table", self.func.name);
             let index = Address::index(
                 Reg::x(S1),

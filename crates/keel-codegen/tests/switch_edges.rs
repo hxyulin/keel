@@ -101,3 +101,86 @@ block3:
         }
     }
 }
+
+#[test]
+fn masked_switches_fill_both_default_entries_before_dropping_bounds_checks() {
+    use keel_codegen::{
+        InstructionSelector, OptionsSelector, SelectionOptions, Target, cover::Cover,
+    };
+    let source = "func @bounded(i64) -> i64 cc(c) {
+block0(v0:i64):
+ v1 = iconst.i64 7
+ v2 = and v0, v1
+ switch v2, block2(v2), [1:block1(v2),2:block1(v2),3:block1(v2),4:block1(v2),5:block1(v2),6:block1(v2)]
+block1(v3:i64):
+ v4 = iconst.i64 10
+ v5 = iadd v3, v4
+ return v5
+block2(v6:i64):
+ v7 = iconst.i64 20
+ v8 = iadd v6, v7
+ return v8
+}";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let mut reference = SelectionOptions::ALL;
+    reference.covers.remove(Cover::BoundedSwitch);
+    for target in Target::NATIVE {
+        for options in [SelectionOptions::ALL, reference] {
+            let selector = OptionsSelector(options);
+            let selected = selector.select(
+                &module.functions[0],
+                keel_codegen::select::Target::Aarch64,
+                &|_| vec![],
+            );
+            let proven = options.covers.contains(Cover::BoundedSwitch);
+            // Ablation preserves the explicit checking route.
+            assert_eq!(
+                selected.owner(
+                    module.functions[0].block_insts(module.functions[0].entry_block().unwrap())[2]
+                ),
+                proven.then_some(Cover::BoundedSwitch)
+            );
+            let assembly = keel_codegen::compile_with_pipeline(
+                &module,
+                target,
+                &CodegenPipeline {
+                    selector: &selector,
+                    allocator: &AllocationTier::Full,
+                },
+            )
+            .unwrap();
+            assert_eq!(assembly.contains("\tcmp\t"), !proven, "{assembly}");
+            if Some(target) == Target::host() {
+                let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+                    .join(format!("switch-range-{proven}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("f.s"), assembly).unwrap();
+                std::fs::write(dir.join("driver.c"), "#include <stdint.h>\nextern uint64_t bounded(uint64_t); int main(void) { uint64_t x=1; for(unsigned i=0;i<10000;i++){x^=x<<13;x^=x>>7;x^=x<<17;uint64_t k=x&7;if(bounded(x)!=k+((k>=1&&k<=6)?10:20))return 1;}return 0;}").unwrap();
+                let build = std::process::Command::new("clang")
+                    .current_dir(&dir)
+                    .args(["f.s", "driver.c", "-o", "run"])
+                    .output()
+                    .unwrap();
+                assert!(
+                    build.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&build.stderr)
+                );
+                assert!(
+                    std::process::Command::new(dir.join("run"))
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }
+        }
+        let unknown = keel_ir::parse(&source.replace("and v0, v1", "or v0, v1")).unwrap();
+        let assembly =
+            keel_codegen::compile_with_options(&unknown, target, SelectionOptions::ALL).unwrap();
+        assert!(
+            assembly.contains("\tcmp\t"),
+            "unknown range lost bounds check: {assembly}"
+        );
+    }
+}

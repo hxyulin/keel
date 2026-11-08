@@ -1,8 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 typedef __UINT64_TYPE__ U;
-U callback(U x) { return (x ^ 0x9e3779b97f4a7c15ULL) + 1; }
+static U *mutate;
+static unsigned calls;
+U callback(U x) {
+  calls++;
+  if (mutate) for (unsigned i = 0; i < 12; i++) mutate[i] ^= ~(U)i;
+  return (x ^ 0x9e3779b97f4a7c15ULL) + 1;
+}
 #define DECL(P)                                                                \
+  U P##across(const U *, U);                                                   \
   U P##cold_call(U, unsigned);                                                 \
   U P##dispatch(const unsigned char *, const U *, unsigned);                   \
   U P##pressure(const U *, unsigned);                                          \
@@ -51,6 +58,21 @@ int main(void) {
         U x = rand64(&seed);
         CHECK(keel_cold_call(x, f), clang_cold_call(x, f));
         CHECK(hand_cold_call(x, f), clang_cold_call(x, f));
+      }
+    }
+    U (*functions[])(const U *, U) = {keel_across, clang_across, hand_across};
+    for (unsigned trial = 0; trial < 100; trial++) {
+      U original[12], expected = 0, argument = rand64(&seed);
+      for (unsigned i = 0; i < 12; i++) expected += original[i] = rand64(&seed);
+      expected += (argument ^ 0x9e3779b97f4a7c15ULL) + 1;
+      for (unsigned f = 0; f < 3; f++) {
+        U input[12];
+        for (unsigned i = 0; i < 12; i++) input[i] = original[i];
+        mutate = input; calls = 0;
+        CHECK(functions[f](input, argument), expected);
+        if (calls != 1) return 2;
+        for (unsigned i = 0; i < 12; i++) if (input[i] != (original[i] ^ ~(U)i)) return 3;
+        mutate = 0;
       }
     }
     puts("all kernel oracles passed");

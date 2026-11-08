@@ -498,6 +498,8 @@ message. The plan, raw runs and report go to `target/keel-suite/ab/runs/<time>/`
 | `--no-lock` | Do not lock executable pages on Linux |
 | `--seed N` | Seed of the run order |
 | `--candidate-isel LIST` | Also pass `--isel LIST` to the candidate, so one binary can time one cover; the trailer records it |
+| `--candidate-regalloc TIER` | Override the candidate allocator; Local/Split need a compiler built with `experimental-regalloc` |
+| `--candidate-pressure-schedule` | Enable the candidate’s bounded integer pressure scheduler |
 | `--candidate-lto` | Also build the candidate as one program, as `keel-O-lto` does, so one binary can time whole-program compilation; the trailer records it |
 
 ## Checking runtime slowdowns

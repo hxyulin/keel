@@ -37,23 +37,35 @@ fn native_control_and_pressure_match_handwritten_and_clang() {
         "-o",
         "clang.o",
     ]));
-    for tier in ["-O1", "-O3"] {
-        run(Command::new(env!("CARGO_BIN_EXE_keel"))
-            .current_dir(&dir)
-            .args([
-                "cc",
-                tier,
-                "--link-intent",
-                "executable",
-                "--verify-each",
-                "--emit-object",
-                "kernels.c",
-                "-o",
-                "keel.o",
-            ]));
-        run(Command::new("clang").current_dir(&dir).args([
-            "-O2", "oracle.c", "hand.c", "keel.o", "clang.o", "-o", "oracle",
-        ]));
-        run(&mut Command::new(dir.join("oracle")));
+    let allocators = ["fast", "full"];
+    for tier in ["-O0", "-O1", "-O3"] {
+        for allocator in allocators {
+            for scheduled in [false, true] {
+                run(Command::new(env!("CARGO_BIN_EXE_keel"))
+                    .current_dir(&dir)
+                    .arg("cc")
+                    .args(if scheduled {
+                        vec!["--schedule-pressure"]
+                    } else {
+                        vec![]
+                    })
+                    .args([
+                        tier,
+                        "--regalloc",
+                        allocator,
+                        "--link-intent",
+                        "executable",
+                        "--verify-each",
+                        "--emit-object",
+                        "kernels.c",
+                        "-o",
+                        "keel.o",
+                    ]));
+                run(Command::new("clang").current_dir(&dir).args([
+                    "-O2", "oracle.c", "hand.c", "keel.o", "clang.o", "-o", "oracle",
+                ]));
+                run(&mut Command::new(dir.join("oracle")));
+            }
+        }
     }
 }

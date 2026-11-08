@@ -16,6 +16,10 @@ pub enum Target {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum Machine {
+    /// AArch64 scalar rotation with its masked right-rotation count.
+    RorImmediate {
+        amount: u8,
+    },
     Madd,
     Msub,
     ShiftAdd,
@@ -97,6 +101,7 @@ impl OperandTable {
 
 #[derive(Default, Debug)]
 pub struct Selection {
+    pub(crate) switch_bounds: HashMap<Inst, (u64, u64)>,
     constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
     /// Dense per-instruction "has any constraint" flags mirroring `constraints`.
     constrained: Vec<bool>,
@@ -766,6 +771,9 @@ impl Selection {
             && !self.matches.contains_key(&inst)
             && !self.has_constraint(inst)
     }
+    pub(crate) fn has_operand_override(&self, inst: Inst) -> bool {
+        self.allocation_operands.get(&inst).is_some()
+    }
     pub fn operands(&self, func: &Function, inst: Inst) -> Vec<Value> {
         if self.covered(inst) || func.inst_data(inst).is_lifetime_marker() {
             return vec![];
@@ -872,6 +880,7 @@ impl Selection {
             Some(uses) => std::borrow::Cow::Borrowed(uses),
             None => std::borrow::Cow::Owned(crate::fold::use_counts(func)),
         };
+        let facts = crate::value_bits::ValueBits::new(func);
         // Reverse block/instruction order gives larger consumers first choice
         // without allocating another entry for every instruction. Block ownership
         // is already stored in Function; no Inst-to-Block hash table is needed.
@@ -883,6 +892,64 @@ impl Selection {
         for &block in blocks.iter().rev() {
             for (end, &inst) in func.block_insts(block).iter().enumerate().rev() {
                 if plan.covered(inst) {
+                    continue;
+                }
+                if plan.enabled(Cover::BoundedSwitch)
+                    && let InstData::Switch { arg, cases, .. } = func.inst_data(inst)
+                    && let Some(bytes) = func.value_type(func.resolve(*arg)).bytes()
+                    && bytes <= 8
+                {
+                    let mask = u64::MAX >> (64 - 8 * bytes);
+                    let mut switch = crate::lowering::SwitchPlan::new(cases, mask);
+                    // Reject sparse cases before requesting any value analysis.
+                    if switch.jump_table()
+                        && let Some(bounds) = facts.unsigned_bounds(*arg)
+                        && switch.bound(bounds)
+                    {
+                        plan.claim(Cover::BoundedSwitch, inst);
+                        plan.switch_bounds.insert(inst, bounds);
+                    }
+                    continue;
+                }
+                if target == Target::Aarch64
+                    && plan.enabled(Cover::Aarch64RotateImmediate)
+                    && let InstData::Binary {
+                        op: BinaryOp::Rotl | BinaryOp::Rotr,
+                        args,
+                    } = *func.inst_data(inst)
+                    && matches!(
+                        func.value_type(func.resolve(args[0])),
+                        Type::I32 | Type::I64
+                    )
+                    && let Some(count) = crate::fold::iconst(func, args[1])
+                {
+                    let width = if func.value_type(func.resolve(args[0])) == Type::I64 {
+                        64
+                    } else {
+                        32
+                    };
+                    let right = if matches!(
+                        func.inst_data(inst),
+                        InstData::Binary {
+                            op: BinaryOp::Rotl,
+                            ..
+                        }
+                    ) {
+                        count.wrapping_neg()
+                    } else {
+                        count
+                    };
+                    plan.claim(Cover::Aarch64RotateImmediate, inst);
+                    plan.matches.insert(
+                        inst,
+                        Match {
+                            machine: Machine::RorImmediate {
+                                amount: (right as u64 & (width - 1)) as u8,
+                            },
+                            args: vec![func.resolve(args[0])],
+                            shift: 0,
+                        },
+                    );
                     continue;
                 }
                 // Preserve the quotient and its trap guard at the original
