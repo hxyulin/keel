@@ -502,3 +502,29 @@ fn semantic_inlining_permission_is_not_an_exact_binding_summary() {
         2
     );
 }
+
+#[test]
+fn bounded_multiblock_scalar_body_preserves_reads() {
+    let helper = "func @leaf(ptr, i64) -> i64 local {\nblock0(v0: ptr, v1: i64):\n brif v1, block1, block2\nblock1:\n v2 = iadd v1, v1\n return v2\nblock2:\n return v1\n}";
+    assert_eq!(
+        loads(&optimize(&source(helper, "v4 = call @leaf(v0, v1)"))),
+        1
+    );
+    let impure = helper.replace("block2:\n", "block2:\n store v1, v0\n");
+    assert_eq!(
+        loads(&optimize(&source(&impure, "v4 = call @leaf(v0, v1)"))),
+        2
+    );
+    for (blocks, expected) in [(16, 1), (17, 2)] {
+        let mut helper =
+            "func @leaf(ptr, i64) -> i64 local {\nblock0(v0: ptr, v1: i64):\n".to_string();
+        for b in 1..blocks {
+            helper.push_str(&format!(" jump block{b}\nblock{b}:\n"));
+        }
+        helper.push_str(" return v1\n}");
+        assert_eq!(
+            loads(&optimize(&source(&helper, "v4 = call @leaf(v0, v1)"))),
+            expected
+        );
+    }
+}

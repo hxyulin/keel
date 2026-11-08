@@ -118,15 +118,14 @@ fn summary_candidate(f: &Function) -> bool {
         && f.debug_vars.is_empty()
         && f.debug_loc.is_none()
         && f.num_values() <= 512
-        && f.blocks().take(2).count() == 1
-        && f.entry_block().is_some_and(|b| {
-            let insts = f.block_insts(b);
-            insts.len() <= 128
-                && insts.iter().all(|&i| {
-                    f.inst_loc(i).is_none()
-                        && (scalar(f.inst_data(i))
-                            || matches!(f.inst_data(i), InstData::Return { .. } | InstData::Call { .. }))
-                })
+        && f.blocks().take(17).count() <= 16
+        && f.entry_block().is_some()
+        && f.layout_insts().take(129).count() <= 128
+        && f.layout_insts().all(|(_, i)| {
+            f.inst_loc(i).is_none()
+                && (scalar(f.inst_data(i))
+                    || matches!(f.inst_data(i), InstData::Return { .. } | InstData::Call { .. }
+                        | InstData::Jump { .. } | InstData::Brif { .. }))
         })
 }
 
@@ -170,7 +169,7 @@ fn run(module: &mut Module) -> bool {
     // Synchronous bottom-up rounds: each round may use only earlier proofs.
     // This rejects recursion (including SCCs with an outgoing pure leaf), makes
     // the depth limit independent of module order, and avoids recursive DFS or
-    // unbounded fixed-point work. Each body has at most 128 instructions.
+    // unbounded fixed-point work. Each body has at most 128 instructions and 16 blocks.
     for _ in 0..=MAX_CALL_DEPTH {
         let proven: Vec<_> = candidates
             .iter()

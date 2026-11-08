@@ -90,6 +90,7 @@ impl From<VectorTarget> for OptimizationContext {
     }
 }
 
+mod bounded_stack_dse;
 mod branch_facts;
 mod memory_alias;
 mod memory_forward;
@@ -332,6 +333,11 @@ pub(crate) static PHI_SIMPLIFY: &dyn Pass = &BuiltinPass::new(
     "replace trivial block parameters with their dominating incoming value",
     |f, _| phi_simplify::run(f),
 );
+pub(crate) static BOUNDED_STACK_DSE: &dyn Pass = &BuiltinPass::new(
+    "bounded-stack-dse",
+    "remove overwritten notrap stores to proven private stack bytes (opt-in)",
+    |f, _| bounded_stack_dse::run(f),
+);
 pub(crate) static MEMORY_FORWARD: &dyn Pass = &BuiltinPass::new(
     "memory-forward",
     "forward exact-address ordinary loads and stores within a block",
@@ -429,6 +435,7 @@ pub static PASSES: &[&dyn Pass] = &[
     INSTCOMBINE,
     PHI_SIMPLIFY,
     MEMORY_FORWARD,
+    BOUNDED_STACK_DSE,
     KNOWN_BITS,
     CANONICALIZE,
     STACK_FORWARD,

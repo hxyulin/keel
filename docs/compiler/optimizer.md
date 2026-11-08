@@ -117,6 +117,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `call-contracts` | Apply direct `noreturn` and `nounwind` contracts; see [function attributes](function-attributes.md#optimizer-consumers) |
 | `memory-forward` (opt-in) | Block-local exact-address load reuse and store-to-load forwarding |
 | `load-reuse` | Bounded cross-block load reuse |
+| `bounded-stack-dse` (opt-in) | Remove covered notrap stores to private stack bytes within a block |
 | `call-load-reuse` (opt-in) | Load reuse across calls with explicit scoped call contracts |
 | `known-bits` | Fold masks and comparisons from known-zero and known-one bits |
 | `phi-simplify` | Replace uniform block arguments with a dominating value |
@@ -527,11 +528,36 @@ prevent this loop transform. No fixed-point memory analysis runs.
 
 `call-load-reuse` also reuses loads across calls whose explicit scoped
 contracts promise no accessible writes, no freeing, no synchronization, no
-callbacks and preserved object accessibility. See
+callbacks and preserved object accessibility. It can also prove a uniquely
+bound local or noninterposable body with at most 16 blocks, 128 instructions
+and 512 values. Those bodies contain only whitelisted integer operations,
+ordinary direct calls to already proven bodies, jumps, conditional branches
+and returns. Recursive call cycles and chains deeper than eight edges have no
+summary. Memory operations, trapping arithmetic, indirect calls, lifetime
+operations and frame observers have no summary. Calls and the first successful
+read remain in place, including when a scalar body does not terminate. This
+pass is absent from tier presets pending application A/B evidence. See
 [LLVM import](../frontends/llvm.md).
 
 Block snapshots are released after their last successor is visited. Local
 cleanup keeps one reusable fact table and does not allocate block snapshots.
+
+### bounded-stack-dse (opt-in)
+
+`bounded-stack-dse` removes an ordinary `notrap` store when a later ordinary
+`notrap` store in the same block covers all its bytes. It tracks at most 64
+pending stores in functions with at most 8192 layout instructions and 32768
+value entries. Constant stack address propagation stops after eight scans.
+Only in-bounds fixed stack objects whose addresses have no unrecognized uses
+qualify. Pointer stores, volatile and atomic accesses, address escapes, frame
+observers, stack save/restore, assembly and exception continuations exclude
+objects or functions. Debug variable homes and function debug locations exclude
+the function. Reads, calls, pinned instructions, lifetime starts and ends, and
+instruction source locations clear the pending stores. It never removes a
+potentially trapping store. Run `stack-notrap` first to expose eligible accesses;
+this pass is absent from tier presets pending application A/B evidence.
+
+Tests: `cargo test -p keel-opt --test bounded_stack_dse`.
 
 ### stack-promote
 
