@@ -31,7 +31,7 @@ completion ledgers or per-feature progress pages.
 | C | [Frontend](frontends/c/README.md), [extensions](frontends/c/extensions.md), [attributes](compiler/function-attributes.md) |
 | Optimization | [Levels](compiler/optimization-levels.md), [optimizer contracts](compiler/optimizer.md), [SIMD IR](compiler/simd-ir.md) |
 | LLVM import | [Semantics](frontends/llvm.md), [frontend runner](../suite/README.md) |
-| Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [archives](linking/archives.md), [unwind](linking/unwind.md) |
+| Native linking | [ELF](linking/elf.md), [GNU scripts](linking/gnu-scripts.md), [macOS](linking/macho.md), [semantic object units](../crates/keel-object/README.md), [archives](linking/archives.md), [unwind](linking/unwind.md) |
 | x86-64 | [Entry point](targets/x86_64/README.md), [code generation](targets/x86_64/codegen.md), [assembler](targets/x86_64/assembler.md), [GNU syntax](targets/x86_64/gnu-assembly-language.md), [intrinsics](targets/x86_64/intrinsics.md), [inline assembly](targets/x86_64/c-inline-asm.md), [system](targets/x86_64/system/README.md), [F80](targets/x86_64/f80/README.md), [structural coverage](targets/x86_64/coverage/README.md) |
 | AArch64 | [Entry point](targets/aarch64/README.md), [code generation](targets/aarch64/codegen.md), [assembler and DWARF line tables](targets/aarch64/assembler.md), [inline assembly](targets/aarch64/c-inline-asm.md) |
 | Other targets | [All targets](targets/README.md), [WebAssembly](targets/wasm/README.md), [WebAssembly C profile](targets/wasm/c-frontend.md) |
