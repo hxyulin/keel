@@ -37,6 +37,7 @@ links (`-r`) take `relocatable.rs`.
 | `read.rs` | Mach-O object/archive reading and semantic unit adaptation |
 | `extract.rs` | Fixed-point Mach-O archive member extraction |
 | `gc.rs` | Mach-O dead-section collection |
+| `symbols.rs` | Stable global IDs and ordered selected definitions |
 | `parallel.rs` | Ordered scoped workers for independent Mach-O work |
 | `tbd.rs` | Bounded TAPI v4 dylib interfaces |
 | `unwind.rs` | `__unwind_info` from compact unwind entries |

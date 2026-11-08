@@ -1786,7 +1786,7 @@ mod tests {
                 .map(|s| (s.data.as_ptr(), s.output.unwrap()))
                 .collect();
             l.layout().unwrap();
-            let main = l.address(l.globals["_main"]).unwrap();
+            let main = l.address(*l.globals.get("_main").unwrap()).unwrap();
             l.relocate().unwrap();
             for ((pointer, id), input) in original.into_iter().zip(&l.objects[0].sections) {
                 let out = &l.outputs[id];

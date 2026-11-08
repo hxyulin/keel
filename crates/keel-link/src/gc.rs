@@ -267,8 +267,8 @@ impl<'a, 'data> Graph<'a, 'data> {
             .ok_or("relocation symbol index out of range")?;
         self.demanded[oi][si] = true;
         let (oi, si) = if s.kind & 1 != 0 || s.kind & 0xe == 0 {
-            match linker.globals.get(&s.name) {
-                Some(Target::Definition(o, s)) => (*o, *s),
+            match linker.global_target(oi, si) {
+                Some(Target::Definition(o, s)) => (o, s),
                 Some(Target::Header) => return Ok(None),
                 None if self.common_ids.contains_key(s.name.as_str()) => {
                     return Ok(Some(Place::Common(s.name.as_str())));
@@ -574,11 +574,12 @@ impl<'a, 'data> Graph<'a, 'data> {
                 let start = if rel.external {
                     let original = &linker.objects[oi].symbols[rel.symbol as usize];
                     let sym = if original.kind & 0xe == 0 {
-                        let Some(Target::Definition(o, id)) = linker.globals.get(&original.name)
+                        let Some(Target::Definition(o, id)) =
+                            linker.global_target(oi, rel.symbol as usize)
                         else {
                             return fail("dead_strip: unwind owner is not an input definition");
                         };
-                        &linker.objects[*o].symbols[*id]
+                        &linker.objects[o].symbols[id]
                     } else {
                         original
                     };

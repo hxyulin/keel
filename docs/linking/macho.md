@@ -74,8 +74,14 @@ boundary validation and marking; foreign pairs retain their validation order.
 GOT/stub discovery tracks each symbol's branch and GOT uses independently,
 so repeated references do not rebuild keys or repeat map updates. A static branch
 can still be followed by a GOT reference to the same symbol.
-Local symbol targets resolve directly from their object and symbol IDs. The
-final global-lookup table omits trailing locals, including native atom symbols.
+Local symbol targets resolve directly from their object and symbol IDs.
+Definitions and commons receive stable numeric global IDs before GC. Forward
+references reuse those IDs; otherwise unresolved names are interned only after
+GC demands them. Each source symbol keeps its own reference flags. GC, undefined
+reference aggregation and relocation read the selected target by ID. Object ID
+tables omit trailing locals, including native atom symbols. Discarding a
+definition does not change its ID. Imports and emitted definitions retain name
+order, including weak/strong selection and per-source live import demand.
 
 Relocation workers append rebase addresses to flat buffers. Emission sorts and
 deduplicates the merged addresses once. Unwind generation decodes each object's

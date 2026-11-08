@@ -10,12 +10,14 @@ mod gc;
 mod parallel;
 mod read;
 mod sign;
+mod symbols;
 mod tbd;
 mod unwind;
 mod write;
 use read::{Object, Symbol};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use symbols::{GlobalId, Globals};
 pub use tbd::Dylib;
 
 /// A link failure. The message names the input, section or symbol involved.
@@ -160,7 +162,7 @@ pub(crate) struct Linker<'a> {
     discarded: BTreeSet<(usize, usize)>,
     demanded: Option<Vec<Vec<bool>>>,
     outputs: Vec<OutputSection>,
-    globals: BTreeMap<String, Target>,
+    globals: Globals,
     imports: Vec<(String, i32)>,
     weak_imports: BTreeSet<usize>,
     weak_names: BTreeSet<String>,
@@ -177,10 +179,8 @@ pub(crate) struct Linker<'a> {
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
     warnings: Vec<String>,
-    /// Global lookup results through each object's last non-local symbol.
-    /// Locals resolve directly, so trailing local atoms need no table entries.
-    /// `None` marks an undefined name. Empty until `globals` is final.
-    resolved: Vec<Vec<Option<Target>>>,
+    /// Interned identities through each object's last non-local symbol.
+    symbol_globals: Vec<Vec<Option<GlobalId>>>,
 }
 
 // These names are assembler labels: no C ABI underscore is added.
@@ -400,7 +400,7 @@ fn prepare_with_objects<'a>(
         discarded: BTreeSet::new(),
         demanded: None,
         outputs: Vec::new(),
-        globals: BTreeMap::new(),
+        globals: Globals::default(),
         imports: Vec::new(),
         weak_imports: BTreeSet::new(),
         weak_names: BTreeSet::new(),
@@ -417,7 +417,7 @@ fn prepare_with_objects<'a>(
         binds: BTreeMap::new(),
         options,
         warnings: Vec::new(),
-        resolved: Vec::new(),
+        symbol_globals: Vec::new(),
     };
     // Embedded LLVM bitcode (`__LLVM,__bitcode` and `__LLVM,__cmdline`, as
     // in Rust's prebuilt standard library) is input for LLVM's tools, never
@@ -463,7 +463,26 @@ impl Linker<'_> {
     }
     fn prepare(&mut self) -> Result<()> {
         self.globals
-            .insert("__mh_execute_header".into(), Target::Header);
+            .insert("__mh_execute_header".into(), Target::Header)?;
+        for o in &self.objects {
+            let end = o
+                .symbols
+                .iter()
+                .rposition(|s| s.kind & 1 != 0 || s.kind & 0xe == 0)
+                .map_or(0, |i| i + 1);
+            let mut ids = Vec::with_capacity(end);
+            for s in &o.symbols[..end] {
+                ids.push(
+                    if (s.kind & 1 != 0 || s.kind & 0xe == 0) && (s.kind & 0xe != 0 || s.value != 0)
+                    {
+                        Some(self.globals.intern(&s.name)?)
+                    } else {
+                        None
+                    },
+                );
+            }
+            self.symbol_globals.push(ids);
+        }
         let mut commons: BTreeMap<String, (u64, u32, bool)> = BTreeMap::new();
         for (oi, o) in self.objects.iter().enumerate() {
             self.options.minimum_macos = self.options.minimum_macos.max(o.minimum);
@@ -485,20 +504,25 @@ impl Linker<'_> {
                 if s.desc & 0x80 != 0 {
                     self.weak_names.insert(s.name.clone());
                 }
-                match self.globals.entry(s.name.clone()) {
-                    std::collections::btree_map::Entry::Vacant(entry) => {
-                        entry.insert(Target::Definition(oi, si));
+                let id = self.symbol_globals[oi][si].expect("external symbol has global ID");
+                if let Some(previous) = self.globals.target(id) {
+                    let weak = matches!(previous, Target::Definition(o, sym) if self.objects[o].symbols[sym].desc & 0x80 != 0);
+                    if s.desc & 0x80 != 0 {
+                        continue;
                     }
-                    std::collections::btree_map::Entry::Occupied(mut entry) => {
-                        let weak = matches!(*entry.get(), Target::Definition(o, sym) if self.objects[o].symbols[sym].desc & 0x80 != 0);
-                        if s.desc & 0x80 != 0 {
-                            continue;
-                        }
-                        if !weak {
-                            return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
-                        }
-                        entry.insert(Target::Definition(oi, si));
+                    if !weak {
+                        return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
                     }
+                }
+                self.globals.set(id, Target::Definition(oi, si));
+            }
+        }
+        // Definitions are final before binding forward references. Unknown
+        // names stay uninterned until a live reference demands them after GC.
+        for (oi, o) in self.objects.iter().enumerate() {
+            for (si, s) in o.symbols.iter().enumerate() {
+                if s.kind & 0xe == 0 && s.value == 0 {
+                    self.symbol_globals[oi][si] = self.globals.id(&s.name);
                 }
             }
         }
@@ -613,24 +637,38 @@ impl Linker<'_> {
             if private {
                 self.private_commons.insert(name.clone());
             }
-            self.globals.insert(name, Target::Common(off));
+            self.globals.insert(name, Target::Common(off))?;
         }
-        let mut undefined = BTreeMap::new();
+        let mut undefined = vec![None; self.globals.id_count()];
+        let mut imports = Vec::new();
         for (oi, o) in self.objects.iter().enumerate() {
             for (si, s) in o.symbols.iter().enumerate() {
                 if s.kind & 0xe == 0
                     && s.value == 0
                     && self.demanded.as_ref().is_none_or(|d| d[oi][si])
                 {
-                    let weak = undefined.entry(s.name.clone()).or_insert(true);
+                    let id = if let Some(id) = self.symbol_globals[oi][si] {
+                        id
+                    } else {
+                        let id = self.globals.intern(&s.name)?;
+                        self.symbol_globals[oi][si] = Some(id);
+                        id
+                    };
+                    if undefined.len() <= id.index() {
+                        undefined.resize(id.index() + 1, None);
+                    }
+                    let entry = &mut undefined[id.index()];
+                    if entry.is_none() && self.globals.target(id).is_none() {
+                        imports.push((s.name.clone(), id));
+                    }
+                    let weak = entry.get_or_insert(true);
                     *weak &= s.desc & 0x40 != 0;
                 }
             }
         }
-        for (name, weak) in undefined {
-            if self.globals.contains_key(&name) {
-                continue;
-            }
+        imports.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (name, global) in imports {
+            let weak = undefined[global.index()].expect("demanded import has reference flags");
             // ld64 searches selected libraries before inventing boundary atoms.
             if !self
                 .options
@@ -668,7 +706,7 @@ impl Linker<'_> {
                     // Like ld64/lld, a missing section denotes an empty span.
                     self.output(segment, section, 0, 0)?
                 };
-                self.globals.insert(name, Target::SectionBoundary(id, end));
+                self.globals.set(global, Target::SectionBoundary(id, end));
                 continue;
             }
             let ordinal = match self
@@ -700,30 +738,19 @@ impl Linker<'_> {
                 self.weak_names.insert(name.clone());
             }
             self.imports.push((name.clone(), ordinal));
-            self.globals.insert(name, Target::Import(id));
+            self.globals.set(global, Target::Import(id));
         }
         for dylib in &self.options.dylibs {
             self.weak_names.extend(
                 dylib
                     .weak_exports
                     .iter()
-                    .filter(|n| matches!(self.globals.get(*n), Some(Target::Definition(_, _))))
+                    .filter(|n| matches!(self.globals.get(n), Some(Target::Definition(_, _))))
                     .cloned(),
             );
         }
         // Private extern definitions coalesce statically, never across images.
         self.weak_names.retain(|name| !matches!(self.globals.get(name), Some(Target::Definition(o,s)) if self.objects[*o].symbols[*s].kind & 0x10 != 0));
-        // `globals` is final. Relocations look symbols up by index from here on.
-        self.resolved = (0..self.objects.len())
-            .map(|oi| {
-                let symbols = &self.objects[oi].symbols;
-                let end = symbols
-                    .iter()
-                    .rposition(|s| s.kind & 1 != 0 || s.kind & 0xe == 0)
-                    .map_or(0, |i| i + 1);
-                (0..end).map(|si| self.lookup(oi, si)).collect()
-            })
-            .collect();
         for (oi, o) in self.objects.iter().enumerate() {
             // GOT use and branch use are independent: a static branch may need
             // no entry, while a later page or personality reference still does.
@@ -840,24 +867,16 @@ impl Linker<'_> {
             .symbols
             .get(si)
             .ok_or("relocation symbol index out of range")?;
-        let target = if s.kind & 1 == 0 && s.kind & 0xe != 0 {
-            Some(Target::Definition(oi, si))
+        let target = if s.kind & 1 != 0 || s.kind & 0xe == 0 {
+            self.global_target(oi, si)
         } else {
-            match self.resolved.get(oi) {
-                Some(table) => table[si],
-                None => self.lookup(oi, si),
-            }
+            Some(Target::Definition(oi, si))
         };
         target.ok_or_else(|| format!("undefined symbol `{}`", s.name).into())
     }
-    /// The target `globals` gives symbol `si` of object `oi`; `None` if undefined.
-    fn lookup(&self, oi: usize, si: usize) -> Option<Target> {
-        let s = &self.objects[oi].symbols[si];
-        if s.kind & 1 != 0 || s.kind & 0xe == 0 {
-            self.globals.get(&s.name).copied()
-        } else {
-            Some(Target::Definition(oi, si))
-        }
+    /// The selected target for a source symbol that participates in linkage.
+    fn global_target(&self, oi: usize, si: usize) -> Option<Target> {
+        self.symbol_globals[oi][si].and_then(|id| self.globals.target(id))
     }
     fn symbol_address(&self, oi: usize, symbol: &Symbol) -> Result<u64> {
         if symbol.kind & 0xe == 2 {

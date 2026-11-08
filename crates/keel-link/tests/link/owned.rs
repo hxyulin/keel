@@ -336,3 +336,58 @@ fn dead_native_page_pairs_are_validated_before_pruning() {
         );
     }
 }
+
+#[test]
+fn interned_names_do_not_merge_dead_strong_import_demand() {
+    let main = keel_asm::assemble(".weak_reference _optional\n.globl _main\n_main:\nb _optional\n")
+        .unwrap()
+        .into_object()
+        .unwrap();
+    let dead = keel_asm::assemble(".globl _dead\n_dead:\nb _optional\nb _unique_dead\n")
+        .unwrap()
+        .into_object()
+        .unwrap();
+    let mut opts = options();
+    opts.dead_strip = true;
+    let expected = keel_link::link_objects(
+        vec![ObjectInput {
+            name: "main".into(),
+            object: main.clone(),
+        }],
+        &[],
+        opts,
+    )
+    .unwrap();
+    let caches: Vec<_> = [&main, &dead].iter().map(|o| o.encode().unwrap()).collect();
+    for cached in [false, true] {
+        let mut opts = options();
+        opts.dead_strip = true;
+        let actual = if cached {
+            let inputs: Vec<_> = caches
+                .iter()
+                .map(|bytes| Input {
+                    name: "unit",
+                    bytes,
+                })
+                .collect();
+            keel_link::link_caches(&inputs, &[], opts)
+        } else {
+            keel_link::link_objects(
+                vec![
+                    ObjectInput {
+                        name: "main".into(),
+                        object: main.clone(),
+                    },
+                    ObjectInput {
+                        name: "dead".into(),
+                        object: dead.clone(),
+                    },
+                ],
+                &[],
+                opts,
+            )
+        }
+        .expect("dead strong reference must not override a live weak import");
+        assert_eq!(actual.bytes, expected.bytes);
+    }
+}
