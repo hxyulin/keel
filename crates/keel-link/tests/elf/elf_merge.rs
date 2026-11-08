@@ -278,3 +278,35 @@ fn entry_budget_falls_back_without_partial_pooling() {
         link(&[input], true, false).bytes
     );
 }
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn pooled_constants_and_interior_string_pointers_execute() {
+    use std::os::unix::fs::PermissionsExt;
+    let input = assemble(
+        ".text\n.globl _start\n_start:\n\
+         mov rax,qword ptr [rip+pointers]\n\
+         cmp dword ptr [rax],42\njne bad\n\
+         mov rax,qword ptr [rip+pointers+8]\n\
+         cmp byte ptr [rax],101\njne bad\n\
+         xor edi,edi\nmov eax,60\nsyscall\n\
+         bad: mov edi,1\nmov eax,60\nsyscall\n\
+         .section .rodata.cst8,\"aM\",@progbits,8\n.p2align 3\n\
+         first: .quad 42\n.quad 99\nsecond: .quad 42\n\
+         .section .rodata.str,\"aMS\",@progbits,1\n\
+         text: .asciz \"hello\"\n.asciz \"other\"\nduplicate: .asciz \"hello\"\n\
+         .data\npointers: .quad second\n.quad duplicate+1\n",
+    );
+    let dir = keel_test_support::TempDir::new("elf-merge-execution");
+    for enabled in [false, true] {
+        let executable = link(std::slice::from_ref(&input), enabled, false);
+        let path = dir.join(format!("merge-{enabled}"));
+        std::fs::write(&path, executable.bytes).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            std::process::Command::new(path).status().unwrap().code(),
+            Some(0),
+            "constant merging enabled: {enabled}"
+        );
+    }
+}
