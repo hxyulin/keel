@@ -1221,6 +1221,11 @@ impl Function {
         }
         for &inst in removed {
             self.call_contracts.remove(&inst);
+            if !self.expectations.is_empty() {
+                for &value in &self.result_pool[self.insts[inst].results.as_range()] {
+                    self.expectations.remove(&value);
+                }
+            }
             self.inst_facts.remove(&inst);
             self.insts[inst].block = NO_BLOCK;
         }
@@ -2916,6 +2921,23 @@ mod result_pool_range_tests {
 #[cfg(test)]
 mod expectation_tests {
     use super::*;
+    #[test]
+    fn bulk_removal_clears_result_expectations() {
+        let mut module = crate::parse("func @f(i64) -> i64 {\nblock0(v0:i64):\n v1=iconst.i64 1\n v2=iadd v0,v1\n return v0\n}").unwrap();
+        let f = &mut module.functions[0];
+        let block = f.entry_block().unwrap();
+        let removed = f.block_insts(block)[..2].to_vec();
+        let values: Vec<_> = removed.iter().map(|&i| f.inst_results(i)[0]).collect();
+        for &value in &values {
+            f.set_value_expectation(value, 7);
+        }
+        f.remove_insts(block, &removed);
+        for value in values {
+            assert_eq!(f.explicit_value_expectation(value), None);
+        }
+        crate::verify_module(&module).unwrap();
+    }
+
     #[test]
     fn expectations_follow_aliases_and_current_comparisons() {
         let mut module = crate::parse("func @f(i64,i64) -> i8 {\nblock0(v0:i64,v1:i64):\n v2=iconst.i64 0\n v3=icmp.ne v0,v2\n return v3\n}").unwrap();
