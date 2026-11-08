@@ -330,20 +330,6 @@ fn allocation_order(
     cfg: &ControlFlowGraph,
     tier: AllocationTier,
 ) -> (Vec<Block>, Vec<u32>) {
-    allocation_order_with_hints(
-        func,
-        cfg,
-        tier,
-        std::env::var_os("KEEL_EXPECT_LAYOUT").is_some(),
-    )
-}
-
-fn allocation_order_with_hints(
-    func: &Function,
-    cfg: &ControlFlowGraph,
-    tier: AllocationTier,
-    hints: bool,
-) -> (Vec<Block>, Vec<u32>) {
     let order = cfg.reverse_postorder(func);
     if tier != AllocationTier::Full {
         return (order, Vec::new());
@@ -382,15 +368,6 @@ fn allocation_order_with_hints(
     }
     let preference = |b: Block| (!cold[b.index()], weights[b.index()]);
     let reverse = |block: Block| {
-        if hints
-            && let Some(&inst) = func.block_insts(block).last()
-            && let InstData::Brif { cond, .. } = func.inst_data(inst)
-            && let Some(expected) = func.value_expectation(*cond)
-        {
-            // DFS visits the preferred successor last so reverse postorder
-            // puts it first. Brif destinations are true then false.
-            return expected != 0;
-        }
         let succs = cfg.succs(block);
         succs.len() == 2 && preference(succs[0]) > preference(succs[1])
     };
@@ -2589,27 +2566,5 @@ block0(v0: i64,v1: i64):
             args: [Value::new(0), Value::new(1)],
         };
         assert!(unread_entry_params(&all_read, &order, &selection).is_empty());
-    }
-}
-
-#[cfg(test)]
-mod expectation_layout_tests {
-    use super::*;
-    #[test]
-    fn advisory_hint_prefers_current_true_or_false_destination() {
-        let mut module = keel_ir::parse("func @f(i8) -> i8 {\nblock0(v0:i8):\n brif v0,block1,block2\nblock1:\n v1=iconst.i8 1\n return v1\nblock2:\n v2=iconst.i8 2\n return v2\n}").unwrap();
-        let f = &mut module.functions[0];
-        let entry = f.entry_block().unwrap();
-        let condition = f.block_params(entry)[0];
-        for expected in [0, 1] {
-            f.set_value_expectation(condition, expected);
-            let cfg = ControlFlowGraph::compute(f);
-            let (order, _) = allocation_order_with_hints(f, &cfg, AllocationTier::Full, true);
-            let InstData::Brif { dests, .. } = f.inst_data(*f.block_insts(entry).last().unwrap())
-            else {
-                unreachable!()
-            };
-            assert_eq!(order[1], dests[usize::from(expected == 0)].block);
-        }
     }
 }

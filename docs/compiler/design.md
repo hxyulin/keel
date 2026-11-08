@@ -774,17 +774,6 @@ location alone does not exclude a function; debug variables, personality and
 returns-twice still exclude it.
 This opt-in leaves Adaptive and the default Split policy available for comparison.
 
-`KEEL_EXPECT_LAYOUT=1` enables advisory C `__builtin_expect` layout. The
-frontend evaluates all arguments and records the expected integer separately
-from trusted IR facts. Aliases, integer widening and equality tests propagate
-expectations; whole-function cloning and inlining preserve explicit hints.
-Instruction rewrites drop their result hints. Layout reads the current branch
-condition and destinations, so CFG rewrites cannot leave a stale edge index.
-Full allocation uses the expected successor as a fallthrough preference on
-both targets. Fast allocation does not consume hints. Hints never prove a
-branch or remove expression side effects. Text IR does not serialize these
-experimental hints. Runtime acceptance remains pending.
-
 **Rematerialization.** Under `experimental-regalloc`,
 `RematerializingAllocator` wraps Fast or Full and replaces some spill homes
 with recipes that recompute the value at each use: integer constants, stack

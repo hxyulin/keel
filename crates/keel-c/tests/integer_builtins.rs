@@ -38,8 +38,6 @@ int test(void){
     for(int n=-1;n<256;++n)if(digit(n)!=(n>=48&&n<=57))return 3;
     calls=0;if(__builtin_ffsll(next())!=41||calls!=1)return 4;
     calls=0;if(__builtin_isdigit((calls++,'5'))==0||calls!=1)return 5;
-    calls=0;if(__builtin_expect((calls++,7),(calls++,0))!=7||calls!=2)return 8;
-    calls=0;if(!__builtin_expect((calls++,7),0)||calls!=1)return 9;
     struct S s={12};if(generic_write(&s)!=13)return 7;
     calls=0;if(__builtin_constant_p(__builtin_ffsll((calls++,8)))||calls)return 6;
     return 0;

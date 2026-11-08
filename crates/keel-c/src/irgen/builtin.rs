@@ -118,11 +118,6 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             for a in &args[1..] {
                 self.discard(a)?;
             }
-            if std::env::var_os("KEEL_EXPECT_LAYOUT").is_some()
-                && let Some(expected) = args.get(1).and_then(crate::eval::eval_int)
-            {
-                self.b.function_mut().set_value_expectation(v, expected);
-            }
             return Ok(Some(v));
         }
         if op == Builtin::Prefetch {

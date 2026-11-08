@@ -109,10 +109,7 @@ pub(super) fn same_truth<'e, 'a>(e: &'e Expr<'a>, layout: CDataLayout) -> Option
                     (Some(to), Some(from)) if to.size_with_layout(layout) >= from.size_with_layout(layout));
             keeps.then_some(&**a)
         }
-        ExprKind::Builtin(Builtin::Hint, args)
-            if std::env::var_os("KEEL_EXPECT_LAYOUT").is_none()
-                && args[1..].iter().all(|e| inert(e, layout)) =>
-        {
+        ExprKind::Builtin(Builtin::Hint, args) if args[1..].iter().all(|e| inert(e, layout)) => {
             Some(&args[0])
         }
         _ => None,

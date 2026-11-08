@@ -195,8 +195,6 @@ Inline assembly stays opaque: its branches and compound statements are never
 rewritten by this pass.
 This can conservatively expand a reachable branch. Unconditional branches still
 require the assembler/linker to diagnose distances outside their range.
-`KEEL_EXPECT_LAYOUT=1` separately enables advisory frontend expectations in
-[block layout](../../compiler/design.md#register-allocation).
 
 For an ordinary i32 or i64 `brif` truth test that compare fusion does not
 cover, the backend emits CBZ to the false destination instead of
