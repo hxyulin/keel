@@ -567,8 +567,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("local") => keel_codegen::regalloc::AllocationTier::Local,
                     #[cfg(feature = "experimental-regalloc")]
                     Some("split") => keel_codegen::regalloc::AllocationTier::Split,
+                    #[cfg(feature = "experimental-regalloc")]
+                    Some("adaptive") => keel_codegen::regalloc::AllocationTier::Adaptive,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full (local/split require experimental-regalloc)".into()),
+                    _ => return Err("`--regalloc` needs fast or full (local/split/adaptive require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
@@ -2004,7 +2006,7 @@ mod x86_feature_option_tests {
     }
     #[test]
     fn null_remat_is_an_independent_experimental_fast_full_mode() {
-        for tier in ["fast", "full", "local", "split"] {
+        for tier in ["fast", "full", "local", "split", "adaptive"] {
             let args = ["--remat", "null", "--regalloc", tier].map(str::to_owned);
             let result = parse_options(&args, &["--remat", "--regalloc"]);
             #[cfg(feature = "experimental-regalloc")]

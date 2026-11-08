@@ -188,6 +188,9 @@ pub enum AllocationTier {
     /// Experimental splitting of spilled ranges into available registers.
     #[cfg(feature = "experimental-regalloc")]
     Split,
+    /// Experimental Full allocation with repeated-use scalar spill repair.
+    #[cfg(feature = "experimental-regalloc")]
+    Adaptive,
     #[default]
     Full,
 }
@@ -199,6 +202,8 @@ impl RegisterAllocator for AllocationTier {
             Self::Local => "local",
             #[cfg(feature = "experimental-regalloc")]
             Self::Split => "split",
+            #[cfg(feature = "experimental-regalloc")]
+            Self::Adaptive => "adaptive",
             Self::Full => "full",
         }
     }
@@ -206,6 +211,10 @@ impl RegisterAllocator for AllocationTier {
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Split {
             return split::allocate(input);
+        }
+        #[cfg(feature = "experimental-regalloc")]
+        if *self == Self::Adaptive {
+            return split::allocate_adaptive(input);
         }
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Local {
@@ -285,7 +294,7 @@ fn allocate_tier_inner(
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
         #[cfg(feature = "experimental-regalloc")]
-        AllocationTier::Local | AllocationTier::Split => {
+        AllocationTier::Local | AllocationTier::Split | AllocationTier::Adaptive => {
             unreachable!("experimental allocators have their own entry points")
         }
         AllocationTier::Fast => {

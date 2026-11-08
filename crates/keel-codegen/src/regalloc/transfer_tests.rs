@@ -173,7 +173,11 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                 #[cfg(feature = "experimental-regalloc")]
                 let tiers = {
                     let mut tiers = tiers;
-                    tiers.extend([AllocationTier::Local, AllocationTier::Split]);
+                    tiers.extend([
+                        AllocationTier::Local,
+                        AllocationTier::Split,
+                        AllocationTier::Adaptive,
+                    ]);
                     tiers
                 };
                 for tier in tiers {

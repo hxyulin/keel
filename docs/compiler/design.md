@@ -729,13 +729,23 @@ when only cycles are left, save one destination in a reserved scratch
 register and redirect its readers there. Each target's codegen reference
 names its scratch registers.
 
+**Adaptive scalar repair.** With `experimental-regalloc`, `--regalloc adaptive`
+starts from Full's weighted allocation and layout. It caches only spilled scalar
+values read by distinct selected instructions in the same block. Duplicate reads
+at one instruction do not qualify. Functions without qualifying values skip cache
+construction. Vector locations stay unchanged; returns-twice functions use Full.
+Dirty cache values return to their stack homes at block edges. This is an
+opportunity filter, not a profitability guarantee or a hard work budget. It does
+not keep cache values across loop backedges or split global register owners.
+Fast, Full and Split remain independently selectable. Runtime gains are unproven.
+
 **Rematerialization.** Under `experimental-regalloc`,
 `RematerializingAllocator` wraps Fast or Full and replaces some spill homes
 with recipes that recompute the value at each use: integer constants, stack
 addresses and null pointers (`RematRecipe`). `--remat constants`, `stack` and
 `all` select recipes; `pressure` also prefers recipe values as spill victims;
 `null` substitutes only canonical null pointers after allocation and rejects
-Local and Split. Each target lowers a recipe without changing flags. Default
+Local, Split and Adaptive. Each target lowers a recipe without changing flags. Default
 builds produce no recipe homes.
 
 The `null` mode accepts only a live `inttoptr.ptr` result whose input is a

@@ -37,7 +37,10 @@ fn native_control_and_pressure_match_handwritten_and_clang() {
         "-o",
         "clang.o",
     ]));
+    #[cfg(not(feature = "experimental-regalloc"))]
     let allocators = ["fast", "full"];
+    #[cfg(feature = "experimental-regalloc")]
+    let allocators = ["fast", "full", "adaptive"];
     for tier in ["-O0", "-O1", "-O3"] {
         for allocator in allocators {
             for scheduled in [false, true] {
