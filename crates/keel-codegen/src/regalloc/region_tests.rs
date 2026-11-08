@@ -216,3 +216,57 @@ int main(void) {
             .success()
     );
 }
+
+#[test]
+fn bounded_segments_use_free_registers_without_an_owner_spill() {
+    let module = keel_ir::parse(ACROSS_CALL).unwrap();
+    let selection = crate::select::Selection::default();
+    let pools = Pools {
+        caller_saved: &[6],
+        ..pools()
+    };
+    let input = AllocationInput {
+        func: &module.functions[0],
+        selection: &selection,
+        pools: &pools,
+        is_call: &|d| matches!(d, InstData::Call { .. }),
+        returns_twice: &|_| false,
+    };
+    let (baseline, intervals) = forced_homes(&input);
+    let slots = baseline.spill_slots;
+    let actual = repair_free(&input, baseline, &intervals);
+    assert!(!actual.edits.is_empty());
+    assert_eq!(actual.spill_slots, slots);
+    actual.validate(&input).unwrap();
+    for seed in 0..16 {
+        transfer_tests::check(&input, &actual, seed);
+    }
+}
+
+#[test]
+fn free_segment_does_not_overwrite_an_idle_i128_high_half() {
+    let module = keel_ir::parse("func @f(ptr,i64,i128) -> i128 {\nblock0(v0:ptr,v1:i64,v2:i128):\n v3=load.i64 v0\n v4=load.i64 v0\n v5=load.i64 v0\n v6=load.i64 v0\n return v2\n}\n").unwrap();
+    let selection = crate::select::Selection::default();
+    let pools = Pools {
+        caller_saved: &[6],
+        callee_saved: &[19],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let input = AllocationInput {
+        func: &module.functions[0],
+        selection: &selection,
+        pools: &pools,
+        is_call: &|_| false,
+        returns_twice: &|_| false,
+    };
+    let (mut baseline, intervals) = forced_homes(&input);
+    let high = input.func.block_params(input.func.entry_block().unwrap())[2];
+    baseline.locs[1][high.index()] = Some(Loc::Reg(6));
+    let actual = repair_free(&input, baseline, &intervals);
+    assert!(actual.edits.is_empty());
+    actual.validate(&input).unwrap();
+    for seed in 0..16 {
+        transfer_tests::check(&input, &actual, seed);
+    }
+}

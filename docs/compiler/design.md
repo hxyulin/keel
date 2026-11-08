@@ -763,6 +763,14 @@ and returns-twice functions skip displacement. The four-use threshold is a stati
 opportunity filter, not a runtime profitability proof. Fast, Full and Split remain
 independently selectable. Application runtime gains are unproven.
 
+With `experimental-regalloc`, `KEEL_BOUNDED_SPLIT=1 --regalloc split` replaces
+Split's cache with Full homes and bounded call-free segments. Windows end at
+calls, constraints, block boundaries or 64 selected instructions. A segment
+loads one spilled i64/pointer at its first use and overrides its reads through
+its last use. A free caller-saved register requires no owner transfer; otherwise
+the idle owner is saved and restored. At least four distinct reads qualify.
+This opt-in leaves Adaptive and the default Split policy available for comparison.
+
 **Rematerialization.** Under `experimental-regalloc`,
 `RematerializingAllocator` wraps Fast or Full and replaces some spill homes
 with recipes that recompute the value at each use: integer constants, stack

@@ -90,6 +90,28 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     cache_spills(input, alloc, &intervals, true)
 }
 
+/// Full homes with one register segment per bounded call-free window.
+pub(super) fn allocate_bounded(input: &AllocationInput<'_>) -> Allocation {
+    let alloc = allocate_tier_inner(
+        input.func,
+        input.pools,
+        input.is_call,
+        input.returns_twice,
+        input.selection,
+        AllocationTier::Full,
+    );
+    let cfg = ControlFlowGraph::compute(input.func);
+    let intervals = build_intervals(
+        input.func,
+        &cfg,
+        &alloc.order,
+        input.is_call,
+        input.returns_twice,
+        input.selection,
+    );
+    super::region::repair_free(input, alloc, &intervals)
+}
+
 pub(super) fn allocate_adaptive(input: &AllocationInput<'_>) -> Allocation {
     profiling::scope!("split-spilled-ranges");
     backend_scope!(Allocation);

@@ -13,9 +13,27 @@ mod tests;
 
 pub(super) fn repair(
     input: &AllocationInput<'_>,
+    alloc: Allocation,
+    intervals: &[Interval],
+    reserved: &[keel_ir::Block],
+) -> Allocation {
+    repair_inner(input, alloc, intervals, reserved, false)
+}
+
+pub(super) fn repair_free(
+    input: &AllocationInput<'_>,
+    alloc: Allocation,
+    intervals: &[Interval],
+) -> Allocation {
+    repair_inner(input, alloc, intervals, &[], true)
+}
+
+fn repair_inner(
+    input: &AllocationInput<'_>,
     mut alloc: Allocation,
     intervals: &[Interval],
     reserved: &[keel_ir::Block],
+    allow_free: bool,
 ) -> Allocation {
     let f = input.func;
     if f.sig.returns_twice
@@ -66,14 +84,14 @@ pub(super) fn repair(
                         | InstData::VaArg { .. }
                 );
             if barrier || region.len() == MAX_REGION_INSTRUCTIONS {
-                apply(input, &mut alloc, intervals, &region, &mut temp);
+                apply(input, &mut alloc, intervals, &region, &mut temp, allow_free);
                 region.clear();
             }
             if !barrier {
                 region.push((inst, read));
             }
         }
-        apply(input, &mut alloc, intervals, &region, &mut temp);
+        apply(input, &mut alloc, intervals, &region, &mut temp, allow_free);
         region.clear();
     }
     alloc
@@ -84,6 +102,7 @@ fn apply(
     intervals: &[Interval],
     region: &[(Inst, u32)],
     temp: &mut Option<u32>,
+    allow_free: bool,
 ) {
     if region.len() < 4 {
         return;
@@ -159,20 +178,35 @@ fn apply(
             _ => None,
         })
         .min();
-    let Some(r) = owner else {
+    // A dead caller-saved register needs no owner save/restore. Exclude
+    // every interval intersecting either endpoint, including lifetime holes.
+    let free = allow_free
+        .then(|| {
+            input.pools.caller_saved.iter().copied().find(|&r| {
+                !used[r as usize]
+                    && !intervals.iter().any(|iv| {
+                        alloc.locs[iv.half][iv.value.index()] == Some(Loc::Reg(r))
+                            && iv.ranges.iter().any(|&(a, b)| a <= to && b >= from)
+                    })
+            })
+        })
+        .flatten();
+    let Some(r) = free.or(owner) else {
         return;
     };
     let home = alloc.loc(candidate).expect("candidate has a stack home");
-    let spill = *temp.get_or_insert_with(|| {
-        let s = alloc.spill_slots;
-        alloc.spill_slots += 1;
-        s
+    let spill = free.is_none().then(|| {
+        *temp.get_or_insert_with(|| {
+            let s = alloc.spill_slots;
+            alloc.spill_slots += 1;
+            s
+        })
     });
-    alloc
-        .edits
-        .instruction_mut(region[0].0)
-        .before
-        .extend([(Loc::Stack(spill), Loc::Reg(r)), (Loc::Reg(r), home)]);
+    let before = &mut alloc.edits.instruction_mut(region[0].0).before;
+    if let Some(spill) = spill {
+        before.push((Loc::Stack(spill), Loc::Reg(r)));
+    }
+    before.push((Loc::Reg(r), home));
     for &(inst, _) in region {
         let mut found = false;
         input.for_each_operand(inst, |op| {
@@ -186,9 +220,11 @@ fn apply(
                 .push((ValuePart::low(candidate), Loc::Reg(r)));
         }
     }
-    alloc
-        .edits
-        .instruction_mut(region.last().expect("candidate window is nonempty").0)
-        .after
-        .push((Loc::Reg(r), Loc::Stack(spill)));
+    if let Some(spill) = spill {
+        alloc
+            .edits
+            .instruction_mut(region.last().expect("candidate window is nonempty").0)
+            .after
+            .push((Loc::Reg(r), Loc::Stack(spill)));
+    }
 }

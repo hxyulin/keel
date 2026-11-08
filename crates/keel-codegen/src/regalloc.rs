@@ -214,6 +214,9 @@ impl RegisterAllocator for AllocationTier {
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Split {
+            if std::env::var_os("KEEL_BOUNDED_SPLIT").is_some() {
+                return split::allocate_bounded(input);
+            }
             return split::allocate(input);
         }
         #[cfg(feature = "experimental-regalloc")]
