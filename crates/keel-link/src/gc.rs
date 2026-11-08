@@ -643,6 +643,9 @@ fn atoms(s: &Section, mut starts: Vec<usize>, joined: &mut [(usize, usize)]) -> 
     }
     units
 }
+fn object_cost(o: &Object<'_>) -> usize {
+    o.symbols.len() + o.sections.iter().map(|s| s.relocs.len()).sum::<usize>()
+}
 impl Linker<'_> {
     pub(crate) fn collect(&mut self) -> Result<BTreeSet<String>> {
         let commons: BTreeSet<&str> = self
@@ -654,32 +657,40 @@ impl Linker<'_> {
             .collect();
         // Parse record extents first, so all symbol references can be mapped to
         // records even when a CIE or an FDE is shared or appears out of order.
-        let mut parts = Vec::with_capacity(self.objects.len());
-        for o in &self.objects {
-            let mut sections = Vec::with_capacity(o.sections.len());
-            for (si, s) in o.sections.iter().enumerate() {
-                let compact = s.segment == "__LD" && s.name == "__compact_unwind";
-                if !compact && s.name != "__eh_frame" {
-                    sections.push(Parts::whole(s, splits(o, s)));
-                    continue;
+        let parts = crate::parallel::map(
+            self.objects.iter().collect(),
+            |o| object_cost(o),
+            32768,
+            |o| -> Result<Vec<Parts>> {
+                let mut sections = Vec::with_capacity(o.sections.len());
+                for (si, s) in o.sections.iter().enumerate() {
+                    let compact = s.segment == "__LD" && s.name == "__compact_unwind";
+                    if !compact && s.name != "__eh_frame" {
+                        sections.push(Parts::whole(s, splits(o, s)));
+                        continue;
+                    }
+                    if o.symbols
+                        .iter()
+                        .any(|sym| sym.section == si + 1 && sym.kind & 1 != 0)
+                    {
+                        return fail(
+                            "dead_strip: external symbols in unwind metadata are unsupported",
+                        );
+                    }
+                    let mut p = Parts {
+                        units: records(s, compact)?,
+                        records: true,
+                        split: false,
+                        buckets: Buckets::Ordered(Vec::new()),
+                    };
+                    p.bucket(s)?;
+                    sections.push(p);
                 }
-                if o.symbols
-                    .iter()
-                    .any(|sym| sym.section == si + 1 && sym.kind & 1 != 0)
-                {
-                    return fail("dead_strip: external symbols in unwind metadata are unsupported");
-                }
-                let mut p = Parts {
-                    units: records(s, compact)?,
-                    records: true,
-                    split: false,
-                    buckets: Buckets::Ordered(Vec::new()),
-                };
-                p.bucket(s)?;
-                sections.push(p);
-            }
-            parts.push(sections);
-        }
+                Ok(sections)
+            },
+        )
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
         let mut g = Graph {
             linker: self,
             parts,
@@ -766,38 +777,52 @@ impl Linker<'_> {
         for demanded in &mut g.demanded {
             demanded.fill(false);
         }
-        for (oi, o) in self.objects.iter().enumerate() {
-            let mut starts = vec![vec![0]; o.sections.len()];
-            for sym in &o.symbols {
-                if starts_atom(sym) {
-                    let s = &o.sections[sym.section - 1];
-                    starts[sym.section - 1].push((sym.value - s.address) as usize);
-                }
-            }
-            for (si, s) in o.sections.iter().enumerate() {
-                let p = &mut g.parts[oi][si];
-                if p.records {
-                    continue;
-                }
-                if p.split {
-                    let mut starts = std::mem::take(&mut starts[si]);
-                    starts.sort_unstable();
-                    starts.dedup();
-                    p.units = atoms(s, starts, &mut joined[oi][si]);
-                    // dyld walks thread-local descriptors in 24-byte steps, so
-                    // they split only where no padding can enter between them.
-                    if s.flags & 255 == 0x13
-                        && (s.alignment > 3 || p.units.iter().any(|u| u.start % 24 != 0))
-                    {
-                        *p = Parts::whole(s, false);
+        let prepared = std::mem::take(&mut g.parts)
+            .into_iter()
+            .zip(joined)
+            .enumerate()
+            .collect();
+        g.parts = crate::parallel::map(
+            prepared,
+            |(oi, _)| object_cost(&self.objects[*oi]),
+            32768,
+            |(oi, (mut sections, mut joined))| -> Result<Vec<Parts>> {
+                let o = &self.objects[oi];
+                let mut starts = vec![vec![0]; o.sections.len()];
+                for sym in &o.symbols {
+                    if starts_atom(sym) {
+                        let s = &o.sections[sym.section - 1];
+                        starts[sym.section - 1].push((sym.value - s.address) as usize);
                     }
                 }
-                if s.segment != "__DWARF" {
-                    p.bucket(s)
-                        .map_err(|e| format!("{}: {},{}: {e}", o.name, s.segment, s.name))?;
+                for (si, s) in o.sections.iter().enumerate() {
+                    let p = &mut sections[si];
+                    if p.records {
+                        continue;
+                    }
+                    if p.split {
+                        let mut starts = std::mem::take(&mut starts[si]);
+                        starts.sort_unstable();
+                        starts.dedup();
+                        p.units = atoms(s, starts, &mut joined[si]);
+                        // dyld walks thread-local descriptors in 24-byte steps, so
+                        // they split only where no padding can enter between them.
+                        if s.flags & 255 == 0x13
+                            && (s.alignment > 3 || p.units.iter().any(|u| u.start % 24 != 0))
+                        {
+                            *p = Parts::whole(s, false);
+                        }
+                    }
+                    if s.segment != "__DWARF" {
+                        p.bucket(s)
+                            .map_err(|e| format!("{}: {},{}: {e}", o.name, s.segment, s.name))?;
+                    }
                 }
-            }
-        }
+                Ok(sections)
+            },
+        )
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
         let count = g
             .parts
             .iter()

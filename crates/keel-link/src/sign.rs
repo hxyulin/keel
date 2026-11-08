@@ -70,6 +70,65 @@ impl PageHashes {
     }
 }
 
+/// Hash large output images from immutable spans without assembling another
+/// image buffer. Gaps are zero-filled, and pages retain their file order.
+pub(crate) fn parallel_hash(spans: &[(usize, &[u8])], size: usize) -> Option<Vec<[u8; 32]>> {
+    if crate::parallel::workers(size, 1024 * 1024) <= 1 {
+        return None;
+    }
+    let mut previous = 0;
+    for &(offset, data) in spans {
+        let end = offset.checked_add(data.len())?;
+        if offset < previous || end > size {
+            return None;
+        }
+        previous = end;
+    }
+    let pages = size.div_ceil(BLOCK);
+    let jobs = (0..pages)
+        .step_by(256)
+        .map(|start| start..(start + 256).min(pages))
+        .collect();
+    let chunks = crate::parallel::map(
+        jobs,
+        |r| r.len() * BLOCK,
+        1024 * 1024,
+        |range| {
+            let mut span =
+                spans.partition_point(|(offset, data)| offset + data.len() <= range.start * BLOCK);
+            let mut hashes = Vec::with_capacity(range.len());
+            for page in range {
+                let start = page * BLOCK;
+                let end = (start + BLOCK).min(size);
+                while span < spans.len() && spans[span].0 + spans[span].1.len() <= start {
+                    span += 1;
+                }
+                let hash = if let Some(&(offset, data)) = spans.get(span)
+                    && offset <= start
+                    && offset + data.len() >= end
+                {
+                    Sha256::digest(&data[start - offset..end - offset])
+                } else {
+                    let mut scratch = [0; BLOCK];
+                    for &(offset, data) in &spans[span..] {
+                        if offset >= end {
+                            break;
+                        }
+                        let left = offset.max(start);
+                        let right = (offset + data.len()).min(end);
+                        scratch[left - start..right - start]
+                            .copy_from_slice(&data[left - offset..right - offset]);
+                    }
+                    Sha256::digest(&scratch[..end - start])
+                };
+                hashes.push(hash.into());
+            }
+            hashes
+        },
+    );
+    Some(chunks.into_iter().flatten().collect())
+}
+
 /// Signs an unsigned Keel image, reading it back to hash every page.
 pub(crate) fn sign<W: Read + Write + Seek>(image: &mut W) -> Result<()> {
     sign_hashed(image, None)
@@ -401,5 +460,28 @@ mod tests {
         let mut image = std::io::Cursor::new(bytes);
         sign(&mut image).unwrap();
         assert!(sign(&mut image).is_err());
+    }
+    #[test]
+    fn parallel_page_hashes_match_streaming_with_gaps_and_partial_pages() {
+        let size: usize = 3 * 1024 * 1024 + 71;
+        let data: Vec<_> = (0..size).map(|i| (i.wrapping_mul(17) >> 5) as u8).collect();
+        let spans = [
+            (0, &data[..91]),
+            (4093, &data[4093..8199]),
+            (12345, &data[12345..size - 31]),
+        ];
+        let mut image = vec![0; size];
+        for &(at, bytes) in &spans {
+            image[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        let mut serial = PageHashes::default();
+        for chunk in image.chunks(777) {
+            serial.update(chunk);
+        }
+        if let Some(parallel) = parallel_hash(&spans, size) {
+            assert_eq!(parallel, serial.finish());
+        }
+        assert!(parallel_hash(&[(1, &data[..99]), (50, &data[..99])], size).is_none());
+        assert!(parallel_hash(&[(size - 1, &data[..2])], size).is_none());
     }
 }

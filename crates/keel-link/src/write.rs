@@ -149,20 +149,21 @@ impl Segment {
 }
 struct Patched<'data> {
     data: std::borrow::Cow<'data, [u8]>,
+    start: usize,
     rebases: Vec<u64>,
     binds: Vec<(u64, (usize, i64))>,
     weak_binds: Vec<(u64, (String, i64))>,
 }
 
 struct RelocationJob<'data> {
-    order: usize,
     object: usize,
     section: usize,
     cost: usize,
-    data: std::borrow::Cow<'data, [u8]>,
+    data: Option<std::borrow::Cow<'data, [u8]>>,
+    bytes: std::ops::Range<usize>,
+    fixups: std::ops::Range<usize>,
 }
 struct RelocationResult<'data> {
-    order: usize,
     object: usize,
     section: usize,
     patched: Result<Patched<'data>>,
@@ -519,21 +520,30 @@ impl<'data> Linker<'data> {
         // bounded chunks, so file output never allocates another complete
         // image. The code signature reuses these page hashes.
         use sha2::{Digest, Sha256};
-        let mut pages = crate::sign::PageHashes::default();
-        let mut position = 0;
-        let mut write = |data: &[u8]| -> Result<()> {
-            output.write_all(data).map_err(|e| e.to_string())?;
-            pages.update(data);
-            position += data.len();
-            Ok(())
-        };
-        write(&bytes)?;
         let mut sections: Vec<_> = self
             .outputs
             .iter()
             .filter(|s| !matches!(s.flags & 255, 1 | 0x12) && !s.data.is_empty())
             .collect();
         sections.sort_by_key(|s| s.file);
+        let mut spans: Vec<_> = sections
+            .iter()
+            .map(|s| (s.file, s.data.as_slice()))
+            .collect();
+        spans.insert(0, (0, bytes.as_slice()));
+        spans.push((file, linkedit.as_slice()));
+        let parallel_pages = crate::sign::parallel_hash(&spans, file + linkedit.len());
+        let mut pages = crate::sign::PageHashes::default();
+        let mut position = 0;
+        let mut write = |data: &[u8]| -> Result<()> {
+            output.write_all(data).map_err(|e| e.to_string())?;
+            if parallel_pages.is_none() {
+                pages.update(data);
+            }
+            position += data.len();
+            Ok(())
+        };
+        write(&bytes)?;
         // Keep padding bounded independently of section or image size.
         let zeros = [0u8; 16384];
         let mut at = bytes.len();
@@ -560,7 +570,7 @@ impl<'data> Linker<'data> {
             gap -= count;
         }
         write(&linkedit)?;
-        let pages = pages.finish();
+        let pages = parallel_pages.unwrap_or_else(|| pages.finish());
         // The page hashes cover the image with a zero UUID, so they
         // determine it.
         let digest = Sha256::digest(pages.as_flattened());
@@ -858,53 +868,83 @@ impl<'data> Linker<'data> {
         if workers <= 1 {
             return self.relocate_serial();
         }
+        let total: usize = self
+            .objects
+            .iter()
+            .enumerate()
+            .flat_map(|(oi, o)| {
+                let discarded = &self.discarded;
+                o.sections
+                    .iter()
+                    .enumerate()
+                    .filter(move |(si, s)| {
+                        !discarded.contains(&(oi, *si)) && s.segment != "__DWARF"
+                    })
+                    .map(|(_, s)| s.relocs.len().max(s.data.len() / 64).max(1))
+            })
+            .sum();
+        let target = total.div_ceil(workers.saturating_mul(2));
         let mut jobs = Vec::new();
         for (oi, o) in self.objects.iter_mut().enumerate() {
             for (si, s) in o.sections.iter_mut().enumerate() {
                 if self.discarded.contains(&(oi, si)) || s.segment == "__DWARF" {
                     continue;
                 }
-                jobs.push(RelocationJob {
-                    order: jobs.len(),
-                    object: oi,
-                    section: si,
-                    cost: s.relocs.len().max(s.data.len() / 64).max(1),
-                    data: std::mem::take(&mut s.data),
+                let split = s.relocs.len() > 4096
+                    && s.relocs.len().max(s.data.len() / 64) > target
+                    && s.name != "__eh_frame"
+                    && s.name != "__compact_unwind"
+                    && s.relocs.iter().all(|r| r.operation != Operation::Foreign);
+                let grain = if split { 4096 } else { s.relocs.len().max(1) };
+                let size = s.data.len();
+                let mut data = if split {
+                    None
+                } else {
+                    Some(std::mem::take(&mut s.data))
+                };
+                let mut first = 0;
+                let mut start = 0;
+                loop {
+                    let last = (first + grain).min(s.relocs.len());
+                    let end = if last == s.relocs.len() {
+                        size
+                    } else {
+                        s.relocs[last].offset as usize
+                    };
+                    jobs.push(RelocationJob {
+                        object: oi,
+                        section: si,
+                        cost: (last - first).max((end - start) / 64).max(1),
+                        data: data.take(),
+                        bytes: start..end,
+                        fixups: first..last,
+                    });
+                    if last == s.relocs.len() {
+                        break;
+                    }
+                    first = last;
+                    start = end;
+                }
+            }
+        }
+        let results = crate::parallel::map_with_workers(
+            jobs,
+            |job| job.cost,
+            workers,
+            |mut job| {
+                let data = job.data.take().unwrap_or_else(|| {
+                    self.objects[job.object].sections[job.section].data[job.bytes.clone()]
+                        .to_vec()
+                        .into()
                 });
-            }
-        }
-        let workers = workers.min(jobs.len());
-        if workers == 0 {
-            return Ok(());
-        }
-        // Distribute large contributions first; input section counts alone can
-        // put every text contribution on one worker.
-        jobs.sort_unstable_by_key(|job| std::cmp::Reverse(job.cost));
-        let mut bins: Vec<_> = (0..workers).map(|_| Vec::new()).collect();
-        let mut costs = vec![0usize; workers];
-        for job in jobs {
-            let worker = (0..workers)
-                .min_by_key(|&i| costs[i])
-                .expect("nonempty worker set");
-            costs[worker] = costs[worker].saturating_add(job.cost);
-            bins[worker].push(job);
-        }
-        let mut results = std::thread::scope(|scope| {
-            let plan = &*self;
-            let local = bins.pop().expect("nonempty worker set");
-            let handles: Vec<_> = bins
-                .into_iter()
-                .map(|jobs| scope.spawn(move || plan.patch_jobs(jobs)))
-                .collect();
-            let mut results = plan.patch_jobs(local);
-            for handle in handles {
-                results.extend(handle.join().expect("relocation worker panicked"));
-            }
-            results
-        });
-        // Worker completion order never changes image layout, map precedence
-        // or the first failing contribution reported to the caller.
-        results.sort_unstable_by_key(|r| r.order);
+                RelocationResult {
+                    object: job.object,
+                    section: job.section,
+                    patched: self.patch_range(&job, data),
+                }
+            },
+        );
+        // Input and chunk order select the first error and binding precedence.
         for result in results {
             let patched = result
                 .patched
@@ -912,16 +952,6 @@ impl<'data> Linker<'data> {
             self.apply_section(result.object, result.section, patched);
         }
         Ok(())
-    }
-    fn patch_jobs(&self, jobs: Vec<RelocationJob<'data>>) -> Vec<RelocationResult<'data>> {
-        jobs.into_iter()
-            .map(|job| RelocationResult {
-                order: job.order,
-                object: job.object,
-                section: job.section,
-                patched: self.patch_section(job.object, job.section, job.data),
-            })
-            .collect()
     }
     fn relocation_error(&self, oi: usize, si: usize, error: Error) -> String {
         format!(
@@ -963,8 +993,24 @@ impl<'data> Linker<'data> {
         &self,
         oi: usize,
         si: usize,
+        data: std::borrow::Cow<'data, [u8]>,
+    ) -> Result<Patched<'data>> {
+        let job = RelocationJob {
+            object: oi,
+            section: si,
+            cost: 0,
+            data: None,
+            bytes: 0..data.len(),
+            fixups: 0..self.objects[oi].sections[si].relocs.len(),
+        };
+        self.patch_range(&job, data)
+    }
+    fn patch_range(
+        &self,
+        job: &RelocationJob<'data>,
         mut data: std::borrow::Cow<'data, [u8]>,
     ) -> Result<Patched<'data>> {
+        let (oi, si) = (job.object, job.section);
         let mut rebases = Vec::new();
         let mut binds = Vec::new();
         let mut weak_binds = Vec::new();
@@ -976,7 +1022,7 @@ impl<'data> Linker<'data> {
             Self::reloc_target
         };
         let mut patched = RelocationRanges::default();
-        for fixup in read::fixups(&s.relocs, 0..usize::MAX) {
+        for fixup in read::fixups(&s.relocs[job.fixups.clone()], 0..usize::MAX) {
             let (r, extra, plus) = match fixup? {
                 Fixup::Single { reloc, addend } => (reloc.clone(), addend, None),
                 Fixup::Difference { minus, plus } => (minus.clone(), 0, Some(plus.clone())),
@@ -1008,6 +1054,9 @@ impl<'data> Linker<'data> {
                     }
                     continue;
                 }
+                let at = (r.offset as usize)
+                    .checked_sub(job.bytes.start)
+                    .ok_or("relocation precedes patch range")?;
                 let location = if metadata {
                     0
                 } else {
@@ -1052,9 +1101,9 @@ impl<'data> Linker<'data> {
                         let raw = if r.operation != Operation::Foreign {
                             r.addend as u64
                         } else if (r.width as usize) == 8 {
-                            Reader(&data).u64(r.offset as usize)?
+                            Reader(&data).u64(at)?
                         } else {
-                            Reader(&data).u32(r.offset as usize)? as i32 as i64 as u64
+                            Reader(&data).u32(at)? as i32 as i64 as u64
                         };
                         if !r.external && !difference {
                             let t = &self.objects[oi].sections[(r.symbol as usize) - 1];
@@ -1128,8 +1177,7 @@ impl<'data> Linker<'data> {
                         {
                             return fail("32-bit difference relocation overflow");
                         }
-                        data.to_mut()
-                            [(r.offset as usize)..(r.offset as usize) + (r.width as usize)]
+                        data.to_mut()[at..at + (r.width as usize)]
                             .copy_from_slice(&value.to_le_bytes()[..(r.width as usize)]);
                     }
                     2..=9 => {
@@ -1154,7 +1202,7 @@ impl<'data> Linker<'data> {
                         if matches!(r.kind, 2 | 3 | 5 | 7 | 8) != r.pc {
                             return fail("invalid PC-relative relocation flag");
                         }
-                        let word = Reader(&data).u32(r.offset as usize)?;
+                        let word = Reader(&data).u32(at)?;
                         if matches!(r.kind, 5..=9) {
                             value = self.outputs[self.got_section].address
                                 + *self
@@ -1240,8 +1288,7 @@ impl<'data> Linker<'data> {
                             }
                             _ => unreachable!(),
                         };
-                        data.to_mut()[(r.offset as usize)..(r.offset as usize) + 4]
-                            .copy_from_slice(&patched.to_le_bytes());
+                        data.to_mut()[at..at + 4].copy_from_slice(&patched.to_le_bytes());
                     }
                     _ => {
                         return fail(format!(
@@ -1255,6 +1302,7 @@ impl<'data> Linker<'data> {
         }
         Ok(Patched {
             data,
+            start: job.bytes.start,
             rebases,
             binds,
             weak_binds,
@@ -1263,6 +1311,7 @@ impl<'data> Linker<'data> {
     fn apply_section(&mut self, oi: usize, si: usize, patched: Patched<'data>) {
         let Patched {
             data,
+            start,
             rebases,
             binds,
             weak_binds,
@@ -1275,11 +1324,16 @@ impl<'data> Linker<'data> {
         if let Some(id) = s.output.filter(|_| !data.is_empty()) {
             let out = &mut self.outputs[id].data;
             if s.atoms.is_empty() {
-                out[s.offset..s.offset + data.len()].copy_from_slice(&data);
+                out[s.offset + start..s.offset + start + data.len()].copy_from_slice(&data);
             } else {
                 for a in s.atoms.iter().filter(|a| a.live) {
-                    out[a.offset..a.offset + (a.end - a.start)]
-                        .copy_from_slice(&data[a.start..a.end]);
+                    let left = a.start.max(start);
+                    let right = a.end.min(start + data.len());
+                    if left < right {
+                        let offset = a.offset + left - a.start;
+                        out[offset..offset + right - left]
+                            .copy_from_slice(&data[left - start..right - start]);
+                    }
                 }
             }
         }
@@ -1287,6 +1341,8 @@ impl<'data> Linker<'data> {
         // All other bytes are now in their merged output sections.
         if metadata || s.name == "__eh_frame" {
             self.objects[oi].sections[si].data = data;
+        } else {
+            self.objects[oi].sections[si].data = Default::default();
         }
     }
     fn make_got_stubs(&mut self) -> Result<()> {
@@ -1728,5 +1784,48 @@ mod tests {
                 .expect("invalid text pointers");
             assert_eq!(error, parallel);
         }
+    }
+    fn native_chunk_fixture(workers: usize, invalid: bool) -> Result<Linker<'static>> {
+        let mut source = ".subsections_via_symbols\n.globl _main\n_main:\n".to_owned();
+        for _ in 0..4095 {
+            source.push_str("bl _helper\n");
+        }
+        source.push_str("adrp x0,_data@PAGE\nadd x0,x0,_data@PAGEOFF\nbl _helper\nadrp x0,_data@PAGE\nadd x0,x0,_data@PAGEOFF\nret\n_dead:\nbl _missing\n_helper:\nret\n.data\n_data:\n.quad _main\n");
+        let mut object = keel_asm::assemble(&source).unwrap().into_object().unwrap();
+        if invalid {
+            object.sections[0].data[..4].fill(0);
+            let at = object.sections[0].fixups[4097].offset as usize;
+            object.sections[0].data[at..at + 4].fill(0);
+        }
+        let object = crate::read::Object::from_owned("chunk.o".into(), object)?;
+        let mut linker = crate::prepare_with_objects(
+            &[],
+            vec![object],
+            Options {
+                dead_strip: true,
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::new(),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Default::default()
+            },
+        )?;
+        linker.layout()?;
+        linker.relocate_with_workers(workers)?;
+        Ok(linker)
+    }
+    #[test]
+    fn native_chunks_preserve_pairs_and_compacted_atom_offsets() {
+        let serial = native_chunk_fixture(1, false).unwrap();
+        let parallel = native_chunk_fixture(4, false).unwrap();
+        assert_eq!(serial.rebases, parallel.rebases);
+        for (a, b) in serial.outputs.iter().zip(&parallel.outputs) {
+            assert_eq!(a.data, b.data, "{}", a.name);
+        }
+        let serial = native_chunk_fixture(1, true).err().expect("invalid branch");
+        let parallel = native_chunk_fixture(4, true).err().expect("invalid branch");
+        assert!(serial.contains("BRANCH26"), "{serial}");
+        assert_eq!(serial, parallel);
     }
 }

@@ -14,6 +14,8 @@ fn fail<T>(s: impl Into<String>) -> Result<T> {
     Err(s.into())
 }
 // The benchmark signs by reading back, so the page-hash writer is unused.
+#[path = "../src/parallel.rs"]
+mod parallel;
 #[allow(dead_code)]
 #[path = "../src/sign.rs"]
 mod sign;

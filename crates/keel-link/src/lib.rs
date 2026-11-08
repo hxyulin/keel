@@ -7,6 +7,7 @@ pub mod elf;
 pub mod elf_selection;
 mod extract;
 mod gc;
+mod parallel;
 mod read;
 mod sign;
 mod tbd;
@@ -238,10 +239,22 @@ pub fn link_objects(
     if !objects.is_empty() && options.debug_directory.is_some() {
         return fail("owned link inputs do not support Darwin debug maps; use Mach-O inputs");
     }
-    let objects = objects
-        .into_iter()
-        .map(|input| Object::from_owned(input.name, input.object))
-        .collect::<Result<Vec<_>>>()?;
+    let objects = parallel::map(
+        objects,
+        |input| {
+            input.object.symbols.len()
+                + input
+                    .object
+                    .sections
+                    .iter()
+                    .map(|s| s.fixups.len())
+                    .sum::<usize>()
+        },
+        32768,
+        |input| Object::from_owned(input.name, input.object),
+    )
+    .into_iter()
+    .collect::<Result<Vec<_>>>()?;
     let mut image = std::io::Cursor::new(Vec::new());
     let (artifacts, _) =
         prepare_with_objects(inputs, objects, options)?.emit_to(&mut image, |image, size| {
@@ -269,14 +282,18 @@ pub fn link_caches(
     if !caches.is_empty() && options.debug_directory.is_some() {
         return fail("cached link inputs do not support Darwin debug maps; use Mach-O inputs");
     }
-    let objects = caches
-        .iter()
-        .map(|input| {
+    let objects = parallel::map(
+        caches.iter().collect(),
+        |input| input.bytes.len(),
+        2 * 1024 * 1024,
+        |input| {
             let cache = keel_object::Cache::parse(input.bytes)
                 .map_err(|e| Error::from(format!("{}: {e}", input.name)))?;
             Object::from_cache(input.name.into(), cache)
-        })
-        .collect::<Result<Vec<_>>>()?;
+        },
+    )
+    .into_iter()
+    .collect::<Result<Vec<_>>>()?;
     let mut image = std::io::Cursor::new(Vec::new());
     let (artifacts, _) =
         prepare_with_objects(inputs, objects, options)?.emit_to(&mut image, |image, size| {

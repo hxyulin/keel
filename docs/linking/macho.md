@@ -54,11 +54,15 @@ interfaces. `link` returns a **not yet signed** Mach-O image plus warnings.
 sign it in process, sync it, and atomically install the executable only after
 signing succeeds. `Input.name` is only a diagnostic label and is never opened.
 
-Large links patch independent input contributions on scoped worker threads after
-symbol selection and layout settle. Small links stay serial. Workers read shared
-metadata and return private payloads and binding records; the linker merges them
-in input order, preserving image layout and the first relocation diagnostic.
-Archive selection, dead stripping, layout and page hashing remain serial.
+Large links use scoped workers for owned/cache input adaptation, per-object
+GC preparation, relocation and output page hashing. Small stages stay serial.
+Native contributions that exceed a worker's share split at validated fixup
+boundaries; balanced contributions, foreign relocation pairs and unwind payloads
+stay whole. Workers read shared metadata and
+return private results in input order, preserving layout and diagnostic order.
+Page hashing reads immutable output spans, including zero-filled gaps, without
+assembling another complete image buffer. Archive selection, global symbol
+selection, the GC reachability walk and final layout remain ordered and serial.
 
 ### Owned link inputs and compilation caches
 
