@@ -154,6 +154,9 @@ Every status-returning operation supplies a module diagnostic through
 An unexpected Rust unwind poisons the module; read its diagnostic and destroy
 it. Further operations return `KEEL_POISONED`. Process faults, allocation failure
 and builds using `panic=abort` can terminate the host process.
+The Rust panic hook still runs before a caught unwind. An ordinary error does
+not promise rollback unless the operation documents it. Load and merge provide
+the transactional guarantees described below.
 
 Output buffers have independent ownership and survive module destruction.
 Borrow their bytes with `keel_buffer_data` and `keel_buffer_size`, then release
@@ -217,6 +220,9 @@ also reach the object encoder. Stable built-in pipeline policies are exposed;
 custom Rust selection/allocation callbacks and structured assembly-program
 callbacks remain Rust APIs. The standalone C frontend, linker, disassembler,
 WebAssembly emission and JIT loading are outside this compiler-facing interface.
+Experimental pressure scheduling and adaptive spill-repair policies have no C
+option; compilation retains the Rust defaults. Caller-managed parallel codegen
+jobs and executors also have no C wrapper.
 
 ## Tern integration requirements
 

@@ -27,12 +27,17 @@ extern "C" {
  *   or otherwise invalid pointers are caller errors, not recoverable statuses.
  * - Every status-returning call on a live, usable module replaces its diagnostic.
  *   Success clears it. Copy diagnostics before the next operation on that module.
+ *   An error does not generally roll back module changes. Transactional load/merge
+ *   and ID invalidation rules are documented on their individual operations.
  * - An unexpected unwinding Rust panic returns KEEL_INTERNAL_PANIC and poisons
  *   the module. Further operations return KEEL_POISONED and keep the diagnostic.
  *   Only error inspection and destruction remain available. Builds using Rust's
  *   panic=abort, allocation failure and process faults can terminate the process.
+ *   The host's Rust panic hook still runs before an unwind is caught.
  * - Buffers own bytes independently of modules. Only keel_buffer_destroy frees
  *   them. Buffer bytes are immutable and are NOT NUL-terminated.
+ *   Borrowed buffer bytes remain valid until that buffer is destroyed. Serialize
+ *   destruction against all reads; destroy each module/buffer exactly once.
  * - This API builds scalar/vector SSA functions with zero or one return and
  *   a C or explicit private calling convention. Narrow ABI extension is explicit in
  *   keel_abi_param. Arithmetic follows Keel IR semantics, not C promotion.
