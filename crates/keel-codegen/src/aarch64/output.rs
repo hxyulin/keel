@@ -62,9 +62,16 @@ impl Output {
         self.write_str(text).unwrap();
     }
     pub(super) fn inline_assembly(&mut self, text: &str) {
+        let precise = std::env::var_os("KEEL_AARCH64_PRECISE_BRANCHES").is_some();
         let mut normalized = String::new();
+        if precise {
+            normalized.push_str("\t; keel-inline-boundary\n");
+        }
         for line in text.lines() {
             writeln!(normalized, "\t{}", line.trim()).unwrap();
+        }
+        if precise {
+            normalized.push_str("\t; keel-inline-boundary\n");
         }
         match self {
             Self::Text(out) | Self::ElfText(out) => out.push_str(&normalized),
@@ -220,6 +227,13 @@ impl Output {
     pub(super) fn relax(&mut self, name: &str, start: usize) {
         if let Self::Text(text) | Self::ElfText(text) = self {
             super::relax_branches(text, start, name);
+            return;
+        }
+        if std::env::var_os("KEEL_AARCH64_PRECISE_BRANCHES").is_some() {
+            let Self::Structured(program) = self else {
+                unreachable!()
+            };
+            precise::relax_program(program, name);
             return;
         }
         if !self.needs_relaxation() {
@@ -535,3 +549,5 @@ fn write_elf_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInst
         }
     }
 }
+
+pub(super) mod precise;

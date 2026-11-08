@@ -528,6 +528,12 @@ const COND_BRANCH_RANGE: usize = 1 << 20;
 /// over a `b`, which reaches ±128 MiB. Interpreter loops get that big.
 /// Relaxes the function whose text is `out[start..]`.
 fn relax_branches(out: &mut String, start: usize, name: &str) {
+    if std::env::var_os("KEEL_AARCH64_PRECISE_BRANCHES").is_some() {
+        let mut text = out.split_off(start);
+        output::precise::relax_source(&mut text, name);
+        out.push_str(&text);
+        return;
+    }
     // An upper bound on the size: every line that is not a label, a
     // comment or a directive is one instruction; data in the code is
     // jump table entries, four bytes each. Each counted line takes at least

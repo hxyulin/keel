@@ -184,7 +184,16 @@ Conditional branches reach ±1 MiB. A function whose code may be bigger
 (interpreter loops get there: QuickJS's is about 4 MB from keel) has each one
 rewritten as the opposite branch over a `b`, which reaches ±128 MiB. Only
 those functions pay the extra instruction. The size is bounded by counting
-instructions, so no branch is measured.
+instructions, so no branch is measured by default.
+
+`KEEL_AARCH64_PRECISE_BRANCHES=1` selects experimental per-branch relaxation
+on both structured and text routes. It computes label distances and repeatedly
+expands only branches outside the signed imm19 range until no further branch
+needs expansion. Data widths count in bytes. Alignment uses maximum padding;
+unknown inline assembly boundaries or directives force crossing branches long.
+This can conservatively expand a reachable branch. Unconditional branches still
+require the assembler/linker to diagnose distances outside their range.
+Frontend expectation hints do not yet influence block placement.
 
 For an ordinary i32 or i64 `brif` truth test that compare fusion does not
 cover, the backend emits CBZ to the false destination instead of
