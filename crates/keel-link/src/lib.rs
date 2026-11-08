@@ -401,6 +401,16 @@ fn prepare_with_objects<'a>(
         warnings: Vec::new(),
         resolved: Vec::new(),
     };
+    // Embedded LLVM bitcode (`__LLVM,__bitcode` and `__LLVM,__cmdline`, as
+    // in Rust's prebuilt standard library) is input for LLVM's tools, never
+    // part of the image. Apple's linker drops it too.
+    for (oi, o) in l.objects.iter().enumerate() {
+        for (si, s) in o.sections.iter().enumerate() {
+            if s.segment == "__LLVM" {
+                l.discarded.insert((oi, si));
+            }
+        }
+    }
     l.prepare()?;
     Ok(l)
 }

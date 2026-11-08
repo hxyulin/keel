@@ -759,6 +759,38 @@ fn discarded_debug_payload_preserves_image_and_requested_archive_snapshots() {
 }
 
 #[test]
+fn embedded_bitcode_is_dropped_from_objects_and_archive_members() {
+    let source = ".text\n.globl _main\n_main:\nmov w0,#0\nret\n";
+    let bitcode = ".section __LLVM,__bitcode,regular\n.byte 0x42,0x43,0xc0,0xde\n.section __LLVM,__cmdline,regular\n.byte 0\n";
+    let plain = object(source);
+    let embedded = object(&format!("{source}{bitcode}"));
+    let link = |bytes: &[u8], name| {
+        keel_link::link(&[Input { name, bytes }], options())
+            .unwrap()
+            .bytes
+    };
+    let expected = link(&plain, "plain.o");
+    assert_eq!(link(&embedded, "embedded.o"), expected);
+    let member = object(&format!(".text\n.globl _helper\n_helper:\nret\n{bitcode}"));
+    let caller = object(".text\n.globl _main\n_main:\nbl _helper\nret\n");
+    let ar = archive(&[("helper.o", member)]);
+    keel_link::link(
+        &[
+            Input {
+                name: "main.o",
+                bytes: &caller,
+            },
+            Input {
+                name: "libhelper.a",
+                bytes: &ar,
+            },
+        ],
+        options(),
+    )
+    .unwrap();
+}
+
+#[test]
 fn discarded_debug_payload_still_requires_valid_file_bounds() {
     let mut bytes = object(
         ".text\n.globl _main\n_main:\nret\n.section __DWARF,__debug_str,regular,debug\n.asciz \"debug\"\n",
