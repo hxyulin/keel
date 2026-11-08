@@ -17,6 +17,7 @@ pub mod cover;
 mod data;
 mod dwarf;
 mod emission;
+pub mod parallel;
 pub use emission::{CodegenGoal, EmissionOptions, UnwindTables};
 mod fold;
 mod integer_division;

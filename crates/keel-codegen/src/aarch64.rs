@@ -219,15 +219,19 @@ pub fn compile_program_with_pipeline(
     request(pools, pipeline).program(module)
 }
 
-pub(crate) fn compile_output(
-    module: &Module,
-    pools: &Pools,
+pub(crate) fn compile_output<'module>(
+    module: &'module Module,
+    pools: &'module Pools<'module>,
     pipeline: &crate::CodegenPipeline<'_>,
-    structured: bool,
+    output: crate::emission::OutputOptions<'_, 'module>,
     mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
     linux: bool,
     emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {
+    let crate::emission::OutputOptions {
+        structured,
+        parallel,
+    } = output;
     crate::validate_function_entries(module)?;
     if let Some((name, _)) = module.x86_target_feature_request() {
         return Err(CodegenError {
@@ -296,7 +300,7 @@ pub(crate) fn compile_output(
             });
         }
     }
-    let symbols = crate::symbols::Symbols::new(module);
+    let symbols = std::sync::Arc::new(crate::symbols::Symbols::new(module));
     let (leaf_summaries, mut prepared_leaves) = if linux {
         (
             leaf_calls::Summaries::default(),
@@ -312,45 +316,127 @@ pub(crate) fn compile_output(
         )?
     };
     let mut frames = Vec::new();
-    for (index, original) in module.functions.iter().enumerate() {
-        if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
-            out.append(body);
+    if parallel.is_none() {
+        for (index, original) in module.functions.iter().enumerate() {
+            if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
+                out.append(body);
+                frames.push(FrameDebug {
+                    frame_register: None,
+                    slots: Vec::new(),
+                    scope_marks,
+                });
+                out.flush(&mut sink);
+                continue;
+            }
+            let _function_profile = crate::backend_profile::function(&original.name);
+            let lowered = vector::lower(original);
+            let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+            let mut compiler = FunctionCompiler::new_for_target(
+                &func,
+                &symbols,
+                pools,
+                pipeline,
+                structured,
+                &leaf_summaries,
+                linux,
+                emission.separate_slots,
+            )?;
+            compiler.debug = debug;
+            compiler.unwind_tables = emission.unwind_tables;
+            compiler.function_sections = emission.function_sections;
+            let (frame_register, slots) = if debug {
+                compiler.slot_frame_offsets()
+            } else {
+                (None, Vec::new())
+            };
+            let scope_marks = compiler.compile(&mut out);
             frames.push(FrameDebug {
-                frame_register: None,
-                slots: Vec::new(),
+                slots,
                 scope_marks,
+                frame_register,
             });
             out.flush(&mut sink);
-            continue;
         }
-        let _function_profile = crate::backend_profile::function(&original.name);
-        let lowered = vector::lower(original);
-        let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
-        let mut compiler = FunctionCompiler::new_for_target(
-            &func,
-            &symbols,
-            pools,
-            pipeline,
-            structured,
-            &leaf_summaries,
-            linux,
-            emission.separate_slots,
-        )?;
-        compiler.debug = debug;
-        compiler.unwind_tables = emission.unwind_tables;
-        compiler.function_sections = emission.function_sections;
-        let (frame_register, slots) = if debug {
-            compiler.slot_frame_offsets()
-        } else {
-            (None, Vec::new())
-        };
-        let scope_marks = compiler.compile(&mut out);
-        frames.push(FrameDebug {
-            slots,
-            scope_marks,
-            frame_register,
-        });
-        out.flush(&mut sink);
+    } else if let Some(parallel) = parallel {
+        let prepared_indices: std::collections::HashSet<_> =
+            prepared_leaves.keys().copied().collect();
+        let symbols = std::sync::Arc::clone(&symbols);
+        let leaf_summaries = std::sync::Arc::new(leaf_summaries);
+        let compile = std::sync::Arc::new(
+            move |index: usize, worker_pipeline: crate::CodegenPipeline<'_>| {
+                if prepared_indices.contains(&index) {
+                    return Ok(None);
+                }
+                let mut out = if linux && !structured {
+                    Output::ElfText(Default::default())
+                } else {
+                    Output::new(structured)
+                };
+                let original = &module.functions[index];
+                let selector = crate::emission::FunctionSelector(worker_pipeline.selector);
+                let pipeline = &crate::CodegenPipeline {
+                    selector: &selector,
+                    allocator: worker_pipeline.allocator,
+                };
+                let _function_profile = crate::backend_profile::function(&original.name);
+                let lowered = vector::lower(original);
+                let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+                let mut compiler = FunctionCompiler::new_for_target(
+                    &func,
+                    &symbols,
+                    pools,
+                    pipeline,
+                    structured,
+                    &leaf_summaries,
+                    linux,
+                    emission.separate_slots,
+                )?;
+                compiler.debug = debug;
+                compiler.unwind_tables = emission.unwind_tables;
+                compiler.function_sections = emission.function_sections;
+                let (frame_register, slots) = if debug {
+                    compiler.slot_frame_offsets()
+                } else {
+                    (None, Vec::new())
+                };
+                let scope_marks = compiler.compile(&mut out);
+                Ok(Some((
+                    out,
+                    FrameDebug {
+                        slots,
+                        scope_marks,
+                        frame_register,
+                    },
+                )))
+            },
+        );
+        let width = parallel.budget.get();
+        for start in (0..module.functions.len()).step_by(width) {
+            let end = start.saturating_add(width).min(module.functions.len());
+            let results =
+                crate::parallel::run(parallel, start..end, std::sync::Arc::clone(&compile));
+            for (index, result) in (start..end).zip(results) {
+                let (body, frame) = match result? {
+                    Some(result) => result,
+                    None => {
+                        let (body, scope_marks) = prepared_leaves
+                            .remove(&index)
+                            .expect("prepared leaf retained until consumption");
+                        (
+                            body,
+                            FrameDebug {
+                                frame_register: None,
+                                slots: Vec::new(),
+                                scope_marks,
+                            },
+                        )
+                    }
+                };
+                out.append(body);
+                frames.push(frame);
+                out.flush(&mut sink);
+            }
+        }
     }
     for f in &module.functions {
         if linux {

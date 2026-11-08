@@ -82,11 +82,26 @@ pub(crate) enum Output {
     Program(keel_asm_ir::Program),
 }
 
+pub(crate) struct OutputOptions<'exec, 'a> {
+    pub structured: bool,
+    pub parallel: Option<&'exec crate::parallel::Execution<'exec, 'a>>,
+}
+
 pub(crate) fn compile(
     module: &Module,
     request: &crate::Request<'_>,
     structured: bool,
     sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+) -> Result<Output, CodegenError> {
+    compile_with_executor(module, request, structured, sink, None)
+}
+
+pub(crate) fn compile_with_executor<'module>(
+    module: &'module Module,
+    request: &crate::Request<'module>,
+    structured: bool,
+    sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    parallel: Option<&crate::parallel::Execution<'_, 'module>>,
 ) -> Result<Output, CodegenError> {
     let crate::Request {
         target,
@@ -111,7 +126,10 @@ pub(crate) fn compile(
                 pools.unwrap_or(&x86_64::REGISTERS),
                 pipeline,
                 options,
-                structured,
+                OutputOptions {
+                    structured,
+                    parallel,
+                },
                 sink,
             )? {
                 x86_64::Output::Text(text, _) => Ok(Output::Text(text.into_string())),
@@ -123,7 +141,10 @@ pub(crate) fn compile(
                 module,
                 pools.unwrap_or(&aarch64::REGISTERS),
                 pipeline,
-                structured,
+                OutputOptions {
+                    structured,
+                    parallel,
+                },
                 sink,
                 target == Target::Aarch64LinuxGnu,
                 options,

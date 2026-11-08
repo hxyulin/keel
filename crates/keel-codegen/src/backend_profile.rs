@@ -333,6 +333,11 @@ impl Drop for Guard {
     }
 }
 
+/// Whether this thread is currently collecting backend observations.
+pub(crate) fn is_active() -> bool {
+    RECORDER.with(|cell| cell.borrow().is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
