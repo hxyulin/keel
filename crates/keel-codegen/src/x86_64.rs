@@ -447,7 +447,14 @@ pub(crate) fn compile_output(
         }
     }
     if debug {
-        dwarf::emit_debug_info(&mut out, Format::Elf, DWARF_RBP, module, &frames);
+        dwarf::emit_debug_info(
+            &mut out,
+            Format::Elf,
+            DWARF_RBP,
+            module,
+            &frames,
+            emission.function_sections,
+        );
     }
     // No executable stack.
     out.directive(Directive::ElfSection {

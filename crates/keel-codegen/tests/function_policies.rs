@@ -96,3 +96,56 @@ fn optional_selection_uses_function_presets() {
         assert_eq!(*selector.0.borrow(), ["default"], "{target:?}");
     }
 }
+
+#[test]
+fn elf_debug_ranges_cover_function_sections_and_hot_cold_sections() {
+    use keel_ir::{EntityRef, SourceFile, SourceLoc};
+    use object::{Object, ObjectSection};
+    for target in [Target::Aarch64LinuxGnu, Target::X86_64LinuxGnu] {
+        for (function_sections, second_attrs) in [(true, ""), (false, "cold")] {
+            let mut module = keel_ir::parse(&format!(
+                "func @a() {{\nblock0:\n return\n}}\nfunc @b() {second_attrs} {{\nblock0:\n return\n}}\n"
+            )).unwrap();
+            module.files.push("sections.c".into());
+            for (index, function) in module.functions.iter_mut().enumerate() {
+                let inst = function.block_insts(function.entry_block().unwrap())[0];
+                function.set_inst_loc(
+                    inst,
+                    Some(SourceLoc {
+                        file: SourceFile::new(0),
+                        line: index as u32 + 1,
+                        col: 1,
+                        scope: None,
+                    }),
+                );
+            }
+            let mut options = EmissionOptions::default();
+            options.function_sections = function_sections;
+            let program = keel_codegen::Request::new(
+                target,
+                CodegenPipeline {
+                    selector: &SelectionTier::Covers,
+                    allocator: &AllocationTier::Full,
+                },
+            )
+            .emission(options)
+            .program(&module)
+            .unwrap();
+            let bytes = keel_asm::assemble_program_for(target, &program).unwrap();
+            let object = object::File::parse(bytes.as_slice()).unwrap();
+            let section = object
+                .section_by_name(".debug_ranges")
+                .expect("disjoint CU needs ranges");
+            let ranges = section.data().unwrap();
+            assert_eq!(ranges.len(), 80, "{target:?}, sections={function_sections}");
+            assert_eq!(&ranges[..8], &[0xff; 8]);
+            assert_eq!(&ranges[32..40], &[0xff; 8]);
+            assert_eq!(&ranges[64..], &[0; 16]);
+            assert_eq!(
+                section.relocations().count(),
+                2,
+                "each function gets its own base address relocation"
+            );
+        }
+    }
+}

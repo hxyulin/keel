@@ -417,6 +417,7 @@ pub(crate) fn compile_output(
             29,
             module,
             &frames,
+            emission.function_sections,
         );
     }
     if !linux {

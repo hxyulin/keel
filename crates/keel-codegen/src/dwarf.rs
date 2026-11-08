@@ -34,13 +34,15 @@ pub(crate) fn emit_debug_info<T: Sink>(
     frame_reg: u8,
     module: &Module,
     frames: &[FrameDebug],
+    function_sections: bool,
 ) {
     let l = format.local();
     let elf = format == Format::Elf;
-    let split_code = module
-        .functions
-        .iter()
-        .any(|f| f.attrs.section.is_some() || (elf && f.attrs.retain));
+    // A compile-unit span cannot subtract addresses in different ELF sections.
+    let split_code = (elf && function_sections)
+        || module.functions.iter().any(|f| {
+            f.attrs.section.is_some() || (elf && (f.attrs.retain || f.attrs.cold || f.attrs.hot))
+        });
 
     out.debug_section(format, "abbrev");
 
