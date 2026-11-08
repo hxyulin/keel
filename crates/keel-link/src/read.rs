@@ -1,4 +1,4 @@
-use crate::{Error, Result, fail};
+use crate::{Result, fail};
 use std::borrow::Cow;
 
 pub(crate) struct Reader<'a>(pub &'a [u8]);
@@ -228,7 +228,7 @@ impl<'a> Object<'a> {
             minimum,
             subsections,
         } = object;
-        let (symbols, map) = native_symbols(&atoms, symbols)?;
+        let (symbols, map) = native_symbols(&atoms, symbols.into_iter())?;
         let unwind = unwind
             .into_iter()
             .map(|u| native_unwind(u, &map))
@@ -269,8 +269,7 @@ impl<'a> Object<'a> {
     }
     pub(crate) fn from_cache(name: String, cache: keel_object::Cache<'a>) -> Result<Self> {
         let atoms: Vec<_> = cache.atoms().collect();
-        let (symbols, map) =
-            native_symbols(&atoms, cache.symbols().map(|s| s.to_symbol()).collect())?;
+        let (symbols, map) = native_symbols(&atoms, cache.symbols().map(|s| s.to_symbol()))?;
         let unwind = cache
             .unwind()
             .map(|u| native_unwind(u, &map))
@@ -687,12 +686,12 @@ fn validate_object(object: &Object<'_>) -> Result<()> {
 }
 
 struct NativeMap {
-    atoms: Vec<usize>,
+    atoms: usize,
     symbols: usize,
 }
 fn native_symbols(
     atoms: &[keel_object::Atom],
-    named: Vec<keel_object::Symbol>,
+    named: impl ExactSizeIterator<Item = keel_object::Symbol>,
 ) -> Result<(Vec<Symbol>, NativeMap)> {
     use keel_object::Definition;
     for a in atoms {
@@ -736,28 +735,24 @@ fn native_symbols(
                 },
         });
     }
-    let map: Vec<_> = atoms
-        .iter()
-        .map(|a| {
-            let id = symbols.len();
-            symbols.push(Symbol {
-                name: String::new(),
-                kind: 0xe,
-                section: a.section as usize + 1,
-                value: a.offset as u64,
-                desc: if a.boundary { 0 } else { 0x200 } | if a.no_dead_strip { 0x20 } else { 0 },
-            });
-            id
-        })
-        .collect();
+    for a in atoms {
+        symbols.push(Symbol {
+            name: String::new(),
+            kind: 0xe,
+            section: a.section as usize + 1,
+            value: a.offset as u64,
+            desc: if a.boundary { 0 } else { 0x200 } | if a.no_dead_strip { 0x20 } else { 0 },
+        });
+    }
     Ok((
         symbols,
         NativeMap {
-            atoms: map,
+            atoms: atoms.len(),
             symbols: count,
         },
     ))
 }
+
 fn native_fixup(f: keel_object::Fixup, map: &NativeMap) -> Result<Reloc> {
     use Operation::{Difference, PagePair, Single};
     use keel_object::FixupKind as K;
@@ -797,10 +792,8 @@ fn native_fixup(f: keel_object::Fixup, map: &NativeMap) -> Result<Reloc> {
 fn native_unwind(u: keel_object::Unwind, map: &NativeMap) -> Result<NativeUnwind> {
     Ok(NativeUnwind {
         owner: map
-            .atoms
-            .get(u.owner as usize)
-            .copied()
-            .ok_or("invalid native unwind owner")?,
+            .index(keel_object::Target::Atom(u.owner))
+            .map_err(|_| "invalid native unwind owner")?,
         length: u.length,
         encoding: u.encoding,
         personality: u.personality.map(|t| map.index(t)).transpose()?,
@@ -810,11 +803,10 @@ fn native_unwind(u: keel_object::Unwind, map: &NativeMap) -> Result<NativeUnwind
 impl NativeMap {
     fn index(&self, t: keel_object::Target) -> Result<usize> {
         match t {
-            keel_object::Target::Atom(id) => self
-                .atoms
-                .get(id as usize)
-                .copied()
-                .ok_or_else(|| Error::from("invalid native atom target")),
+            keel_object::Target::Atom(id) if (id as usize) < self.atoms => {
+                Ok(self.symbols + id as usize)
+            }
+            keel_object::Target::Atom(_) => fail("invalid native atom target"),
             keel_object::Target::Symbol(id) if (id as usize) < self.symbols => Ok(id as usize),
             _ => fail("invalid native symbol target"),
         }
