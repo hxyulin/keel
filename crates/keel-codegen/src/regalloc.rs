@@ -96,6 +96,8 @@ mod remat;
 pub use remat::RematerializingAllocator;
 pub(crate) use remat::{RematRecipe, remat_recipe};
 #[cfg(feature = "experimental-regalloc")]
+mod loop_region;
+#[cfg(feature = "experimental-regalloc")]
 mod region;
 #[cfg(feature = "experimental-regalloc")]
 mod split;

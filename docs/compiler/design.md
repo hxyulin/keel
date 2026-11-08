@@ -735,10 +735,22 @@ values read by distinct selected instructions in the same block. Duplicate reads
 at one instruction do not qualify. Functions without qualifying values skip cache
 construction. Vector locations stay unchanged; returns-twice functions use Full.
 Dirty cache values return to their stack homes at block edges. This is an
-opportunity filter, not a profitability guarantee or a hard work budget. It does
-not keep cache values across loop backedges.
+opportunity filter, not a profitability guarantee or a hard work budget.
 
-After caching, untouched blocks can temporarily displace one idle i64 or pointer
+Call-free natural loops with an unconditional preheader can retain one spilled
+i64 or pointer in a register across backedges. The candidate and displaced owner
+must be defined outside the loop and dominate its preheader. The owner must stay
+live but unused throughout every loop block. Entry-edge copies save the owner and
+load the candidate; exiting-edge copies restore the owner. These transfers join
+the existing phi parallel copies, including shared exits. Conflicting register
+destinations, loop-phi owners and existing cache edits inside the loop exclude a
+plan. Loops can qualify with one read per iteration even when no value meets the
+block-local repeated-read gate. At most one loop is repaired per function. Its
+blocks and preheader are reserved against the later block-window repair. This
+experimental policy does not prove profitable trip counts, and application
+runtime gains remain unproven.
+
+After loop repair, untouched blocks can temporarily displace one idle i64 or pointer
 register owner. A bounded call-free window needs at least four distinct reads of
 a spilled scalar and no definition of that value. The owner must remain live but
 unused throughout the candidate's first-to-last-use window. Save the owner, load

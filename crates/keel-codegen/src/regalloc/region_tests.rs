@@ -67,7 +67,7 @@ fn restores_owner_before_call_and_keeps_parallel_sources() {
         returns_twice: &|_| false,
     };
     let (baseline, intervals) = forced_homes(&input);
-    let actual = repair(&input, baseline, &intervals);
+    let actual = repair(&input, baseline, &intervals, &[]);
     assert!(
         !actual.edits.is_empty(),
         "forced homes must require displacement"
@@ -124,7 +124,7 @@ block1:
         .instruction_mut(first)
         .uses
         .push((ValuePart::low(pointer), home));
-    let actual = repair(&input, baseline, &intervals);
+    let actual = repair(&input, baseline, &intervals, &[]);
     assert_eq!(
         actual.spill_slots,
         slots + 1,
@@ -164,7 +164,7 @@ fn emitted_owner_save_restore_matches_native_oracle() {
         }
         fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
             let (baseline, intervals) = forced_homes(input);
-            let actual = repair(input, baseline, &intervals);
+            let actual = repair(input, baseline, &intervals, &[]);
             assert!(
                 !actual.edits.is_empty(),
                 "native oracle must execute displacement"

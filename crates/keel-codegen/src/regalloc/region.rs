@@ -15,6 +15,7 @@ pub(super) fn repair(
     input: &AllocationInput<'_>,
     mut alloc: Allocation,
     intervals: &[Interval],
+    reserved: &[keel_ir::Block],
 ) -> Allocation {
     let f = input.func;
     if f.sig.returns_twice
@@ -32,11 +33,13 @@ pub(super) fn repair(
         // Existing local edits own this entire block, including boundary copies.
         // Local caching flushes dirty homes at edges, so untouched blocks start
         // with stable homes and cannot overlap its resident cache segments.
-        if f.block_insts(block).iter().any(|&inst| {
-            alloc.edits.instruction_index(inst).is_some()
-                || (0..f.inst_data(inst).branch_dests().len())
-                    .any(|edge| !alloc.edits.edge(inst, edge).is_empty())
-        }) {
+        if reserved.contains(&block)
+            || f.block_insts(block).iter().any(|&inst| {
+                alloc.edits.instruction_index(inst).is_some()
+                    || (0..f.inst_data(inst).branch_dests().len())
+                        .any(|edge| !alloc.edits.edge(inst, edge).is_empty())
+            })
+        {
             slot += 1 + f.block_insts(block).len() as u32;
             continue;
         }

@@ -134,11 +134,17 @@ pub(super) fn allocate_adaptive(input: &AllocationInput<'_>) -> Allocation {
         return alloc;
     }
     let allowed = repeated_spills(input, &alloc);
-    if !allowed.iter().any(|&yes| yes) {
-        return alloc;
-    }
-    let alloc = cache_spills_filtered(input, alloc, &intervals, true, Some(&allowed));
-    super::region::repair(input, alloc, &intervals)
+    let alloc = if allowed.iter().any(|&yes| yes) {
+        cache_spills_filtered(input, alloc, &intervals, true, Some(&allowed))
+    } else {
+        alloc
+    };
+    let (alloc, reserved) = if weights.iter().any(|&w| w > 1) {
+        super::loop_region::repair(input, alloc, &intervals, &cfg)
+    } else {
+        (alloc, Vec::new())
+    };
+    super::region::repair(input, alloc, &intervals, &reserved)
 }
 
 // A conservative opportunity gate, not a profitability proof. Count distinct
