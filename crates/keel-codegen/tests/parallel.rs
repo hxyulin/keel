@@ -318,3 +318,96 @@ fn unused_signature_is_validated_before_dispatch_or_output() {
         assert!(error.message.contains("SIMD"), "{error}");
     }
 }
+
+#[test]
+fn executor_windows_are_bounded_and_sinks_stay_on_the_caller() {
+    use std::{
+        cell::RefCell,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    let source: String = (0..17)
+        .map(|i| format!("func @f{i}() {{\nentry:\n return\n}}\n"))
+        .collect();
+    let module = keel_ir::parse(&source).unwrap();
+    let caller = std::thread::current().id();
+    let windows = RefCell::new(Vec::new());
+    let completed = AtomicUsize::new(0);
+    let mut chunks = 0;
+    parallel::program_chunks(
+        &module,
+        parallel::Options {
+            target: Target::X86_64LinuxGnu,
+            pipeline: parallel::Pipeline {
+                selector: &SelectionTier::Full,
+                allocator: &AllocationTier::Full,
+            },
+            emission: Default::default(),
+            pools: None,
+            budget: NonZeroUsize::new(3).unwrap(),
+        },
+        &|jobs| {
+            assert_eq!(std::thread::current().id(), caller);
+            windows.borrow_mut().push(jobs.len());
+            assert!(!jobs.is_empty() && jobs.len() <= 3);
+            std::thread::scope(|scope| {
+                for job in jobs.into_iter().rev() {
+                    let completed = &completed;
+                    scope.spawn(move || {
+                        job.run();
+                        completed.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+            });
+        },
+        &mut |_| {
+            assert_eq!(std::thread::current().id(), caller);
+            assert_eq!(
+                completed.load(Ordering::SeqCst),
+                windows.borrow().iter().sum::<usize>(),
+                "the executor must finish the whole window before a sink runs"
+            );
+            chunks += 1;
+        },
+    )
+    .unwrap();
+    assert_eq!(*windows.borrow(), [3, 3, 3, 3, 3, 2]);
+    assert_eq!(
+        chunks, 18,
+        "one chunk per function and final module metadata"
+    );
+}
+
+#[test]
+fn omitted_jobs_and_executor_panics_do_not_emit_partial_windows() {
+    let module = keel_ir::parse("func @f() {\nentry:\n return\n}\n").unwrap();
+    for omit in [false, true] {
+        let mut chunks = 0;
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            parallel::program_chunks(
+                &module,
+                parallel::Options {
+                    target: Target::X86_64LinuxGnu,
+                    pipeline: parallel::Pipeline {
+                        selector: &SelectionTier::Full,
+                        allocator: &AllocationTier::Full,
+                    },
+                    emission: Default::default(),
+                    pools: None,
+                    budget: NonZeroUsize::new(3).unwrap(),
+                },
+                &|jobs| {
+                    if omit {
+                        drop(jobs);
+                    } else {
+                        Threads.execute(jobs);
+                        panic!("executor failure after joining workers");
+                    }
+                },
+                &mut |_| chunks += 1,
+            )
+        }));
+        assert!(panic.is_err(), "executor contract failure must propagate");
+        assert_eq!(chunks, 0, "a failed first window must not reach the sink");
+    }
+}
