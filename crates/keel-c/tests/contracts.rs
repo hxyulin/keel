@@ -6,6 +6,8 @@ mod attribute_corrections;
 mod attribute_factory_ownership;
 #[path = "contracts/attribute_ownership.rs"]
 mod attribute_ownership;
+#[path = "contracts/memory_attributes.rs"]
+mod memory_attributes;
 
 use keel_ir::{InstData, Target};
 

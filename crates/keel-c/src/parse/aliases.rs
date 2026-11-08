@@ -87,6 +87,11 @@ impl Parser<'_> {
             if global.returns_twice != other.returns_twice
                 || (global.function_attrs.noreturn && !other.function_attrs.noreturn)
                 || (global.function_attrs.nounwind && !other.function_attrs.nounwind)
+                || global
+                    .function_attrs
+                    .contract
+                    .intersect(&other.function_attrs.contract)
+                    != other.function_attrs.contract
             {
                 return Err(Error::new(
                     loc,

@@ -85,7 +85,19 @@ GNU `always_inline`, `noinline`, `noreturn`, `nothrow`
 (including double-underscore spellings), and C `_Noreturn` map to their IR
 counterparts. `nothrow` means the function promises no exception unwinding;
 it supplies no C++ termination semantics. No C++ `noexcept` syntax is added.
-Recognized GNU function attributes take no arguments.
+These GNU function attributes take no arguments.
+
+GNU `pure` and `const` supply scoped call memory contracts: `pure` permits
+reads but no externally relevant writes; `const` permits neither. Neither
+attribute adds termination, unwinding, capture, synchronization or accessibility
+promises. Calls remain subject to each optimizer consumer's legality checks.
+Plain `malloc` supplies allocation-like return alias freedom without implying
+non-nullness or a readable byte extent. `returns_nonnull` independently supplies
+return non-nullness. Both require a pointer return type. The argument-taking
+`malloc(deallocator, ...)` spelling remains advisory and supplies no alias
+promise; it can be combined with plain `malloc` when both meanings apply.
+`alloc_size` remains advisory because dynamic allocation extents are not
+represented by these contracts.
 
 Redeclarations and the definition accumulate attributes by boolean union,
 independent of their order. Missing attributes never clear earlier ones.
@@ -102,7 +114,8 @@ retain the inliner's existing lexical-subtree treatment.
 
 Contracts apply to the named direct function, including declarations without
 bodies and named functions returning pointers. Attribute ownership is specific
-to the attribute category. Inline policies, `returns_twice`, and GNU `nothrow`
+to the attribute category. Inline policies, `returns_twice`, GNU `nothrow`,
+and the memory and return attributes above
 are declaration attributes in the supported placements: they accumulate through
 intermediate declarator layers until the complete declarator identifies the
 named function. This includes factory declarations and attributes inside an

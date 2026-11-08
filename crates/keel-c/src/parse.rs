@@ -2138,6 +2138,9 @@ impl<'a> Parser<'a> {
                 "setjmp" | "_setjmp" | "sigsetjmp" | "__sigsetjmp" | "savectx" | "vfork"
             );
         self.globals[g].returns_twice |= returns_twice;
+        if !attrs.function_attrs.contract.returns.is_empty() && !matches!(fty.ret, Ty::Ptr(_)) {
+            return Err("malloc/returns_nonnull attributes require a pointer return type");
+        }
         let mut policies = attrs.function_attrs.clone();
         policies.align = attrs.aligned.map(|a| a as u32);
         policies.inlinehint |= spec.inline;
@@ -2701,6 +2704,47 @@ impl<'a> Parser<'a> {
                             "interrupt" => a.interrupt = true,
                             "no_instrument_function" => a.no_instrument_function = true,
                             _ => a.no_profile_instrument_function = true,
+                        }
+                    }
+                    "pure" | "const" | "malloc" | "returns_nonnull" => {
+                        // The argument-taking malloc spelling describes a deallocator,
+                        // not allocation-like alias freedom. Keep its existing advisory
+                        // handling without manufacturing a noalias promise.
+                        if name == "malloc" && self.eat("(") {
+                            self.skip_parens()?;
+                        } else {
+                            if self.is("(") {
+                                return Err(self.unexpected("an attribute without arguments"));
+                            }
+                            attrs.function_policy.get_or_insert(loc);
+                            let contract = &mut attrs.function_attrs.contract;
+                            match name {
+                                "pure" | "const" => {
+                                    let access = if name == "const" {
+                                        keel_ir::MemoryAccess::None
+                                    } else {
+                                        keel_ir::MemoryAccess::Read
+                                    };
+                                    contract.memory =
+                                        contract.memory.intersect(keel_ir::MemorySummary {
+                                            argmem: access,
+                                            other: access,
+                                            inaccessible: access,
+                                        });
+                                }
+                                _ => {
+                                    let facts = keel_ir::PointerContract {
+                                        return_noalias: name == "malloc",
+                                        nonnull: name == "returns_nonnull",
+                                        ..Default::default()
+                                    };
+                                    let promise = keel_ir::CallContract {
+                                        returns: vec![(0, facts)],
+                                        ..Default::default()
+                                    };
+                                    *contract = contract.intersect(&promise);
+                                }
+                            }
                         }
                     }
                     "gnu_inline" => attrs.gnu_inline = true,

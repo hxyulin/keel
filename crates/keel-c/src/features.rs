@@ -45,6 +45,10 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
                 | "no_instrument_function"
                 | "no_profile_instrument_function"
                 | "nothrow"
+                | "pure"
+                | "const"
+                | "malloc"
+                | "returns_nonnull"
         ),
         "__has_c_attribute" | "__has_declspec_attribute" | "__building_module" => false,
         "__is_target_arch" => {
