@@ -332,15 +332,15 @@ pub(crate) fn compile_output<'module>(
             let _function_profile = crate::backend_profile::function(&original.name);
             let lowered = vector::lower(original);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+            let request = crate::Request::new(target, *pipeline)
+                .pools(pools)
+                .emission(emission);
             let mut compiler = FunctionCompiler::new_for_target(
                 &func,
                 &symbols,
-                pools,
-                pipeline,
+                &request,
                 structured,
                 &leaf_summaries,
-                linux,
-                emission.separate_slots,
             )?;
             compiler.debug = debug;
             compiler.unwind_tables = emission.unwind_tables;
@@ -382,15 +382,15 @@ pub(crate) fn compile_output<'module>(
                 let _function_profile = crate::backend_profile::function(&original.name);
                 let lowered = vector::lower(original);
                 let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+                let request = crate::Request::new(target, *pipeline)
+                    .pools(pools)
+                    .emission(emission);
                 let mut compiler = FunctionCompiler::new_for_target(
                     &func,
                     &symbols,
-                    pools,
-                    pipeline,
+                    &request,
                     structured,
                     &leaf_summaries,
-                    linux,
-                    emission.separate_slots,
                 )?;
                 compiler.debug = debug;
                 compiler.unwind_tables = emission.unwind_tables;
@@ -1006,12 +1006,9 @@ impl<'a> FunctionCompiler<'a> {
         Self::new_for_target(
             func,
             symbols,
-            pools,
-            pipeline,
+            &crate::Request::new(crate::Target::Aarch64AppleDarwin, *pipeline).pools(pools),
             structured,
             leaf_summaries,
-            false,
-            false,
         )
     }
     /// Checks the function, then plans it in phases: call area, inline
@@ -1020,13 +1017,14 @@ impl<'a> FunctionCompiler<'a> {
     fn new_for_target(
         func: &'a Function,
         symbols: &'a crate::symbols::Symbols<'a>,
-        pools: &Pools,
-        pipeline: &crate::CodegenPipeline<'_>,
+        request: &crate::Request<'_>,
         structured: bool,
         leaf_summaries: &leaf_calls::Summaries,
-        linux: bool,
-        separate_slots: bool,
     ) -> Result<Self, CodegenError> {
+        let pools = request.pools.unwrap_or(&REGISTERS);
+        let pipeline = &request.pipeline;
+        let linux = request.target == crate::Target::Aarch64LinuxGnu;
+        let separate_slots = request.emission.separate_slots;
         let module = symbols.module;
         let err = |message: String| CodegenError {
             func: func.name.clone(),
