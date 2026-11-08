@@ -149,9 +149,10 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 `-p pass,pass,...` selects any pipeline explicitly, overriding the tier.
 
 No tier runs the opt-in passes. `memory-forward` applies `restrict` parameter
-contracts within a block, and `call-load-reuse` keeps loads across calls whose
-scoped contracts LLVM import supplies. The other three are test entry points
-for code that tiers run inside other passes:
+contracts within a block. `call-load-reuse` keeps loads across calls with scoped
+contracts or bounded body proofs. `bounded-stack-dse` removes overwritten
+private stack stores. Some opt-in entries also expose kernels that tiers run
+inside other passes:
 
 - The binding-aware inliners share `inline`'s legality checks, cloning and
   growth budgets.

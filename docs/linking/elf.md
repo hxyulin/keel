@@ -51,6 +51,7 @@ link the installed CRT objects explicitly (see
 | `--rpath PATH`, `-rpath PATH` | Emit `DT_RUNPATH`; repeat to join paths with colons. |
 | `--gc-sections`, `--no-gc-sections` | Opt-in section garbage collection (last option wins). |
 | `--relax-got`, `--no-relax-got` | Opt-in x86-64 GOT-load relaxation (last option wins). |
+| `--merge-constants`, `--no-merge-constants` | Opt-in record and exact string pooling (last option wins). |
 | `--` | End of options. |
 | `--target aarch64-apple-darwin` | Use the [Mach-O linker](macho.md) instead. |
 | `--system ...` | Forward to the Clang driver instead. |

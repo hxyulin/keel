@@ -106,11 +106,11 @@ four-byte AArch64 instructions (including wide-constant materialization), and
 uses bounded x86 instruction allowances. Duplicated bodies have a 64-byte
 allowance, including credit for eliminating call and frame overhead. Removable
 single-use private bodies bypass this filter because their out-of-line code
-disappears. Inline assembly,
-and intrinsics have no estimate and remain calls. Portable targets keep the
-existing IR policy. Required
-inlining and flatten retain their contracts. This is an admission filter, not
-a prediction of final object size after selection and allocation.
+disappears. Inline assembly and intrinsics have no estimate and remain calls.
+Portable targets keep the existing IR policy. Required inlining and flatten
+retain their contracts. This admission filter can reduce text while adding
+calls and runtime cost. It does not predict final object size after selection
+and allocation.
 
 Size does not guarantee the smallest machine code: selection and allocation
 have no target byte-cost model, and losing profitable
