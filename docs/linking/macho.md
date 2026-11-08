@@ -65,11 +65,17 @@ Page hashing reads immutable output spans, including zero-filled gaps, without
 assembling another complete image buffer. Archive selection, global symbol
 selection, the GC reachability walk and final layout remain ordered and serial.
 
-GC walks validated native fixup ranges directly and resolves each referenced
-symbol's graph node lazily. Foreign records use the object-format pair decoder.
+GC walks validated native fixup ranges directly. After atom boundaries are
+final, ordinary local definitions map to cached graph nodes independently per
+object; large symbol tables use workers. This mapping demands no imports.
+Globals and moving metadata retain lazy resolution. Foreign records use the
+object-format pair decoder. Native writes in dead atoms are removed after
+boundary validation and marking; foreign pairs retain their validation order.
 GOT/stub discovery tracks each symbol's branch and GOT uses independently,
 so repeated references do not rebuild keys or repeat map updates. A static branch
 can still be followed by a GOT reference to the same symbol.
+Local symbol targets resolve directly from their object and symbol IDs. The
+final global-lookup table omits trailing locals, including native atom symbols.
 
 Relocation workers append rebase addresses to flat buffers. Emission sorts and
 deduplicates the merged addresses once. Unwind generation decodes each object's
@@ -407,8 +413,11 @@ References: [ld64 manual](https://github.com/apple-oss-distributions/ld64/blob/m
 
 The CLI maps stable regular input files (reading unmappable ones) and streams
 the executable through `link_signed`, so it never holds a complete output
-buffer. Relocation patches each owned input payload in place; ordinary payloads
-are released after merging, while relocated `__eh_frame` and `__compact_unwind`
+buffer. Preparation plans section sizes and offsets without copying payloads
+into output buffers. Relocation appends patched contributions once, reserving
+space for their final output section. A complete owned contribution moves
+into its output buffer directly. Ordinary payloads are released after merging,
+while relocated `__eh_frame` and `__compact_unwind`
 payloads live until unwind generation. DWARF bounds are validated even when
 debugging is omitted, but DWARF payloads are only snapshotted when requested.
 `link_to` writes directly into an empty `Write + Seek` sink. The byte-returning

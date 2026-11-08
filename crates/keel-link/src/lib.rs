@@ -177,8 +177,9 @@ pub(crate) struct Linker<'a> {
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
     warnings: Vec<String>,
-    /// Each object symbol's target, indexed like `objects`, once `globals` is
-    /// final. `None` marks an undefined name. Empty until then.
+    /// Global lookup results through each object's last non-local symbol.
+    /// Locals resolve directly, so trailing local atoms need no table entries.
+    /// `None` marks an undefined name. Empty until `globals` is final.
     resolved: Vec<Vec<Option<Target>>>,
 }
 
@@ -554,15 +555,10 @@ impl Linker<'_> {
                 let id = self.output(&seg, &name, flags, alignment)?;
                 let s = &mut self.objects[oi].sections[si];
                 let out = &mut self.outputs[id];
-                let zero_fill = matches!(s.flags & 255, 1 | 0x12);
                 let offset = align(out.size, 1 << s.alignment);
+                // Plan placement now; append bytes once after relocation.
                 let end = if s.atoms.is_empty() {
-                    let end = offset.checked_add(s.size).ok_or("section size overflow")?;
-                    if end <= 512 * 1024 * 1024 && !zero_fill {
-                        out.data.resize(offset, 0);
-                        out.data.extend_from_slice(&s.data);
-                    }
-                    end
+                    offset.checked_add(s.size).ok_or("section size overflow")?
                 } else {
                     // Each live atom keeps its offset modulo the section
                     // alignment, so alignment inside an atom still holds, and
@@ -576,10 +572,6 @@ impl Linker<'_> {
                             .checked_add(a.end - a.start)
                             .filter(|&end| end <= 512 * 1024 * 1024)
                             .ok_or("merged section exceeds 512 MiB")?;
-                        if !zero_fill {
-                            out.data.resize(a.offset, 0);
-                            out.data.extend_from_slice(&s.data[a.start..a.end]);
-                        }
                     }
                     cursor
                 };
@@ -724,9 +716,12 @@ impl Linker<'_> {
         // `globals` is final. Relocations look symbols up by index from here on.
         self.resolved = (0..self.objects.len())
             .map(|oi| {
-                (0..self.objects[oi].symbols.len())
-                    .map(|si| self.lookup(oi, si))
-                    .collect()
+                let symbols = &self.objects[oi].symbols;
+                let end = symbols
+                    .iter()
+                    .rposition(|s| s.kind & 1 != 0 || s.kind & 0xe == 0)
+                    .map_or(0, |i| i + 1);
+                (0..end).map(|si| self.lookup(oi, si)).collect()
             })
             .collect();
         for (oi, o) in self.objects.iter().enumerate() {
@@ -845,9 +840,13 @@ impl Linker<'_> {
             .symbols
             .get(si)
             .ok_or("relocation symbol index out of range")?;
-        let target = match self.resolved.get(oi) {
-            Some(table) => table[si],
-            None => self.lookup(oi, si),
+        let target = if s.kind & 1 == 0 && s.kind & 0xe != 0 {
+            Some(Target::Definition(oi, si))
+        } else {
+            match self.resolved.get(oi) {
+                Some(table) => table[si],
+                None => self.lookup(oi, si),
+            }
         };
         target.ok_or_else(|| format!("undefined symbol `{}`", s.name).into())
     }

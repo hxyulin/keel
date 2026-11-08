@@ -283,3 +283,56 @@ fn local_pointer_addend_follows_the_destination_atom() {
     .unwrap();
     assert_eq!(expected.bytes, actual.bytes);
 }
+
+#[test]
+fn dead_native_page_pairs_are_validated_before_pruning() {
+    let mut object = keel_asm::assemble(
+        ".subsections_via_symbols\n.globl _main\n_main:\nb _live\n_dead:\nadrp x0,_missing@PAGE\nadd x0,x0,_missing@PAGEOFF\nbl _missing\n_live:\nret\n"
+    ).unwrap().into_object().unwrap();
+    let mut opts = options();
+    opts.dead_strip = true;
+    keel_link::link_objects(
+        vec![ObjectInput {
+            name: "dead".into(),
+            object: object.clone(),
+        }],
+        &[],
+        opts,
+    )
+    .unwrap();
+    // Move the live atom boundary between the two words of a dead page pair.
+    // Pruning the dead high word must not hide its write into the live atom.
+    let keel_object::Target::Atom(live) = object.sections[0].fixups[0].target else {
+        panic!("local branch must use an atom target");
+    };
+    object.atoms[live as usize].offset = 8;
+    let cache = object.encode().unwrap();
+    for cached in [false, true] {
+        let mut opts = options();
+        opts.dead_strip = true;
+        let error = if cached {
+            keel_link::link_caches(
+                &[Input {
+                    name: "dead",
+                    bytes: &cache,
+                }],
+                &[],
+                opts,
+            )
+        } else {
+            keel_link::link_objects(
+                vec![ObjectInput {
+                    name: "dead".into(),
+                    object: object.clone(),
+                }],
+                &[],
+                opts,
+            )
+        }
+        .expect_err("crossing pair must fail before marking");
+        assert!(
+            error.contains("paired relocation crosses a linker atom"),
+            "{error}"
+        );
+    }
+}

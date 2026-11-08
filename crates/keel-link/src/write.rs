@@ -147,6 +147,19 @@ impl Segment {
         }
     }
 }
+// Ordered contributions normally append. Keep overwrite support for callers
+// that relocate a contribution again while planning metadata.
+fn merge_bytes(out: &mut Vec<u8>, offset: usize, data: &[u8]) {
+    let overlap = data.len().min(out.len().saturating_sub(offset));
+    if overlap != 0 {
+        out[offset..offset + overlap].copy_from_slice(&data[..overlap]);
+    }
+    if offset > out.len() {
+        out.resize(offset, 0);
+    }
+    out.extend_from_slice(&data[overlap..]);
+}
+
 struct Patched<'data> {
     data: std::borrow::Cow<'data, [u8]>,
     start: usize,
@@ -863,10 +876,17 @@ impl<'data> Linker<'data> {
             })
             .sum();
         if fixups < FIXUPS_PER_WORKER * 2 {
-            return self.relocate_serial();
+            self.relocate_serial()?;
+        } else {
+            let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+            self.relocate_with_workers((fixups / FIXUPS_PER_WORKER).max(1).min(available))?;
         }
-        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
-        self.relocate_with_workers((fixups / FIXUPS_PER_WORKER).max(1).min(available))
+        for out in &mut self.outputs {
+            if !matches!(out.flags & 255, 1 | 0x12) {
+                out.data.resize(out.size, 0);
+            }
+        }
+        Ok(())
     }
     fn relocate_with_workers(&mut self, workers: usize) -> Result<()> {
         if workers <= 1 {
@@ -1325,18 +1345,34 @@ impl<'data> Linker<'data> {
         self.weak_binds.extend(weak_binds);
         let s = &self.objects[oi].sections[si];
         let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
+        // A complete owned contribution can become its output buffer. Metadata
+        // keeps its input payload because unwind generation reads it afterward.
+        if !metadata
+            && s.name != "__eh_frame"
+            && let Some(id) = s.output
+            && s.atoms.is_empty()
+            && s.offset == 0
+            && start == 0
+            && data.len() == self.outputs[id].size
+            && let std::borrow::Cow::Owned(bytes) = data
+        {
+            self.outputs[id].data = bytes;
+            self.objects[oi].sections[si].data = Default::default();
+            return;
+        }
         if let Some(id) = s.output.filter(|_| !data.is_empty()) {
+            let size = self.outputs[id].size;
             let out = &mut self.outputs[id].data;
+            out.reserve(size.saturating_sub(out.len()));
             if s.atoms.is_empty() {
-                out[s.offset + start..s.offset + start + data.len()].copy_from_slice(&data);
+                merge_bytes(out, s.offset + start, &data);
             } else {
                 for a in s.atoms.iter().filter(|a| a.live) {
                     let left = a.start.max(start);
                     let right = a.end.min(start + data.len());
                     if left < right {
                         let offset = a.offset + left - a.start;
-                        out[offset..offset + right - left]
-                            .copy_from_slice(&data[left - start..right - start]);
+                        merge_bytes(out, offset, &data[left - start..right - start]);
                     }
                 }
             }
@@ -1713,6 +1749,61 @@ mod tests {
         addend.width = 8;
         check(vec![pointer, addend, branch], "invalid ARM64_RELOC_ADDEND");
     }
+    #[test]
+    fn complete_owned_contributions_move_into_output_and_empty_tails_pad() {
+        let source = ".globl _main\n_main:\nb _main\n.data\n_pointer:\n.quad _main\n";
+        let object = keel_asm::assemble(source).unwrap().into_object().unwrap();
+        for aligned_tail in [false, true] {
+            let mut objects = vec![Object::from_owned("main".into(), object.clone()).unwrap()];
+            if aligned_tail {
+                objects.push(
+                    Object::from_owned(
+                        "empty".into(),
+                        keel_asm::assemble(".text\n.p2align 4\n.data\n.p2align 4\n")
+                            .unwrap()
+                            .into_object()
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                );
+            }
+            let mut l = prepare_with_objects(
+                &[],
+                objects,
+                Options {
+                    dylibs: vec![Dylib {
+                        install_name: "/usr/lib/libSystem.B.dylib".into(),
+                        exports: BTreeSet::new(),
+                        weak_exports: BTreeSet::new(),
+                    }],
+                    ..Options::default()
+                },
+            )
+            .unwrap();
+            let original: Vec<_> = l.objects[0]
+                .sections
+                .iter()
+                .map(|s| (s.data.as_ptr(), s.output.unwrap()))
+                .collect();
+            l.layout().unwrap();
+            let main = l.address(l.globals["_main"]).unwrap();
+            l.relocate().unwrap();
+            for ((pointer, id), input) in original.into_iter().zip(&l.objects[0].sections) {
+                let out = &l.outputs[id];
+                if aligned_tail {
+                    assert_eq!(out.data.len(), 16, "{},{}", out.segment, out.name);
+                    assert!(out.data[input.size..].iter().all(|b| *b == 0));
+                } else {
+                    assert_eq!(out.data.as_ptr(), pointer, "owned payload must move");
+                }
+                assert!(input.data.is_empty());
+                if out.name == "__data" {
+                    assert_eq!(&out.data[..8], &main.to_le_bytes());
+                }
+            }
+        }
+    }
+
     #[test]
     fn got_and_stub_discovery_tracks_uses_independently() {
         let source = ".subsections_via_symbols\n.globl _main\n_main:\n\

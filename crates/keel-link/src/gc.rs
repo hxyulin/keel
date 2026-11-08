@@ -209,8 +209,8 @@ struct Graph<'a, 'data> {
     owner_starts: Vec<usize>,
     owners: Vec<NodeId>,
     demanded: Vec<Vec<bool>>,
-    /// Filled lazily after atom boundaries and global winners are final.
-    /// The outer option distinguishes an unseen symbol from no input edge.
+    /// Local ordinary definitions are mapped after atom boundaries are final.
+    /// Other references resolve lazily; the outer option marks an unseen symbol.
     targets: Vec<Vec<Option<Option<NodeId>>>>,
 }
 impl<'a, 'data> Graph<'a, 'data> {
@@ -890,28 +890,55 @@ impl Linker<'_> {
             g.common_ids.insert(name, g.nodes.len());
             g.nodes.push(Node::Common(name));
         }
-        g.targets = self
-            .objects
-            .iter()
-            .map(|o| vec![None; o.symbols.len()])
-            .collect();
+        // Ordinary local definitions cannot demand imports or report moving
+        // metadata errors. Map them independently while global references and
+        // metadata symbols retain lazy resolution in traversal order.
+        g.targets = crate::parallel::map(
+            self.objects.iter().enumerate().collect(),
+            |(_, o)| o.symbols.len(),
+            8192,
+            |(oi, o)| {
+                o.symbols
+                    .iter()
+                    .map(|sym| {
+                        if sym.kind & 1 != 0 || sym.kind & 0xe == 0 {
+                            return None;
+                        }
+                        if sym.kind & 0xe == 2 {
+                            return Some(None);
+                        }
+                        let section = sym.section - 1;
+                        if g.records(oi, section) {
+                            return None;
+                        }
+                        let offset = (sym.value - o.sections[section].address) as usize;
+                        let unit = g.parts[oi][section].atom(offset);
+                        Some(Some(g.id(Node::Unit(oi, section, unit))))
+                    })
+                    .collect()
+            },
+        );
         g.owner_starts = vec![0; count + 1];
-        for &(o, sec, start, _) in &owned {
-            let id = g
-                .id(Node::Unit(o, sec, g.parts[o][sec].atom(start)))
-                .index();
-            g.owner_starts[id + 1] += 1;
+        let owned: Vec<_> = owned
+            .into_iter()
+            .map(|(o, sec, start, record)| {
+                (
+                    g.id(Node::Unit(o, sec, g.parts[o][sec].atom(start))),
+                    g.id(record),
+                )
+            })
+            .collect();
+        for &(owner, _) in &owned {
+            g.owner_starts[owner.index() + 1] += 1;
         }
         for i in 1..g.owner_starts.len() {
             g.owner_starts[i] += g.owner_starts[i - 1];
         }
         let mut next = g.owner_starts[..count].to_vec();
         g.owners = vec![NodeId(0); owned.len()];
-        for (o, sec, start, record) in owned {
-            let id = g
-                .id(Node::Unit(o, sec, g.parts[o][sec].atom(start)))
-                .index();
-            g.owners[next[id]] = g.id(record);
+        for (owner, record) in owned {
+            let id = owner.index();
+            g.owners[next[id]] = record;
             next[id] += 1;
         }
         let mut pending = Vec::new();
@@ -1169,6 +1196,19 @@ impl Linker<'_> {
                             offset: 0,
                         })
                         .collect();
+                    // Native operations were validated and bucketed before
+                    // marking. Remove dead writes once, so GOT planning and
+                    // patching do not rescan them or search their atom again.
+                    // Foreign pairs retain their decoder and error ordering.
+                    if matches!(p.buckets, Buckets::Ordered(_)) {
+                        let mut ui = 0;
+                        section.relocs.retain(|r| {
+                            while ui + 1 < p.units.len() && r.offset as usize >= p.units[ui].end {
+                                ui += 1;
+                            }
+                            units[ui]
+                        });
+                    }
                 }
             }
         }
