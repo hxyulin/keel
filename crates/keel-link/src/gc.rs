@@ -38,10 +38,33 @@ struct Parts {
     records: bool,
     /// Whether the section may split into atoms at symbols.
     split: bool,
-    /// Each unit's relocations, as indexes in their original order.
-    relocs: Vec<Vec<u32>>,
-    /// The relocations among those that start a fixup.
-    fixups: Vec<Vec<u32>>,
+    buckets: Buckets,
+}
+/// Native fixups are disjoint and ordered, so each unit needs only a range.
+/// Foreign records may be unordered and include prefixes and subtractor pairs.
+enum Buckets {
+    Ordered(Vec<std::ops::Range<usize>>),
+    Indexed {
+        relocs: Vec<Vec<u32>>,
+        fixups: Vec<Vec<u32>>,
+    },
+}
+impl Buckets {
+    fn relocation(&self, unit: usize, index: usize) -> Option<usize> {
+        match self {
+            Self::Ordered(ranges) => {
+                let range = &ranges[unit];
+                (index < range.len()).then(|| range.start + index)
+            }
+            Self::Indexed { relocs, .. } => relocs[unit].get(index).map(|&i| i as usize),
+        }
+    }
+    fn fixup(&self, unit: usize, index: usize) -> Option<usize> {
+        match self {
+            Self::Ordered(_) => self.relocation(unit, index),
+            Self::Indexed { fixups, .. } => fixups[unit].get(index).map(|&i| i as usize),
+        }
+    }
 }
 impl Parts {
     fn whole(s: &Section, split: bool) -> Self {
@@ -53,8 +76,7 @@ impl Parts {
             }],
             records: false,
             split,
-            relocs: Vec::new(),
-            fixups: Vec::new(),
+            buckets: Buckets::Ordered(Vec::new()),
         }
     }
     /// The unit whose bytes contain `offset`.
@@ -77,45 +99,71 @@ impl Parts {
     /// into a surviving neighbor, or reinterpret it after compaction. Dead
     /// units are validated too, before pruning.
     fn bucket(&mut self, s: &Section) -> Result<()> {
-        self.relocs = vec![Vec::new(); self.units.len()];
-        self.fixups = vec![Vec::new(); self.units.len()];
-        let mut next_fixup = 0;
-        for (at, rel) in s.relocs.iter().enumerate() {
-            let Some(ui) = self.find(rel.offset as usize) else {
-                return fail(if self.records {
-                    "dead_strip: relocation outside an unwind record"
-                } else {
-                    "dead_strip: relocation outside its section"
-                });
-            };
-            if (rel.offset as usize)
-                .checked_add(rel.width as usize)
-                .is_none_or(|end| end > self.units[ui].end)
-            {
-                return fail(if self.records {
-                    "dead_strip: relocation crosses an unwind record boundary"
-                } else {
-                    "dead_strip: relocation crosses a linker atom"
-                });
+        // Native ingestion validates disjoint, ascending fixups before GC.
+        let ordered = s.relocs.iter().all(|r| r.operation != Operation::Foreign);
+        if ordered {
+            let mut ranges = vec![0..0; self.units.len()];
+            let mut ui = 0;
+            for (at, rel) in s.relocs.iter().enumerate() {
+                let offset = rel.offset as usize;
+                while ui < self.units.len() && offset >= self.units[ui].end {
+                    ui += 1;
+                }
+                let found = self.units.get(ui).filter(|u| offset >= u.start);
+                self.validate_relocation(found, rel)?;
+                let range = &mut ranges[ui];
+                if range.start == range.end {
+                    range.start = at;
+                }
+                range.end = at + 1;
             }
-            if rel.operation == Operation::PagePair
-                && (rel.aux as usize + 4 > self.units[ui].end
-                    || (rel.aux as usize) < self.units[ui].start)
-            {
-                return fail("dead_strip: paired relocation crosses a linker atom");
+            self.buckets = Buckets::Ordered(ranges);
+        } else {
+            let mut relocs = vec![Vec::new(); self.units.len()];
+            let mut fixups = vec![Vec::new(); self.units.len()];
+            let mut next_fixup = 0;
+            for (at, rel) in s.relocs.iter().enumerate() {
+                let found = self.find(rel.offset as usize);
+                self.validate_relocation(found.map(|ui| &self.units[ui]), rel)?;
+                let ui = found.expect("validated relocation belongs to a unit");
+                relocs[ui].push(at as u32);
+                // Prefix/pair records consume the next relocation too.
+                if at == next_fixup {
+                    fixups[ui].push(at as u32);
+                    let paired = rel.operation == Operation::Foreign
+                        && matches!(rel.kind, read::ADDEND | read::SUBTRACTOR)
+                        && read::fixups(&s.relocs[at..], 0..usize::MAX)
+                            .next()
+                            .is_some_and(|f| f.is_ok());
+                    next_fixup = at + 1 + paired as usize;
+                }
             }
-            self.relocs[ui].push(at as u32);
-            // Decode once in list order, as an ADDEND prefix or a SUBTRACTOR
-            // pair takes the next relocation with it.
-            if at == next_fixup {
-                self.fixups[ui].push(at as u32);
-                let paired = rel.operation == Operation::Foreign
-                    && matches!(rel.kind, read::ADDEND | read::SUBTRACTOR)
-                    && read::fixups(&s.relocs[at..], 0..usize::MAX)
-                        .next()
-                        .is_some_and(|f| f.is_ok());
-                next_fixup = at + 1 + paired as usize;
-            }
+            self.buckets = Buckets::Indexed { relocs, fixups };
+        }
+        Ok(())
+    }
+    fn validate_relocation(&self, unit: Option<&Unit>, rel: &Reloc) -> Result<()> {
+        let Some(unit) = unit else {
+            return fail(if self.records {
+                "dead_strip: relocation outside an unwind record"
+            } else {
+                "dead_strip: relocation outside its section"
+            });
+        };
+        if (rel.offset as usize)
+            .checked_add(rel.width as usize)
+            .is_none_or(|end| end > unit.end)
+        {
+            return fail(if self.records {
+                "dead_strip: relocation crosses an unwind record boundary"
+            } else {
+                "dead_strip: relocation crosses a linker atom"
+            });
+        }
+        if rel.operation == Operation::PagePair
+            && (rel.aux as usize + 4 > unit.end || (rel.aux as usize) < unit.start)
+        {
+            return fail("dead_strip: paired relocation crosses a linker atom");
         }
         Ok(())
     }
@@ -289,8 +337,9 @@ impl<'a, 'data> Graph<'a, 'data> {
         let s = &linker.objects[oi].sections[si];
         let records = self.records(oi, si);
         let mut edges = Vec::new();
-        for i in 0..self.parts[oi][si].fixups[ui].len() {
-            let at = self.parts[oi][si].fixups[ui][i] as usize;
+        let mut i = 0;
+        while let Some(at) = self.parts[oi][si].buckets.fixup(ui, i) {
+            i += 1;
             let fixup = read::fixups(&s.relocs[at..], 0..usize::MAX)
                 .next()
                 .expect("bucketed fixup exists");
@@ -366,9 +415,9 @@ impl<'a, 'data> Graph<'a, 'data> {
     ) -> Result<(usize, usize, usize, usize)> {
         let linker = self.linker;
         let s = &linker.objects[oi].sections[si];
-        let matches: Vec<_> = self.parts[oi][si].relocs[ri]
-            .iter()
-            .map(|&at| &s.relocs[at as usize])
+        let matches: Vec<_> = (0..)
+            .map_while(|i| self.parts[oi][si].buckets.relocation(ri, i))
+            .map(|at| &s.relocs[at])
             .filter(|r| (r.offset as usize) == field)
             .collect();
         let native_difference =
@@ -577,8 +626,7 @@ impl Linker<'_> {
                     units: records(s, compact)?,
                     records: true,
                     split: false,
-                    relocs: Vec::new(),
-                    fixups: Vec::new(),
+                    buckets: Buckets::Ordered(Vec::new()),
                 };
                 p.bucket(s)?;
                 sections.push(p);
@@ -1097,16 +1145,24 @@ mod tests {
             kind: read::UNSIGNED,
             ..Reloc::default()
         };
-        let s = section(32, vec![reloc(8), reloc(12)]);
-        let mut parts = Parts::whole(&s, true);
-        parts.units = atoms(&s, vec![0, 16], &mut []);
-        let error = parts.bucket(&s).unwrap_err();
-        assert!(
-            error.to_string().contains("crosses a linker atom"),
-            "{error}"
-        );
-        let s = section(32, vec![reloc(8)]);
-        parts.bucket(&s).unwrap();
-        assert_eq!(parts.relocs, [vec![0], vec![]]);
+        for operation in [Operation::Foreign, Operation::Single] {
+            let reloc = |offset| Reloc {
+                operation,
+                ..reloc(offset)
+            };
+            let s = section(32, vec![reloc(8), reloc(12)]);
+            let mut parts = Parts::whole(&s, true);
+            parts.units = atoms(&s, vec![0, 16], &mut []);
+            let error = parts.bucket(&s).unwrap_err();
+            assert!(
+                error.to_string().contains("crosses a linker atom"),
+                "{operation:?}: {error}"
+            );
+            let s = section(32, vec![reloc(8)]);
+            parts.bucket(&s).unwrap();
+            assert_eq!(parts.buckets.relocation(0, 0), Some(0));
+            assert_eq!(parts.buckets.relocation(0, 1), None);
+            assert_eq!(parts.buckets.relocation(1, 0), None);
+        }
     }
 }
