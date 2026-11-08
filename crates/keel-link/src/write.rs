@@ -147,7 +147,28 @@ impl Segment {
         }
     }
 }
-impl Linker<'_> {
+struct Patched<'data> {
+    data: std::borrow::Cow<'data, [u8]>,
+    rebases: Vec<u64>,
+    binds: Vec<(u64, (usize, i64))>,
+    weak_binds: Vec<(u64, (String, i64))>,
+}
+
+struct RelocationJob<'data> {
+    order: usize,
+    object: usize,
+    section: usize,
+    cost: usize,
+    data: std::borrow::Cow<'data, [u8]>,
+}
+struct RelocationResult<'data> {
+    order: usize,
+    object: usize,
+    section: usize,
+    patched: Result<Patched<'data>>,
+}
+
+impl<'data> Linker<'data> {
     pub(crate) fn emit_to<W: std::io::Write + std::io::Seek>(
         mut self,
         output: &mut W,
@@ -810,6 +831,107 @@ impl Linker<'_> {
         Ok((segments, file, address))
     }
     fn relocate(&mut self) -> Result<()> {
+        // A worker needs enough fixups to amortize scoped-thread startup.
+        const FIXUPS_PER_WORKER: usize = 32768;
+        let discarded = &self.discarded;
+        let fixups: usize = self
+            .objects
+            .iter()
+            .enumerate()
+            .flat_map(|(oi, o)| {
+                o.sections
+                    .iter()
+                    .enumerate()
+                    .filter(move |(si, s)| {
+                        !discarded.contains(&(oi, *si)) && s.segment != "__DWARF"
+                    })
+                    .map(|(_, s)| s.relocs.len())
+            })
+            .sum();
+        if fixups < FIXUPS_PER_WORKER * 2 {
+            return self.relocate_serial();
+        }
+        let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+        self.relocate_with_workers((fixups / FIXUPS_PER_WORKER).max(1).min(available))
+    }
+    fn relocate_with_workers(&mut self, workers: usize) -> Result<()> {
+        if workers <= 1 {
+            return self.relocate_serial();
+        }
+        let mut jobs = Vec::new();
+        for (oi, o) in self.objects.iter_mut().enumerate() {
+            for (si, s) in o.sections.iter_mut().enumerate() {
+                if self.discarded.contains(&(oi, si)) || s.segment == "__DWARF" {
+                    continue;
+                }
+                jobs.push(RelocationJob {
+                    order: jobs.len(),
+                    object: oi,
+                    section: si,
+                    cost: s.relocs.len().max(s.data.len() / 64).max(1),
+                    data: std::mem::take(&mut s.data),
+                });
+            }
+        }
+        let workers = workers.min(jobs.len());
+        if workers == 0 {
+            return Ok(());
+        }
+        // Distribute large contributions first; input section counts alone can
+        // put every text contribution on one worker.
+        jobs.sort_unstable_by_key(|job| std::cmp::Reverse(job.cost));
+        let mut bins: Vec<_> = (0..workers).map(|_| Vec::new()).collect();
+        let mut costs = vec![0usize; workers];
+        for job in jobs {
+            let worker = (0..workers)
+                .min_by_key(|&i| costs[i])
+                .expect("nonempty worker set");
+            costs[worker] = costs[worker].saturating_add(job.cost);
+            bins[worker].push(job);
+        }
+        let mut results = std::thread::scope(|scope| {
+            let plan = &*self;
+            let local = bins.pop().expect("nonempty worker set");
+            let handles: Vec<_> = bins
+                .into_iter()
+                .map(|jobs| scope.spawn(move || plan.patch_jobs(jobs)))
+                .collect();
+            let mut results = plan.patch_jobs(local);
+            for handle in handles {
+                results.extend(handle.join().expect("relocation worker panicked"));
+            }
+            results
+        });
+        // Worker completion order never changes image layout, map precedence
+        // or the first failing contribution reported to the caller.
+        results.sort_unstable_by_key(|r| r.order);
+        for result in results {
+            let patched = result
+                .patched
+                .map_err(|e| self.relocation_error(result.object, result.section, e))?;
+            self.apply_section(result.object, result.section, patched);
+        }
+        Ok(())
+    }
+    fn patch_jobs(&self, jobs: Vec<RelocationJob<'data>>) -> Vec<RelocationResult<'data>> {
+        jobs.into_iter()
+            .map(|job| RelocationResult {
+                order: job.order,
+                object: job.object,
+                section: job.section,
+                patched: self.patch_section(job.object, job.section, job.data),
+            })
+            .collect()
+    }
+    fn relocation_error(&self, oi: usize, si: usize, error: Error) -> String {
+        format!(
+            "{}: {},{}: {error}",
+            self.objects[oi].name,
+            self.objects[oi].sections[si].segment,
+            self.objects[oi].sections[si].name
+        )
+    }
+    fn relocate_serial(&mut self) -> Result<()> {
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
                 if self.discarded.contains(&(oi, si))
@@ -830,9 +952,22 @@ impl Linker<'_> {
         Ok(())
     }
     pub(crate) fn relocate_section(&mut self, oi: usize, si: usize) -> Result<()> {
-        // Relocation consumes this section's payload. Symbol resolution uses
-        // section addresses and sizes, so it does not need the resident bytes.
-        let mut data = std::mem::take(&mut self.objects[oi].sections[si].data);
+        let data = std::mem::take(&mut self.objects[oi].sections[si].data);
+        let patched = self.patch_section(oi, si, data)?;
+        self.apply_section(oi, si, patched);
+        Ok(())
+    }
+    /// Reads finalized symbol and layout tables; each contribution owns its
+    /// patch buffer and binding records independently of other contributions.
+    fn patch_section(
+        &self,
+        oi: usize,
+        si: usize,
+        mut data: std::borrow::Cow<'data, [u8]>,
+    ) -> Result<Patched<'data>> {
+        let mut rebases = Vec::new();
+        let mut binds = Vec::new();
+        let mut weak_binds = Vec::new();
         let s = &self.objects[oi].sections[si];
         let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
         let target_of = if metadata || s.name == "__eh_frame" {
@@ -967,7 +1102,7 @@ impl Linker<'_> {
                         }
                         if !metadata && !difference && !tls_offset {
                             if let Some(Target::Import(import)) = target {
-                                self.binds.insert(location, (import, raw as i64));
+                                binds.push((location, (import, raw as i64)));
                                 value = 0;
                             } else {
                                 let absolute = matches!(target,Some(Target::Definition(o,s)) if self.objects[o].symbols[s].kind&0xe==2);
@@ -977,14 +1112,14 @@ impl Linker<'_> {
                                             "absolute pointer relocation in read-only __TEXT requires the system linker",
                                         );
                                     }
-                                    self.rebases.insert(location);
+                                    rebases.push(location);
                                 }
                             }
                         }
                         if !metadata && !difference && !tls_offset && r.external {
                             let name = &self.objects[oi].symbols[r.symbol as usize].name;
                             if target.is_some_and(|t| self.coalesces(t, name)) {
-                                self.weak_binds.insert(location, (name.clone(), raw as i64));
+                                weak_binds.push((location, (name.clone(), raw as i64)));
                             }
                         }
                         if (r.width as usize) == 4
@@ -1118,6 +1253,25 @@ impl Linker<'_> {
                 }
             }
         }
+        Ok(Patched {
+            data,
+            rebases,
+            binds,
+            weak_binds,
+        })
+    }
+    fn apply_section(&mut self, oi: usize, si: usize, patched: Patched<'data>) {
+        let Patched {
+            data,
+            rebases,
+            binds,
+            weak_binds,
+        } = patched;
+        self.rebases.extend(rebases);
+        self.binds.extend(binds);
+        self.weak_binds.extend(weak_binds);
+        let s = &self.objects[oi].sections[si];
+        let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
         if let Some(id) = s.output.filter(|_| !data.is_empty()) {
             let out = &mut self.outputs[id].data;
             if s.atoms.is_empty() {
@@ -1134,7 +1288,6 @@ impl Linker<'_> {
         if metadata || s.name == "__eh_frame" {
             self.objects[oi].sections[si].data = data;
         }
-        Ok(())
     }
     fn make_got_stubs(&mut self) -> Result<()> {
         for (symbol, &index) in &self.got {
@@ -1499,5 +1652,81 @@ mod tests {
         );
         addend.width = 8;
         check(vec![pointer, addend, branch], "invalid ARM64_RELOC_ADDEND");
+    }
+    fn relocation_fixture(workers: usize, invalid: bool) -> Result<Linker<'static>> {
+        let sources = if invalid {
+            vec![
+                ".globl _main\n_main:\n.quad _data\n.data\n_data:\n.quad 0\n",
+                ".globl _helper\n_helper:\n.quad _other\n.data\n_other:\n.quad 0\n",
+            ]
+        } else {
+            vec![
+                ".globl _main\n_main:\n.cfi_startproc\n.cfi_def_cfa x28,16\nbl _helper\nret\n.cfi_endproc\n.data\n_data:\n.quad _main\n.quad _puts\n.quad _weak\n",
+                ".globl _helper\n_helper:\nbl _puts\nb _main\n.globl _weak\n.weak_definition _weak\n_weak:\nret\n.data\n_other:\n.quad _helper\n",
+            ]
+        };
+        let bytes: Vec<_> = sources
+            .iter()
+            .map(|s| keel_asm::assemble_object(s).unwrap())
+            .collect();
+        let inputs: Vec<_> = bytes
+            .iter()
+            .enumerate()
+            .map(|(i, b)| Input {
+                name: if i == 0 { "first.o" } else { "second.o" },
+                bytes: b,
+            })
+            .collect();
+        let mut linker = crate::prepare_linker(
+            &inputs,
+            Options {
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::from(["_puts".into()]),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Default::default()
+            },
+        )?;
+        linker.layout()?;
+        linker.relocate_with_workers(workers)?;
+        Ok(linker)
+    }
+
+    #[test]
+    fn parallel_relocation_preserves_payloads_bindings_and_metadata() {
+        let serial = relocation_fixture(1, false).unwrap();
+        for workers in [2, 8] {
+            let parallel = relocation_fixture(workers, false).unwrap();
+            assert_eq!(serial.rebases, parallel.rebases);
+            assert_eq!(serial.binds, parallel.binds);
+            assert_eq!(serial.weak_binds, parallel.weak_binds);
+            for (left, right) in serial.outputs.iter().zip(&parallel.outputs) {
+                assert_eq!(
+                    left.data, right.data,
+                    "{} with {workers} workers",
+                    left.name
+                );
+            }
+            for (left, right) in serial.objects.iter().zip(&parallel.objects) {
+                for (left, right) in left.sections.iter().zip(&right.sections) {
+                    assert_eq!(left.data, right.data, "retained {} payload", left.name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_relocation_reports_the_first_input_error() {
+        let error = relocation_fixture(1, true)
+            .err()
+            .expect("invalid text pointers");
+        assert!(error.contains("first.o"), "{error}");
+        for workers in [2, 8] {
+            let parallel = relocation_fixture(workers, true)
+                .err()
+                .expect("invalid text pointers");
+            assert_eq!(error, parallel);
+        }
     }
 }

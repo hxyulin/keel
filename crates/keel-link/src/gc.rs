@@ -16,6 +16,14 @@ enum Node<'a> {
     Common(&'a str),
     Unwind(usize, usize),
 }
+/// Dense graph identity; descriptors are stored once in Graph::nodes.
+#[derive(Clone, Copy)]
+struct NodeId(u32);
+impl NodeId {
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 /// Where a reference lands, before it is mapped to a node.
 #[derive(Clone, Copy)]
 enum Place<'a> {
@@ -195,29 +203,31 @@ struct Graph<'a, 'data> {
     first: Vec<Vec<usize>>,
     /// Common node ids, after every section's nodes.
     common_ids: BTreeMap<&'a str, usize>,
-    nodes: usize,
+    nodes: Vec<Node<'a>>,
     unwind_first: Vec<usize>,
     /// The records owned by each code atom, by node id.
-    owners: Vec<Vec<Node<'a>>>,
+    owner_starts: Vec<usize>,
+    owners: Vec<NodeId>,
     demanded: Vec<Vec<bool>>,
     /// Filled lazily after atom boundaries and global winners are final.
     /// The outer option distinguishes an unseen symbol from no input edge.
-    targets: Vec<Vec<Option<Option<Node<'a>>>>>,
+    targets: Vec<Vec<Option<Option<NodeId>>>>,
 }
 impl<'a, 'data> Graph<'a, 'data> {
     fn records(&self, oi: usize, si: usize) -> bool {
         self.parts[oi][si].records
     }
-    fn id(&self, node: Node<'_>) -> usize {
-        match node {
+    fn id(&self, node: Node<'_>) -> NodeId {
+        let index = match node {
             Node::Unit(oi, si, ui) => self.first[oi][si] + ui,
             Node::Common(name) => self.common_ids[name],
             Node::Unwind(o, r) => self.unwind_first[o] + r,
-        }
+        };
+        NodeId(u32::try_from(index).expect("validated graph node count"))
     }
-    fn node(&self, place: Place<'a>) -> Result<Node<'a>> {
+    fn node(&self, place: Place<'a>) -> Result<NodeId> {
         match place {
-            Place::Common(name) => Ok(Node::Common(name)),
+            Place::Common(name) => Ok(self.id(Node::Common(name))),
             Place::In(oi, si, offset) => {
                 let parts = &self.parts[oi][si];
                 let ui = if parts.records {
@@ -227,11 +237,11 @@ impl<'a, 'data> Graph<'a, 'data> {
                 } else {
                     parts.atom(offset)
                 };
-                Ok(Node::Unit(oi, si, ui))
+                Ok(self.id(Node::Unit(oi, si, ui)))
             }
         }
     }
-    fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<Node<'a>>> {
+    fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<NodeId>> {
         let cached = self.targets[oi]
             .get(si)
             .ok_or("relocation symbol index out of range")?;
@@ -353,7 +363,7 @@ impl<'a, 'data> Graph<'a, 'data> {
         r: &Reloc,
         data: &[u8],
         pointer: bool,
-    ) -> Result<Option<Node<'a>>> {
+    ) -> Result<Option<NodeId>> {
         if r.external
             && !(self.records(oi, si)
                 && self.linker.objects[oi]
@@ -369,7 +379,7 @@ impl<'a, 'data> Graph<'a, 'data> {
     }
     /// Decode prefix/pair records before interpreting symbol fields. ADDEND's
     /// 24-bit symbol field is a signed number, never an edge.
-    fn edges(&mut self, oi: usize, si: usize, ui: usize, edges: &mut Vec<Node<'a>>) -> Result<()> {
+    fn edges(&mut self, oi: usize, si: usize, ui: usize, edges: &mut Vec<NodeId>) -> Result<()> {
         let linker = self.linker;
         let s = &linker.objects[oi].sections[si];
         let records = self.records(oi, si);
@@ -675,8 +685,9 @@ impl Linker<'_> {
             parts,
             first: Vec::new(),
             common_ids: BTreeMap::new(),
-            nodes: 0,
+            nodes: Vec::new(),
             unwind_first: Vec::new(),
+            owner_starts: Vec::new(),
             owners: Vec::new(),
             targets: Vec::new(),
             demanded: self
@@ -787,42 +798,59 @@ impl Linker<'_> {
                 }
             }
         }
-        let mut nodes = 0;
-        g.first = g
+        let count = g
             .parts
             .iter()
-            .map(|sections| {
-                sections
-                    .iter()
-                    .map(|p| {
-                        let id = nodes;
-                        nodes += p.units.len();
-                        id
-                    })
-                    .collect()
-            })
-            .collect();
-        g.unwind_first = self
-            .objects
-            .iter()
-            .map(|o| {
-                let first = nodes;
-                nodes += o.unwind.len();
-                first
-            })
-            .collect();
-        g.common_ids = commons.into_iter().zip(nodes..).collect();
-        nodes += g.common_ids.len();
-        g.nodes = nodes;
+            .flatten()
+            .map(|p| p.units.len())
+            .sum::<usize>()
+            + self.objects.iter().map(|o| o.unwind.len()).sum::<usize>()
+            + commons.len();
+        if count > u32::MAX as usize {
+            return fail("dead_strip: graph exceeds 32-bit node IDs");
+        }
+        g.nodes.reserve(count);
+        for (oi, sections) in g.parts.iter().enumerate() {
+            let mut first = Vec::with_capacity(sections.len());
+            for (si, p) in sections.iter().enumerate() {
+                first.push(g.nodes.len());
+                g.nodes
+                    .extend((0..p.units.len()).map(|ui| Node::Unit(oi, si, ui)));
+            }
+            g.first.push(first);
+        }
+        for (oi, o) in self.objects.iter().enumerate() {
+            g.unwind_first.push(g.nodes.len());
+            g.nodes
+                .extend((0..o.unwind.len()).map(|ui| Node::Unwind(oi, ui)));
+        }
+        for name in commons {
+            g.common_ids.insert(name, g.nodes.len());
+            g.nodes.push(Node::Common(name));
+        }
         g.targets = self
             .objects
             .iter()
             .map(|o| vec![None; o.symbols.len()])
             .collect();
-        g.owners = vec![Vec::new(); nodes];
+        g.owner_starts = vec![0; count + 1];
+        for &(o, sec, start, _) in &owned {
+            let id = g
+                .id(Node::Unit(o, sec, g.parts[o][sec].atom(start)))
+                .index();
+            g.owner_starts[id + 1] += 1;
+        }
+        for i in 1..g.owner_starts.len() {
+            g.owner_starts[i] += g.owner_starts[i - 1];
+        }
+        let mut next = g.owner_starts[..count].to_vec();
+        g.owners = vec![NodeId(0); owned.len()];
         for (o, sec, start, record) in owned {
-            let id = g.id(Node::Unit(o, sec, g.parts[o][sec].atom(start)));
-            g.owners[id].push(record);
+            let id = g
+                .id(Node::Unit(o, sec, g.parts[o][sec].atom(start)))
+                .index();
+            g.owners[next[id]] = g.id(record);
+            next[id] += 1;
         }
         let mut pending = Vec::new();
         let main = self
@@ -880,7 +908,7 @@ impl Linker<'_> {
                 }
                 if s.flags & 0x10000000 != 0 || matches!(s.flags & 255, 9 | 0xa) {
                     let units = g.parts[oi][si].units.len();
-                    pending.extend((0..units).map(|ui| Node::Unit(oi, si, ui)));
+                    pending.extend((0..units).map(|ui| g.id(Node::Unit(oi, si, ui))));
                 }
             }
             for (si, sym) in o.symbols.iter().enumerate() {
@@ -889,22 +917,22 @@ impl Linker<'_> {
                 }
             }
         }
-        let mut live = vec![false; g.nodes];
+        let mut live = vec![false; g.nodes.len()];
         let mut commons = BTreeSet::new();
         let mut edges = Vec::new();
         while let Some(node) = pending.pop() {
-            let id = g.id(node);
+            let id = node.index();
             if std::mem::replace(&mut live[id], true) {
                 continue;
             }
-            pending.extend_from_slice(&g.owners[id]);
-            match node {
+            pending.extend_from_slice(&g.owners[g.owner_starts[id]..g.owner_starts[id + 1]]);
+            match g.nodes[id] {
                 Node::Unit(oi, si, ui) if g.records(oi, si) => {
                     g.edges(oi, si, ui, &mut edges)?;
                     pending.append(&mut edges);
                     if let Some(cie) = g.parts[oi][si].units[ui].cie {
                         let c = g.parts[oi][si].starting_at(cie).unwrap();
-                        pending.push(Node::Unit(oi, si, c));
+                        pending.push(g.id(Node::Unit(oi, si, c)));
                     }
                 }
                 Node::Unit(oi, si, ui) => {
@@ -917,7 +945,7 @@ impl Linker<'_> {
                     })?;
                     if edges
                         .iter()
-                        .any(|n| matches!(*n, Node::Unit(o, sec, _) if g.records(o, sec)))
+                        .any(|n| matches!(g.nodes[n.index()], Node::Unit(o, sec, _) if g.records(o, sec)))
                     {
                         return fail(
                             "dead_strip: ordinary input relocation into moving unwind metadata is unsupported",

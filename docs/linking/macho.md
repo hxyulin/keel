@@ -54,6 +54,12 @@ interfaces. `link` returns a **not yet signed** Mach-O image plus warnings.
 sign it in process, sync it, and atomically install the executable only after
 signing succeeds. `Input.name` is only a diagnostic label and is never opened.
 
+Large links patch independent input contributions on scoped worker threads after
+symbol selection and layout settle. Small links stay serial. Workers read shared
+metadata and return private payloads and binding records; the linker merges them
+in input order, preserving image layout and the first relocation diagnostic.
+Archive selection, dead stripping, layout and page hashing remain serial.
+
 ### Owned link inputs and compilation caches
 
 For in-process AArch64 Darwin builds, `Assembly::into_object` or
