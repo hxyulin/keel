@@ -248,6 +248,7 @@ impl Plan {
         }
         self.property = Some(sections.len());
         sections.push(Section {
+            merge: None,
             name: ".note.gnu.property".into(),
             flags: 2,
             kind: 7,
@@ -376,6 +377,7 @@ mod tests {
 
     fn linux_section(data: &[u8], offset: u64) -> Section {
         Section {
+            merge: None,
             name: ".note.Linux".into(),
             flags: 2,
             kind: 7,

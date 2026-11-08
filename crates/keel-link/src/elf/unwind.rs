@@ -270,6 +270,7 @@ pub(super) fn merge(
         return Ok(remap);
     }
     let mut merged = Section {
+        merge: None,
         name: ".eh_frame".into(),
         flags: 2,
         kind: object::elf::SHT_PROGBITS,
@@ -363,6 +364,7 @@ pub(super) fn prepare(
     )?;
     let header = sections.len();
     sections.push(Section {
+        merge: None,
         name: ".eh_frame_hdr".into(),
         flags: 2,
         kind: 1,
@@ -635,6 +637,7 @@ mod tests {
 
     fn section(offset: u64, size: u64, flags: u64) -> Section {
         Section {
+            merge: None,
             name: String::new(),
             flags,
             kind: object::elf::SHT_PROGBITS,

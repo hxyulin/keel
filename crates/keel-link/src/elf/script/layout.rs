@@ -589,6 +589,7 @@ pub(in crate::elf) fn link(
     // Allocate common definitions before script matching, preserving input symbol IDs.
     let common_index = sections.len();
     let mut common = Section {
+        merge: None,
         name: ".bss.common".into(),
         flags: 3,
         kind: 8,

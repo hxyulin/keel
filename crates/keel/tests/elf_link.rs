@@ -672,3 +672,47 @@ fn function_and_data_sections_let_gc_remove_single_definitions() {
         }
     }
 }
+
+#[test]
+fn elf_cli_constant_merging_is_explicit_and_rejected_for_partial_links() {
+    use object::{Object, ObjectSection};
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("elf-cli-merge-constants");
+    std::fs::create_dir_all(&dir).unwrap();
+    let obj = keel_asm::x86::assemble_object(".text\n.globl _start\n_start: ret\n.section .rodata.cst8,\"aM\",@progbits,8\n.quad 42,42\n").unwrap();
+    std::fs::write(dir.join("input.o"), obj).unwrap();
+    let mut args = vec![
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "input.o",
+        "-o",
+        "program",
+        "--merge-constants",
+    ];
+    let result = invoke(&dir, &args[..args.len() - 1]);
+    assert!(result.status.success());
+    let baseline = std::fs::read(dir.join("program")).unwrap();
+    let file = object::File::parse(baseline.as_slice()).unwrap();
+    assert_eq!(file.section_by_name(".rodata.cst8").unwrap().size(), 16);
+    let result = invoke(&dir, &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let image = std::fs::read(dir.join("program")).unwrap();
+    let file = object::File::parse(image.as_slice()).unwrap();
+    assert_eq!(file.section_by_name(".rodata.cst8").unwrap().size(), 8);
+    args.push("-r");
+    let result = invoke(&dir, &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("--merge-constants"));
+    assert_eq!(std::fs::read(dir.join("program")).unwrap(), image);
+    args.push("--no-merge-constants");
+    let result = invoke(&dir, &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

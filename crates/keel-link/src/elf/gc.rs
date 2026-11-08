@@ -616,6 +616,7 @@ mod tests {
     #[test]
     fn sparse_raw_weak_identity_survives_dense_marking() {
         let section = |name: &str| Section {
+            merge: None,
             name: name.into(),
             flags: 6,
             kind: 1,
@@ -813,6 +814,7 @@ mod tests {
             data.extend_from_slice(&1u64.to_le_bytes());
         }
         let section = |name: &str, flags, data: Vec<u8>| Section {
+            merge: None,
             name: name.into(),
             flags,
             kind: 1,

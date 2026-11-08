@@ -470,6 +470,7 @@ impl Dynamic {
                        entsize: u64| {
             let index = sections.len();
             sections.push(Section {
+                merge: None,
                 name: name.into(),
                 flags,
                 kind,

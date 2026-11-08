@@ -17,7 +17,8 @@ and [archive](../../docs/linking/archives.md) references.
    `groups.rs` for COMDAT groups).
 2. Collect live sections and merge metadata such as notes and SFrame inputs
    (`gc.rs`, `notes.rs`, `sframe.rs`).
-3. Allocate commons, compute section boundary symbols (`bounds.rs`) and plan
+3. Optionally pool eligible merge records and exact strings (`elf/merge.rs`),
+   then allocate commons, compute section boundary symbols (`bounds.rs`) and plan
    imports from shared libraries.
 4. Fix the symbol selection (`selected.rs`) and plan the GOT and, for dynamic
    output, the dynamic tables (`dynamic.rs`, `lifecycle.rs`).

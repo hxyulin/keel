@@ -1011,6 +1011,7 @@ mod tests {
             .unwrap();
         let table = Table::parse(&single.bytes).unwrap();
         let section = |name: &str| Section {
+            merge: None,
             name: name.into(),
             flags: 6,
             kind: 1,

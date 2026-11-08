@@ -10,6 +10,8 @@ mod elf_debugger;
 mod elf_gc;
 #[path = "elf/elf_lifecycle.rs"]
 mod elf_lifecycle;
+#[path = "elf/elf_merge.rs"]
+mod elf_merge;
 #[path = "elf/elf_notes.rs"]
 mod elf_notes;
 #[path = "elf/elf_rel8.rs"]

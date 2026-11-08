@@ -7,6 +7,7 @@ mod gc;
 mod groups;
 mod input;
 mod lifecycle;
+mod merge;
 mod notes;
 mod relax;
 mod reloc;
@@ -63,6 +64,8 @@ impl Machine {
 pub struct Options {
     /// Relax eligible x86-64 GOTPCRELX address loads. Disabled by default.
     pub relax_got: bool,
+    /// Deduplicate eligible ELF merge records and exact strings. Disabled by default.
+    pub merge_constants: bool,
     /// Collect unreachable ELF input sections. Disabled by default.
     pub gc_sections: bool,
     /// Owned GNU linker script text for bounded static x86-64 final linking.
@@ -80,6 +83,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             relax_got: false,
+            merge_constants: false,
             gc_sections: false,
             script: None,
             max_page_size: None,
@@ -127,6 +131,7 @@ pub struct Executable {
     pub warnings: Vec<String>,
 }
 struct Section {
+    merge: Option<(u64, bool)>,
     name: String,
     flags: u64,
     kind: u32,
@@ -240,6 +245,9 @@ fn resolve_options(mut options: Options) -> Result<ResolvedOptions> {
     let arm = options.machine == Machine::Aarch64;
     if options.relax_got && (arm || script.is_some()) {
         return Err("GOT relaxation requires default-layout x86-64 ELF output".into());
+    }
+    if options.merge_constants && (arm || script.is_some()) {
+        return Err("constant merging requires default-layout x86-64 ELF output".into());
     }
     let page = options
         .max_page_size
@@ -358,6 +366,9 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         mut note_plan,
         object_properties,
     } = parsed;
+    if options.merge_constants {
+        merge::constants(&mut sections, &mut units, &globals);
+    }
     let (common_locations, common_sizes) =
         allocate_commons(&mut sections, &units, &globals, commons)?;
     let bounds = bounds::symbols(&sections, &units, &globals)?;
@@ -748,6 +759,8 @@ impl Parsed {
             }
             unit.sections.insert(section.index().0, sections.len());
             sections.push(Section {
+                merge: (sh_flags & 0x10 != 0)
+                    .then_some((raw.sh_entsize(file.endian()), sh_flags & 0x20 != 0)),
                 name,
                 flags: sh_flags & 0x200007,
                 kind,
@@ -1068,6 +1081,7 @@ fn allocate_commons(
     let mut common_locations = BTreeMap::new();
     let mut common_sizes = BTreeMap::new();
     let mut common = Section {
+        merge: None,
         name: ".bss.common".into(),
         flags: 3,
         kind: 8,
@@ -1242,6 +1256,7 @@ fn plan_got(
     let got_section = sections.len();
     let got_size = end(0, got.len() as u64 * 8)?;
     sections.push(Section {
+        merge: None,
         name: ".got".into(),
         flags: 2,
         kind: 1,

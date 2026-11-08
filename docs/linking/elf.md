@@ -206,6 +206,41 @@ custom startup; this does not establish support for arbitrary libc APIs. The C
 frontend emits ordinary weak definitions and references; see
 [C weak symbols](../frontends/c/extensions.md).
 
+## Opt-in constant and string merging
+
+`--merge-constants` (or `elf::Options::merge_constants = true`) pools equal
+fixed-width `SHF_MERGE` records and exact `SHF_MERGE | SHF_STRINGS` strings.
+It is off by default; `--no-merge-constants` disables it. It requires
+x86-64 final output with the default layout. Scripts, AArch64 output and `-r`
+are diagnosed when enabled. GOT relaxation is a separate option.
+
+Pooling runs after COMDAT selection, GC and unwind rewriting, before address
+planning. Eligible sections are read-only PROGBITS with names starting with
+`.rodata`, a positive entry size divisible by their alignment, and complete
+records. Strings end at an all-zero character of the declared entry width;
+wide characters containing individual zero bytes do not terminate strings.
+Only exact strings merge; suffix merging is not implemented. Compatible
+contributions agree on entry size, string mode, alignment and retained flags.
+First input occurrence determines canonical order. Section aliases, local and
+global values, interior offsets, symbol sizes and dynamic exports follow the
+canonical records. Empty input contributions retain empty output headers.
+
+A section containing relocations stays unchanged. A sized symbol must fit in
+one record. Absolute section-symbol relocations map their complete input
+offset, while ordinary symbols keep arithmetic within their own record,
+including its one-past address. Nonzero addends on other relocation forms,
+including PC-relative and GOT forms, leave the target contribution unchanged.
+This avoids treating instruction biases as input section offsets. See
+[LLD's `getSymVA`](https://github.com/llvm/llvm-project/blob/main/lld/ELF/Symbols.cpp)
+for the section-symbol distinction. Unsupported record shapes, unterminated
+strings, invalid reference ranges and incompatible alignments also retain the
+original contribution. Boundary registration tables are outside this subset.
+
+Auxiliary work is bounded to 32 MiB of merge-marked input bytes and fewer than
+131,072 records. Reaching either limit leaves the pass unchanged. The option
+remains experimental pending application performance gates; size savings alone
+do not establish a runtime gain.
+
 ## Opt-in section garbage collection
 
 `--gc-sections` (or `elf::Options::gc_sections = true`) enables collection. It
