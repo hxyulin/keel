@@ -200,6 +200,9 @@ struct Graph<'a, 'data> {
     /// The records owned by each code atom, by node id.
     owners: Vec<Vec<Node<'a>>>,
     demanded: Vec<Vec<bool>>,
+    /// Filled lazily after atom boundaries and global winners are final.
+    /// The outer option distinguishes an unseen symbol from no input edge.
+    targets: Vec<Vec<Option<Option<Node<'a>>>>>,
 }
 impl<'a, 'data> Graph<'a, 'data> {
     fn records(&self, oi: usize, si: usize) -> bool {
@@ -229,7 +232,18 @@ impl<'a, 'data> Graph<'a, 'data> {
         }
     }
     fn symbol(&mut self, oi: usize, si: usize) -> Result<Option<Node<'a>>> {
-        self.symbol_place(oi, si)?.map(|p| self.node(p)).transpose()
+        let cached = self.targets[oi]
+            .get(si)
+            .ok_or("relocation symbol index out of range")?;
+        if let Some(node) = cached {
+            return Ok(*node);
+        }
+        let node = self
+            .symbol_place(oi, si)?
+            .map(|p| self.node(p))
+            .transpose()?;
+        self.targets[oi][si] = Some(node);
+        Ok(node)
     }
     fn symbol_place(&mut self, oi: usize, si: usize) -> Result<Option<Place<'a>>> {
         let linker = self.linker;
@@ -330,13 +344,36 @@ impl<'a, 'data> Graph<'a, 'data> {
         }
         self.target(oi, r, data, pointer)
     }
+    /// Ordinary external references resolve once per symbol. Metadata's own
+    /// definitions bypass global winners, so they retain their ownership path.
+    fn edge_node(
+        &mut self,
+        oi: usize,
+        si: usize,
+        r: &Reloc,
+        data: &[u8],
+        pointer: bool,
+    ) -> Result<Option<Node<'a>>> {
+        if r.external
+            && !(self.records(oi, si)
+                && self.linker.objects[oi]
+                    .symbols
+                    .get(r.symbol as usize)
+                    .is_some_and(|s| s.kind & 0xe == 0xe))
+        {
+            return self.symbol(oi, r.symbol as usize);
+        }
+        self.edge(oi, si, r, data, pointer)?
+            .map(|p| self.node(p))
+            .transpose()
+    }
     /// Decode prefix/pair records before interpreting symbol fields. ADDEND's
     /// 24-bit symbol field is a signed number, never an edge.
-    fn edges(&mut self, oi: usize, si: usize, ui: usize) -> Result<Vec<Node<'a>>> {
+    fn edges(&mut self, oi: usize, si: usize, ui: usize, edges: &mut Vec<Node<'a>>) -> Result<()> {
         let linker = self.linker;
         let s = &linker.objects[oi].sections[si];
         let records = self.records(oi, si);
-        let mut edges = Vec::new();
+        edges.clear();
         let mut i = 0;
         while let Some(at) = self.parts[oi][si].buckets.fixup(ui, i) {
             i += 1;
@@ -355,12 +392,12 @@ impl<'a, 'data> Graph<'a, 'data> {
                         && anchor.kind & 0xe == 0xe
                         && anchor.kind & 1 == 0
                         && anchor.section == si + 1)
-                        && let Some(p) = self.edge(oi, si, minus, &s.data, false)?
+                        && let Some(node) = self.edge_node(oi, si, minus, &s.data, false)?
                     {
-                        edges.push(self.node(p)?);
+                        edges.push(node);
                     }
-                    if let Some(p) = self.edge(oi, si, plus, &s.data, false)? {
-                        edges.push(self.node(p)?);
+                    if let Some(node) = self.edge_node(oi, si, plus, &s.data, false)? {
+                        edges.push(node);
                     }
                 }
                 Fixup::Native(r) => {
@@ -373,13 +410,13 @@ impl<'a, 'data> Graph<'a, 'data> {
                             && anchor.kind & 0xe == 0xe
                             && anchor.kind & 1 == 0
                             && anchor.section == si + 1)
-                            && let Some(p) = self.edge(oi, si, &minus, &s.data, false)?
+                            && let Some(node) = self.edge_node(oi, si, &minus, &s.data, false)?
                         {
-                            edges.push(self.node(p)?);
+                            edges.push(node);
                         }
                     }
-                    if let Some(p) = self.edge(oi, si, r, &s.data, false)? {
-                        edges.push(self.node(p)?);
+                    if let Some(node) = self.edge_node(oi, si, r, &s.data, false)? {
+                        edges.push(node);
                     }
                 }
                 Fixup::Single { reloc: r, .. } => {
@@ -389,19 +426,19 @@ impl<'a, 'data> Graph<'a, 'data> {
                             r.kind
                         ));
                     }
-                    if let Some(p) = self.edge(
+                    if let Some(node) = self.edge_node(
                         oi,
                         si,
                         r,
                         &s.data,
                         r.kind == read::UNSIGNED && (r.width as usize) == 8,
                     )? {
-                        edges.push(self.node(p)?);
+                        edges.push(node);
                     }
                 }
             }
         }
-        Ok(edges)
+        Ok(())
     }
     /// The function range that record `ri` describes: its code section and
     /// the byte range in it.
@@ -641,6 +678,7 @@ impl Linker<'_> {
             nodes: 0,
             unwind_first: Vec::new(),
             owners: Vec::new(),
+            targets: Vec::new(),
             demanded: self
                 .objects
                 .iter()
@@ -776,6 +814,11 @@ impl Linker<'_> {
         g.common_ids = commons.into_iter().zip(nodes..).collect();
         nodes += g.common_ids.len();
         g.nodes = nodes;
+        g.targets = self
+            .objects
+            .iter()
+            .map(|o| vec![None; o.symbols.len()])
+            .collect();
         g.owners = vec![Vec::new(); nodes];
         for (o, sec, start, record) in owned {
             let id = g.id(Node::Unit(o, sec, g.parts[o][sec].atom(start)));
@@ -848,6 +891,7 @@ impl Linker<'_> {
         }
         let mut live = vec![false; g.nodes];
         let mut commons = BTreeSet::new();
+        let mut edges = Vec::new();
         while let Some(node) = pending.pop() {
             let id = g.id(node);
             if std::mem::replace(&mut live[id], true) {
@@ -856,7 +900,8 @@ impl Linker<'_> {
             pending.extend_from_slice(&g.owners[id]);
             match node {
                 Node::Unit(oi, si, ui) if g.records(oi, si) => {
-                    pending.extend(g.edges(oi, si, ui)?);
+                    g.edges(oi, si, ui, &mut edges)?;
+                    pending.append(&mut edges);
                     if let Some(cie) = g.parts[oi][si].units[ui].cie {
                         let c = g.parts[oi][si].starting_at(cie).unwrap();
                         pending.push(Node::Unit(oi, si, c));
@@ -867,7 +912,7 @@ impl Linker<'_> {
                     if s.segment == "__DWARF" {
                         return fail("dead_strip: live reference into debug metadata");
                     }
-                    let edges = g.edges(oi, si, ui).map_err(|e| {
+                    g.edges(oi, si, ui, &mut edges).map_err(|e| {
                         format!("{}: {},{}: {e}", self.objects[oi].name, s.segment, s.name)
                     })?;
                     if edges
@@ -878,7 +923,7 @@ impl Linker<'_> {
                             "dead_strip: ordinary input relocation into moving unwind metadata is unsupported",
                         );
                     }
-                    pending.extend(edges);
+                    pending.append(&mut edges);
                 }
                 Node::Common(name) => {
                     commons.insert(name.to_string());
