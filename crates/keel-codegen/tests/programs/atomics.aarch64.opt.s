@@ -1270,8 +1270,8 @@ Lk_count_block2:
 	mov	x12, x8
 	; v7 = iadd v8, v5
 	add	x11, x11, #1
-	; v10 = icmp.ugt v1, v7
-	; brif v10, block2(v7), block3
+	; v9 = icmp.ugt v1, v7
+	; brif v9, block2(v7), block3
 	cmp	x10, x11
 	b.hi	Lk_count_block2
 Lk_count_block3:

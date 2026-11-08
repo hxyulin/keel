@@ -17,46 +17,43 @@
 .Lmain_block0:
 	# v1 = iconst.i64 0
 	xor	esi, esi
-	# jump block1(v1)
-.Lmain_block1:
-	# v3 = iconst.i64 10
-	# v4 = icmp.ult v2, v3
+	# jump block2(v1)
+.Lmain_block2:
+	# v85 = iconst.i64 2
+	# v6 = shl v95, v85
+	# v90 = stack_addr ss1
+	lea	rdi, [rbp + -88]
+	# v7 = ptradd v90, v6
+	# v8 = iconst.i64 3
+	# v9 = imul v95, v8
+	imul	r8, rsi, 3
+	# v10 = trunc.i32 v9
+	# store v10, v7
+	mov	dword ptr [rdi + rsi * 4], r8d
+	# v11 = iconst.i64 1
+	# v12 = iadd v95, v11
+	add	rsi, 1
+	# v96 = iconst.i64 10
+	# v97 = icmp.ult v12, v96
 	cmp	rsi, 10
 	setb	dil
-	# v94 = iconst.i64 0
+	# v98 = iconst.i64 0
 	xor	r8d, r8d
-	# brif v4, block2, block3
+	# brif v97, block2(v12), block3(v98, v98)
 	test	dil, dil
 	jne	".Lmain_block2"
-.Lmain_block3:
-	# jump block4(v94, v94)
 	mov	rsi, r8
 	mov	rdi, r8
-.Lmain_block4:
-	# v86 = iconst.i64 2
-	# v18 = shl v95, v86
-	# v89 = stack_addr ss1
-	lea	r8, [rbp + -88]
-	# v19 = ptradd v89, v18
-	# v20 = load.i32 v19
-	mov	r8d, dword ptr [r8 + rsi * 4]
-	# v21 = sext.i64 v20
-	movsxd	r8, r8d
-	# v22 = iadd v96, v21
-	add	rdi, r8
-	# v23 = iconst.i64 1
-	# v24 = iadd v95, v23
-	add	rsi, 1
-	# v99 = iconst.i64 10
-	# v100 = icmp.ult v24, v99
-	# brif v100, block4(v24, v22), block5(v22)
+.Lmain_block3:
+	# v93 = iconst.i64 10
+	# v16 = icmp.ult v13, v93
+	# brif v16, block4, block5
 	cmp	rsi, 10
 	jb	".Lmain_block4"
-	mov	rsi, rdi
 .Lmain_block5:
 	# v26 = iconst.i64 135
-	# v27 = icmp.ne v98, v26
-	cmp	rsi, 135
+	# v27 = icmp.ne v14, v26
+	cmp	rdi, 135
 	setne	sil
 	# v29 = uext.i32 v27
 	movzx	esi, sil
@@ -158,23 +155,23 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lmain_block2:
-	# v85 = iconst.i64 2
-	# v6 = shl v2, v85
-	# v90 = stack_addr ss1
-	lea	rdi, [rbp + -88]
-	# v7 = ptradd v90, v6
-	# v8 = iconst.i64 3
-	# v9 = imul v2, v8
-	imul	r8, rsi, 3
-	# v10 = trunc.i32 v9
-	# store v10, v7
-	mov	dword ptr [rdi + rsi * 4], r8d
-	# v11 = iconst.i64 1
-	# v12 = iadd v2, v11
+.Lmain_block4:
+	# v86 = iconst.i64 2
+	# v18 = shl v13, v86
+	# v89 = stack_addr ss1
+	lea	r8, [rbp + -88]
+	# v19 = ptradd v89, v18
+	# v20 = load.i32 v19
+	mov	r8d, dword ptr [r8 + rsi * 4]
+	# v21 = sext.i64 v20
+	movsxd	r8, r8d
+	# v22 = iadd v14, v21
+	add	rdi, r8
+	# v23 = iconst.i64 1
+	# v24 = iadd v13, v23
 	add	rsi, 1
-	# jump block1(v12)
-	jmp	".Lmain_block1"
+	# jump block3(v24, v22)
+	jmp	".Lmain_block3"
 .Lmain_end:
 	.cfi_endproc
 	.size "main", .-"main"

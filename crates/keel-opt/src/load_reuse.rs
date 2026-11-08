@@ -2,7 +2,9 @@
 //!
 //! A reachable non-entry block inherits completed predecessor states, retaining
 //! only identical values present on every incoming path. An unvisited
-//! predecessor or backedge cannot supply facts. Each inherited value dominates its
+//! predecessor cannot supply facts. A single-block loop can carry one exact
+//! stored value when an existing successful read supplies its entry. Other
+//! backedges supply nothing. Each inherited value dominates its
 //! replacement and was already successfully loaded on this execution. Siblings
 //! receive separate snapshots. Block arguments are deliberately not translated.
 //!
@@ -26,7 +28,12 @@ impl crate::Pass for LoadReuse {
         "reuse successful reads and exact stored values across bounded CFG chains"
     }
     fn run(&self, func: &mut Function, _: &crate::OptimizationContext) -> bool {
-        run(func)
+        let mut reused = Vec::new();
+        let changed = reuse(func, Some(&mut reused), true);
+        if !reused.is_empty() {
+            crate::gvn::run_late(func, &reused);
+        }
+        changed
     }
     fn deterministic(&self) -> bool {
         true
@@ -83,7 +90,124 @@ fn incoming(
     (depth + 1, facts)
 }
 
+/// A one-block loop can reuse the value written by its preceding iteration.
+/// Retain every store and all other reads, including reads aliasing this field.
+/// The entry value must already be available: no read is added or speculated.
+fn loop_incoming(
+    func: &mut Function,
+    cfg: &ControlFlowGraph,
+    block: keel_ir::Block,
+    exits: &[Option<(usize, Facts)>],
+    aliases: &AliasInfo,
+) -> Option<(usize, Facts)> {
+    let preds = cfg.preds(block);
+    if preds.len() != 2 || !preds.contains(&block) {
+        return None;
+    }
+    let pre = *preds.iter().find(|&&b| b != block)?;
+    let (depth, facts) = exits[pre.index()].as_ref()?;
+    if *depth >= MAX_EDGES {
+        return None;
+    }
+    let &back = func.block_insts(block).last()?;
+    let InstData::Brif { dests, .. } = func.inst_data(back) else {
+        return None;
+    };
+    if dests.iter().filter(|d| d.block == block).count() != 1 {
+        return None;
+    }
+    let &entry = func.block_insts(pre).last()?;
+    if func
+        .inst_data(entry)
+        .branch_dests()
+        .iter()
+        .filter(|d| d.block == block)
+        .count()
+        != 1
+    {
+        return None;
+    }
+    let mut store = None;
+    for &i in func.block_insts(block) {
+        if func.inst_loc(i).is_some() {
+            return None;
+        }
+        match *func.inst_data(i) {
+            InstData::Store { value, addr, flags } if !flags.volatile => {
+                if store.replace((i, value, addr)).is_some() {
+                    return None;
+                }
+            }
+            InstData::Load { flags, .. } if flags.volatile => return None,
+            ref data if data.memory_effects().may_write() => return None,
+            _ => {}
+        }
+    }
+    let (store, value, addr) = store?;
+    let ty = func.value_type(value);
+    let key = (aliases.address(func, addr), ty);
+    let fact = *facts.get(&key)?;
+    if !fact.readable {
+        return None;
+    }
+    // Require an ordinary read before the only write. Local forwarding deals
+    // with reads after it; the backedge carries exactly that stored value.
+    let mut read = false;
+    for &i in func.block_insts(block) {
+        if i == store {
+            break;
+        }
+        if let InstData::Load {
+            ty: load_ty,
+            addr,
+            flags,
+        } = *func.inst_data(i)
+            && !flags.volatile
+            && (aliases.address(func, addr), load_ty) == key
+            && matches!(func.value_def(func.first_result(i)), ValueDef::Result(owner, 0) if owner == i)
+        {
+            read = true;
+        }
+    }
+    if !read {
+        return None;
+    }
+    let carried = func.append_block_param(block, ty);
+    for dest in func.inst_data_mut(entry).branch_dests_mut() {
+        if dest.block == block {
+            dest.args.push(fact.value);
+        }
+    }
+    for dest in func.inst_data_mut(back).branch_dests_mut() {
+        if dest.block == block {
+            dest.args.push(value);
+        }
+    }
+    let mut available = Facts::default();
+    available.insert(
+        key,
+        Fact {
+            value: carried,
+            ..fact
+        },
+    );
+    // The carried value is defined by this block's new parameter, and its
+    // outgoing value by the local store. Start a fresh chain here rather than
+    // expiring those local definitions at the entry predecessor's depth.
+    Some((1, available))
+}
+
 pub(crate) fn run(func: &mut Function) -> bool {
+    reuse(func, None, true)
+}
+
+/// Local cleanup after cloning scalar iterations. Keep the same read proofs,
+/// without adding cross-block recurrences before the late reuse pass.
+pub(crate) fn run_local(func: &mut Function) -> bool {
+    reuse(func, None, false)
+}
+
+fn reuse(func: &mut Function, mut reused: Option<&mut Vec<Value>>, across_blocks: bool) -> bool {
     // A debugger may edit source variable homes between source locations.
     // Avoid inferring availability anywhere in functions with such homes.
     if !func.debug_vars.is_empty() {
@@ -94,8 +218,16 @@ pub(crate) fn run(func: &mut Function) -> bool {
     let aliases = AliasInfo::compute(func);
     let mut exits: Vec<Option<(usize, Facts)>> = vec![None; func.num_blocks()];
     let mut changed = false;
+    let mut local_facts = Facts::default();
     for &block in analysis.dom.rpo() {
-        let (depth, mut facts) = incoming(func, cfg, block, &exits);
+        let (depth, mut facts) = if !across_blocks {
+            (0, std::mem::take(&mut local_facts))
+        } else if let Some(state) = loop_incoming(func, cfg, block, &exits, &aliases) {
+            changed = true;
+            state
+        } else {
+            incoming(func, cfg, block, &exits)
+        };
         // Only the visited load is removed; the next one moves into its place.
         let mut i = 0;
         while let Some(&inst) = func.block_insts(block).get(i) {
@@ -114,6 +246,9 @@ pub(crate) fn run(func: &mut Function) -> bool {
                     if let Some(fact) = facts.get(&key)
                         && (fact.readable || flags.notrap)
                     {
+                        if let Some(reused) = reused.as_deref_mut() {
+                            reused.push(result);
+                        }
                         func.replace_all_uses(result, func.resolve(fact.value));
                         func.remove_inst(inst);
                         i -= 1;
@@ -173,7 +308,12 @@ pub(crate) fn run(func: &mut Function) -> bool {
                 _ => {}
             }
         }
-        exits[block.index()] = Some((depth, facts));
+        if across_blocks {
+            exits[block.index()] = Some((depth, facts));
+        } else {
+            facts.clear();
+            local_facts = facts;
+        }
     }
     changed
 }

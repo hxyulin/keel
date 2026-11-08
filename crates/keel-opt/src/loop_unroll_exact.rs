@@ -12,7 +12,7 @@ use keel_ir::{
 const MAX_TRIPS: usize = 8;
 const MAX_BODY: usize = 24;
 const MAX_CLONED: usize = 128;
-const FUNCTION_BUDGET: usize = 256;
+const FUNCTION_BUDGET: usize = 512;
 
 pub(crate) struct LoopUnrollExact;
 impl crate::Pass for LoopUnrollExact {
@@ -164,8 +164,10 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         let insts = f.block_insts(b);
         for &i in &insts[..insts.len() - 1] {
             if f.inst_loc(i).is_some()
-                || f.inst_results(i).len() != 1
-                || f.resolve(f.first_result(i)) != f.first_result(i)
+                || f.inst_results(i).len() > 1
+                || f.inst_results(i)
+                    .first()
+                    .is_some_and(|&v| f.resolve(v) != v)
             {
                 return None;
             }
@@ -203,6 +205,13 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
                     ..
                 } => true,
                 D::Icmp { .. } => true,
+                D::Store { flags, value, .. } => {
+                    !flags.volatile
+                        && matches!(
+                            f.value_type(*value),
+                            Type::I8 | Type::I16 | Type::I32 | Type::I64
+                        )
+                }
                 D::Load { flags, ty, .. } => {
                     !flags.volatile && matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
                 }
@@ -211,7 +220,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             if !allowed {
                 return None;
             }
-            definitions.insert(f.first_result(i));
+            definitions.extend(f.inst_results(i));
             body_len += 1;
         }
         if f.inst_loc(*insts.last()?).is_some() {
@@ -255,11 +264,13 @@ fn clone_block(
 ) {
     let insts = f.block_insts(b).to_vec();
     for &i in &insts[..insts.len() - 1] {
-        let original = f.first_result(i);
+        let original = f.inst_results(i).first().copied();
         // Literals and symbol addresses have no iteration-dependent operands.
         // Keep the first clone: later scalar steps reuse it without requiring
         // another GVN/GCM pass after the unrolled region is constructed.
-        if let Some(&shared) = invariants.get(&original) {
+        if let Some(original) = original
+            && let Some(&shared) = invariants.get(&original)
+        {
             map.insert(original, shared);
             continue;
         }
@@ -270,10 +281,12 @@ fn clone_block(
             *v = map.get(&old).copied().unwrap_or(old);
         });
         let new = f.insert_inst(InsertPoint::Before(at), data);
-        let value = f.first_result(new);
-        map.insert(original, value);
-        if invariant {
-            invariants.insert(original, value);
+        if let Some(original) = original {
+            let value = f.first_result(new);
+            map.insert(original, value);
+            if invariant {
+                invariants.insert(original, value);
+            }
         }
     }
 }
@@ -322,11 +335,7 @@ fn transform(f: &mut Function, c: Candidate) {
     f.remove_block(c.header);
 }
 fn run(f: &mut Function) -> bool {
-    if f.debug_return.is_some()
-        || f.debug_loc.is_some()
-        || !f.debug_vars.is_empty()
-        || !f.debug_scopes.is_empty()
-    {
+    if f.debug_return.is_some() || f.debug_loc.is_some() || !f.debug_vars.is_empty() {
         return false;
     }
     let headers = f.blocks().collect::<Vec<_>>();
@@ -344,5 +353,41 @@ fn run(f: &mut Function) -> bool {
             changed = true;
         }
     }
+    if changed {
+        if crate::load_reuse::run_local(f) {
+            crate::canonicalize::run(f);
+            crate::instcombine::run(f);
+        }
+        collapse_stores(f);
+    }
     changed
+}
+
+/// Forwarding the hash recurrence can expose successive writes of the same
+/// scalar. Keep the last write, with no intervening access, trap or source
+/// location. Reads from possibly aliased input bytes still separate writes.
+fn collapse_stores(f: &mut Function) {
+    let blocks: Vec<_> = f.blocks().collect();
+    for b in blocks {
+        let mut pending = None;
+        for i in f.block_insts(b).to_vec() {
+            if f.inst_loc(i).is_some() {
+                pending = None;
+                continue;
+            }
+            match *f.inst_data(i) {
+                D::Store { addr, value, flags } if !flags.volatile => {
+                    let key = (f.resolve(addr), f.value_type(value));
+                    if let Some((previous_key, previous)) = pending
+                        && key == previous_key
+                    {
+                        f.remove_inst(previous);
+                    }
+                    pending = Some((key, i));
+                }
+                ref data if data.is_pinned() => pending = None,
+                _ => {}
+            }
+        }
+    }
 }

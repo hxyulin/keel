@@ -476,13 +476,26 @@ Tests: `cargo test -p keel-opt --test memory_forward`.
 ### load-reuse
 
 `load-reuse` makes an ordinary successful load's value available for its exact
-type and canonical address along unique-predecessor edges in reverse
-postorder. Merges, unprocessed predecessors and backedges inherit nothing, and
-a loop header resets availability. Chains stop after eight edges and snapshots
-hold at most 128 facts. Stores do not create facts. A later duplicate load
-disappears only after the original load succeeded with no possible mutation
-or start of the load's slot on the path. Address analysis is shared with
-`memory-forward`. Balanced, Size and Full run it.
+type and canonical address in reverse postorder. A merge retains only identical
+values available from every predecessor. Unprocessed predecessors supply no
+facts. Chains stop after eight edges and snapshots hold at most 128 facts.
+Exact stores publish their value, but forwarding a later load also requires a
+prior successful read or an explicit `notrap` promise on that load. Writes
+invalidate possibly overlapping facts. Address analysis is shared with
+`memory-forward`. Balanced, Size and Full run it. When reuse changes a function,
+it also numbers equivalent pure expressions that depend on the reads removed
+by that invocation. This cleanup preserves GCM's local copies of operandless
+instructions and address calculations. It leaves unrelated expressions and
+branches alone rather than creating new long live ranges after scheduling.
+This late numbering is limited to 2,048 layout instructions and 8,192 value
+arena entries per function; memory forwarding itself keeps its existing bounds.
+
+A single-block loop with one ordinary store may carry that stored value on its
+backedge. Its entry predecessor must already supply a successfully read value
+for the exact field. The pass adds a block parameter and removes the repeated
+read. It adds no loads and keeps every write and other read, including input
+bytes that alias the field. Other writes, volatile accesses and source locations
+prevent this loop transform. No fixed-point memory analysis runs.
 
 `call-load-reuse` also reuses loads across calls whose explicit scoped
 contracts promise no accessible writes, no freeing, no synchronization, no
@@ -608,15 +621,35 @@ increments in range. Both complete body copies run in their original order,
 including loads. The original loop handles the final odd iteration. No
 loop-carried floating-point operation is reassociated.
 
+### loop-rotate
+
+`loop-rotate` copies a small header test to the unique latch while retaining the
+entry guard. A natural loop may contain up to four body blocks and distinct
+early exits. Header operations are restricted to integer constants, compares,
+and wrapping addition/subtraction. Every memory access stays in its original
+block, so an empty loop or an early mismatch performs no extra loads.
+
+The pass forwards current header values to body and exit parameters. A shared
+tail keeps its existing edge arguments; direct header-value uses outside the
+loop must be in an immediate exit reached only from the loop. Uses in a later
+descendant require SSA repair that this bounded pass does not perform. Calls, source locations,
+debugger variable homes and cyclic bodies reject rotation. Empty lexical
+scopes alone do not prevent it.
+
 ### loop-unroll-exact
 
 Full runs `loop-unroll-exact` after loop rotation and dead-code cleanup. It
 accepts counted header/body loops and rotated one-block loops with at most eight
 literal iterations. Each loop may clone at most 128 instructions, within a
-256-instruction function budget. Integer operations and nonvolatile loads stay
-in iteration order; the pass does not reassociate recurrences. Calls, stores,
-floating operations, unsupported control flow and debugger locations reject the
-candidate. The final induction update must not wrap in its comparison domain.
+512-instruction function budget. Integer operations and nonvolatile scalar
+loads and stores stay in iteration order; the pass does not reassociate
+recurrences. Local forwarding then removes redundant reads using the same
+readability proofs as `load-reuse`; a store alone is not such a proof. Successive stores
+to the exact same scalar address collapse only when no intervening access,
+trap or source location can observe the earlier store. Input reads that may
+alias the field keep the writes separate. Calls, volatile accesses, floating
+operations, unsupported control flow and debugger locations reject the
+candidate. Empty lexical scopes alone do not prevent unrolling. The final induction update must not wrap in its comparison domain.
 
 ### if-convert
 

@@ -173,85 +173,26 @@
 	xor	r14d, r14d
 	# v90 = iconst.i32 0
 	xor	r15d, r15d
-	# jump block10(v45, v45, v90, v11)
-	mov	rbx, r15
-	mov	r15, r14
-	mov	r8, qword ptr [rbp + -56]
-.Lk_matmul_block10:
-	# v56 = isub v3, v52
-	mov	r13, r9
-	sub	r13d, r14d
+	# v56 = isub v3, v45
+	mov	rbx, r9
+	sub	ebx, 0
 	# v57 = iconst.i32 2
 	# v58 = icmp.sge v56, v57
-	# brif v58, block11, block12
-	cmp	r13d, 2
-	jge	".Lk_matmul_block11"
-.Lk_matmul_block12:
-	# v89 = iadd v53, v54
-	add	r15d, ebx
-	# v16 = icmp.sgt v3, v52
-	# brif v16, block8(v52, v89, v55), block9(v89)
-	cmp	r9d, r14d
-	jle	".Lk_matmul_inst16_else"
-	mov	rbx, r15
-	mov	r13, r8
+	# brif v58, block11(v45, v45, v90, v11), block12(v45, v45, v90, v11)
+	cmp	ebx, 2
+	jl	".Lk_matmul_inst57_else"
+	mov	rbx, r14
+	mov	r8, qword ptr [rbp + -56]
+	jmp	".Lk_matmul_block11"
+.Lk_matmul_inst57_else:
+	mov	rdi, r14
 	mov	r8, r14
-	jmp	".Lk_matmul_block8"
-.Lk_matmul_inst16_else:
-	mov	r8, r15
-	jmp	".Lk_matmul_block9"
-.Lk_matmul_block8:
-	# v17 = iadd v7, v91
-	lea	r14d, [r12 + r8 * 1]
-	# v18 = sext.i64 v17
-	movsxd	r14, r14d
-	# v19 = iconst.i64 2
-	# v20 = shl v18, v19
-	# v21 = ptradd v0, v20
-	# v22 = load.i32 v21
-	mov	r14d, dword ptr [rsi + r14 * 4]
-	# v25 = sext.i64 v93
-	movsxd	r15, r13d
-	# v26 = shl v25, v19
-	# v27 = ptradd v1, v26
-	# v28 = load.i32 v27
-	# v29 = imul v22, v28
-	mov	rcx, qword ptr [rbp + -80]
-	imul	r14d, dword ptr [rcx + r15 * 4]
-	# v30 = iadd v92, v29
-	add	ebx, r14d
-	# v31 = iconst.i32 1
-	# v32 = iadd v91, v31
-	add	r8d, 1
-	# v50 = iadd v3, v93
-	add	r13d, r9d
-	# v97 = icmp.sgt v3, v32
-	# brif v97, block8(v32, v30, v50), block9(v30)
-	cmp	r9d, r8d
-	jg	".Lk_matmul_block8"
-	mov	r8, rbx
-.Lk_matmul_block9:
-	# v33 = iadd v7, v11
-	mov	rcx, qword ptr [rbp + -56]
-	lea	ebx, [r12 + rcx * 1]
-	# v34 = sext.i64 v33
-	movsxd	rbx, ebx
-	# v35 = iconst.i64 2
-	# v36 = shl v34, v35
-	# v37 = ptradd v2, v36
-	# store v95, v37
-	mov	rcx, qword ptr [rbp + -72]
-	mov	dword ptr [rcx + rbx * 4], r8d
-	# v38 = iconst.i32 1
-	# v39 = iadd v11, v38
-	mov	rax, qword ptr [rbp + -56]
-	lea	r8d, [rax + 1]
-	# jump block5(v39)
-	mov	qword ptr [rbp + -56], r8
-	jmp	".Lk_matmul_block5"
+	mov	rbx, r15
+	mov	r13, qword ptr [rbp + -56]
+	jmp	".Lk_matmul_block12"
 .Lk_matmul_block11:
-	# v59 = iadd v7, v52
-	lea	r13d, [r12 + r14 * 1]
+	# v59 = iadd v7, v98
+	lea	r13d, [r12 + rbx * 1]
 	# v60 = sext.i64 v59
 	movsxd	r13, r13d
 	# v61 = iconst.i64 2
@@ -259,7 +200,7 @@
 	# v63 = ptradd v0, v62
 	# v64 = load.i32 v63
 	mov	r13d, dword ptr [rsi + r13 * 4]
-	# v65 = sext.i64 v55
+	# v65 = sext.i64 v101
 	movsxd	rdi, r8d
 	# v66 = shl v65, v61
 	# v67 = ptradd v1, v66
@@ -267,15 +208,15 @@
 	# v69 = imul v64, v68
 	mov	rcx, qword ptr [rbp + -80]
 	imul	r13d, dword ptr [rcx + rdi * 4]
-	# v70 = iadd v53, v69
-	add	r15d, r13d
+	# v70 = iadd v99, v69
+	add	r14d, r13d
 	# v71 = iconst.i32 1
-	# v72 = iadd v52, v71
-	add	r14d, 1
-	# v73 = iadd v3, v55
+	# v72 = iadd v98, v71
+	add	ebx, 1
+	# v73 = iadd v3, v101
 	lea	edi, [r9 + r8 * 1]
 	# v74 = iadd v7, v72
-	lea	r8d, [r12 + r14 * 1]
+	lea	r8d, [r12 + rbx * 1]
 	# v75 = sext.i64 v74
 	movsxd	r8, r8d
 	# v76 = iconst.i64 2
@@ -291,16 +232,89 @@
 	# v84 = imul v79, v83
 	mov	rcx, qword ptr [rbp + -80]
 	imul	r8d, dword ptr [rcx + r13 * 4]
-	# v85 = iadd v54, v84
-	add	ebx, r8d
+	# v85 = iadd v100, v84
+	add	r15d, r8d
 	# v86 = iconst.i32 1
 	# v87 = iadd v72, v86
-	add	r14d, 1
+	add	ebx, 1
 	# v88 = iadd v3, v73
 	add	edi, r9d
-	# jump block10(v87, v70, v85, v88)
+	# v106 = isub v3, v87
+	mov	r8, r9
+	sub	r8d, ebx
+	# v107 = iconst.i32 2
+	# v108 = icmp.sge v106, v107
+	# brif v108, block11(v87, v70, v85, v88), block12(v87, v70, v85, v88)
+	cmp	r8d, 2
+	jl	".Lk_matmul_inst88_else"
 	mov	r8, rdi
-	jmp	".Lk_matmul_block10"
+	jmp	".Lk_matmul_block11"
+.Lk_matmul_inst88_else:
+	mov	r8, r14
+	mov	r13, rdi
+	mov	rdi, rbx
+	mov	rbx, r15
+.Lk_matmul_block12:
+	# v89 = iadd v103, v104
+	add	r8d, ebx
+	# v16 = icmp.sgt v3, v102
+	# brif v16, block8(v102, v89, v105), block9(v89)
+	cmp	r9d, edi
+	jle	".Lk_matmul_inst16_else"
+	mov	rbx, r13
+	jmp	".Lk_matmul_block8"
+.Lk_matmul_inst16_else:
+	mov	rdi, r8
+	jmp	".Lk_matmul_block9"
+.Lk_matmul_block8:
+	# v17 = iadd v7, v91
+	lea	r13d, [r12 + rdi * 1]
+	# v18 = sext.i64 v17
+	movsxd	r13, r13d
+	# v19 = iconst.i64 2
+	# v20 = shl v18, v19
+	# v21 = ptradd v0, v20
+	# v22 = load.i32 v21
+	mov	r13d, dword ptr [rsi + r13 * 4]
+	# v25 = sext.i64 v93
+	movsxd	r14, ebx
+	# v26 = shl v25, v19
+	# v27 = ptradd v1, v26
+	# v28 = load.i32 v27
+	# v29 = imul v22, v28
+	mov	rcx, qword ptr [rbp + -80]
+	imul	r13d, dword ptr [rcx + r14 * 4]
+	# v30 = iadd v92, v29
+	add	r8d, r13d
+	# v31 = iconst.i32 1
+	# v32 = iadd v91, v31
+	add	edi, 1
+	# v50 = iadd v3, v93
+	add	ebx, r9d
+	# v97 = icmp.sgt v3, v32
+	# brif v97, block8(v32, v30, v50), block9(v30)
+	cmp	r9d, edi
+	jg	".Lk_matmul_block8"
+	mov	rdi, r8
+.Lk_matmul_block9:
+	# v33 = iadd v7, v11
+	mov	rcx, qword ptr [rbp + -56]
+	lea	r8d, [r12 + rcx * 1]
+	# v34 = sext.i64 v33
+	movsxd	r8, r8d
+	# v35 = iconst.i64 2
+	# v36 = shl v34, v35
+	# v37 = ptradd v2, v36
+	# store v95, v37
+	mov	rcx, qword ptr [rbp + -72]
+	mov	dword ptr [rcx + r8 * 4], edi
+	# v38 = iconst.i32 1
+	# v39 = iadd v11, v38
+	mov	rax, qword ptr [rbp + -56]
+	lea	edi, [rax + 1]
+	# jump block5(v39)
+	mov	qword ptr [rbp + -56], rdi
+	jmp	".Lk_matmul_block5"
 .Lk_matmul_end:
 	.cfi_endproc
 	.size "k_matmul", .-"k_matmul"
@@ -334,24 +348,71 @@
 	xor	ebx, ebx
 	# v48 = iconst.i32 0
 	xor	r12d, r12d
-	# jump block4(v4, v3, v48)
+	# v22 = isub v2, v4
+	mov	r13, r8
+	sub	r13d, 0
+	# v23 = iconst.i32 2
+	# v24 = icmp.sge v22, v23
+	# brif v24, block5(v4, v3, v48), block6(v4, v3, v48)
+	cmp	r13d, 2
+	jl	".Lsigned_dot32_inst20_else"
 	mov	r11, r9
 	mov	r9, rbx
 	mov	rbx, r11
-.Lsigned_dot32_block4:
-	# v22 = isub v2, v19
+	jmp	".Lsigned_dot32_block5"
+.Lsigned_dot32_inst20_else:
+	mov	r11, r9
+	mov	r9, rbx
+	mov	rbx, r11
+	jmp	".Lsigned_dot32_block6"
+.Lsigned_dot32_block5:
+	# v25 = sext.i64 v54
+	movsxd	r13, r9d
+	# v26 = iconst.i64 2
+	# v27 = shl v25, v26
+	shl	r13, 2
+	# v28 = ptradd v0, v27
+	# v29 = load.i32 v28
+	mov	r14d, dword ptr [rsi + r13 * 1]
+	# v30 = ptradd v1, v27
+	# v31 = load.i32 v30
+	# v32 = imul v29, v31
+	imul	r14d, dword ptr [rdi + r13 * 1]
+	# v33 = iadd v55, v32
+	add	ebx, r14d
+	# v34 = iconst.i32 1
+	# v35 = iadd v54, v34
+	add	r9d, 1
+	# v36 = sext.i64 v35
+	movsxd	r13, r9d
+	# v37 = iconst.i64 2
+	# v38 = shl v36, v37
+	shl	r13, 2
+	# v39 = ptradd v0, v38
+	# v40 = load.i32 v39
+	mov	r14d, dword ptr [rsi + r13 * 1]
+	# v41 = ptradd v1, v38
+	# v42 = load.i32 v41
+	# v43 = imul v40, v42
+	imul	r14d, dword ptr [rdi + r13 * 1]
+	# v44 = iadd v56, v43
+	add	r12d, r14d
+	# v45 = iconst.i32 1
+	# v46 = iadd v35, v45
+	add	r9d, 1
+	# v60 = isub v2, v46
 	mov	r13, r8
 	sub	r13d, r9d
-	# v23 = iconst.i32 2
-	# v24 = icmp.sge v22, v23
-	# brif v24, block5, block6
+	# v61 = iconst.i32 2
+	# v62 = icmp.sge v60, v61
+	# brif v62, block5(v46, v33, v44), block6(v46, v33, v44)
 	cmp	r13d, 2
 	jge	".Lsigned_dot32_block5"
 .Lsigned_dot32_block6:
-	# v47 = iadd v20, v21
+	# v47 = iadd v58, v59
 	add	ebx, r12d
-	# v7 = icmp.sgt v2, v19
-	# brif v7, block2(v19, v47), block3(v47)
+	# v7 = icmp.sgt v2, v57
+	# brif v7, block2(v57, v47), block3(v47)
 	cmp	r8d, r9d
 	jg	".Lsigned_dot32_block2"
 	mov	rsi, rbx
@@ -389,43 +450,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lsigned_dot32_block5:
-	# v25 = sext.i64 v19
-	movsxd	r13, r9d
-	# v26 = iconst.i64 2
-	# v27 = shl v25, v26
-	shl	r13, 2
-	# v28 = ptradd v0, v27
-	# v29 = load.i32 v28
-	mov	r14d, dword ptr [rsi + r13 * 1]
-	# v30 = ptradd v1, v27
-	# v31 = load.i32 v30
-	# v32 = imul v29, v31
-	imul	r14d, dword ptr [rdi + r13 * 1]
-	# v33 = iadd v20, v32
-	add	ebx, r14d
-	# v34 = iconst.i32 1
-	# v35 = iadd v19, v34
-	add	r9d, 1
-	# v36 = sext.i64 v35
-	movsxd	r13, r9d
-	# v37 = iconst.i64 2
-	# v38 = shl v36, v37
-	shl	r13, 2
-	# v39 = ptradd v0, v38
-	# v40 = load.i32 v39
-	mov	r14d, dword ptr [rsi + r13 * 1]
-	# v41 = ptradd v1, v38
-	# v42 = load.i32 v41
-	# v43 = imul v40, v42
-	imul	r14d, dword ptr [rdi + r13 * 1]
-	# v44 = iadd v21, v43
-	add	r12d, r14d
-	# v45 = iconst.i32 1
-	# v46 = iadd v35, v45
-	add	r9d, 1
-	# jump block4(v46, v33, v44)
-	jmp	".Lsigned_dot32_block4"
 .Lsigned_dot32_end:
 	.cfi_endproc
 	.size "signed_dot32", .-"signed_dot32"
@@ -459,24 +483,69 @@
 	xor	ebx, ebx
 	# v45 = iconst.i64 0
 	xor	r12d, r12d
-	# jump block4(v4, v3, v45)
+	# v21 = isub v2, v4
+	mov	r13, r8
+	sub	r13, 0
+	# v22 = iconst.i64 2
+	# v23 = icmp.sge v21, v22
+	# brif v23, block5(v4, v3, v45), block6(v4, v3, v45)
+	cmp	r13, 2
+	jl	".Lsigned_dot64_inst19_else"
 	mov	r11, r9
 	mov	r9, rbx
 	mov	rbx, r11
-.Lsigned_dot64_block4:
-	# v21 = isub v2, v18
+	jmp	".Lsigned_dot64_block5"
+.Lsigned_dot64_inst19_else:
+	mov	r11, r9
+	mov	r9, rbx
+	mov	rbx, r11
+	jmp	".Lsigned_dot64_block6"
+.Lsigned_dot64_block5:
+	# v24 = iconst.i64 3
+	# v25 = shl v51, v24
+	mov	r13, r9
+	shl	r13, 3
+	# v26 = ptradd v0, v25
+	# v27 = load.i64 v26
+	mov	r14, qword ptr [rsi + r13 * 1]
+	# v28 = ptradd v1, v25
+	# v29 = load.i64 v28
+	# v30 = imul v27, v29
+	imul	r14, qword ptr [rdi + r13 * 1]
+	# v31 = iadd v52, v30
+	add	rbx, r14
+	# v32 = iconst.i64 1
+	# v33 = iadd v51, v32
+	add	r9, 1
+	# v34 = iconst.i64 3
+	# v35 = shl v33, v34
+	mov	r13, r9
+	shl	r13, 3
+	# v36 = ptradd v0, v35
+	# v37 = load.i64 v36
+	mov	r14, qword ptr [rsi + r13 * 1]
+	# v38 = ptradd v1, v35
+	# v39 = load.i64 v38
+	# v40 = imul v37, v39
+	imul	r14, qword ptr [rdi + r13 * 1]
+	# v41 = iadd v53, v40
+	add	r12, r14
+	# v42 = iconst.i64 1
+	# v43 = iadd v33, v42
+	add	r9, 1
+	# v57 = isub v2, v43
 	mov	r13, r8
 	sub	r13, r9
-	# v22 = iconst.i64 2
-	# v23 = icmp.sge v21, v22
-	# brif v23, block5, block6
+	# v58 = iconst.i64 2
+	# v59 = icmp.sge v57, v58
+	# brif v59, block5(v43, v31, v41), block6(v43, v31, v41)
 	cmp	r13, 2
 	jge	".Lsigned_dot64_block5"
 .Lsigned_dot64_block6:
-	# v44 = iadd v19, v20
+	# v44 = iadd v55, v56
 	add	rbx, r12
-	# v7 = icmp.sgt v2, v18
-	# brif v7, block2(v18, v44), block3(v44)
+	# v7 = icmp.sgt v2, v54
+	# brif v7, block2(v54, v44), block3(v44)
 	cmp	r8, r9
 	jg	".Lsigned_dot64_block2"
 	mov	rsi, rbx
@@ -513,41 +582,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lsigned_dot64_block5:
-	# v24 = iconst.i64 3
-	# v25 = shl v18, v24
-	mov	r13, r9
-	shl	r13, 3
-	# v26 = ptradd v0, v25
-	# v27 = load.i64 v26
-	mov	r14, qword ptr [rsi + r13 * 1]
-	# v28 = ptradd v1, v25
-	# v29 = load.i64 v28
-	# v30 = imul v27, v29
-	imul	r14, qword ptr [rdi + r13 * 1]
-	# v31 = iadd v19, v30
-	add	rbx, r14
-	# v32 = iconst.i64 1
-	# v33 = iadd v18, v32
-	add	r9, 1
-	# v34 = iconst.i64 3
-	# v35 = shl v33, v34
-	mov	r13, r9
-	shl	r13, 3
-	# v36 = ptradd v0, v35
-	# v37 = load.i64 v36
-	mov	r14, qword ptr [rsi + r13 * 1]
-	# v38 = ptradd v1, v35
-	# v39 = load.i64 v38
-	# v40 = imul v37, v39
-	imul	r14, qword ptr [rdi + r13 * 1]
-	# v41 = iadd v20, v40
-	add	r12, r14
-	# v42 = iconst.i64 1
-	# v43 = iadd v33, v42
-	add	r9, 1
-	# jump block4(v43, v31, v41)
-	jmp	".Lsigned_dot64_block4"
 .Lsigned_dot64_end:
 	.cfi_endproc
 	.size "signed_dot64", .-"signed_dot64"

@@ -219,9 +219,8 @@ fn header_liveouts_parallel_recurrences_and_aliases() {
     assert_eq!(m.to_string(), before);
     let mut debug = keel_ir::parse(&src).unwrap();
     debug.functions[0].debug_scopes.push(None);
-    let before = debug.to_string();
     keel_opt::run_passes(&mut debug, &["loop-unroll-exact"]).unwrap();
-    assert_eq!(debug.to_string(), before);
+    assert!(!debug.to_string().contains("brif"));
 }
 
 #[test]
@@ -285,4 +284,155 @@ fn literal_and_symbol_templates_are_shared_across_iterations() {
             .count(),
         8
     );
+}
+
+#[test]
+fn scalar_stores_keep_aliasing_input_observations_and_zero_trips() {
+    use keel_ir_interp::{Outcome, Val};
+    for trips in [0, 1, 8] {
+        for input in [false, true] {
+            let read = if input {
+                "v20=ptradd v1,v4\n v21=load.i8 v20\n v22=uext.i64 v21"
+            } else {
+                "v22=iconst.i64 17"
+            };
+            let src = format!(
+                "func @f(ptr,ptr)->i64 {{
+block0(v0:ptr,v1:ptr):
+ v2=iconst.i64 0
+ v3=iconst.i64 {trips}
+ jump block1(v2)
+block1(v4:i64):
+ v5=icmp.ult v4,v3
+ brif v5,block2,block3
+block2:
+ {read}
+ v6=load.i64 v0
+ v7=xor v6,v22
+ v8=iconst.i64 1099511628211
+ v9=imul v7,v8
+ store v9,v0
+ v10=iconst.i64 1
+ v11=iadd v4,v10
+ jump block1(v11)
+block3:
+ return v2
+}}"
+            );
+            let before = keel_ir::parse(&src).unwrap();
+            let after = optimize(&src);
+            assert!(!after.to_string().contains("brif"));
+            let stores = after.functions[0]
+                .layout_insts()
+                .filter(|(_, i)| matches!(after.functions[0].inst_data(*i), D::Store { .. }))
+                .count();
+            assert_eq!(
+                stores,
+                if input {
+                    trips
+                } else {
+                    usize::from(trips != 0)
+                }
+            );
+            for offset in [0, 1, 7, 8, 16] {
+                let mut outputs = Vec::new();
+                for m in [&before, &after] {
+                    let f = &m.functions[0];
+                    let mut i = Interpreter::for_function(f).with_load_trace();
+                    let bytes: Vec<_> = (0..32).map(|v| (v * 137 + 17) as u8).collect();
+                    let p = i.memory_mut().alloc_bytes(&bytes, 8);
+                    let out = i.call("f", &[Val::Ptr(p), Val::Ptr(p + offset)]);
+                    assert!(matches!(out, Outcome::Return(_)), "{out:?}");
+                    outputs.push((out, i.memory().read(p, 32).unwrap().to_vec()));
+                }
+                assert_eq!(
+                    outputs[0], outputs[1],
+                    "trips={trips}, input={input}, offset={offset}"
+                );
+            }
+            if trips == 0 {
+                let mut i = Interpreter::for_function(&after.functions[0]);
+                assert!(matches!(
+                    i.call("f", &[Val::Ptr(0), Val::Ptr(0)]),
+                    Outcome::Return(_)
+                ));
+            }
+            let volatile = src.replace("store v9,v0", "store volatile v9,v0");
+            assert_eq!(
+                optimize(&volatile).to_string(),
+                keel_ir::parse(&volatile).unwrap().to_string()
+            );
+        }
+    }
+}
+
+#[test]
+fn store_cleanup_keeps_a_write_before_a_trapping_operation() {
+    use keel_ir_interp::{Outcome, Val};
+    let src = "func @f(ptr,i64)->i64 {
+block0(v0:ptr,v1:i64):
+ v2=iconst.i64 17
+ v3=iconst.i64 29
+ store v2,v0
+ v4=udiv v3,v1
+ store v3,v0
+ v5=iconst.i64 0
+ v6=iconst.i64 2
+ jump block1(v5)
+block1(v7:i64):
+ v8=icmp.ult v7,v6
+ brif v8,block2,block3
+block2:
+ v9=iconst.i64 1
+ v10=iadd v7,v9
+ jump block1(v10)
+block3:
+ return v4
+}";
+    let after = optimize(src);
+    assert!(!after.to_string().contains("brif"));
+    for m in [keel_ir::parse(src).unwrap(), after] {
+        let mut i = Interpreter::for_function(&m.functions[0]);
+        let p = i.memory_mut().alloc_bytes(&0u64.to_le_bytes(), 8);
+        assert!(matches!(
+            i.call("f", &[Val::Ptr(p), Val::I64(0)]),
+            Outcome::Trap(_)
+        ));
+        assert_eq!(i.memory().read(p, 8).unwrap(), 17u64.to_le_bytes());
+    }
+}
+
+#[test]
+fn ordinary_read_after_a_store_requires_its_own_readability_proof() {
+    for (flags, expected_loads) in [("", 1), ("notrap ", 0)] {
+        let src = format!(
+            "func @f(ptr)->i64 {{
+block0(v0:ptr):
+ v1=iconst.i64 0
+ v2=iconst.i64 1
+ v3=iconst.i64 17
+ jump block1(v1,v1)
+block1(v4:i64,v5:i64):
+ v6=icmp.ult v4,v2
+ brif v6,block2,block3
+block2:
+ store v3,v0
+ v7=load.i64 {flags}v0
+ v8=iadd v5,v7
+ v9=iadd v4,v2
+ jump block1(v9,v8)
+block3:
+ return v5
+}}"
+        );
+        let after = optimize(&src);
+        assert_eq!(
+            after.functions[0]
+                .layout_insts()
+                .filter(|(_, i)| matches!(after.functions[0].inst_data(*i), D::Load { .. }))
+                .count(),
+            expected_loads,
+            "{after}"
+        );
+    }
 }

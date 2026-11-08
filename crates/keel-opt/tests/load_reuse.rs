@@ -520,3 +520,237 @@ fn completed_merge_predecessor_budget_has_an_exact_boundary() {
         assert_eq!(loads(&optimize(&source)), if count == 8 { 1 } else { 2 });
     }
 }
+
+fn carried_hash() -> &'static str {
+    "func @hash(ptr,ptr,i64)->i64 {
+block0(v0:ptr,v1:ptr,v2:i64):
+ v3=load.i64 v0
+ v4=iconst.i64 0
+ v5=icmp.ne v2,v4
+ brif v5,block1(v4),block2
+block1(v6:i64):
+ v7=ptradd v1,v6
+ v8=load.i8 v7
+ v9=load.i64 v0
+ v10=uext.i64 v8
+ v11=xor v9,v10
+ v12=iconst.i64 1099511628211
+ v13=imul v11,v12
+ store v13,v0
+ v14=iconst.i64 1
+ v15=iadd v6,v14
+ v16=icmp.ult v15,v2
+ brif v16,block1(v15),block2
+block2:
+ v17=load.i64 v0
+ return v17
+}"
+}
+
+#[test]
+fn loop_carries_stored_values_without_moving_reads_or_writes() {
+    use keel_ir_interp::{Interpreter, Outcome, Val};
+    let before = keel_ir::parse(carried_hash()).unwrap();
+    let after = optimize(carried_hash());
+    keel_ir::verify_module(&after).unwrap();
+    assert_eq!(
+        loads(&after),
+        3,
+        "Entry and exit hash reads and input byte read remain"
+    );
+    assert_eq!(after.to_string().matches("store ").count(), 1);
+    let mut again = after.clone();
+    keel_opt::run_passes(&mut again, &["load-reuse"]).unwrap();
+    assert_eq!(after.to_string(), again.to_string());
+    for n in [0, 1, 8, 31] {
+        // Input may overlap any byte of the digest. Each write must stay
+        // visible to later byte reads; carrying the hash adds no noalias rule.
+        for offset in [0, 1, 7, 8, 16] {
+            let mut outputs = Vec::new();
+            for m in [&before, &after] {
+                let mut i = Interpreter::for_function(&m.functions[0]).with_load_trace();
+                let bytes: Vec<_> = (0..64).map(|v| (v * 137 + 17) as u8).collect();
+                let p = i.memory_mut().alloc_bytes(&bytes, 8);
+                let outcome = i.call("hash", &[Val::Ptr(p), Val::Ptr(p + offset), Val::I64(n)]);
+                let Outcome::Return(result) = outcome else {
+                    panic!("{outcome:?}")
+                };
+                outputs.push((
+                    result,
+                    i.memory().read(p, 64).unwrap().to_vec(),
+                    i.load_trace()
+                        .iter()
+                        .filter(|&&a| a != p)
+                        .map(|a| a - p)
+                        .collect::<Vec<_>>(),
+                ));
+            }
+            // The input at p also aliases the hash read in this address-only
+            // trace. Memory and results cover that case independently.
+            assert_eq!(outputs[0], outputs[1], "n={n}, offset={offset}");
+        }
+    }
+}
+
+#[test]
+fn loop_carry_requires_a_successful_entry_read_and_no_other_writes() {
+    for src in [
+        carried_hash().replace(" v3=load.i64 v0\n", ""),
+        carried_hash().replace("store v13,v0", "store volatile v13,v0"),
+        carried_hash().replace("v8=load.i8 v7", "v8=load.i8 volatile v7"),
+        carried_hash().replace("store v13,v0", "store v13,v0\n store v8,v7"),
+        carried_hash().replace("store v13,v0", "store v13,v0\n fence seq_cst"),
+        carried_hash().replace("v8=load.i8 v7", "v8=atomic_load.i8 relaxed v7"),
+        format!(
+            "decl @effect(ptr)\n{}",
+            carried_hash().replace("store v13,v0", "store v13,v0\n call @effect(v0)")
+        ),
+    ] {
+        let before = keel_ir::parse(&src).unwrap();
+        let after = optimize(&src);
+        keel_ir::verify_module(&after).unwrap();
+        // Ordinary local forwarding may still remove the final exit read.
+        let header = before.functions[0].blocks().nth(1).unwrap();
+        assert_eq!(
+            before.functions[0].block_params(header).len(),
+            after.functions[0].block_params(header).len(),
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn loop_carry_does_not_turn_a_redirected_read_into_unused_phis() {
+    let mut m = keel_ir::parse(carried_hash()).unwrap();
+    let f = &mut m.functions[0];
+    let b = f.blocks().nth(1).unwrap();
+    let iv = f.block_params(b)[0];
+    let load = f
+        .block_insts(b)
+        .iter()
+        .copied()
+        .find(|&i| {
+            matches!(
+                f.inst_data(i),
+                InstData::Load {
+                    ty: keel_ir::Type::I64,
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    f.replace_all_uses(f.first_result(load), iv);
+    keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
+    assert_eq!(m.functions[0].block_params(b).len(), 1);
+    let before = m.to_string();
+    keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
+    assert_eq!(before, m.to_string());
+}
+
+#[test]
+fn local_loop_store_starts_a_fresh_availability_chain() {
+    let mut src = carried_hash().replace("brif v5,block1(v4),block2", "brif v5,block10,block2");
+    let chain = (10..17)
+        .map(|b| {
+            format!(
+                "block{b}:\n jump {}\n",
+                if b == 16 {
+                    "block1(v4)".to_owned()
+                } else {
+                    format!("block{}", b + 1)
+                }
+            )
+        })
+        .collect::<String>();
+    src = src.replace("block1(v6:i64):", &format!("{chain}block1(v6:i64):"));
+    let second = "block20(v106:i64):
+ v107=ptradd v1,v106
+ v108=load.i8 v107
+ v109=load.i64 v0
+ v110=uext.i64 v108
+ v111=xor v109,v110
+ v112=iconst.i64 1099511628211
+ v113=imul v111,v112
+ store v113,v0
+ v114=iconst.i64 1
+ v115=iadd v106,v114
+ v116=icmp.ult v115,v2
+ brif v116,block20(v115),block2
+";
+    src = src
+        .replace(
+            "brif v16,block1(v15),block2",
+            "brif v16,block1(v15),block20(v4)",
+        )
+        .replace("block2:\n", &format!("{second}block2:\n"));
+    let m = optimize(&src);
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(
+        loads(&m),
+        4,
+        "Entry/exit hash reads and one byte read in each loop: {m}"
+    );
+}
+
+#[test]
+fn dependent_expressions_reuse_values_without_merging_local_constants() {
+    let src = "func @tag(ptr,i64)->i64 {
+block0(v0:ptr,v1:i64):
+ v2=load.i64 v0
+ v3=iconst.i64 1099511628211
+ v4=and v2,v3
+ brif v1,block1,block2
+block1:
+ v5=load.i64 v0
+ v6=iconst.i64 1099511628211
+ v7=and v5,v6
+ v8=iadd v7,v6
+ return v8
+block2:
+ return v4
+}";
+    let src = src
+        .replace("v4=and v2,v3", "v4=and v2,v3\n v20=imul v1,v1")
+        .replace(
+            "v8=iadd v7,v6",
+            "v8=iadd v7,v6\n v21=imul v1,v1\n v22=iadd v8,v21",
+        )
+        .replace("return v8", "return v22")
+        .replace("return v4", "return v20");
+    let after = optimize(&src);
+    keel_ir::verify_module(&after).unwrap();
+    assert_eq!(loads(&after), 1);
+    let f = &after.functions[0];
+    assert_eq!(
+        f.layout_insts()
+            .filter(|(_, i)| matches!(
+                f.inst_data(*i),
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::And,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        f.layout_insts()
+            .filter(|(_, i)| matches!(
+                f.inst_data(*i),
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::Imul,
+                    ..
+                }
+            ))
+            .count(),
+        2,
+        "Preserve unrelated code-motion choices"
+    );
+    let constants: Vec<_> = f
+        .layout_insts()
+        .filter(|(_, i)| matches!(f.inst_data(*i), InstData::Iconst { .. }))
+        .collect();
+    assert_eq!(constants.len(), 2, "Preserve GCM's literal copies");
+    let local = f.first_result(constants[1].1);
+    assert!(f.layout_insts().any(|(_,i)| matches!(f.inst_data(i),InstData::Binary {op:keel_ir::BinaryOp::Iadd,args} if args.contains(&local))));
+}

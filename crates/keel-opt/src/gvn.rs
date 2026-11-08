@@ -15,12 +15,51 @@
 //! later branches on the same SSA condition, without changing its integer value.
 
 use crate::scratch::Scratch;
-use keel_ir::fxhash::FxBuildHasher;
-use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp, ValueDef};
+use keel_ir::fxhash::{FxBuildHasher, FxHashMap};
+use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp, Value};
 use std::borrow::Cow;
 use std::hash::BuildHasher;
 
 pub fn run(func: &mut Function) -> bool {
+    number(func, None)
+}
+
+/// Reuse expressions exposed by memory forwarding after GCM, without merging
+/// its per-block copies into long register live ranges. Only computations
+/// dependent on these removed reads may merge. Addresses stay at their uses.
+/// Literal IDs in keys are semantic representatives only; operands stay local.
+pub(crate) fn run_late(func: &mut Function, reused: &[Value]) -> bool {
+    // Late merging cannot be rescheduled afterwards. Keep its register-pressure
+    // and scratch costs bounded, including arena entries left by earlier passes.
+    const MAX_INSTS: usize = 2048;
+    const MAX_VALUES: usize = 8192;
+    if func.num_values() > MAX_VALUES || func.layout_insts().take(MAX_INSTS + 1).count() > MAX_INSTS
+    {
+        return false;
+    }
+    number(func, Some(reused))
+}
+
+fn number(func: &mut Function, reused: Option<&[Value]>) -> bool {
+    let keep_literals = reused.is_some();
+    let mut affected = reused.map(|values| {
+        let mut flags = vec![false; func.num_values()];
+        for v in values {
+            flags[v.index()] = true;
+        }
+        flags
+    });
+    let literals = keep_literals.then(|| {
+        let mut representatives = FxHashMap::default();
+        let mut ids: Vec<_> = (0..func.num_values()).map(Value::new).collect();
+        for (_, i) in func.layout_insts() {
+            if let InstData::Iconst { ty, imm } = *func.inst_data(i) {
+                let v = func.first_result(i);
+                ids[v.index()] = *representatives.entry((ty, imm)).or_insert(v);
+            }
+        }
+        ids
+    });
     let analysis = crate::analysis::get(func);
     let domtree = &analysis.dom;
     let Some(entry) = func.entry_block() else {
@@ -79,7 +118,11 @@ pub fn run(func: &mut Function) -> bool {
         let mut i = 0;
         while let Some(&inst) = func.block_insts(block).get(i) {
             let data = func.inst_data(inst);
-            if let InstData::Brif { cond, dests } = data
+            let branch_affected = affected.as_ref().is_none_or(
+                |flags| matches!(data, InstData::Brif {cond,..} if flags[cond.index()]),
+            );
+            if branch_affected
+                && let InstData::Brif { cond, dests } = data
                 && let Some(taken) = truth[func.resolve(*cond).index()]
             {
                 let dest = dests[usize::from(!taken)].clone();
@@ -88,11 +131,37 @@ pub fn run(func: &mut Function) -> bool {
                 i += 1;
                 continue;
             }
-            if data.is_pinned() {
+            let mut has_operand = false;
+            if keep_literals {
+                data.for_each_operand(|_| has_operand = true);
+            }
+            if data.is_pinned()
+                || (keep_literals
+                    && (!has_operand
+                        || matches!(
+                            data,
+                            InstData::Binary {
+                                op: BinaryOp::Ptradd,
+                                ..
+                            }
+                        )))
+            {
                 i += 1;
                 continue;
             }
-            let key = canonical(func, data);
+            // Only computations depending on reads removed by this invocation
+            // may merge late. Keep unrelated GCM placement decisions intact.
+            let can_merge = if let Some(affected) = &mut affected {
+                let mut dependent = false;
+                data.for_each_operand(|v| dependent |= affected[v.index()]);
+                for v in func.inst_results(inst) {
+                    affected[v.index()] = dependent;
+                }
+                dependent
+            } else {
+                true
+            };
+            let key = canonical(func, data, literals.as_deref());
             let hash = FxBuildHasher::default().hash_one(&*key);
             let tag = (hash >> 32) as u32;
             let mut slot = hash as usize & mask;
@@ -101,13 +170,19 @@ pub fn run(func: &mut Function) -> bool {
                 if existing == empty {
                     break None;
                 }
-                if t == tag && *canonical(func, func.inst_data(existing)) == *key {
+                if t == tag
+                    && *canonical(func, func.inst_data(existing), literals.as_deref()) == *key
+                {
                     break Some(existing);
                 }
                 slot = (slot + 1) & mask;
             };
             match existing {
                 Some(existing) if open[func.inst_block(existing).index()] => {
+                    if !can_merge {
+                        i += 1;
+                        continue;
+                    }
                     let n = func.inst_results(inst).len();
                     for k in 0..n.min(func.inst_results(existing).len()) {
                         let result = func.inst_results(inst)[k];
@@ -135,9 +210,17 @@ pub fn run(func: &mut Function) -> bool {
 /// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key. Integer
 /// comparisons reverse their predicate when their operands are swapped.
 /// Most instructions are already in that form and lend themselves.
-fn canonical<'a>(func: &Function, data: &'a InstData) -> Cow<'a, InstData> {
+fn canonical<'a>(
+    func: &Function,
+    data: &'a InstData,
+    literals: Option<&[Value]>,
+) -> Cow<'a, InstData> {
+    let resolve = |v| {
+        let v = func.resolve(v);
+        literals.map_or(v, |ids| ids[v.index()])
+    };
     let mut resolved = true;
-    data.for_each_operand(|v| resolved &= !matches!(func.value_def(v), ValueDef::Alias(_)));
+    data.for_each_operand(|v| resolved &= resolve(v) == v);
     let ordered = match data {
         InstData::Binary { op, args } if is_commutative(*op) => args[0].index() <= args[1].index(),
         InstData::Overflow { op, args } if is_commutative_overflow(*op) => {
@@ -150,7 +233,7 @@ fn canonical<'a>(func: &Function, data: &'a InstData) -> Cow<'a, InstData> {
         return Cow::Borrowed(data);
     }
     let mut key = data.clone();
-    key.for_each_operand_mut(|v| *v = func.resolve(*v));
+    key.for_each_operand_mut(|v| *v = resolve(*v));
     match &mut key {
         InstData::Binary { op, args } if is_commutative(*op) => args.sort_by_key(|v| v.index()),
         InstData::Overflow { op, args } if is_commutative_overflow(*op) => {

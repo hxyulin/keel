@@ -1584,8 +1584,8 @@
 	mov	r9, rax
 	# v7 = iadd v8, v5
 	add	r8, 1
-	# v10 = icmp.ugt v1, v7
-	# brif v10, block2(v7), block3
+	# v9 = icmp.ugt v1, v7
+	# brif v9, block2(v7), block3
 	cmp	rdi, r8
 	ja	".Lk_count_block2"
 .Lk_count_block3:

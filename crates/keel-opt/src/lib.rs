@@ -722,7 +722,7 @@ const FULL_ROUND: [&str; 17] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 28] = [
+const FULL_EPILOGUE: [&str; 29] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -743,6 +743,7 @@ const FULL_EPILOGUE: [&str; 28] = [
     "simplify-cfg",
     "dce",
     "loop-unroll-exact",
+    "load-reuse",
     "dce",
     "empty-calls",
     "dce",
@@ -759,9 +760,10 @@ const FULL_EPILOGUE: [&str; 28] = [
 // cheaper schedules did not preserve the same workload/code-size tradeoffs.
 // Convert only private abs triangles before vectorization; this moves a single
 // wrapping negation, never a memory access or a potentially trapping operation.
-// The epilogue reuses memory facts before introducing loop recurrences, then
-// vectorizes extended reductions before unrolling and rotation: unrolling first
-// leaves only a remainder loop too short to vectorize. Keep phi cleanup late and
+// Vectorize extended reductions before unrolling and rotation: unrolling first
+// leaves only a remainder loop too short to vectorize. Reuse memory facts after
+// exact unrolling exposes scalar store/load chains, then number the newly
+// equivalent pure expressions. Keep phi cleanup late and
 // omit an extra GCM: broader schedules regressed Lua fib in app screening.
 // Finalize private call transport only after IR rewrites. Physical preservation
 // summaries are built by codegen from the final selected/allocated leaf bodies.

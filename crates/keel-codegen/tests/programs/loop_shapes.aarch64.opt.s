@@ -88,7 +88,7 @@ Lk_isort_end:
 	.p2align	2
 _k_matmul:
 Lk_matmul_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v7=x14 v10=x13 v11=x15 v17=x22 v18=x22 v22=x22 v25=x23 v28=x23 v30=x20 v32=x19 v33=x20 v34=x20 v39=x15 v44=x15 v45=x19 v50=x21 v52=x19 v53=x20 v54=x21 v55=x22 v56=x23 v59=x23 v60=x23 v64=x23 v65=x24 v68=x24 v70=x20 v72=x19 v73=x22 v74=x23 v75=x23 v79=x23 v80=x24 v83=x24 v85=x21 v87=x19 v88=x22 v89=x20 v90=x20 v91=x19 v92=x20 v93=x21 v95=x19
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v7=x14 v10=x13 v11=x15 v17=x22 v18=x22 v22=x22 v25=x23 v28=x23 v30=x20 v32=x19 v33=x20 v34=x20 v39=x15 v44=x15 v45=x19 v50=x21 v56=x21 v59=x23 v60=x23 v64=x23 v65=x24 v68=x24 v70=x20 v72=x19 v73=x22 v74=x23 v75=x23 v79=x23 v80=x24 v83=x24 v85=x21 v87=x19 v88=x22 v89=x20 v90=x20 v91=x19 v92=x20 v93=x21 v95=x19 v98=x19 v99=x20 v100=x21 v101=x22 v102=x19 v103=x20 v104=x21 v105=x22 v106=x23
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -147,23 +147,81 @@ Lk_matmul_block6:
 	movz	w19, #0x0
 	; v90 = iconst.i32 0
 	movz	w20, #0x0
-	; jump block10(v45, v45, v90, v11)
+	; v56 = isub v3, v45
+	sub	w21, w12, #0
+	; v57 = iconst.i32 2
+	; v58 = icmp.sge v56, v57
+	; brif v58, block11(v45, v45, v90, v11), block12(v45, v45, v90, v11)
+	cmp	w21, #2
+	b.lt	Lk_matmul_inst57_else
 	mov	x21, x20
 	mov	x20, x19
 	mov	x22, x15
-Lk_matmul_block10:
-	; v56 = isub v3, v52
+	b	Lk_matmul_block11
+Lk_matmul_inst57_else:
+	mov	x21, x20
+	mov	x20, x19
+	mov	x22, x15
+	b	Lk_matmul_block12
+Lk_matmul_block11:
+	; v59 = iadd v7, v98
+	add	w23, w14, w19
+	; v60 = sext.i64 v59
+	sxtw	x23, w23
+	; v61 = iconst.i64 2
+	; v62 = shl v60, v61
+	; v63 = ptradd v0, v62
+	; v64 = load.i32 v63
+	ldr	w23, [x9, x23, lsl #2]
+	; v65 = sext.i64 v101
+	sxtw	x24, w22
+	; v66 = shl v65, v61
+	; v67 = ptradd v1, v66
+	; v68 = load.i32 v67
+	ldr	w24, [x10, x24, lsl #2]
+	; v69 = imul v64, v68
+	; v70 = iadd v99, v69
+	madd	w20, w23, w24, w20
+	; v71 = iconst.i32 1
+	; v72 = iadd v98, v71
+	add	w19, w19, #1
+	; v73 = iadd v3, v101
+	add	w22, w12, w22
+	; v74 = iadd v7, v72
+	add	w23, w14, w19
+	; v75 = sext.i64 v74
+	sxtw	x23, w23
+	; v76 = iconst.i64 2
+	; v77 = shl v75, v76
+	; v78 = ptradd v0, v77
+	; v79 = load.i32 v78
+	ldr	w23, [x9, x23, lsl #2]
+	; v80 = sext.i64 v73
+	sxtw	x24, w22
+	; v81 = shl v80, v76
+	; v82 = ptradd v1, v81
+	; v83 = load.i32 v82
+	ldr	w24, [x10, x24, lsl #2]
+	; v84 = imul v79, v83
+	; v85 = iadd v100, v84
+	madd	w21, w23, w24, w21
+	; v86 = iconst.i32 1
+	; v87 = iadd v72, v86
+	add	w19, w19, #1
+	; v88 = iadd v3, v73
+	add	w22, w12, w22
+	; v106 = isub v3, v87
 	sub	w23, w12, w19
-	; v57 = iconst.i32 2
-	; v58 = icmp.sge v56, v57
-	; brif v58, block11, block12
+	; v107 = iconst.i32 2
+	; v108 = icmp.sge v106, v107
+	; brif v108, block11(v87, v70, v85, v88), block12(v87, v70, v85, v88)
 	cmp	w23, #2
 	b.ge	Lk_matmul_block11
 Lk_matmul_block12:
-	; v89 = iadd v53, v54
+	; v89 = iadd v103, v104
 	add	w20, w20, w21
-	; v16 = icmp.sgt v3, v52
-	; brif v16, block8(v52, v89, v55), block9(v89)
+	; v16 = icmp.sgt v3, v102
+	; brif v16, block8(v102, v89, v105), block9(v89)
 	cmp	w12, w19
 	b.le	Lk_matmul_inst16_else
 	mov	x21, x22
@@ -215,55 +273,6 @@ Lk_matmul_block9:
 	add	w15, w15, #1
 	; jump block5(v39)
 	b	Lk_matmul_block5
-Lk_matmul_block11:
-	; v59 = iadd v7, v52
-	add	w23, w14, w19
-	; v60 = sext.i64 v59
-	sxtw	x23, w23
-	; v61 = iconst.i64 2
-	; v62 = shl v60, v61
-	; v63 = ptradd v0, v62
-	; v64 = load.i32 v63
-	ldr	w23, [x9, x23, lsl #2]
-	; v65 = sext.i64 v55
-	sxtw	x24, w22
-	; v66 = shl v65, v61
-	; v67 = ptradd v1, v66
-	; v68 = load.i32 v67
-	ldr	w24, [x10, x24, lsl #2]
-	; v69 = imul v64, v68
-	; v70 = iadd v53, v69
-	madd	w20, w23, w24, w20
-	; v71 = iconst.i32 1
-	; v72 = iadd v52, v71
-	add	w19, w19, #1
-	; v73 = iadd v3, v55
-	add	w22, w12, w22
-	; v74 = iadd v7, v72
-	add	w23, w14, w19
-	; v75 = sext.i64 v74
-	sxtw	x23, w23
-	; v76 = iconst.i64 2
-	; v77 = shl v75, v76
-	; v78 = ptradd v0, v77
-	; v79 = load.i32 v78
-	ldr	w23, [x9, x23, lsl #2]
-	; v80 = sext.i64 v73
-	sxtw	x24, w22
-	; v81 = shl v80, v76
-	; v82 = ptradd v1, v81
-	; v83 = load.i32 v82
-	ldr	w24, [x10, x24, lsl #2]
-	; v84 = imul v79, v83
-	; v85 = iadd v54, v84
-	madd	w21, w23, w24, w21
-	; v86 = iconst.i32 1
-	; v87 = iadd v72, v86
-	add	w19, w19, #1
-	; v88 = iadd v3, v73
-	add	w22, w12, w22
-	; jump block10(v87, v70, v85, v88)
-	b	Lk_matmul_block10
 Lk_matmul_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -271,7 +280,7 @@ Lk_matmul_end:
 	.p2align	2
 _signed_dot32:
 Lsigned_dot32_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x14 v10=x14 v12=x15 v14=x14 v16=x13 v18=x12 v19=x12 v20=x13 v21=x14 v22=x15 v25=x15 v27=x15 v29=x19 v31=x15 v33=x13 v35=x12 v36=x15 v38=x15 v40=x19 v42=x15 v44=x14 v46=x12 v47=x13 v48=x14 v49=x12 v50=x13 v52=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x14 v10=x14 v12=x15 v14=x14 v16=x13 v18=x12 v22=x15 v25=x15 v27=x15 v29=x19 v31=x15 v33=x13 v35=x12 v36=x15 v38=x15 v40=x19 v42=x15 v44=x14 v46=x12 v47=x13 v48=x14 v49=x12 v50=x13 v52=x9 v54=x12 v55=x13 v56=x14 v57=x12 v58=x13 v59=x14 v60=x15
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -289,23 +298,69 @@ Lsigned_dot32_block0:
 	movz	w13, #0x0
 	; v48 = iconst.i32 0
 	movz	w14, #0x0
-	; jump block4(v4, v3, v48)
+	; v22 = isub v2, v4
+	sub	w15, w11, #0
+	; v23 = iconst.i32 2
+	; v24 = icmp.sge v22, v23
+	; brif v24, block5(v4, v3, v48), block6(v4, v3, v48)
+	cmp	w15, #2
+	b.lt	Lsigned_dot32_inst20_else
 	mov	x16, x12
 	mov	x12, x13
 	mov	x13, x16
-Lsigned_dot32_block4:
-	; v22 = isub v2, v19
+	b	Lsigned_dot32_block5
+Lsigned_dot32_inst20_else:
+	mov	x16, x12
+	mov	x12, x13
+	mov	x13, x16
+	b	Lsigned_dot32_block6
+Lsigned_dot32_block5:
+	; v25 = sext.i64 v54
+	sxtw	x15, w12
+	; v26 = iconst.i64 2
+	; v27 = shl v25, v26
+	lsl	x15, x15, #2
+	; v28 = ptradd v0, v27
+	; v29 = load.i32 v28
+	ldr	w19, [x9, x15, lsl #0]
+	; v30 = ptradd v1, v27
+	; v31 = load.i32 v30
+	ldr	w15, [x10, x15, lsl #0]
+	; v32 = imul v29, v31
+	; v33 = iadd v55, v32
+	madd	w13, w19, w15, w13
+	; v34 = iconst.i32 1
+	; v35 = iadd v54, v34
+	add	w12, w12, #1
+	; v36 = sext.i64 v35
+	sxtw	x15, w12
+	; v37 = iconst.i64 2
+	; v38 = shl v36, v37
+	lsl	x15, x15, #2
+	; v39 = ptradd v0, v38
+	; v40 = load.i32 v39
+	ldr	w19, [x9, x15, lsl #0]
+	; v41 = ptradd v1, v38
+	; v42 = load.i32 v41
+	ldr	w15, [x10, x15, lsl #0]
+	; v43 = imul v40, v42
+	; v44 = iadd v56, v43
+	madd	w14, w19, w15, w14
+	; v45 = iconst.i32 1
+	; v46 = iadd v35, v45
+	add	w12, w12, #1
+	; v60 = isub v2, v46
 	sub	w15, w11, w12
-	; v23 = iconst.i32 2
-	; v24 = icmp.sge v22, v23
-	; brif v24, block5, block6
+	; v61 = iconst.i32 2
+	; v62 = icmp.sge v60, v61
+	; brif v62, block5(v46, v33, v44), block6(v46, v33, v44)
 	cmp	w15, #2
 	b.ge	Lsigned_dot32_block5
 Lsigned_dot32_block6:
-	; v47 = iadd v20, v21
+	; v47 = iadd v58, v59
 	add	w13, w13, w14
-	; v7 = icmp.sgt v2, v19
-	; brif v7, block2(v19, v47), block3(v47)
+	; v7 = icmp.sgt v2, v57
+	; brif v7, block2(v57, v47), block3(v47)
 	cmp	w11, w12
 	b.gt	Lsigned_dot32_block2
 	mov	x9, x13
@@ -340,43 +395,6 @@ Lsigned_dot32_block3:
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
-Lsigned_dot32_block5:
-	; v25 = sext.i64 v19
-	sxtw	x15, w12
-	; v26 = iconst.i64 2
-	; v27 = shl v25, v26
-	lsl	x15, x15, #2
-	; v28 = ptradd v0, v27
-	; v29 = load.i32 v28
-	ldr	w19, [x9, x15, lsl #0]
-	; v30 = ptradd v1, v27
-	; v31 = load.i32 v30
-	ldr	w15, [x10, x15, lsl #0]
-	; v32 = imul v29, v31
-	; v33 = iadd v20, v32
-	madd	w13, w19, w15, w13
-	; v34 = iconst.i32 1
-	; v35 = iadd v19, v34
-	add	w12, w12, #1
-	; v36 = sext.i64 v35
-	sxtw	x15, w12
-	; v37 = iconst.i64 2
-	; v38 = shl v36, v37
-	lsl	x15, x15, #2
-	; v39 = ptradd v0, v38
-	; v40 = load.i32 v39
-	ldr	w19, [x9, x15, lsl #0]
-	; v41 = ptradd v1, v38
-	; v42 = load.i32 v41
-	ldr	w15, [x10, x15, lsl #0]
-	; v43 = imul v40, v42
-	; v44 = iadd v21, v43
-	madd	w14, w19, w15, w14
-	; v45 = iconst.i32 1
-	; v46 = iadd v35, v45
-	add	w12, w12, #1
-	; jump block4(v46, v33, v44)
-	b	Lsigned_dot32_block4
 Lsigned_dot32_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -384,7 +402,7 @@ Lsigned_dot32_end:
 	.p2align	2
 _signed_dot64:
 Lsigned_dot64_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v9=x14 v11=x15 v13=x14 v15=x13 v17=x12 v18=x12 v19=x13 v20=x14 v21=x15 v25=x15 v27=x19 v29=x15 v31=x13 v33=x12 v35=x15 v37=x19 v39=x15 v41=x14 v43=x12 v44=x13 v45=x14 v46=x12 v47=x13 v49=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v9=x14 v11=x15 v13=x14 v15=x13 v17=x12 v21=x15 v25=x15 v27=x19 v29=x15 v31=x13 v33=x12 v35=x15 v37=x19 v39=x15 v41=x14 v43=x12 v44=x13 v45=x14 v46=x12 v47=x13 v49=x9 v51=x12 v52=x13 v53=x14 v54=x12 v55=x13 v56=x14 v57=x15
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -402,23 +420,65 @@ Lsigned_dot64_block0:
 	movz	x13, #0x0
 	; v45 = iconst.i64 0
 	movz	x14, #0x0
-	; jump block4(v4, v3, v45)
+	; v21 = isub v2, v4
+	sub	x15, x11, #0
+	; v22 = iconst.i64 2
+	; v23 = icmp.sge v21, v22
+	; brif v23, block5(v4, v3, v45), block6(v4, v3, v45)
+	cmp	x15, #2
+	b.lt	Lsigned_dot64_inst19_else
 	mov	x16, x12
 	mov	x12, x13
 	mov	x13, x16
-Lsigned_dot64_block4:
-	; v21 = isub v2, v18
+	b	Lsigned_dot64_block5
+Lsigned_dot64_inst19_else:
+	mov	x16, x12
+	mov	x12, x13
+	mov	x13, x16
+	b	Lsigned_dot64_block6
+Lsigned_dot64_block5:
+	; v24 = iconst.i64 3
+	; v25 = shl v51, v24
+	lsl	x15, x12, #3
+	; v26 = ptradd v0, v25
+	; v27 = load.i64 v26
+	ldr	x19, [x9, x15, lsl #0]
+	; v28 = ptradd v1, v25
+	; v29 = load.i64 v28
+	ldr	x15, [x10, x15, lsl #0]
+	; v30 = imul v27, v29
+	; v31 = iadd v52, v30
+	madd	x13, x19, x15, x13
+	; v32 = iconst.i64 1
+	; v33 = iadd v51, v32
+	add	x12, x12, #1
+	; v34 = iconst.i64 3
+	; v35 = shl v33, v34
+	lsl	x15, x12, #3
+	; v36 = ptradd v0, v35
+	; v37 = load.i64 v36
+	ldr	x19, [x9, x15, lsl #0]
+	; v38 = ptradd v1, v35
+	; v39 = load.i64 v38
+	ldr	x15, [x10, x15, lsl #0]
+	; v40 = imul v37, v39
+	; v41 = iadd v53, v40
+	madd	x14, x19, x15, x14
+	; v42 = iconst.i64 1
+	; v43 = iadd v33, v42
+	add	x12, x12, #1
+	; v57 = isub v2, v43
 	sub	x15, x11, x12
-	; v22 = iconst.i64 2
-	; v23 = icmp.sge v21, v22
-	; brif v23, block5, block6
+	; v58 = iconst.i64 2
+	; v59 = icmp.sge v57, v58
+	; brif v59, block5(v43, v31, v41), block6(v43, v31, v41)
 	cmp	x15, #2
 	b.ge	Lsigned_dot64_block5
 Lsigned_dot64_block6:
-	; v44 = iadd v19, v20
+	; v44 = iadd v55, v56
 	add	x13, x13, x14
-	; v7 = icmp.sgt v2, v18
-	; brif v7, block2(v18, v44), block3(v44)
+	; v7 = icmp.sgt v2, v54
+	; brif v7, block2(v54, v44), block3(v44)
 	cmp	x11, x12
 	b.gt	Lsigned_dot64_block2
 	mov	x9, x13
@@ -451,39 +511,6 @@ Lsigned_dot64_block3:
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
-Lsigned_dot64_block5:
-	; v24 = iconst.i64 3
-	; v25 = shl v18, v24
-	lsl	x15, x12, #3
-	; v26 = ptradd v0, v25
-	; v27 = load.i64 v26
-	ldr	x19, [x9, x15, lsl #0]
-	; v28 = ptradd v1, v25
-	; v29 = load.i64 v28
-	ldr	x15, [x10, x15, lsl #0]
-	; v30 = imul v27, v29
-	; v31 = iadd v19, v30
-	madd	x13, x19, x15, x13
-	; v32 = iconst.i64 1
-	; v33 = iadd v18, v32
-	add	x12, x12, #1
-	; v34 = iconst.i64 3
-	; v35 = shl v33, v34
-	lsl	x15, x12, #3
-	; v36 = ptradd v0, v35
-	; v37 = load.i64 v36
-	ldr	x19, [x9, x15, lsl #0]
-	; v38 = ptradd v1, v35
-	; v39 = load.i64 v38
-	ldr	x15, [x10, x15, lsl #0]
-	; v40 = imul v37, v39
-	; v41 = iadd v20, v40
-	madd	x14, x19, x15, x14
-	; v42 = iconst.i64 1
-	; v43 = iadd v33, v42
-	add	x12, x12, #1
-	; jump block4(v43, v31, v41)
-	b	Lsigned_dot64_block4
 Lsigned_dot64_end:
 	.cfi_endproc
 	.section	__TEXT,__text

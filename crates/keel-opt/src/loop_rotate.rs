@@ -8,14 +8,10 @@ impl crate::Pass for LoopRotate {
         "loop-rotate"
     }
     fn description(&self) -> &'static str {
-        "rotate small single-exit loops while retaining their entry guard"
+        "rotate small loops with early exits while retaining their entry guard"
     }
     fn run(&self, f: &mut Function, _: &crate::OptimizationContext) -> bool {
-        if f.debug_return.is_some()
-            || f.debug_loc.is_some()
-            || !f.debug_vars.is_empty()
-            || !f.debug_scopes.is_empty()
-        {
+        if f.debug_return.is_some() || f.debug_loc.is_some() || !f.debug_vars.is_empty() {
             return false;
         }
         let headers: Vec<_> = f.blocks().collect();
@@ -53,23 +49,57 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     // Only cheap total tests may be duplicated. In particular never duplicate a
     // load, divide, overflow check, call, or debugger location.
     for &i in &hi[..hi.len() - 1] {
-        if !matches!(f.inst_data(i), D::Iconst { .. } | D::Icmp { .. })
-            || f.inst_results(i).len() != 1
+        if !matches!(
+            f.inst_data(i),
+            D::Iconst { .. }
+                | D::Icmp { .. }
+                | D::Binary {
+                    op: keel_ir::BinaryOp::Iadd | keel_ir::BinaryOp::Isub,
+                    ..
+                }
+        ) || f.inst_results(i).len() != 1
             || f.resolve(f.first_result(i)) != f.first_result(i)
         {
             return false;
         }
     }
+    // Find the natural loop from its unique backedge. Early returns and the
+    // common tail are exits, rather than extra blocks to absorb into the loop.
+    let backedges: Vec<_> = cfg
+        .preds(h)
+        .iter()
+        .copied()
+        .filter(|&b| dom.dominates(h, b))
+        .collect();
+    let [latch] = backedges.as_slice() else {
+        return false;
+    };
+    let latch = *latch;
+    if latch == h || cfg.preds(h).len() != 2 {
+        return false;
+    }
+    let Some(&back) = f.block_insts(latch).last() else {
+        return false;
+    };
+    if !matches!(f.inst_data(back), D::Jump { dest } if dest.block == h) {
+        return false;
+    }
     let mut region = FxHashSet::default();
-    let mut work = vec![body];
-    let mut latch = None;
+    let mut work = vec![latch];
     while let Some(b) = work.pop() {
-        if b == h || b == exit || !region.insert(b) {
+        if b == h || !region.insert(b) {
             continue;
         }
         if region.len() > 4 || !dom.dominates(h, b) || f.block_insts(b).len() > 32 {
             return false;
         }
+        work.extend(cfg.preds(b).iter().copied());
+    }
+    if !region.contains(&body) || region.contains(&exit) {
+        return false;
+    }
+    let mut exits = FxHashSet::default();
+    for b in region.iter().copied().chain([h]) {
         let Some(&term) = f.block_insts(b).last() else {
             return false;
         };
@@ -77,39 +107,17 @@ fn rotate(f: &mut Function, h: Block) -> bool {
             return false;
         }
         for dest in f.inst_data(term).branch_dests() {
-            if dest.block == h {
-                if latch.replace(b).is_some() || !matches!(f.inst_data(term), D::Jump { .. }) {
-                    return false;
-                }
-            } else if dest.block != exit {
-                work.push(dest.block);
+            if dest.block != h && !region.contains(&dest.block) {
+                exits.insert(dest.block);
             }
         }
-    }
-    let Some(latch) = latch else {
-        return false;
-    };
-    // Calls and debugger locations elsewhere in the function do not affect
-    // the loop; only its own blocks are checked.
-    if region.iter().chain([&h]).any(|&b| {
-        f.block_insts(b).iter().any(|&i| {
+        // Calls and source locations in the loop retain their original graph.
+        if f.block_insts(b).iter().any(|&i| {
             f.inst_loc(i).is_some()
                 || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
-        })
-    }) {
-        return false;
-    }
-    if cfg.preds(h).len() != 2
-        || !cfg.preds(h).contains(&latch)
-        || cfg
-            .preds(exit)
-            .iter()
-            .any(|p| *p != h && !region.contains(p))
-        || region
-            .iter()
-            .any(|&b| cfg.preds(b).iter().any(|p| *p != h && !region.contains(p)))
-    {
-        return false;
+        }) {
+            return false;
+        }
     }
     // A bounded topological elimination also rejects irreducible body cycles.
     let mut pending = region.clone();
@@ -143,13 +151,22 @@ fn rotate(f: &mut Function, h: Block) -> bool {
         return false;
     }
     let set: FxHashSet<_> = carried.iter().copied().collect();
+    let mut forwarded_exits = FxHashSet::default();
     for (b, i) in f.layout_insts() {
-        if b != h && b != exit && !region.contains(&b) {
-            let mut escapes = false;
+        if b != h && !region.contains(&b) {
+            let mut uses_header = false;
             f.inst_data(i)
-                .for_each_operand(|v| escapes |= set.contains(&f.resolve(v)));
-            if escapes {
-                return false;
+                .for_each_operand(|v| uses_header |= set.contains(&f.resolve(v)));
+            if uses_header {
+                // Existing branch arguments already transport values to shared
+                // tails. Add new parameters only for direct header-value uses,
+                // and only when every predecessor can supply the current value.
+                if !exits.contains(&b)
+                    || cfg.preds(b).iter().any(|p| *p != h && !region.contains(p))
+                {
+                    return false;
+                }
+                forwarded_exits.insert(b);
             }
         }
     }
@@ -157,12 +174,24 @@ fn rotate(f: &mut Function, h: Block) -> bool {
         .iter()
         .map(|&v| (v, f.append_block_param(body, f.value_type(v))))
         .collect();
-    let exit_map: FxHashMap<_, _> = carried
+    let exit_maps: FxHashMap<_, FxHashMap<_, _>> = forwarded_exits
         .iter()
-        .map(|&v| (v, f.append_block_param(exit, f.value_type(v))))
+        .map(|&b| {
+            (
+                b,
+                carried
+                    .iter()
+                    .map(|&v| (v, f.append_block_param(b, f.value_type(v))))
+                    .collect(),
+            )
+        })
         .collect();
-    for b in region.iter().copied().chain([exit]) {
-        let map = if b == exit { &exit_map } else { &body_map };
+    for b in region
+        .iter()
+        .copied()
+        .chain(forwarded_exits.iter().copied())
+    {
+        let map = exit_maps.get(&b).unwrap_or(&body_map);
         for i in f.block_insts(b).to_vec() {
             let mut d = f.inst_data(i).clone();
             d.for_each_operand_mut(|v| {
@@ -191,7 +220,7 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     for b in region.iter().copied().chain([h]) {
         let term = *f.block_insts(b).last().unwrap();
         for dest in f.inst_data_mut(term).branch_dests_mut() {
-            if dest.block == body || dest.block == exit {
+            if dest.block == body || forwarded_exits.contains(&dest.block) {
                 let map = if b == h {
                     None
                 } else if b == latch {
