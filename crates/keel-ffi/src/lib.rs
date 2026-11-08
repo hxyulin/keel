@@ -48,6 +48,7 @@ pub struct KeelModule {
     poisoned: bool,
     signatures: Vec<Signature>,
     symbols: Vec<systems::SymbolEntry>,
+    layouts: Vec<keel_ir::Layout>,
 }
 
 /// Opaque output owner, independent of the module that produced it.
@@ -121,6 +122,84 @@ pub struct KeelMemory {
     pub flags: u32,
 }
 
+/// One ordered data initializer item. Only fields selected by `kind` are read.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelDataItem {
+    pub kind: u32,
+    pub scalar_type: u32,
+    pub value: i64,
+    pub bytes: *const u8,
+    pub length: usize,
+    pub symbol: KeelSymbol,
+    pub addend: u32,
+}
+
+/// A switch case, including its destination's block argument span.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelSwitchCase {
+    pub value: i64,
+    pub block: KeelBlock,
+    pub args: *const KeelValue,
+    pub count: usize,
+}
+
+/// A module-owned source path for instruction locations.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelSourceFile {
+    pub owner: u64,
+    pub index: u32,
+}
+
+/// A module-owned aggregate memory layout.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelLayout {
+    pub owner: u64,
+    pub index: u32,
+}
+
+/// A scalar or aggregate ABI argument. Normal parameters ignore `layout`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelAbiValue {
+    pub kind: u32,
+    pub extension: u32,
+    pub purpose: u32,
+    pub layout: KeelLayout,
+}
+
+/// Full signature policy: convention, variadic/returns-twice flags and x86 producer ABI.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelSignatureOptions {
+    pub convention: u32,
+    pub flags: u32,
+    pub x86_vector_abi: u32,
+}
+
+/// A typed value with an explicit call-operand ABI override.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KeelCallArgument {
+    pub value: KeelValue,
+    pub abi: KeelAbiValue,
+}
+
+/// Code generation policies. All-zero fields select default native compilation.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct KeelCodegenOptions {
+    pub selection: u32,
+    pub allocation: u32,
+    pub goal: u32,
+    pub unwind: u32,
+    pub x86_code_model: u32,
+    pub flags: u32,
+}
+
 fn invalid(message: &str) -> Error {
     (INVALID, message.into())
 }
@@ -132,13 +211,26 @@ fn ty(raw: u32) -> Result<Type> {
         3 => Ok(Type::I32),
         4 => Ok(Type::I64),
         5 => Ok(Type::Ptr),
+        6 => Ok(Type::I128),
+        7 => Ok(Type::F32),
+        8 => Ok(Type::F64),
+        9 => Ok(Type::F80),
+        raw if raw & 0xffff_0000 == 0x1_0000 => {
+            let lane = ty(raw & 0xff)?;
+            let lanes = (raw >> 8) & 0xff;
+            keel_ir::VectorType::ALL
+                .into_iter()
+                .find(|shape| shape.lane_type() == lane && u32::from(shape.lanes()) == lanes)
+                .map(Type::Vector)
+                .ok_or_else(|| invalid("unsupported vector type tag"))
+        }
         _ => Err(invalid("unknown scalar type")),
     }
 }
 
 fn signature_ty(raw: u32) -> Result<Type> {
     match ty(raw)? {
-        t @ (Type::I32 | Type::I64 | Type::Ptr) => Ok(t),
+        t if !matches!(t, Type::I8 | Type::I16) => Ok(t),
         _ => Err(invalid(
             "use a signature with explicit ABI extension for i8/i16",
         )),
@@ -319,6 +411,7 @@ pub extern "C" fn keel_module_create() -> *mut KeelModule {
         poisoned: false,
         signatures: Vec::new(),
         symbols: Vec::new(),
+        layouts: Vec::new(),
     }))
 }
 
@@ -441,12 +534,17 @@ api! {
                 4 => BinaryOp::Udiv, 5 => BinaryOp::Sdiv, 6 => BinaryOp::Urem, 7 => BinaryOp::Srem,
                 8 => BinaryOp::And, 9 => BinaryOp::Or, 10 => BinaryOp::Xor,
                 11 => BinaryOp::Shl, 12 => BinaryOp::Ushr, 13 => BinaryOp::Sshr,
+                14 => BinaryOp::Rotl, 15 => BinaryOp::Rotr, 16 => BinaryOp::Umulhi, 17 => BinaryOp::Smulhi,
+                20 => BinaryOp::Fadd, 21 => BinaryOp::Fsub, 22 => BinaryOp::Fmul, 23 => BinaryOp::Fdiv,
+                24 => BinaryOp::Fmin, 25 => BinaryOp::Fmax, 26 => BinaryOp::Fcopysign,
                 _ => return Err(invalid("unknown binary operation")),
             };
             let f = &mut m.ir.functions[block.function as usize];
-            if !f.value_type(a).is_int() || f.value_type(a) != f.value_type(c) {
-                return Err(invalid("binary operands must have the same integer type"));
-            }
+            let (lhs, rhs) = (f.value_type(a), f.value_type(c));
+            let valid = if op.is_float() { lhs.is_float() && lhs == rhs }
+                else if matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr | BinaryOp::Rotl | BinaryOp::Rotr) { lhs.is_int() && rhs.is_int() }
+                else { lhs.is_int() && lhs == rhs };
+            if !valid { return Err(invalid("binary operand types do not match operation")); }
             let v = f.ins(InsertPoint::End(b)).binary(op, a, c);
             Ok(m.value_id(block.function, v))
         }) }
@@ -468,8 +566,9 @@ api! {
                 _ => return Err(invalid("unknown integer condition")),
             };
             let f = &mut m.ir.functions[block.function as usize];
-            if f.value_type(a) != f.value_type(c) {
-                return Err(invalid("comparison operands must have the same type"));
+            let kind = f.value_type(a);
+            if !(kind.is_int() || kind == Type::Ptr) || kind != f.value_type(c) {
+                return Err(invalid("comparison requires equal integer or pointer types"));
             }
             let v = f.ins(InsertPoint::End(b)).icmp(cond, a, c);
             Ok(m.value_id(block.function, v))
@@ -546,9 +645,7 @@ api! {
         // SAFETY: The exported API's pointer contract covers module.
         unsafe { run(module, |m| {
             m.verify()?;
-            m.owner = owner();
-            m.symbols.clear();
-            m.signatures.clear();
+            m.invalidate_ids();
             keel_opt::optimize(&mut m.ir).map_err(|e| (COMPILE, e.to_string()))?;
             m.verify()
         }) }
@@ -570,15 +667,9 @@ api! {
     fn keel_module_emit_object(module: *mut KeelModule, target: u32, out: *mut *mut KeelBuffer) {
         // SAFETY: The exported API's pointer contract covers module and output.
         unsafe { output(module, out, |m| {
-            let target = match target {
-                1 => keel_ir::Target::Aarch64AppleDarwin,
-                2 => keel_ir::Target::Aarch64LinuxGnu,
-                3 => keel_ir::Target::X86_64LinuxGnu,
-                _ => return Err(invalid("unknown native target")),
-            };
+            let target = pipeline::target(target)?;
             m.verify()?;
-            let program = keel_codegen::compile_program(&m.ir, target).map_err(|e| (COMPILE, e.to_string()))?;
-            let bytes = keel_asm::assemble_program_for(target, &program).map_err(|e| (COMPILE, e.to_string()))?;
+            let bytes = pipeline::compile(&m.ir, target, KeelCodegenOptions::default(), false)?;
             Ok(Box::into_raw(Box::new(KeelBuffer(bytes))))
         }) }
     }
@@ -617,7 +708,14 @@ pub unsafe extern "C" fn keel_buffer_destroy(buffer: *mut KeelBuffer) {
     }
 }
 
+mod abi;
+mod advanced;
+mod atomics;
+mod numeric;
+mod pipeline;
 mod systems;
 
+#[cfg(test)]
+mod compiler_tests;
 #[cfg(test)]
 mod tests;

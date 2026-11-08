@@ -12,9 +12,9 @@ use super::{
 
 #[derive(Debug)]
 pub(super) struct SymbolEntry {
-    name: String,
+    pub(super) name: String,
     // None means a data symbol; function signatures are immutable.
-    signature: Option<Signature>,
+    pub(super) signature: Option<Signature>,
 }
 
 pub(super) fn name(bytes: &[u8]) -> Result<&str> {
@@ -30,7 +30,7 @@ pub(super) fn name(bytes: &[u8]) -> Result<&str> {
     Ok(name)
 }
 
-fn abi(param: &KeelAbiParam) -> Result<AbiParam> {
+pub(super) fn abi(param: &KeelAbiParam) -> Result<AbiParam> {
     let kind = ty(param.kind)?;
     let ext = match param.extension {
         0 => ArgExt::None,
@@ -88,7 +88,7 @@ impl KeelModule {
         Ok(())
     }
 
-    fn signature(&self, signature: KeelSignature) -> Result<&Signature> {
+    pub(super) fn signature(&self, signature: KeelSignature) -> Result<&Signature> {
         if signature.owner != self.owner {
             return Err(invalid("foreign or stale signature ID"));
         }
@@ -97,7 +97,7 @@ impl KeelModule {
             .ok_or_else(|| invalid("invalid signature ID"))
     }
 
-    fn symbol(&self, symbol: KeelSymbol) -> Result<&SymbolEntry> {
+    pub(super) fn symbol(&self, symbol: KeelSymbol) -> Result<&SymbolEntry> {
         if symbol.owner != self.owner {
             return Err(invalid("foreign or stale symbol ID"));
         }
@@ -106,7 +106,11 @@ impl KeelModule {
             .ok_or_else(|| invalid("invalid symbol ID"))
     }
 
-    fn intern_symbol(&mut self, name: &str, signature: Option<Signature>) -> Result<KeelSymbol> {
+    pub(super) fn intern_symbol(
+        &mut self,
+        name: &str,
+        signature: Option<Signature>,
+    ) -> Result<KeelSymbol> {
         let index = if let Some(index) = self.symbols.iter().position(|s| s.name == name) {
             index as u32
         } else {
@@ -124,7 +128,7 @@ impl KeelModule {
         })
     }
 
-    fn pointer(&self, function: u32, value: KeelValue) -> Result<Value> {
+    pub(super) fn pointer(&self, function: u32, value: KeelValue) -> Result<Value> {
         let v = self.value(function, value)?;
         if self.ir.functions[function as usize].value_type(v) != Type::Ptr {
             return Err(invalid("address must have pointer type"));
@@ -132,7 +136,7 @@ impl KeelModule {
         Ok(v)
     }
 
-    fn slot(&self, block: KeelBlock, slot: KeelStackSlot) -> Result<StackSlot> {
+    pub(super) fn slot(&self, block: KeelBlock, slot: KeelStackSlot) -> Result<StackSlot> {
         if slot.owner != self.owner || slot.function != block.function {
             return Err(invalid("foreign or stale stack slot ID"));
         }
@@ -142,25 +146,45 @@ impl KeelModule {
         Ok(StackSlot::new(slot.index as usize))
     }
 
-    fn call_arguments(
+    pub(super) fn call_arguments(
         &self,
         function: u32,
         sig: &Signature,
         args: &[KeelValue],
     ) -> Result<Vec<Value>> {
         let values = self.values(function, args)?;
-        if values.len() != sig.params.len()
-            || values
-                .iter()
-                .zip(&sig.params)
-                .any(|(v, p)| self.ir.functions[function as usize].value_type(*v) != p.ty)
+        if (if sig.variadic {
+            values.len() < sig.params.len()
+        } else {
+            values.len() != sig.params.len()
+        }) || values
+            .iter()
+            .zip(&sig.params)
+            .any(|(v, p)| self.ir.functions[function as usize].value_type(*v) != p.ty)
         {
             return Err(invalid("call arguments do not match signature"));
+        }
+        if sig.variadic
+            && values.iter().skip(sig.params.len()).any(|v| {
+                !matches!(
+                    self.ir.functions[function as usize].value_type(*v),
+                    Type::I32 | Type::I64 | Type::Ptr | Type::F64
+                )
+            })
+        {
+            return Err(invalid(
+                "variadic arguments require C default promotions or an explicit aggregate ABI",
+            ));
         }
         Ok(values)
     }
 
-    fn define_data(&mut self, name: &str, init: DataInit, flags: u32) -> Result<KeelSymbol> {
+    pub(super) fn define_data(
+        &mut self,
+        name: &str,
+        init: DataInit,
+        flags: u32,
+    ) -> Result<KeelSymbol> {
         global_options(init.align, flags)?;
         if self.ir.signature(name).is_some() {
             return Err(invalid("duplicate symbol name"));
@@ -185,7 +209,7 @@ impl KeelModule {
 
 // Validate call output shape before mutation. Allocation validity is checked
 // by the caller's pointer contract when the result is actually written.
-fn call_output(ptr: *mut KeelValue, count: usize, sig: &Signature) -> Result<()> {
+pub(super) fn call_output(ptr: *mut KeelValue, count: usize, sig: &Signature) -> Result<()> {
     if count != sig.returns.len() || (count != 0 && ptr.is_null()) {
         return Err(invalid(
             "call result count must match signature and nonempty output cannot be null",
@@ -221,7 +245,9 @@ api! {
             m.unused_name(name)?;
             let sig = m.signature(signature)?.clone();
             let index = u32::try_from(m.ir.functions.len()).map_err(|_| invalid("too many functions"))?;
-            m.ir.functions.push(Function::new(name, sig));
+            let mut function = Function::new(name, sig);
+            function.local = function.sig.cc == keel_ir::CallConv::Fast;
+            m.ir.functions.push(function);
             Ok(KeelFunction { owner: m.owner, index })
         }) }
     }
@@ -252,8 +278,12 @@ api! {
             let name = entry.name.clone();
             if m.ir.functions.iter().any(|f| f.name == name) { return Err(invalid("function is already defined")); }
             let index = u32::try_from(m.ir.functions.len()).map_err(|_| invalid("too many functions"))?;
+            let attrs = m.ir.function_attrs(&name).cloned().unwrap_or_default();
             m.ir.decls.retain(|d| d.name != name);
-            m.ir.functions.push(Function::new(name, sig));
+            let mut function = Function::new(name, sig);
+            function.attrs = attrs;
+            function.local = function.sig.cc == keel_ir::CallConv::Fast;
+            m.ir.functions.push(function);
             Ok(KeelFunction { owner: m.owner, index })
         }) }
     }
@@ -278,6 +308,7 @@ api! {
         unsafe { run(module, |m| {
             let index = m.function_index(function)?;
             let local = match linkage { 0 => false, 1 => true, _ => return Err(invalid("unknown linkage")) };
+            if !local && m.ir.functions[index].sig.cc == keel_ir::CallConv::Fast { return Err(invalid("private calling convention requires local linkage")); }
             m.ir.functions[index].local = local;
             Ok(())
         }) }
@@ -375,6 +406,11 @@ api! {
                 3 if from.is_int() && to.is_int() && from.bytes() > to.bytes() => ConvertOp::Trunc,
                 4 if (from, to) == (Type::Ptr, Type::I64) => ConvertOp::PtrToInt,
                 5 if (from, to) == (Type::I64, Type::Ptr) => ConvertOp::IntToPtr,
+                6 if from.is_float() && to.is_float() && from.bytes() < to.bytes() => ConvertOp::Fpext,
+                7 if from.is_float() && to.is_float() && from.bytes() > to.bytes() => ConvertOp::Fptrunc,
+                8 | 9 if from.is_float() && matches!(to, Type::I32 | Type::I64) => { if op == 8 { ConvertOp::Fptosi } else { ConvertOp::Fptoui } }
+                10 | 11 if from.is_int() && from != Type::I128 && to.is_float() => { if op == 10 { ConvertOp::Sitofp } else { ConvertOp::Uitofp } }
+                12 if from.bytes() == to.bytes() && ((from.is_float() && to.is_int()) || (from.is_int() && to.is_float()) || (from.is_vector() || to.is_vector())) => ConvertOp::Bitcast,
                 _ => return Err(invalid("unknown conversion or invalid source/destination types")),
             };
             let v = f.ins(InsertPoint::End(b)).convert(op, to, value);
@@ -391,9 +427,14 @@ api! {
             let b = m.insertion(block)?;
             let entry = m.symbol(symbol)?;
             let (name, sig) = (entry.name.clone(), entry.signature.clone());
+            let attrs = m.ir.function_attrs(&name).cloned().unwrap_or_default();
             let f = &mut m.ir.functions[block.function as usize];
             let symbol = match sig {
-                Some(sig) => Symbol::Func(f.import_function(&name, sig)),
+                Some(sig) => {
+                    let reference = f.import_function(&name, sig);
+                    f.set_callee_attrs(reference, attrs);
+                    Symbol::Func(reference)
+                },
                 None => Symbol::Data(f.import_data(&name)),
             };
             let v = f.ins(InsertPoint::End(b)).symbol_addr(symbol);
@@ -414,8 +455,10 @@ api! {
             let name = entry.name.clone();
             call_output(results, result_count, &sig)?;
             let args = m.call_arguments(block.function, &sig, input(args, count)?)?;
+            let attrs = m.ir.function_attrs(&name).cloned().unwrap_or_default();
             let f = &mut m.ir.functions[block.function as usize];
             let callee = f.import_function(&name, sig);
+            f.set_callee_attrs(callee, attrs);
             let inst = f.ins(InsertPoint::End(b)).call(callee, &args);
             if result_count != 0 { results.write(m.value_id(block.function, m.ir.functions[block.function as usize].inst_results(inst)[0])); }
             Ok(())

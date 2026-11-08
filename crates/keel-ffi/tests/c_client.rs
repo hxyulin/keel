@@ -316,3 +316,61 @@ fn systems_api_calls_memory_and_globals_execute_before_and_after_optimization() 
     );
     std::fs::remove_dir_all(work).expect("remove systems API test directory");
 }
+
+#[test]
+fn compiler_api_records_floats_varargs_and_atomics_execute() {
+    let Some(native) = native_target() else {
+        return;
+    };
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let exe = std::env::current_exe().expect("test executable path");
+    let deps = exe.parent().expect("test dependencies directory");
+    let work = std::env::temp_dir().join(format!("keel-ffi-compiler-{}", std::process::id()));
+    std::fs::create_dir_all(&work).expect("create compiler API directory");
+    let generator = work.join("compiler-client");
+    let consumer = work.join("consumer");
+    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    compile_client(&cc, root, deps, "tests/compiler_client.c", &generator);
+    for target in ["darwin-arm64", "linux-arm64", "linux-x86_64"] {
+        for mode in ["baseline", "optimized"] {
+            let object = work.join(format!("{target}-{mode}.o"));
+            execute(Command::new(&generator).arg(target).arg(&object).arg(mode));
+            if target == native {
+                execute(
+                    Command::new(&cc)
+                        .args([
+                            "-std=c11",
+                            "-Wall",
+                            "-Wextra",
+                            "-Werror",
+                            "-pedantic",
+                            "-pthread",
+                        ])
+                        .arg(root.join("tests/compiler_consumer.c"))
+                        .arg(&object)
+                        .arg("-o")
+                        .arg(&consumer),
+                );
+                execute(&mut Command::new(&consumer));
+            }
+        }
+    }
+    let cxx = std::env::var_os("CXX").unwrap_or_else(|| "c++".into());
+    execute(
+        Command::new(cxx)
+            .args([
+                "-x",
+                "c++",
+                "-std=c++11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-pedantic",
+                "-fsyntax-only",
+            ])
+            .arg(root.join("tests/compiler_client.c"))
+            .arg("-I")
+            .arg(root.join("include")),
+    );
+    std::fs::remove_dir_all(work).expect("remove compiler API directory");
+}
