@@ -26,11 +26,7 @@ Lconstant_loop_block1:
 	cmp	x10, x9
 	b.lo	Lconstant_loop_block2
 	mov	x9, x11
-Lconstant_loop_block3:
-	; return v11
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lconstant_loop_block3
 Lconstant_loop_block2:
 	; v7 = imul v5, v5
 	mul	x13, x12, x12
@@ -41,6 +37,11 @@ Lconstant_loop_block2:
 	add	x10, x10, #1
 	; jump block1(v10, v8, v5)
 	b	Lconstant_loop_block1
+Lconstant_loop_block3:
+	; return v11
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lconstant_loop_end:
 	.cfi_endproc
 	.subsections_via_symbols

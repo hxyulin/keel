@@ -216,7 +216,23 @@ fn reuse(func: &mut Function, mut reused: Option<&mut Vec<Value>>, across_blocks
     let analysis = crate::analysis::get(func);
     let cfg = &analysis.cfg;
     let aliases = AliasInfo::compute(func);
-    let mut exits: Vec<Option<(usize, Facts)>> = vec![None; func.num_blocks()];
+    let mut exits: Vec<Option<(usize, Facts)>> = if across_blocks {
+        vec![None; func.num_blocks()]
+    } else {
+        Vec::new()
+    };
+    // Every reachable successor consumes its predecessor state once. A
+    // backedge to an already visited block has no future consumer, and an
+    // unreachable predecessor never publishes a state.
+    let mut remaining: Vec<usize> = if across_blocks {
+        let mut counts = vec![0; func.num_blocks()];
+        for block in func.blocks() {
+            counts[block.index()] = cfg.succs(block).len();
+        }
+        counts
+    } else {
+        Vec::new()
+    };
     let mut changed = false;
     let mut local_facts = Facts::default();
     for &block in analysis.dom.rpo() {
@@ -228,6 +244,14 @@ fn reuse(func: &mut Function, mut reused: Option<&mut Vec<Value>>, across_blocks
         } else {
             incoming(func, cfg, block, &exits)
         };
+        if across_blocks {
+            for &pred in cfg.preds(block) {
+                remaining[pred.index()] -= 1;
+                if remaining[pred.index()] == 0 {
+                    exits[pred.index()] = None;
+                }
+            }
+        }
         // Only the visited load is removed; the next one moves into its place.
         let mut i = 0;
         while let Some(&inst) = func.block_insts(block).get(i) {
@@ -309,7 +333,9 @@ fn reuse(func: &mut Function, mut reused: Option<&mut Vec<Value>>, across_blocks
             }
         }
         if across_blocks {
-            exits[block.index()] = Some((depth, facts));
+            if remaining[block.index()] != 0 {
+                exits[block.index()] = Some((depth, facts));
+            }
         } else {
             facts.clear();
             local_facts = facts;

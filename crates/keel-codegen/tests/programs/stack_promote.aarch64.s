@@ -39,37 +39,7 @@ Lprivate_acc_block1:
 	; v12 = icmp.ugt v1, v11
 	; brif v12, block2, block3
 	cmp	x10, x11
-	b.hi	Lprivate_acc_block2
-Lprivate_acc_block3:
-	; v19 = stack_addr ss0
-	add	x9, sp, #0
-	; v20 = load.i64 align 8 v19
-	ldr	x10, [sp, #0]
-	; v21 = iconst.i64 3
-	movz	x11, #0x3
-	; v22 = imul v20, v21
-	mul	x10, x10, x11
-	; v23 = iconst.i64 8
-	; v24 = ptradd v19, v23
-	add	x11, x9, #8
-	; v25 = load.i64 align 8 v24
-	ldr	x11, [x11]
-	; v26 = iadd v22, v25
-	add	x10, x10, x11
-	; v27 = iconst.i64 16
-	; v28 = ptradd v19, v27
-	add	x9, x9, #16
-	; v29 = load.i32 align 8 v28
-	ldr	w9, [x9]
-	; v30 = uext.i64 v29
-	mov	w9, w9
-	; v31 = iadd v26, v30
-	add	x9, x10, x9
-	; return v31
-	mov	x0, x9
-	mov	sp, x29
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ls	Lprivate_acc_block3
 Lprivate_acc_block2:
 	; v13 = iconst.i64 3
 	; v14 = shl v11, v13
@@ -124,6 +94,36 @@ Lprivate_acc_block6:
 	add	x11, x11, #1
 	; jump block1(v47)
 	b	Lprivate_acc_block1
+Lprivate_acc_block3:
+	; v19 = stack_addr ss0
+	add	x9, sp, #0
+	; v20 = load.i64 align 8 v19
+	ldr	x10, [sp, #0]
+	; v21 = iconst.i64 3
+	movz	x11, #0x3
+	; v22 = imul v20, v21
+	mul	x10, x10, x11
+	; v23 = iconst.i64 8
+	; v24 = ptradd v19, v23
+	add	x11, x9, #8
+	; v25 = load.i64 align 8 v24
+	ldr	x11, [x11]
+	; v26 = iadd v22, v25
+	add	x10, x10, x11
+	; v27 = iconst.i64 16
+	; v28 = ptradd v19, v27
+	add	x9, x9, #16
+	; v29 = load.i32 align 8 v28
+	ldr	w9, [x9]
+	; v30 = uext.i64 v29
+	mov	w9, w9
+	; v31 = iadd v26, v30
+	add	x9, x10, x9
+	; return v31
+	mov	x0, x9
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+	ret
 Lprivate_acc_end:
 	.cfi_endproc
 	.subsections_via_symbols

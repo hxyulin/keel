@@ -4,7 +4,7 @@
 use super::*;
 use keel_ir::dominators::DominatorTree;
 
-fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Vec<u32> {
+pub(super) fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Vec<u32> {
     let mut weights = vec![1u32; func.num_blocks()];
     let mut positions = vec![usize::MAX; func.num_blocks()];
     for (i, &b) in order.iter().enumerate() {
@@ -62,18 +62,18 @@ fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Ve
 pub(super) fn linear_scan<'a>(
     func: &Function,
     selection: &crate::select::Selection,
-    cfg: &ControlFlowGraph,
     order: &[Block],
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
+    weights: &[u32],
 ) -> Vec<&'a Interval> {
-    // Most functions never exhaust their pools. Build loop weights and operand
-    // costs only when the scan must choose between spilling two values.
+    // Reuse layout loop weights. Build operand costs only when the scan
+    // must choose between spilling two values.
     let costs = std::cell::OnceCell::new();
     linear_scan_with_priority(intervals, pools, locs, &selection.hints, |a, b| {
-        let (costs, lengths) =
-            costs.get_or_init(|| spill_costs(func, selection, cfg, order, intervals));
+        let (costs, lengths) = costs
+            .get_or_init(|| spill_costs_with_weights(func, selection, order, intervals, weights));
         // Products can exceed u64 for very large functions. Keep comparisons
         // exact and deterministic without floating point or truncating ratios.
         let score_a = u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]);
@@ -82,6 +82,7 @@ pub(super) fn linear_scan<'a>(
     })
 }
 
+#[cfg(test)]
 pub(super) fn spill_costs(
     func: &Function,
     selection: &crate::select::Selection,
@@ -90,6 +91,16 @@ pub(super) fn spill_costs(
     intervals: &[Interval],
 ) -> (Vec<u64>, Vec<u64>) {
     let weights = block_weights(func, cfg, order);
+    spill_costs_with_weights(func, selection, order, intervals, &weights)
+}
+
+fn spill_costs_with_weights(
+    func: &Function,
+    selection: &crate::select::Selection,
+    order: &[Block],
+    intervals: &[Interval],
+    weights: &[u32],
+) -> (Vec<u64>, Vec<u64>) {
     let mut costs = vec![0u64; func.num_values()];
     for &block in order {
         let weight = u64::from(weights[block.index()]);

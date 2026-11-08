@@ -1263,11 +1263,7 @@ Lk_count_block1:
 	; v4 = icmp.ult v3, v1
 	; brif v4, block2, block3
 	cmp	x11, x10
-	b.lo	Lk_count_block2
-Lk_count_block3:
-	; return
-	ldp	x29, x30, [sp], #16
-	ret
+	b.hs	Lk_count_block3
 Lk_count_block2:
 	; v5 = iconst.i64 1
 	movz	x12, #0x1
@@ -1278,6 +1274,10 @@ Lk_count_block2:
 	add	x11, x11, #1
 	; jump block1(v7)
 	b	Lk_count_block1
+Lk_count_block3:
+	; return
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_count_end:
 	.cfi_endproc
 	.section	__TEXT,__text

@@ -1579,13 +1579,7 @@
 	# v4 = icmp.ult v3, v1
 	# brif v4, block2, block3
 	cmp	r8, rdi
-	jb	".Lk_count_block2"
-.Lk_count_block3:
-	# return
-	lea	rsp, [rbp + -8]
-	pop	rbx
-	pop	rbp
-	ret
+	jae	".Lk_count_block3"
 .Lk_count_block2:
 	# v5 = iconst.i64 1
 	mov	r9d, 1
@@ -1597,6 +1591,12 @@
 	add	r8, 1
 	# jump block1(v7)
 	jmp	".Lk_count_block1"
+.Lk_count_block3:
+	# return
+	lea	rsp, [rbp + -8]
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_count_end:
 	.cfi_endproc
 	.size "k_count", .-"k_count"

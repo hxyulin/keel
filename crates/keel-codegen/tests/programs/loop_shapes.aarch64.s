@@ -23,13 +23,7 @@ Lk_isort_block1:
 	; v4 = icmp.ugt v1, v3
 	; brif v4, block2, block3
 	cmp	x10, x11
-	b.hi	Lk_isort_block2
-Lk_isort_block3:
-	; return
-	sub	sp, x29, #16
-	ldr	x19, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ls	Lk_isort_block3
 Lk_isort_block2:
 	; v5 = iconst.i64 2
 	; v6 = shl v3, v5
@@ -60,20 +54,7 @@ Lk_isort_block7:
 	; v27 = icmp.slt v8, v26
 	; brif v27, block5, block6
 	cmp	w12, w19
-	b.lt	Lk_isort_block5
-Lk_isort_block6:
-	; v16 = iconst.i64 2
-	; v17 = shl v9, v16
-	lsl	x13, x13, #2
-	; v18 = ptradd v0, v17
-	add	x13, x9, x13
-	; store v8, v18
-	str	w12, [x13]
-	; v19 = iconst.i64 1
-	; v20 = iadd v3, v19
-	add	x11, x11, #1
-	; jump block1(v20)
-	b	Lk_isort_block1
+	b.ge	Lk_isort_block6
 Lk_isort_block5:
 	; v12 = iconst.i64 2
 	; v13 = shl v9, v12
@@ -87,6 +68,25 @@ Lk_isort_block5:
 	; jump block4(v22)
 	mov	x13, x14
 	b	Lk_isort_block4
+Lk_isort_block6:
+	; v16 = iconst.i64 2
+	; v17 = shl v9, v16
+	lsl	x13, x13, #2
+	; v18 = ptradd v0, v17
+	add	x13, x9, x13
+	; store v8, v18
+	str	w12, [x13]
+	; v19 = iconst.i64 1
+	; v20 = iadd v3, v19
+	add	x11, x11, #1
+	; jump block1(v20)
+	b	Lk_isort_block1
+Lk_isort_block3:
+	; return
+	sub	sp, x29, #16
+	ldr	x19, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_isort_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -119,14 +119,7 @@ Lk_matmul_block1:
 	; v6 = icmp.sgt v3, v5
 	; brif v6, block2, block4
 	cmp	w12, w13
-	b.gt	Lk_matmul_block2
-Lk_matmul_block4:
-	; return
-	sub	sp, x29, #32
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.le	Lk_matmul_block4
 Lk_matmul_block2:
 	; v7 = imul v3, v5
 	mul	w14, w12, w13
@@ -137,13 +130,7 @@ Lk_matmul_block5:
 	; v12 = icmp.sgt v3, v11
 	; brif v12, block6, block3
 	cmp	w12, w15
-	b.gt	Lk_matmul_block6
-Lk_matmul_block3:
-	; v9 = iconst.i32 1
-	; v10 = iadd v5, v9
-	add	w13, w13, #1
-	; jump block1(v10)
-	b	Lk_matmul_block1
+	b.le	Lk_matmul_block3
 Lk_matmul_block6:
 	; v13 = iconst.i32 0
 	movz	w19, #0x0
@@ -153,22 +140,7 @@ Lk_matmul_block7:
 	; v16 = icmp.sgt v3, v14
 	; brif v16, block8, block9
 	cmp	w12, w19
-	b.gt	Lk_matmul_block8
-Lk_matmul_block9:
-	; v33 = iadd v11, v7
-	add	w19, w15, w14
-	; v34 = sext.i64 v33
-	; v35 = iconst.i64 2
-	; v36 = shl v34, v35
-	; v37 = ptradd v2, v36
-	add	x19, x11, w19, sxtw #2
-	; store v15, v37
-	str	w20, [x19]
-	; v38 = iconst.i32 1
-	; v39 = iadd v11, v38
-	add	w15, w15, #1
-	; jump block5(v39)
-	b	Lk_matmul_block5
+	b.le	Lk_matmul_block9
 Lk_matmul_block8:
 	; v17 = iadd v14, v7
 	add	w21, w19, w14
@@ -198,6 +170,34 @@ Lk_matmul_block8:
 	add	w19, w19, #1
 	; jump block7(v32, v30)
 	b	Lk_matmul_block7
+Lk_matmul_block9:
+	; v33 = iadd v11, v7
+	add	w19, w15, w14
+	; v34 = sext.i64 v33
+	; v35 = iconst.i64 2
+	; v36 = shl v34, v35
+	; v37 = ptradd v2, v36
+	add	x19, x11, w19, sxtw #2
+	; store v15, v37
+	str	w20, [x19]
+	; v38 = iconst.i32 1
+	; v39 = iadd v11, v38
+	add	w15, w15, #1
+	; jump block5(v39)
+	b	Lk_matmul_block5
+Lk_matmul_block3:
+	; v9 = iconst.i32 1
+	; v10 = iadd v5, v9
+	add	w13, w13, #1
+	; jump block1(v10)
+	b	Lk_matmul_block1
+Lk_matmul_block4:
+	; return
+	sub	sp, x29, #32
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_matmul_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -227,12 +227,7 @@ Lsigned_dot32_block1:
 	; v7 = icmp.slt v5, v2
 	; brif v7, block2, block3
 	cmp	w12, w11
-	b.lt	Lsigned_dot32_block2
-Lsigned_dot32_block3:
-	; return v6
-	mov	x0, x13
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ge	Lsigned_dot32_block3
 Lsigned_dot32_block2:
 	; v8 = sext.i64 v5
 	sxtw	x14, w12
@@ -256,6 +251,11 @@ Lsigned_dot32_block2:
 	add	w12, w12, #1
 	; jump block1(v18, v16)
 	b	Lsigned_dot32_block1
+Lsigned_dot32_block3:
+	; return v6
+	mov	x0, x13
+	ldp	x29, x30, [sp], #16
+	ret
 Lsigned_dot32_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -285,12 +285,7 @@ Lsigned_dot64_block1:
 	; v7 = icmp.slt v5, v2
 	; brif v7, block2, block3
 	cmp	x12, x11
-	b.lt	Lsigned_dot64_block2
-Lsigned_dot64_block3:
-	; return v6
-	mov	x0, x13
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ge	Lsigned_dot64_block3
 Lsigned_dot64_block2:
 	; v8 = iconst.i64 3
 	; v9 = shl v5, v8
@@ -312,6 +307,11 @@ Lsigned_dot64_block2:
 	add	x12, x12, #1
 	; jump block1(v17, v15)
 	b	Lsigned_dot64_block1
+Lsigned_dot64_block3:
+	; return v6
+	mov	x0, x13
+	ldp	x29, x30, [sp], #16
+	ret
 Lsigned_dot64_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -341,14 +341,7 @@ Ldiv_loop_block1:
 	; v7 = icmp.slt v5, v2
 	; brif v7, block2, block3
 	cmp	x13, x11
-	b.lt	Ldiv_loop_block2
-Ldiv_loop_block3:
-	; return v6
-	mov	x0, x14
-	sub	sp, x29, #16
-	ldr	x19, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ge	Ldiv_loop_block3
 Ldiv_loop_block2:
 	; v8 = load.i64 v0
 	ldr	x15, [x9]
@@ -370,6 +363,13 @@ Ldiv_loop_block2:
 	add	x13, x13, #1
 	; jump block1(v14, v12)
 	b	Ldiv_loop_block1
+Ldiv_loop_block3:
+	; return v6
+	mov	x0, x14
+	sub	sp, x29, #16
+	ldr	x19, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Ldiv_loop_trap:
 	brk	#1
 Ldiv_loop_end:

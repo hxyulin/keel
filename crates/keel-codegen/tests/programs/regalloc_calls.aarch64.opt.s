@@ -139,15 +139,7 @@ Lcall_loop_block1:
 	; v7 = icmp.ugt v0, v5
 	; brif v7, block2, block3
 	cmp	x19, x21
-	b.hi	Lcall_loop_block2
-Lcall_loop_block3:
-	; return v6
-	mov	x0, x22
-	sub	sp, x29, #32
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ls	Lcall_loop_block3
 Lcall_loop_block2:
 	; v8 = call @twice(v5)
 	mov	x0, x21
@@ -164,6 +156,14 @@ Lcall_loop_block2:
 	mov	x21, x10
 	mov	x22, x9
 	b	Lcall_loop_block1
+Lcall_loop_block3:
+	; return v6
+	mov	x0, x22
+	sub	sp, x29, #32
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lcall_loop_end:
 	.cfi_endproc
 	.section	__TEXT,__text

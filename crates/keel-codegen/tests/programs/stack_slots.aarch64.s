@@ -33,7 +33,25 @@ Lmain_block3:
 	; v16 = icmp.ult v13, v15
 	; brif v16, block4, block5
 	cmp	x10, #10
-	b.lo	Lmain_block4
+	b.hs	Lmain_block5
+Lmain_block4:
+	; v17 = iconst.i64 4
+	movz	x12, #0x4
+	; v18 = imul v13, v17
+	mul	x12, x10, x12
+	; v19 = ptradd v0, v18
+	add	x12, x9, x12
+	; v20 = load.i32 v19
+	ldr	w12, [x12]
+	; v21 = sext.i64 v20
+	sxtw	x12, w12
+	; v22 = iadd v14, v21
+	add	x11, x11, x12
+	; v23 = iconst.i64 1
+	; v24 = iadd v13, v23
+	add	x10, x10, #1
+	; jump block3(v24, v22)
+	b	Lmain_block3
 Lmain_block5:
 	; v25 = iconst.i32 0
 	movz	w9, #0x0
@@ -176,24 +194,6 @@ Lmain_block5:
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
 	ret
-Lmain_block4:
-	; v17 = iconst.i64 4
-	movz	x12, #0x4
-	; v18 = imul v13, v17
-	mul	x12, x10, x12
-	; v19 = ptradd v0, v18
-	add	x12, x9, x12
-	; v20 = load.i32 v19
-	ldr	w12, [x12]
-	; v21 = sext.i64 v20
-	sxtw	x12, w12
-	; v22 = iadd v14, v21
-	add	x11, x11, x12
-	; v23 = iconst.i64 1
-	; v24 = iadd v13, v23
-	add	x10, x10, #1
-	; jump block3(v24, v22)
-	b	Lmain_block3
 Lmain_block2:
 	; v5 = iconst.i64 4
 	movz	x12, #0x4

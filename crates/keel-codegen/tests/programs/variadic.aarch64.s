@@ -31,13 +31,7 @@ Lk_sum_block1:
 	; v6 = icmp.slt v4, v0
 	; brif v6, block2, block3
 	cmp	w11, w9
-	b.lt	Lk_sum_block2
-Lk_sum_block3:
-	; return v5
-	mov	x0, x12
-	mov	sp, x29
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ge	Lk_sum_block3
 Lk_sum_block2:
 	; v7 = va_arg.i64 v1
 	ldr	x16, [x10]
@@ -51,6 +45,12 @@ Lk_sum_block2:
 	add	w11, w11, #1
 	; jump block1(v10, v8)
 	b	Lk_sum_block1
+Lk_sum_block3:
+	; return v5
+	mov	x0, x12
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_sum_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -82,13 +82,7 @@ Lk_pairs_block1:
 	; v6 = icmp.slt v4, v0
 	; brif v6, block2, block3
 	cmp	w11, w9
-	b.lt	Lk_pairs_block2
-Lk_pairs_block3:
-	; return v5
-	fmov	d0, d19
-	mov	sp, x29
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ge	Lk_pairs_block3
 Lk_pairs_block2:
 	; v7 = va_arg.i32 v1
 	ldr	x16, [x10]
@@ -111,6 +105,12 @@ Lk_pairs_block2:
 	add	w11, w11, #1
 	; jump block1(v13, v11)
 	b	Lk_pairs_block1
+Lk_pairs_block3:
+	; return v5
+	fmov	d0, d19
+	mov	sp, x29
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_pairs_end:
 	.cfi_endproc
 	.section	__TEXT,__text

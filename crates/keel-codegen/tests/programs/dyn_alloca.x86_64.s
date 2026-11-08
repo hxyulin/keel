@@ -51,7 +51,22 @@
 	# v9 = icmp.ult v7, v0
 	# brif v9, block2, block3
 	cmp	rdi, rbx
-	jb	".Lk_vla_block2"
+	jae	".Lk_vla_block3"
+.Lk_vla_block2:
+	# v10 = imul v7, v3
+	imul	r8, rdi, 8
+	# v11 = ptradd v5, v10
+	add	r8, r15
+	# v12 = load.i64 v11
+	mov	r8, qword ptr [r8]
+	# v13 = iadd v8, v12
+	add	r8, r13
+	# v14 = iconst.i64 1
+	# v15 = iadd v7, v14
+	add	rdi, 1
+	# jump block1(v15, v13)
+	mov	r13, r8
+	jmp	".Lk_vla_block1"
 .Lk_vla_block3:
 	# v16 = iconst.i64 2
 	mov	edi, 2
@@ -110,21 +125,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lk_vla_block2:
-	# v10 = imul v7, v3
-	imul	r8, rdi, 8
-	# v11 = ptradd v5, v10
-	add	r8, r15
-	# v12 = load.i64 v11
-	mov	r8, qword ptr [r8]
-	# v13 = iadd v8, v12
-	add	r8, r13
-	# v14 = iconst.i64 1
-	# v15 = iadd v7, v14
-	add	rdi, 1
-	# jump block1(v15, v13)
-	mov	r13, r8
-	jmp	".Lk_vla_block1"
 .Lk_vla_end:
 	.cfi_endproc
 	.size "k_vla", .-"k_vla"
@@ -153,14 +153,7 @@
 	# v4 = icmp.ult v2, v0
 	# brif v4, block2, block3
 	cmp	rdi, rsi
-	jb	".Lk_loop_block2"
-.Lk_loop_block3:
-	# return v3
-	mov	rax, r8
-	lea	rsp, [rbp + -8]
-	pop	rbx
-	pop	rbp
-	ret
+	jae	".Lk_loop_block3"
 .Lk_loop_block2:
 	# v5 = intrinsic stack_save()
 	mov	r9, rsp
@@ -184,6 +177,13 @@
 	add	rdi, 1
 	# jump block1(v11, v9)
 	jmp	".Lk_loop_block1"
+.Lk_loop_block3:
+	# return v3
+	mov	rax, r8
+	lea	rsp, [rbp + -8]
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_loop_end:
 	.cfi_endproc
 	.size "k_loop", .-"k_loop"

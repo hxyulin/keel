@@ -47,7 +47,25 @@ Lmain_block3:
 	; v16 = icmp.ult v13, v93
 	; brif v16, block4, block5
 	cmp	x9, #10
-	b.lo	Lmain_block4
+	b.hs	Lmain_block5
+Lmain_block4:
+	; v86 = iconst.i64 2
+	; v18 = shl v13, v86
+	; v89 = stack_addr ss1
+	add	x11, sp, #904
+	add	x11, x11, #1, lsl #12
+	; v19 = ptradd v89, v18
+	; v20 = load.i32 v19
+	ldr	w11, [x11, x9, lsl #2]
+	; v21 = sext.i64 v20
+	sxtw	x11, w11
+	; v22 = iadd v14, v21
+	add	x10, x10, x11
+	; v23 = iconst.i64 1
+	; v24 = iadd v13, v23
+	add	x9, x9, #1
+	; jump block3(v24, v22)
+	b	Lmain_block3
 Lmain_block5:
 	; v26 = iconst.i64 135
 	; v27 = icmp.ne v14, v26
@@ -150,24 +168,6 @@ Lmain_block5:
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
 	ret
-Lmain_block4:
-	; v86 = iconst.i64 2
-	; v18 = shl v13, v86
-	; v89 = stack_addr ss1
-	add	x11, sp, #904
-	add	x11, x11, #1, lsl #12
-	; v19 = ptradd v89, v18
-	; v20 = load.i32 v19
-	ldr	w11, [x11, x9, lsl #2]
-	; v21 = sext.i64 v20
-	sxtw	x11, w11
-	; v22 = iadd v14, v21
-	add	x10, x10, x11
-	; v23 = iconst.i64 1
-	; v24 = iadd v13, v23
-	add	x9, x9, #1
-	; jump block3(v24, v22)
-	b	Lmain_block3
 Lmain_end:
 	.cfi_endproc
 	.subsections_via_symbols

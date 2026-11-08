@@ -52,7 +52,22 @@ Lk_vla_block1:
 	; v9 = icmp.ult v7, v0
 	; brif v9, block2, block3
 	cmp	x10, x20
-	b.lo	Lk_vla_block2
+	b.hs	Lk_vla_block3
+Lk_vla_block2:
+	; v10 = imul v7, v3
+	mul	x11, x10, x23
+	; v11 = ptradd v5, v10
+	add	x11, x24, x11
+	; v12 = load.i64 v11
+	ldr	x11, [x11]
+	; v13 = iadd v8, v12
+	add	x11, x25, x11
+	; v14 = iconst.i64 1
+	; v15 = iadd v7, v14
+	add	x10, x10, #1
+	; jump block1(v15, v13)
+	mov	x25, x11
+	b	Lk_vla_block1
 Lk_vla_block3:
 	; v16 = iconst.i64 2
 	movz	x10, #0x2
@@ -108,21 +123,6 @@ Lk_vla_block3:
 	ldp	x19, x20, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
-Lk_vla_block2:
-	; v10 = imul v7, v3
-	mul	x11, x10, x23
-	; v11 = ptradd v5, v10
-	add	x11, x24, x11
-	; v12 = load.i64 v11
-	ldr	x11, [x11]
-	; v13 = iadd v8, v12
-	add	x11, x25, x11
-	; v14 = iconst.i64 1
-	; v15 = iadd v7, v14
-	add	x10, x10, #1
-	; jump block1(v15, v13)
-	mov	x25, x11
-	b	Lk_vla_block1
 Lk_vla_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -150,14 +150,7 @@ Lk_loop_block1:
 	; v4 = icmp.ult v2, v0
 	; brif v4, block2, block3
 	cmp	x10, x9
-	b.lo	Lk_loop_block2
-Lk_loop_block3:
-	; return v3
-	mov	x0, x11
-	sub	sp, x29, #16
-	ldr	x19, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.hs	Lk_loop_block3
 Lk_loop_block2:
 	; v5 = intrinsic stack_save()
 	mov	x12, sp
@@ -181,6 +174,13 @@ Lk_loop_block2:
 	add	x10, x10, #1
 	; jump block1(v11, v9)
 	b	Lk_loop_block1
+Lk_loop_block3:
+	; return v3
+	mov	x0, x11
+	sub	sp, x29, #16
+	ldr	x19, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_loop_end:
 	.cfi_endproc
 	.section	__TEXT,__text

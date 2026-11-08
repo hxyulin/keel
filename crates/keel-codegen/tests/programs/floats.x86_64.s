@@ -1285,12 +1285,7 @@
 	# v5 = icmp.sle v3, v0
 	# brif v5, block2, block3
 	cmp	r8, rsi
-	jle	".Lharmonic_block2"
-.Lharmonic_block3:
-	# return v4
-	mov	rsp, rbp
-	pop	rbp
-	ret
+	jg	".Lharmonic_block3"
 .Lharmonic_block2:
 	# v6 = sitofp.f64 v3
 	xorps	xmm1, xmm1
@@ -1308,6 +1303,11 @@
 	add	r8, 1
 	# jump block1(v10, v9)
 	jmp	".Lharmonic_block1"
+.Lharmonic_block3:
+	# return v4
+	mov	rsp, rbp
+	pop	rbp
+	ret
 .Lharmonic_end:
 	.cfi_endproc
 	.size "harmonic", .-"harmonic"
@@ -1332,7 +1332,16 @@
 	# v7 = icmp.ult v6, v2
 	# brif v7, block2, block3
 	cmp	rdi, rsi
-	jb	".Lswaps_block2"
+	jae	".Lswaps_block3"
+.Lswaps_block2:
+	# v8 = iconst.i64 1
+	# v9 = iadd v6, v8
+	add	rdi, 1
+	# jump block1(v5, v4, v9)
+	movaps	xmm14, xmm0
+	movaps	xmm0, xmm1
+	movaps	xmm1, xmm14
+	jmp	".Lswaps_block1"
 .Lswaps_block3:
 	# v10 = fconst.f64 10.0
 	movabs	rax, 4621819117588971520
@@ -1345,15 +1354,6 @@
 	mov	rsp, rbp
 	pop	rbp
 	ret
-.Lswaps_block2:
-	# v8 = iconst.i64 1
-	# v9 = iadd v6, v8
-	add	rdi, 1
-	# jump block1(v5, v4, v9)
-	movaps	xmm14, xmm0
-	movaps	xmm0, xmm1
-	movaps	xmm1, xmm14
-	jmp	".Lswaps_block1"
 .Lswaps_end:
 	.cfi_endproc
 	.size "swaps", .-"swaps"

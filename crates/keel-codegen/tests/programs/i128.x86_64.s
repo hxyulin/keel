@@ -1995,18 +1995,7 @@
 	jne	".Lk_pow_block2"
 	mov	rsi, r9
 	mov	rdi, rbx
-.Lk_pow_block3:
-	# return v12
-	mov	rax, rsi
-	mov	rdx, rdi
-	lea	rsp, [rbp + -40]
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jmp	".Lk_pow_block3"
 .Lk_pow_block2:
 	# v6 = iconst.i64 1
 	# v7 = and v4, v6
@@ -2046,6 +2035,18 @@
 	shr	r8, 1
 	# jump block1(v10, v11, v9)
 	jmp	".Lk_pow_block1"
+.Lk_pow_block3:
+	# return v12
+	mov	rax, rsi
+	mov	rdx, rdi
+	lea	rsp, [rbp + -40]
+	pop	r15
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_pow_end:
 	.cfi_endproc
 	.size "k_pow", .-"k_pow"

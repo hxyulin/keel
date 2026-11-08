@@ -727,9 +727,14 @@ block0(v0: i64):
         }
         .allocate(&input);
         assert_eq!(alloc.loc(Value::new(1)), Some(Loc::Remat(Value::new(1))));
-        for i in [0, 2, 3, 4] {
-            assert!(matches!(alloc.loc(Value::new(i)), Some(Loc::Stack(_))));
+        for i in [0, 2, 3] {
+            assert!(
+                matches!(alloc.loc(Value::new(i)), Some(Loc::Stack(_))),
+                "v{i}: {alloc:?}"
+            );
         }
+        // Canonical i8 -1 rematerializes as the cheap zero-extended bits 255.
+        assert_eq!(alloc.loc(Value::new(4)), Some(Loc::Remat(Value::new(4))));
         assert_eq!(alloc.loc(Value::new(5)), Some(Loc::Remat(Value::new(5))));
         assert!(alloc.locs.iter().flatten().flatten().all(|&l| match l {
             Loc::Stack(s) => s < alloc.spill_slots,

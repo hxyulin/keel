@@ -25,11 +25,7 @@ Lhot32p_block1:
 	cmp	w13, w9
 	b.lo	Lhot32p_block2
 	mov	x9, x12
-Lhot32p_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot32p_block3
 Lhot32p_block2:
 	; v9 = imul v5, v1
 	mul	w14, w11, w10
@@ -43,6 +39,11 @@ Lhot32p_block2:
 	add	w13, w13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot32p_block1
+Lhot32p_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot32p_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -71,11 +72,7 @@ Lhot32m_block1:
 	cmp	w13, w9
 	b.lo	Lhot32m_block2
 	mov	x9, x12
-Lhot32m_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot32m_block3
 Lhot32m_block2:
 	; v9 = imul v5, v1
 	mul	w14, w11, w10
@@ -89,6 +86,11 @@ Lhot32m_block2:
 	add	w13, w13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot32m_block1
+Lhot32m_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot32m_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -117,11 +119,7 @@ Lhot32z_block1:
 	cmp	w13, w9
 	b.lo	Lhot32z_block2
 	mov	x9, x12
-Lhot32z_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot32z_block3
 Lhot32z_block2:
 	; v9 = imul v5, v1
 	mul	w14, w11, w10
@@ -135,6 +133,11 @@ Lhot32z_block2:
 	add	w13, w13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot32z_block1
+Lhot32z_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot32z_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -163,11 +166,7 @@ Lhot64p_block1:
 	cmp	x13, x9
 	b.lo	Lhot64p_block2
 	mov	x9, x12
-Lhot64p_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot64p_block3
 Lhot64p_block2:
 	; v9 = imul v5, v1
 	mul	x14, x11, x10
@@ -181,6 +180,11 @@ Lhot64p_block2:
 	add	x13, x13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot64p_block1
+Lhot64p_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot64p_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -209,11 +213,7 @@ Lhot64m_block1:
 	cmp	x13, x9
 	b.lo	Lhot64m_block2
 	mov	x9, x12
-Lhot64m_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot64m_block3
 Lhot64m_block2:
 	; v9 = imul v5, v1
 	mul	x14, x11, x10
@@ -227,6 +227,11 @@ Lhot64m_block2:
 	add	x13, x13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot64m_block1
+Lhot64m_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot64m_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -255,11 +260,7 @@ Lhot64z_block1:
 	cmp	x13, x9
 	b.lo	Lhot64z_block2
 	mov	x9, x12
-Lhot64z_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lhot64z_block3
 Lhot64z_block2:
 	; v9 = imul v5, v1
 	mul	x14, x11, x10
@@ -273,6 +274,11 @@ Lhot64z_block2:
 	add	x13, x13, #1
 	; jump block1(v12, v10, v14)
 	b	Lhot64z_block1
+Lhot64z_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lhot64z_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -303,11 +309,7 @@ Loffset32_block1:
 	cmp	w13, w9
 	b.lo	Loffset32_block2
 	mov	x9, x14
-Loffset32_block3:
-	; return v16
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Loffset32_block3
 Loffset32_block2:
 	; v10 = iadd v6, v3
 	add	w15, w11, w12
@@ -322,6 +324,11 @@ Loffset32_block2:
 	add	w13, w13, #1
 	; jump block1(v13, v15, v12)
 	b	Loffset32_block1
+Loffset32_block3:
+	; return v16
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Loffset32_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -352,11 +359,7 @@ Loffset64_block1:
 	cmp	x13, x9
 	b.lo	Loffset64_block2
 	mov	x9, x14
-Loffset64_block3:
-	; return v15
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Loffset64_block3
 Loffset64_block2:
 	; v10 = iadd v6, v3
 	add	x15, x11, x12
@@ -369,6 +372,11 @@ Loffset64_block2:
 	add	x13, x13, #1
 	; jump block1(v12, v14, v11)
 	b	Loffset64_block1
+Loffset64_block3:
+	; return v15
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Loffset64_end:
 	.cfi_endproc
 	.subsections_via_symbols

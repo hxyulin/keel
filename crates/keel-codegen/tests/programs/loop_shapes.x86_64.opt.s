@@ -29,15 +29,7 @@
 	# v4 = icmp.ugt v1, v3
 	# brif v4, block2, block3
 	cmp	rdi, r8
-	ja	".Lk_isort_block2"
-.Lk_isort_block3:
-	# return
-	lea	rsp, [rbp + -24]
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jbe	".Lk_isort_block3"
 .Lk_isort_block2:
 	# v5 = iconst.i64 2
 	# v6 = shl v3, v5
@@ -94,6 +86,14 @@
 	add	r8, 1
 	# jump block1(v20)
 	jmp	".Lk_isort_block1"
+.Lk_isort_block3:
+	# return
+	lea	rsp, [rbp + -24]
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_isort_end:
 	.cfi_endproc
 	.size "k_isort", .-"k_isort"
@@ -134,17 +134,7 @@
 	# brif v6, block2, block4
 	mov	rcx, qword ptr [rbp + -64]
 	cmp	r9d, ecx
-	jg	".Lk_matmul_block2"
-.Lk_matmul_block4:
-	# return
-	lea	rsp, [rbp + -40]
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jle	".Lk_matmul_block4"
 .Lk_matmul_block2:
 	# v7 = imul v3, v5
 	mov	rcx, qword ptr [rbp + -64]
@@ -159,15 +149,7 @@
 	# brif v12, block6, block3
 	mov	rcx, qword ptr [rbp + -56]
 	cmp	r9d, ecx
-	jg	".Lk_matmul_block6"
-.Lk_matmul_block3:
-	# v9 = iconst.i32 1
-	# v10 = iadd v5, v9
-	mov	rax, qword ptr [rbp + -64]
-	lea	ebx, [rax + 1]
-	# jump block1(v10)
-	mov	qword ptr [rbp + -64], rbx
-	jmp	".Lk_matmul_block1"
+	jle	".Lk_matmul_block3"
 .Lk_matmul_block6:
 	# v45 = iconst.i32 0
 	xor	r14d, r14d
@@ -315,6 +297,24 @@
 	# jump block5(v39)
 	mov	qword ptr [rbp + -56], rdi
 	jmp	".Lk_matmul_block5"
+.Lk_matmul_block3:
+	# v9 = iconst.i32 1
+	# v10 = iadd v5, v9
+	mov	rax, qword ptr [rbp + -64]
+	lea	edi, [rax + 1]
+	# jump block1(v10)
+	mov	qword ptr [rbp + -64], rdi
+	jmp	".Lk_matmul_block1"
+.Lk_matmul_block4:
+	# return
+	lea	rsp, [rbp + -40]
+	pop	r15
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_matmul_end:
 	.cfi_endproc
 	.size "k_matmul", .-"k_matmul"

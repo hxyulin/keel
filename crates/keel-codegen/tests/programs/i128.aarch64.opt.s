@@ -1863,15 +1863,7 @@ Lk_pow_block0:
 	; jump block1(v0, v1, v2)
 Lk_pow_block1:
 	; brif v4, block2, block3
-	cbnz	x11, Lk_pow_block2
-Lk_pow_block3:
-	; return v5
-	mov	x0, x12
-	mov	x1, x13
-	sub	sp, x29, #16
-	ldr	x19, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	cbz	x11, Lk_pow_block3
 Lk_pow_block2:
 	; v6 = iconst.i64 1
 	; v7 = and v4, v6
@@ -1913,6 +1905,14 @@ Lk_pow_block2:
 	lsr	x11, x11, #1
 	; jump block1(v10, v11, v9)
 	b	Lk_pow_block1
+Lk_pow_block3:
+	; return v5
+	mov	x0, x12
+	mov	x1, x13
+	sub	sp, x29, #16
+	ldr	x19, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_pow_end:
 	.cfi_endproc
 	.section	__TEXT,__text

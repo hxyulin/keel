@@ -236,15 +236,9 @@ fn assert_reference_equivalence(
     // Full keeps the denser value: loop-weighted uses per live point, the
     // later end losing ties. The cost inputs come from `weighted`, whose
     // loop weights have their own test; the other tiers keep the earlier end.
-    let (costs, lengths) = weighted::spill_costs(func, selection, &cfg, &order, &full);
-    let density = |a: &Interval, b: &Interval| {
-        (u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]))
-            .cmp(&(u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()])))
-            .then_with(|| b.end().cmp(&a.end()))
-    };
     let endpoint = |a: &Interval, b: &Interval| b.end().cmp(&a.end());
     let fast = build_fast_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
-    let mut collapsed = full.clone();
+    let mut collapsed = full;
     for iv in &mut collapsed {
         iv.ranges = vec![(iv.start(), iv.end())].into();
     }
@@ -284,6 +278,17 @@ fn assert_reference_equivalence(
         },
     ] {
         for tier in [AllocationTier::Fast, AllocationTier::Full] {
+            let (order, _) = allocation_order(func, &cfg, tier);
+            let full = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
+            let (costs, lengths) = weighted::spill_costs(func, selection, &cfg, &order, &full);
+            let density = |a: &Interval, b: &Interval| {
+                (u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]))
+                    .cmp(
+                        &(u128::from(costs[b.value.index()])
+                            * u128::from(lengths[a.value.index()])),
+                    )
+                    .then_with(|| b.end().cmp(&a.end()))
+            };
             let intervals = if tier == AllocationTier::Fast {
                 &collapsed
             } else {

@@ -21,13 +21,7 @@
 	# v6 = icmp.ult v3, v0
 	# brif v6, block2, block3
 	cmp	rdi, rsi
-	jb	".Lconstant_loop_block2"
-.Lconstant_loop_block3:
-	# return v4
-	mov	rax, r8
-	mov	rsp, rbp
-	pop	rbp
-	ret
+	jae	".Lconstant_loop_block3"
 .Lconstant_loop_block2:
 	# v7 = iconst.i64 49
 	# v8 = iadd v4, v7
@@ -37,6 +31,12 @@
 	add	rdi, 1
 	# jump block1(v10, v8)
 	jmp	".Lconstant_loop_block1"
+.Lconstant_loop_block3:
+	# return v4
+	mov	rax, r8
+	mov	rsp, rbp
+	pop	rbp
+	ret
 .Lconstant_loop_end:
 	.cfi_endproc
 	.size "constant_loop", .-"constant_loop"

@@ -28,13 +28,7 @@
 	cmp	r8, rdi
 	jb	".Lsum_block2"
 	mov	rsi, r9
-.Lsum_block3:
-	# return v14
-	mov	rax, rsi
-	lea	rsp, [rbp + -8]
-	pop	rbx
-	pop	rbp
-	ret
+	jmp	".Lsum_block3"
 .Lsum_block2:
 	# v6 = iconst.i64 4
 	# v7 = imul v3, v6
@@ -52,6 +46,13 @@
 	add	r8, 1
 	# jump block1(v13, v11)
 	jmp	".Lsum_block1"
+.Lsum_block3:
+	# return v14
+	mov	rax, rsi
+	lea	rsp, [rbp + -8]
+	pop	rbx
+	pop	rbp
+	ret
 .Lsum_end:
 	.cfi_endproc
 	.size "sum", .-"sum"

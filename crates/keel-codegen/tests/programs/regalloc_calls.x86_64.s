@@ -153,17 +153,7 @@
 	# v7 = icmp.ult v5, v0
 	# brif v7, block2, block3
 	cmp	r13, rbx
-	jb	".Lcall_loop_block2"
-.Lcall_loop_block3:
-	# return v6
-	mov	rax, r14
-	lea	rsp, [rbp + -32]
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jae	".Lcall_loop_block3"
 .Lcall_loop_block2:
 	# v8 = call @twice(v5)
 	mov	rdi, r13
@@ -180,6 +170,16 @@
 	mov	r13, rdi
 	mov	r14, rsi
 	jmp	".Lcall_loop_block1"
+.Lcall_loop_block3:
+	# return v6
+	mov	rax, r14
+	lea	rsp, [rbp + -32]
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lcall_loop_end:
 	.cfi_endproc
 	.size "call_loop", .-"call_loop"
@@ -221,18 +221,7 @@
 	# v6 = icmp.ult v4, v0
 	# brif v6, block2, block3
 	cmp	r14, rbx
-	jb	".Lmemset_loop_block2"
-.Lmemset_loop_block3:
-	# return v5
-	mov	rax, r15
-	lea	rsp, [rbp + -40]
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jae	".Lmemset_loop_block3"
 .Lmemset_loop_block2:
 	# v7 = trunc.i8 v4
 	mov	rsi, r14
@@ -251,6 +240,17 @@
 	mov	r14, rdi
 	mov	r15, rsi
 	jmp	".Lmemset_loop_block1"
+.Lmemset_loop_block3:
+	# return v5
+	mov	rax, r15
+	lea	rsp, [rbp + -40]
+	pop	r15
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lmemset_loop_end:
 	.cfi_endproc
 	.size "memset_loop", .-"memset_loop"

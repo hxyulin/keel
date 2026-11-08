@@ -657,7 +657,11 @@ Full runs these steps; Fast shares the first two and builds one range per
 value.
 
 1. **Linearize.** Reachable blocks in reverse postorder, which is also the
-   emission order. Unreachable blocks are not emitted. Each instruction has
+   emission order. Full visits a two-way branch's shallower-loop successor
+   first during DFS, putting the deeper-loop successor earlier in reverse
+   postorder. This keeps loop exits out of the body's fallthrough path.
+   Fast retains the original successor traversal. Unreachable blocks are not
+   emitted. Each instruction has
    two program points: it reads operands at `2k` and writes results at
    `2k + 1`, so a result can reuse the register of an operand that dies
    there. Block parameters are defined at their block's header point, and
@@ -729,8 +733,9 @@ including native AArch64 fixtures for calls, `setjmp`, stack restore and
 `invoke`. No performance gain is claimed for any mode.
 
 Known gaps: no interval splitting outside the experimental Split tier (a
-value spilled anywhere is spilled everywhere), and blocks are laid out in
-reverse postorder only.
+value spilled anywhere is spilled everywhere). Layout uses loop depth but no
+execution counts; equally nested paths and switch cases keep their original
+DFS successor order. Prologues are not moved onto cold call paths.
 
 **Decisions.** The register-assignment design moves register effects, fixed
 operands and ABI preferences into a shared policy. Its settled choices: x86-64

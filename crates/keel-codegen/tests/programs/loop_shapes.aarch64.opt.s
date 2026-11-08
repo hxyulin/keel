@@ -21,11 +21,7 @@ Lk_isort_block1:
 	; v4 = icmp.ugt v1, v3
 	; brif v4, block2, block3
 	cmp	x10, x11
-	b.hi	Lk_isort_block2
-Lk_isort_block3:
-	; return
-	ldp	x29, x30, [sp], #16
-	ret
+	b.ls	Lk_isort_block3
 Lk_isort_block2:
 	; v5 = iconst.i64 2
 	; v6 = shl v3, v5
@@ -81,6 +77,10 @@ Lk_isort_block6:
 	add	x11, x11, #1
 	; jump block1(v20)
 	b	Lk_isort_block1
+Lk_isort_block3:
+	; return
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_isort_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -116,15 +116,7 @@ Lk_matmul_block1:
 	; v6 = icmp.sgt v3, v5
 	; brif v6, block2, block4
 	cmp	w12, w13
-	b.gt	Lk_matmul_block2
-Lk_matmul_block4:
-	; return
-	sub	sp, x29, #48
-	ldp	x23, x24, [sp], #16
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.le	Lk_matmul_block4
 Lk_matmul_block2:
 	; v7 = imul v3, v5
 	mul	w14, w12, w13
@@ -135,13 +127,7 @@ Lk_matmul_block5:
 	; v12 = icmp.sgt v3, v11
 	; brif v12, block6, block3
 	cmp	w12, w15
-	b.gt	Lk_matmul_block6
-Lk_matmul_block3:
-	; v9 = iconst.i32 1
-	; v10 = iadd v5, v9
-	add	w13, w13, #1
-	; jump block1(v10)
-	b	Lk_matmul_block1
+	b.le	Lk_matmul_block3
 Lk_matmul_block6:
 	; v45 = iconst.i32 0
 	movz	w19, #0x0
@@ -273,6 +259,20 @@ Lk_matmul_block9:
 	add	w15, w15, #1
 	; jump block5(v39)
 	b	Lk_matmul_block5
+Lk_matmul_block3:
+	; v9 = iconst.i32 1
+	; v10 = iadd v5, v9
+	add	w13, w13, #1
+	; jump block1(v10)
+	b	Lk_matmul_block1
+Lk_matmul_block4:
+	; return
+	sub	sp, x29, #48
+	ldp	x23, x24, [sp], #16
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lk_matmul_end:
 	.cfi_endproc
 	.section	__TEXT,__text

@@ -44,37 +44,7 @@
 	# v12 = icmp.ugt v1, v11
 	# brif v12, block2, block3
 	cmp	rdi, r8
-	ja	".Lprivate_acc_block2"
-.Lprivate_acc_block3:
-	# v19 = stack_addr ss0
-	lea	rsi, [rbp + -48]
-	# v20 = load.i64 align 8 v19
-	mov	rdi, qword ptr [rbp + -48]
-	# v21 = iconst.i64 3
-	# v22 = imul v20, v21
-	imul	rdi, rdi, 3
-	# v23 = iconst.i64 8
-	# v24 = ptradd v19, v23
-	lea	r8, [rsi + 8]
-	# v25 = load.i64 align 8 v24
-	mov	r8, qword ptr [r8]
-	# v26 = iadd v22, v25
-	add	rdi, r8
-	# v27 = iconst.i64 16
-	# v28 = ptradd v19, v27
-	add	rsi, 16
-	# v29 = load.i32 align 8 v28
-	mov	esi, dword ptr [rsi]
-	# v30 = uext.i64 v29
-	# v31 = iadd v26, v30
-	add	rsi, rdi
-	# return v31
-	mov	rax, rsi
-	lea	rsp, [rbp + -16]
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jbe	".Lprivate_acc_block3"
 .Lprivate_acc_block2:
 	# v13 = iconst.i64 3
 	# v14 = shl v11, v13
@@ -130,6 +100,36 @@
 	add	r8, 1
 	# jump block1(v47)
 	jmp	".Lprivate_acc_block1"
+.Lprivate_acc_block3:
+	# v19 = stack_addr ss0
+	lea	rsi, [rbp + -48]
+	# v20 = load.i64 align 8 v19
+	mov	rdi, qword ptr [rbp + -48]
+	# v21 = iconst.i64 3
+	# v22 = imul v20, v21
+	imul	rdi, rdi, 3
+	# v23 = iconst.i64 8
+	# v24 = ptradd v19, v23
+	lea	r8, [rsi + 8]
+	# v25 = load.i64 align 8 v24
+	mov	r8, qword ptr [r8]
+	# v26 = iadd v22, v25
+	add	rdi, r8
+	# v27 = iconst.i64 16
+	# v28 = ptradd v19, v27
+	add	rsi, 16
+	# v29 = load.i32 align 8 v28
+	mov	esi, dword ptr [rsi]
+	# v30 = uext.i64 v29
+	# v31 = iadd v26, v30
+	add	rsi, rdi
+	# return v31
+	mov	rax, rsi
+	lea	rsp, [rbp + -16]
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lprivate_acc_end:
 	.cfi_endproc
 	.size "private_acc", .-"private_acc"

@@ -149,17 +149,7 @@
 	# v7 = icmp.ugt v0, v5
 	# brif v7, block2, block3
 	cmp	rbx, r13
-	ja	".Lcall_loop_block2"
-.Lcall_loop_block3:
-	# return v6
-	mov	rax, r14
-	lea	rsp, [rbp + -32]
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbx
-	pop	rbp
-	ret
+	jbe	".Lcall_loop_block3"
 .Lcall_loop_block2:
 	# v8 = call @twice(v5)
 	mov	rdi, r13
@@ -175,6 +165,16 @@
 	# jump block1(v12, v10)
 	mov	r14, rsi
 	jmp	".Lcall_loop_block1"
+.Lcall_loop_block3:
+	# return v6
+	mov	rax, r14
+	lea	rsp, [rbp + -32]
+	pop	r14
+	pop	r13
+	pop	r12
+	pop	rbx
+	pop	rbp
+	ret
 .Lcall_loop_end:
 	.cfi_endproc
 	.size "call_loop", .-"call_loop"

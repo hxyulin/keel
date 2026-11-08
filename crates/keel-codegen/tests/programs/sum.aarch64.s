@@ -24,11 +24,7 @@ Lsum_block1:
 	cmp	x11, x10
 	b.lo	Lsum_block2
 	mov	x9, x12
-Lsum_block3:
-	; return v14
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lsum_block3
 Lsum_block2:
 	; v6 = iconst.i64 4
 	movz	x13, #0x4
@@ -47,6 +43,11 @@ Lsum_block2:
 	add	x11, x11, #1
 	; jump block1(v13, v11)
 	b	Lsum_block1
+Lsum_block3:
+	; return v14
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lsum_end:
 	.cfi_endproc
 	.subsections_via_symbols

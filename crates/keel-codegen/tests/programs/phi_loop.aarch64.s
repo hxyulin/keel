@@ -22,17 +22,17 @@ Lphi_loop_block1:
 	; v6 = icmp.ult v5, v1
 	; brif v6, block2, block3(v4)
 	cmp	x11, x10
-	b.lo	Lphi_loop_block2
-Lphi_loop_block3:
-	; return v8
-	mov	x0, x9
-	ldp	x29, x30, [sp], #16
-	ret
+	b.hs	Lphi_loop_block3
 Lphi_loop_block2:
 	; v7 = iadd v5, v3
 	add	x11, x11, #1
 	; jump block1(v4, v7)
 	b	Lphi_loop_block1
+Lphi_loop_block3:
+	; return v8
+	mov	x0, x9
+	ldp	x29, x30, [sp], #16
+	ret
 Lphi_loop_end:
 	.cfi_endproc
 	.subsections_via_symbols

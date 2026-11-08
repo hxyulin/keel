@@ -29,13 +29,7 @@
 	cmp	rdi, rsi
 	jb	".Lconstant_loop_block2"
 	mov	rsi, r8
-.Lconstant_loop_block3:
-	# return v11
-	mov	rax, rsi
-	lea	rsp, [rbp + -8]
-	pop	rbx
-	pop	rbp
-	ret
+	jmp	".Lconstant_loop_block3"
 .Lconstant_loop_block2:
 	# v7 = imul v5, v5
 	mov	rbx, r9
@@ -47,6 +41,13 @@
 	add	rdi, 1
 	# jump block1(v10, v8, v5)
 	jmp	".Lconstant_loop_block1"
+.Lconstant_loop_block3:
+	# return v11
+	mov	rax, rsi
+	lea	rsp, [rbp + -8]
+	pop	rbx
+	pop	rbp
+	ret
 .Lconstant_loop_end:
 	.cfi_endproc
 	.size "constant_loop", .-"constant_loop"

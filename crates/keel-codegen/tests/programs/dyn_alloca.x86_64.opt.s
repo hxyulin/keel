@@ -144,7 +144,19 @@
 	# v9 = icmp.ugt v0, v7
 	# brif v9, block2, block3
 	cmp	rbx, rsi
-	ja	".Lk_vla_block2"
+	jbe	".Lk_vla_block3"
+.Lk_vla_block2:
+	# v93 = iconst.i64 3
+	# v10 = shl v7, v93
+	# v11 = ptradd v5, v10
+	# v12 = load.i64 v11
+	# v13 = iadd v8, v12
+	add	r12, qword ptr [r13 + rsi * 8]
+	# v14 = iconst.i64 1
+	# v15 = iadd v7, v14
+	add	rsi, 1
+	# jump block1(v15, v13)
+	jmp	".Lk_vla_block1"
 .Lk_vla_block3:
 	# v16 = iconst.i64 2
 	mov	esi, 2
@@ -207,18 +219,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lk_vla_block2:
-	# v93 = iconst.i64 3
-	# v10 = shl v7, v93
-	# v11 = ptradd v5, v10
-	# v12 = load.i64 v11
-	# v13 = iadd v8, v12
-	add	r12, qword ptr [r13 + rsi * 8]
-	# v14 = iconst.i64 1
-	# v15 = iadd v7, v14
-	add	rsi, 1
-	# jump block1(v15, v13)
-	jmp	".Lk_vla_block1"
 .Lk_vla_end:
 	.cfi_endproc
 	.size "k_vla", .-"k_vla"

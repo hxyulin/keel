@@ -132,7 +132,21 @@ Lk_vla_block1:
 	; v9 = icmp.ugt v0, v7
 	; brif v9, block2, block3
 	cmp	x20, x9
-	b.hi	Lk_vla_block2
+	b.ls	Lk_vla_block3
+Lk_vla_block2:
+	; v93 = iconst.i64 3
+	; v10 = shl v7, v93
+	; v11 = ptradd v5, v10
+	; v12 = load.i64 v11
+	ldr	x10, [x22, x9, lsl #3]
+	; v13 = iadd v8, v12
+	add	x10, x21, x10
+	; v14 = iconst.i64 1
+	; v15 = iadd v7, v14
+	add	x9, x9, #1
+	; jump block1(v15, v13)
+	mov	x21, x10
+	b	Lk_vla_block1
 Lk_vla_block3:
 	; v16 = iconst.i64 2
 	movz	x9, #0x2
@@ -194,20 +208,6 @@ Lk_vla_block3:
 	ldp	x19, x20, [sp], #16
 	ldp	x29, x30, [sp], #16
 	ret
-Lk_vla_block2:
-	; v93 = iconst.i64 3
-	; v10 = shl v7, v93
-	; v11 = ptradd v5, v10
-	; v12 = load.i64 v11
-	ldr	x10, [x22, x9, lsl #3]
-	; v13 = iadd v8, v12
-	add	x10, x21, x10
-	; v14 = iconst.i64 1
-	; v15 = iadd v7, v14
-	add	x9, x9, #1
-	; jump block1(v15, v13)
-	mov	x21, x10
-	b	Lk_vla_block1
 Lk_vla_end:
 	.cfi_endproc
 	.section	__TEXT,__text

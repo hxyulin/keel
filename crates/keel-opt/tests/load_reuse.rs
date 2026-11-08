@@ -754,3 +754,49 @@ block2:
     let local = f.first_result(constants[1].1);
     assert!(f.layout_insts().any(|(_,i)| matches!(f.inst_data(i),InstData::Binary {op:keel_ir::BinaryOp::Iadd,args} if args.contains(&local))));
 }
+
+#[test]
+fn duplicate_edges_consume_one_snapshot_and_keep_the_last_successor() {
+    let m = optimize(
+        "func @f(ptr, i8) -> i64 {
+block0(v0: ptr, v1: i8):
+ v2 = load.i64 v0
+ brif v1, block1, block2
+block1:
+ brif v1, block3, block3
+block2:
+ jump block3
+block3:
+ v3 = load.i64 v0
+ return v3
+}",
+    );
+    assert_eq!(loads(&m), 1, "{m}");
+    assert!(m.to_string().contains("return v2"), "{m}");
+}
+
+#[test]
+fn snapshot_consumers_use_arena_indices_after_block_removal() {
+    let mut m = keel_ir::parse(
+        "func @f(ptr, i8) -> i64 {
+block0(v0: ptr, v1: i8):
+ v2 = load.i64 v0
+ brif v1, block2, block3
+block1:
+ return v2
+block2:
+ v3 = load.i64 v0
+ return v3
+block3:
+ v4 = load.i64 v0
+ return v4
+}",
+    )
+    .unwrap();
+    let dead = m.functions[0].blocks().nth(1).unwrap();
+    m.functions[0].remove_block(dead);
+    keel_ir::verify_module(&m).unwrap();
+    keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
+    assert_eq!(loads(&m), 1, "{m}");
+    keel_ir::verify_module(&m).unwrap();
+}

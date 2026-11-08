@@ -780,12 +780,7 @@ Lharmonic_block1:
 	; v5 = icmp.sle v3, v0
 	; brif v5, block2, block3
 	cmp	x11, x9
-	b.le	Lharmonic_block2
-Lharmonic_block3:
-	; return v4
-	fmov	d0, d19
-	ldp	x29, x30, [sp], #16
-	ret
+	b.gt	Lharmonic_block3
 Lharmonic_block2:
 	; v6 = sitofp.f64 v3
 	scvtf	d20, x11
@@ -799,6 +794,11 @@ Lharmonic_block2:
 	add	x11, x11, #1
 	; jump block1(v10, v9)
 	b	Lharmonic_block1
+Lharmonic_block3:
+	; return v4
+	fmov	d0, d19
+	ldp	x29, x30, [sp], #16
+	ret
 Lharmonic_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -824,7 +824,16 @@ Lswaps_block1:
 	; v7 = icmp.ult v6, v2
 	; brif v7, block2, block3
 	cmp	x10, x9
-	b.lo	Lswaps_block2
+	b.hs	Lswaps_block3
+Lswaps_block2:
+	; v8 = iconst.i64 1
+	; v9 = iadd v6, v8
+	add	x10, x10, #1
+	; jump block1(v5, v4, v9)
+	fmov	x16, d19
+	fmov	d19, d20
+	fmov	d20, x16
+	b	Lswaps_block1
 Lswaps_block3:
 	; v10 = fconst.f64 10.0
 	fmov	d21, #10.0
@@ -836,15 +845,6 @@ Lswaps_block3:
 	fmov	d0, d19
 	ldp	x29, x30, [sp], #16
 	ret
-Lswaps_block2:
-	; v8 = iconst.i64 1
-	; v9 = iadd v6, v8
-	add	x10, x10, #1
-	; jump block1(v5, v4, v9)
-	fmov	x16, d19
-	fmov	d19, d20
-	fmov	d20, x16
-	b	Lswaps_block1
 Lswaps_end:
 	.cfi_endproc
 	.section	__TEXT,__text

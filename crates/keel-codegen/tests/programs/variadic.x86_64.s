@@ -54,14 +54,7 @@
 	# v6 = icmp.slt v4, v0
 	# brif v6, block2, block3
 	cmp	r8d, esi
-	jl	".Lk_sum_block2"
-.Lk_sum_block3:
-	# return v5
-	mov	rax, r9
-	lea	rsp, [rbp + -8]
-	pop	rbx
-	pop	rbp
-	ret
+	jge	".Lk_sum_block3"
 .Lk_sum_block2:
 	# v7 = va_arg.i64 v1
 	mov	ecx, dword ptr [rdi]
@@ -85,6 +78,13 @@
 	add	r8d, 1
 	# jump block1(v10, v8)
 	jmp	".Lk_sum_block1"
+.Lk_sum_block3:
+	# return v5
+	mov	rax, r9
+	lea	rsp, [rbp + -8]
+	pop	rbx
+	pop	rbp
+	ret
 .Lk_sum_end:
 	.cfi_endproc
 	.size "k_sum", .-"k_sum"
@@ -138,12 +138,7 @@
 	# v6 = icmp.slt v4, v0
 	# brif v6, block2, block3
 	cmp	r8d, esi
-	jl	".Lk_pairs_block2"
-.Lk_pairs_block3:
-	# return v5
-	mov	rsp, rbp
-	pop	rbp
-	ret
+	jge	".Lk_pairs_block3"
 .Lk_pairs_block2:
 	# v7 = va_arg.i32 v1
 	mov	ecx, dword ptr [rdi]
@@ -189,6 +184,11 @@
 	add	r8d, 1
 	# jump block1(v13, v11)
 	jmp	".Lk_pairs_block1"
+.Lk_pairs_block3:
+	# return v5
+	mov	rsp, rbp
+	pop	rbp
+	ret
 .Lk_pairs_end:
 	.cfi_endproc
 	.size "k_pairs", .-"k_pairs"

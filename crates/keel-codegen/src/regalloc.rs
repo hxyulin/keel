@@ -7,7 +7,8 @@
 //!
 //! 1. **Linearize.** Put the reachable blocks in reverse postorder (each
 //!    block after its dominator, so definitions come before uses) and number
-//!    every program point. That order is also the order the code is emitted
+//!    every program point. Full visits shallower-loop successors first during
+//!    DFS so deeper-loop successors tend to fall through in reverse postorder. That order is also the order the code is emitted
 //!    in.
 //! 2. **Liveness.** A backward dataflow over blocks finds which values are
 //!    live on entry to and exit from each block.
@@ -280,7 +281,7 @@ fn allocate_tier_inner(
     tier: AllocationTier,
 ) -> Allocation {
     let cfg = ControlFlowGraph::compute(func);
-    let order = cfg.reverse_postorder(func);
+    let (order, weights) = allocation_order(func, &cfg, tier);
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
         #[cfg(feature = "experimental-regalloc")]
@@ -296,13 +297,64 @@ fn allocate_tier_inner(
         AllocationTier::Full => {
             let intervals =
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
-            let mut spilled =
-                weighted::linear_scan(func, selection, &cfg, &order, &intervals, pools, &mut locs);
+            let mut spilled = weighted::linear_scan(
+                func, selection, &order, &intervals, pools, &mut locs, &weights,
+            );
             assign_spill_slots(&mut spilled, &mut locs)
         }
     };
 
     baseline_allocation(order, locs, spill_slots, pools)
+}
+
+/// Keep loop exits outside the fallthrough path while retaining a DFS reverse
+/// postorder. Fast keeps the original traversal and does not build dominators.
+fn allocation_order(
+    func: &Function,
+    cfg: &ControlFlowGraph,
+    tier: AllocationTier,
+) -> (Vec<Block>, Vec<u32>) {
+    let order = cfg.reverse_postorder(func);
+    if tier != AllocationTier::Full {
+        return (order, Vec::new());
+    }
+    let weights = weighted::block_weights(func, cfg, &order);
+    if order.len() < 3 {
+        return (order, weights);
+    }
+    let reverse = |block: Block| {
+        let succs = cfg.succs(block);
+        succs.len() == 2 && weights[succs[0].index()] > weights[succs[1].index()]
+    };
+    if !order.iter().copied().any(reverse) {
+        return (order, weights);
+    }
+    let mut result = Vec::with_capacity(order.len());
+    let mut visited = vec![false; func.num_blocks()];
+    let entry = order[0];
+    visited[entry.index()] = true;
+    let mut stack = vec![(entry, 0usize)];
+    while let Some((block, next)) = stack.last_mut() {
+        let succs = cfg.succs(*block);
+        if *next == succs.len() {
+            result.push(*block);
+            stack.pop();
+            continue;
+        }
+        let index = if reverse(*block) {
+            succs.len() - 1 - *next
+        } else {
+            *next
+        };
+        *next += 1;
+        let succ = succs[index];
+        if !visited[succ.index()] {
+            visited[succ.index()] = true;
+            stack.push((succ, 0));
+        }
+    }
+    result.reverse();
+    (result, weights)
 }
 
 /// Prefer spilling cheap recipes only when the ordinary scan exhausts its
@@ -1042,9 +1094,20 @@ fn unread_entry_params(
     for &param in func.block_params(entry) {
         unread[param.index()] = true;
     }
+    let mut remaining = func.block_params(entry).len();
     for &block in order {
         for &inst in func.block_insts(block) {
-            selection.for_each_operand(func, inst, |v| unread[v.index()] = false);
+            selection.for_each_operand(func, inst, |v| {
+                if unread[v.index()] {
+                    unread[v.index()] = false;
+                    remaining -= 1;
+                }
+            });
+            // Every parameter is read. The remaining body cannot make one
+            // unread again, and an empty result means no omitted parameters.
+            if remaining == 0 {
+                return Vec::new();
+            }
         }
     }
     unread
@@ -2383,3 +2446,80 @@ mod transfer_tests;
 
 #[cfg(test)]
 mod call_preserves_tests;
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn full_keeps_loop_body_adjacent_and_fast_keeps_original_order() {
+        let module = keel_ir::parse(
+            "func @f(i64) -> i64 {
+block0(v0: i64):
+ jump block1(v0)
+block1(v1: i64):
+ v2 = iconst.i64 0
+ v3 = icmp.ugt v1, v2
+ brif v3, block2, block3
+block2:
+ v4 = iconst.i64 1
+ v5 = isub v1, v4
+ jump block1(v5)
+block3:
+ return v1
+block4:
+ jump block4
+}",
+        )
+        .unwrap();
+        let func = &module.functions[0];
+        keel_ir::verify_module(&module).unwrap();
+        let cfg = ControlFlowGraph::compute(func);
+        let (fast, _) = allocation_order(func, &cfg, AllocationTier::Fast);
+        assert_eq!(fast, cfg.reverse_postorder(func));
+        let (full, weights) = allocation_order(func, &cfg, AllocationTier::Full);
+        assert_eq!(
+            full.iter().map(|b| b.index()).collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
+        assert_eq!(weights, [1, 8, 8, 1, 1]);
+        let reference = liveness(func, &cfg, &fast, &crate::select::Selection::default());
+        let actual = liveness(func, &cfg, &full, &crate::select::Selection::default());
+        for block in func.blocks() {
+            assert_eq!(
+                reference.live_in[block.index()],
+                actual.live_in[block.index()]
+            );
+            assert_eq!(
+                reference.live_out[block.index()],
+                actual.live_out[block.index()]
+            );
+        }
+    }
+
+    #[test]
+    fn read_parameter_scan_keeps_unused_homes() {
+        let module = keel_ir::parse(
+            "func @f(i64,i64) -> i64 {
+block0(v0: i64,v1: i64):
+ v2 = iadd v0,v0
+ return v2
+}",
+        )
+        .unwrap();
+        let func = &module.functions[0];
+        let cfg = ControlFlowGraph::compute(func);
+        let order = cfg.reverse_postorder(func);
+        let selection = crate::select::Selection::default();
+        let unread = unread_entry_params(func, &order, &selection);
+        assert!(!unread[0]);
+        assert!(unread[1]);
+        let mut all_read = func.clone();
+        let add = all_read.block_insts(order[0])[0];
+        *all_read.inst_data_mut(add) = InstData::Binary {
+            op: keel_ir::BinaryOp::Iadd,
+            args: [Value::new(0), Value::new(1)],
+        };
+        assert!(unread_entry_params(&all_read, &order, &selection).is_empty());
+    }
+}

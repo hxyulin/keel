@@ -32,7 +32,25 @@
 	# v5 = icmp.ult v3, v1
 	# brif v5, block2, block3
 	cmp	rsi, 10
-	jb	".Lmain_block2"
+	jae	".Lmain_block3"
+.Lmain_block2:
+	# v6 = iconst.i64 4
+	# v7 = imul v3, v6
+	imul	rdi, rsi, 4
+	# v8 = ptradd v0, v7
+	add	rdi, rbx
+	# v9 = load.i32 v8
+	mov	edi, dword ptr [rdi]
+	# v10 = sext.i64 v9
+	movsxd	rdi, edi
+	# v11 = iadd v4, v10
+	add	rdi, r12
+	# v12 = iconst.i64 1
+	# v13 = iadd v3, v12
+	add	rsi, 1
+	# jump block1(v13, v11)
+	mov	r12, rdi
+	jmp	".Lmain_block1"
 .Lmain_block3:
 	# v14 = stack_addr ss1
 	lea	rsi, [rbp + -24]
@@ -75,24 +93,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lmain_block2:
-	# v6 = iconst.i64 4
-	# v7 = imul v3, v6
-	imul	rdi, rsi, 4
-	# v8 = ptradd v0, v7
-	add	rdi, rbx
-	# v9 = load.i32 v8
-	mov	edi, dword ptr [rdi]
-	# v10 = sext.i64 v9
-	movsxd	rdi, edi
-	# v11 = iadd v4, v10
-	add	rdi, r12
-	# v12 = iconst.i64 1
-	# v13 = iadd v3, v12
-	add	rsi, 1
-	# jump block1(v13, v11)
-	mov	r12, rdi
-	jmp	".Lmain_block1"
 .Lmain_end:
 	.cfi_endproc
 	.size "main", .-"main"

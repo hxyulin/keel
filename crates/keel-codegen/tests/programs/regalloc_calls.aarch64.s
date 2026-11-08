@@ -143,15 +143,7 @@ Lcall_loop_block1:
 	; v7 = icmp.ult v5, v0
 	; brif v7, block2, block3
 	cmp	x21, x19
-	b.lo	Lcall_loop_block2
-Lcall_loop_block3:
-	; return v6
-	mov	x0, x22
-	sub	sp, x29, #32
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.hs	Lcall_loop_block3
 Lcall_loop_block2:
 	; v8 = call @twice(v5)
 	mov	x0, x21
@@ -168,6 +160,14 @@ Lcall_loop_block2:
 	mov	x21, x10
 	mov	x22, x9
 	b	Lcall_loop_block1
+Lcall_loop_block3:
+	; return v6
+	mov	x0, x22
+	sub	sp, x29, #32
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lcall_loop_end:
 	.cfi_endproc
 	.section	__TEXT,__text
@@ -206,16 +206,7 @@ Lmemset_loop_block1:
 	; v6 = icmp.ult v4, v0
 	; brif v6, block2, block3
 	cmp	x22, x19
-	b.lo	Lmemset_loop_block2
-Lmemset_loop_block3:
-	; return v5
-	mov	x0, x23
-	sub	sp, x29, #48
-	ldr	x23, [sp], #16
-	ldp	x21, x22, [sp], #16
-	ldp	x19, x20, [sp], #16
-	ldp	x29, x30, [sp], #16
-	ret
+	b.hs	Lmemset_loop_block3
 Lmemset_loop_block2:
 	; v7 = trunc.i8 v4
 	mov	x9, x22
@@ -235,6 +226,15 @@ Lmemset_loop_block2:
 	mov	x22, x10
 	mov	x23, x9
 	b	Lmemset_loop_block1
+Lmemset_loop_block3:
+	; return v5
+	mov	x0, x23
+	sub	sp, x29, #48
+	ldr	x23, [sp], #16
+	ldp	x21, x22, [sp], #16
+	ldp	x19, x20, [sp], #16
+	ldp	x29, x30, [sp], #16
+	ret
 Lmemset_loop_end:
 	.cfi_endproc
 	.subsections_via_symbols

@@ -22,19 +22,19 @@
 	# v6 = icmp.ugt v1, v5
 	# brif v6, block2, block3
 	cmp	rdi, r8
-	ja	".Lphi_loop_block2"
-.Lphi_loop_block3:
-	# return v0
-	mov	rax, rsi
-	mov	rsp, rbp
-	pop	rbp
-	ret
+	jbe	".Lphi_loop_block3"
 .Lphi_loop_block2:
 	# v3 = iconst.i64 1
 	# v7 = iadd v5, v3
 	add	r8, 1
 	# jump block1(v7)
 	jmp	".Lphi_loop_block1"
+.Lphi_loop_block3:
+	# return v0
+	mov	rax, rsi
+	mov	rsp, rbp
+	pop	rbp
+	ret
 .Lphi_loop_end:
 	.cfi_endproc
 	.size "phi_loop", .-"phi_loop"

@@ -35,7 +35,24 @@
 	# v16 = icmp.ult v13, v15
 	# brif v16, block4, block5
 	cmp	rdi, 10
-	jb	".Lmain_block4"
+	jae	".Lmain_block5"
+.Lmain_block4:
+	# v17 = iconst.i64 4
+	# v18 = imul v13, v17
+	imul	r9, rdi, 4
+	# v19 = ptradd v0, v18
+	add	r9, rsi
+	# v20 = load.i32 v19
+	mov	r9d, dword ptr [r9]
+	# v21 = sext.i64 v20
+	movsxd	r9, r9d
+	# v22 = iadd v14, v21
+	add	r8, r9
+	# v23 = iconst.i64 1
+	# v24 = iadd v13, v23
+	add	rdi, 1
+	# jump block3(v24, v22)
+	jmp	".Lmain_block3"
 .Lmain_block5:
 	# v25 = iconst.i32 0
 	xor	esi, esi
@@ -192,23 +209,6 @@
 	pop	rbx
 	pop	rbp
 	ret
-.Lmain_block4:
-	# v17 = iconst.i64 4
-	# v18 = imul v13, v17
-	imul	r9, rdi, 4
-	# v19 = ptradd v0, v18
-	add	r9, rsi
-	# v20 = load.i32 v19
-	mov	r9d, dword ptr [r9]
-	# v21 = sext.i64 v20
-	movsxd	r9, r9d
-	# v22 = iadd v14, v21
-	add	r8, r9
-	# v23 = iconst.i64 1
-	# v24 = iadd v13, v23
-	add	rdi, 1
-	# jump block3(v24, v22)
-	jmp	".Lmain_block3"
 .Lmain_block2:
 	# v5 = iconst.i64 4
 	# v6 = imul v2, v5

@@ -502,6 +502,9 @@ contracts promise no accessible writes, no freeing, no synchronization, no
 callbacks and preserved object accessibility. See
 [LLVM import](../frontends/llvm.md).
 
+Block snapshots are released after their last successor is visited. Local
+cleanup keeps one reusable fact table and does not allocate block snapshots.
+
 ### stack-promote
 
 `stack-promote` promotes scalar i8 to i64 and pointer fields reached only
