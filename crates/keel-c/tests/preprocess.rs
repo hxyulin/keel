@@ -743,3 +743,46 @@ fn batch_cache_rebinds_alias_locations_and_does_not_retain_once_or_macros() {
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn batch_cache_keeps_target_sysroot_and_missing_header_state_private() {
+    let root = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("batch-cache-environment");
+    for (name, value) in [("first", 11), ("second", 29)] {
+        let include = root.join(name).join("usr/include");
+        std::fs::create_dir_all(&include).unwrap();
+        std::fs::write(include.join("value.h"), format!("#define VALUE {value}\n")).unwrap();
+    }
+    let mut cache = keel_c::PreprocessCache::new();
+    let source =
+        "#include <stdint.h>\n#include <value.h>\nVALUE __SIZEOF_LONG__ __APPLE__ __linux__\n";
+    for (target, sdk, value) in [
+        (keel_ir::Target::Aarch64AppleDarwin, "first", "11"),
+        (keel_ir::Target::X86_64LinuxGnu, "second", "29"),
+        (keel_ir::Target::Aarch64AppleDarwin, "first", "11"),
+    ] {
+        let options = PreprocessOptions {
+            target,
+            sysroot: Some(root.join(sdk)),
+            ..Default::default()
+        };
+        let plain = preprocess(source, "caller.c", &options).unwrap();
+        assert_eq!(
+            cache.preprocess(source, "caller.c", &options).unwrap(),
+            plain
+        );
+        assert!(plain.contains(value));
+        let header = root.join(sdk).join("usr/include/value.h");
+        let text = std::fs::read_to_string(&header).unwrap();
+        std::fs::remove_file(&header).unwrap();
+        let plain = preprocess(source, "caller.c", &options).unwrap_err();
+        let reused = cache.preprocess(source, "caller.c", &options).unwrap_err();
+        assert_eq!(reused.to_string(), plain.to_string());
+        std::fs::write(&header, text).unwrap();
+        assert_eq!(
+            cache.preprocess(source, "caller.c", &options).unwrap(),
+            preprocess(source, "caller.c", &options).unwrap()
+        );
+    }
+    assert!(cache.lexical_hits() > 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
