@@ -97,9 +97,7 @@ pub fn run(func: &mut Function) -> bool {
             continue;
         };
         let loc = func.inst_loc(inst);
-        for i in suffix {
-            func.remove_inst(i);
-        }
+        func.remove_insts(block, &suffix);
         let trap = func.append_inst(block, InstData::Trap);
         func.set_inst_loc(trap, loc);
         func.remove_blocks(&dead);

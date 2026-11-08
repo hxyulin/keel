@@ -437,6 +437,20 @@ impl<T: EntityRef> ListPool<T> {
         item
     }
 
+    /// Compacts a list in place without growing its storage.
+    pub(crate) fn retain(&mut self, list: &mut ListRange<T>, mut keep: impl FnMut(T) -> bool) {
+        let start = list.start as usize;
+        let mut retained = 0;
+        for index in 0..list.len as usize {
+            let item = self.items[start + index];
+            if keep(item) {
+                self.items[start + retained] = item;
+                retained += 1;
+            }
+        }
+        list.len = retained as u32;
+    }
+
     /// Keeps the first `len` items of `list`.
     pub(crate) fn truncate(&mut self, list: &mut ListRange<T>, len: usize) {
         assert!(len <= list.len as usize, "list index out of bounds");

@@ -327,3 +327,46 @@ fn accessibility_preservation_is_explicit_and_not_implied_by_nofree() {
     assert!(!m.decls[1].attrs.contract.preserves_access);
     assert_eq!(parsed(&m.to_string()).to_string(), m.to_string());
 }
+
+#[test]
+fn bulk_removal_matches_individual_metadata_and_cfg_invalidation() {
+    let mut module = parsed(&SOURCE.replace(" v1 = call", " v2 = call @callee(v0)\n v1 = call"));
+    let f = &mut module.functions[0];
+    let block = f.entry_block().unwrap();
+    let dead = f.block_insts(block)[0];
+    let mut expected = f.clone();
+    let stamp = f.cfg_stamp();
+    expected.remove_inst(dead);
+    f.remove_insts(block, &[dead]);
+    assert_eq!(f.cfg_stamp(), stamp);
+    assert!(f.is_removed(dead));
+    assert_eq!(f.to_string(), expected.to_string());
+    keel_ir::verify_module(&module).unwrap();
+    let f = &mut module.functions[0];
+    let all = f.block_insts(block).to_vec();
+    let stamp = f.cfg_stamp();
+    f.remove_insts(block, &all);
+    assert_ne!(f.cfg_stamp(), stamp);
+    assert!(
+        all.iter()
+            .all(|&i| f.is_removed(i) && f.call_contract(i).is_none())
+    );
+}
+
+#[test]
+fn bulk_removal_rejects_invalid_order_before_mutation() {
+    let mut module = parsed(SOURCE);
+    let f = &mut module.functions[0];
+    let b = f.entry_block().unwrap();
+    let before = f.to_string();
+    let mut reversed = f.block_insts(b).to_vec();
+    reversed.reverse();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f.remove_insts(b, &reversed);
+        }))
+        .is_err()
+    );
+    assert_eq!(f.to_string(), before);
+    keel_ir::verify_module(&module).unwrap();
+}

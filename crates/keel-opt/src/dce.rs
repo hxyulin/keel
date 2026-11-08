@@ -108,16 +108,16 @@ pub fn run(func: &mut Function) -> bool {
 
     let mut changed = false;
     let mut dead_insts: Scratch<Inst> = Scratch::new();
-    for block in func.blocks() {
+    let layout: Vec<_> = func.blocks().collect();
+    for block in layout {
+        dead_insts.clear();
         for &inst in func.block_insts(block) {
             if !live_inst[inst.index()] {
                 dead_insts.push(inst);
             }
         }
-    }
-    for &inst in dead_insts.iter() {
-        func.remove_inst(inst);
-        changed = true;
+        changed |= !dead_insts.is_empty();
+        func.remove_insts(block, &dead_insts);
     }
 
     let mut blocks: Scratch<Block> = Scratch::new();

@@ -1186,6 +1186,50 @@ impl Function {
         self.insts[inst].block = NO_BLOCK;
     }
 
+    /// Removes an ordered subsequence of a block's instructions in one compaction.
+    /// Results must be unused or replaced, as for [`Self::remove_inst`].
+    /// Surviving instruction IDs, metadata and order stay unchanged.
+    /// Runs in O(block length + removed count), without allocating.
+    ///
+    /// # Panics
+    /// Panics before mutation if `removed` is not a subsequence of the block
+    /// (including duplicate, already removed, or out-of-order instructions).
+    pub fn remove_insts(&mut self, block: Block, removed: &[Inst]) {
+        if removed.is_empty() {
+            return;
+        }
+        let mut next = 0;
+        for &inst in self.block_insts(block) {
+            if removed.get(next) == Some(&inst) {
+                next += 1;
+            }
+        }
+        assert_eq!(
+            next,
+            removed.len(),
+            "removed instructions must follow block order"
+        );
+        if self.block_insts(block).last() == removed.last() {
+            self.cfg_stamp = fresh_cfg_stamp();
+        }
+        for &inst in removed {
+            self.call_contracts.remove(&inst);
+            self.inst_facts.remove(&inst);
+            self.insts[inst].block = NO_BLOCK;
+        }
+        let data = &mut self.blocks[block];
+        self.layout_len -= removed.len() * usize::from(data.in_layout);
+        let mut next = 0;
+        self.block_insts.retain(&mut data.insts, |inst| {
+            if removed.get(next) == Some(&inst) {
+                next += 1;
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     /// Moves `inst` to `at`, keeping its results.
     pub fn move_inst(&mut self, inst: Inst, at: InsertPoint) {
         self.remove_inst(inst);

@@ -84,8 +84,10 @@ it without depending on the IR.
   redirect values with `replace_all_uses`.
 
 **Decisions.** Instruction storage keeps contiguous per-block slices; there
-is no linked list. The planned storage work adds `Function::remove_insts`
-for passes that remove many instructions at once, position hints so an
+is no linked list. `Function::remove_insts` removes an ordered subsequence
+with one block compaction, clearing its instruction metadata without changing
+surviving handles. DCE and noreturn cleanup use it. Other planned storage work
+includes position hints so an
 insertion does not scan its block, a CFG stamp taken on read, and a 48-byte
 `InstData` with indirect-call arguments and `invoke` kept inline. A
 mid-block insertion still shifts the rest of the block. Functions are not
