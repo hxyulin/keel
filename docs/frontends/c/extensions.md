@@ -50,7 +50,13 @@ Darwin's libm never sets `errno`, so a recognized square root there is only
 `fsqrt`. Linux libm sets `errno` to `EDOM` for negative inputs, so on Linux a
 recognized square root computes `fsqrt` for `x >= 0` and calls the library for
 negative and NaN inputs. This matches Clang's default `-fmath-errno` code. Keel
-has no `-fno-math-errno`.
+has no standalone `-fno-math-errno` flag. With `cc -ffast-math`, recognized
+library square roots lower directly to `fsqrt` on Linux too. This removes the
+errno fallback so Full can vectorize normalization and length maps. Disabling
+builtin recognition still preserves the ordinary library call. Library API
+callers can select the same errno policy with
+`LibraryBuiltins::without_math_errno()`, independently of floating-point
+reassociation permissions.
 
 ### Explicit memory builtins
 

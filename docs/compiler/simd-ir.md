@@ -168,7 +168,17 @@ add/subtract/bitwise operations, and floating add/subtract/multiply/divide can b
 widened to the matching 128-bit shape. Uniform scalar operands are broadcast once
 outside the vector loop. NEON broadcasts use typed `DUP` instructions for all six
 shapes. Signed positive bounds and scalar cleanup are supported, without floating
-reassociation or a fast-math requirement.
+reassociation or a fast-math requirement. In functions marked `fast_math`,
+the map expression matcher also accepts scalar square root and emits packed
+`vfsqrt`. This uses hardware square root on NEON and SSE2, without an estimate
+or Newton refinement. Normalization and length expressions keep their original
+arithmetic order within each vector lane. Existing range and alias guards and
+the original scalar tail still apply. Strict functions keep their existing
+scalar square-root loops. Short, bounded multiply/add maps marked `fast_math`
+can batch four NEON vectors to expose independent arithmetic chains. They keep
+the same range guards and scalar cleanup, and respect `no-unroll-loops`.
+Packed FMA contraction and refined f32 `1/sqrt(x)` lowering run later in the
+`fast-math` pass; general normalization retains hardware root and division.
 
 The full `-O` pipeline includes `loop-reduce`, which lets read-only i32/i64 sum reductions use independent vector accumulators, provided
 the only extra loop-carried value is the wrapping sum. The initial scalar
@@ -195,9 +205,12 @@ The opt-in `loop-dot` pass handles read-only floating dot products on the native
 f64 products from two contiguous streams and one scalar accumulator. Batches of
 eight compute products in vectors, extract lanes in input order, then apply the
 original left-to-right scalar additions in strict functions. In `fast_math`
-functions it instead uses one independent vector accumulator per chunk and
-reduces them once before the scalar tail. The Full pipeline schedules this
-relaxed recipe through `fast-loop-dot`, which does nothing to strict functions. Every load must be nonvolatile and carry `notrap` or `trap_ub`.
+functions it instead uses four independent vector accumulators and reduces
+them once before the scalar tail. A single squared stream and the square of
+the difference of two streams use the same guarded reduction recipe. The Full
+pipeline schedules these relaxed recipes through `fast-loop-dot`, which does
+nothing to strict functions. Every load must be nonvolatile and carry `notrap`
+or `trap_ub`.
 Range guards reject wrapping byte counts or pointer ranges. The original loop
 handles those inputs, short ranges and the tail. Other recurrences, observable
 loads and functions with debugger variable metadata stay scalar. Select this

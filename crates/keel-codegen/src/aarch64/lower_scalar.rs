@@ -205,6 +205,14 @@ impl FunctionCompiler<'_> {
                 self.mach("fmov", [(freg(d, ty)).into(), (rb).into()]);
                 self.def_done(result, d);
             }
+            InstData::Fma { args } if self.ty(args[0]).is_vector() => {
+                self.neon(
+                    keel_ir::NeonIntrinsic::Fmla,
+                    self.ty(args[0]),
+                    &[args[2], args[0], args[1]],
+                    result,
+                );
+            }
             InstData::Fma { args } => {
                 let ty = self.ty(args[0]);
                 let d = self.def_freg(result);

@@ -268,7 +268,7 @@ impl Pass for BuiltinPass {
 // a pass's name decides nothing but its lookup.
 pub(crate) static FAST_MATH: &dyn Pass = &BuiltinPass::new(
     "fast-math",
-    "simplify finite floating algebra and contract native multiply/add in fast_math functions",
+    "simplify finite floating algebra, contract native multiply/add and refine f32 reciprocal roots",
     fast_math::run,
 );
 pub(crate) static FAST_CFG: &dyn Pass = &fast::Cfg;

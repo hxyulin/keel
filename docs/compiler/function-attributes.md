@@ -345,7 +345,7 @@ C compilation options and are rejected for Wasm and other subcommands.
 ## Floating-point math mode
 
 `fast_math` belongs to a function body. It permits finite-only algebra,
-reassociation and fused multiply-add contraction. Inputs and intermediate
+reassociation, fused multiply-add contraction and approximations. Inputs and intermediate
 floating results are assumed finite. The compiler need not preserve NaNs,
 infinities, signed zero, dynamic rounding modes or floating exception state.
 This permission does not change integer, pointer, memory or ABI rules.
@@ -357,7 +357,10 @@ Native `cc`, `compile` and `opt` accept `-ffast-math` to mark every input
 function. `-fno-fast-math` is the default; the last flag wins. Disabling the
 command-line flag does not revoke permissions already stored in input IR or
 undo earlier transformations. C preprocessing defines `__FAST_MATH__=1` when
-the flag is enabled. Wasm rejects the flag for now.
+the flag is enabled. C compilation also permits recognized library square roots
+to omit errno handling, so Linux can vectorize them without a fallback call.
+`-fno-builtin` and per-function builtin disabling still retain ordinary calls.
+Wasm rejects the flag for now.
 
 The mode survives text serialization and module merging. Merging declaration
 attributes does not change the destination body's math mode. Both optional
@@ -365,10 +368,23 @@ and mandatory inlining reject different modes, in either direction, so a
 strict body cannot acquire relaxed arithmetic from its caller. An
 `alwaysinline` requirement across that boundary is diagnosed.
 
-The first implementation enables finite scalar identities and AArch64 scalar
-FMA in Balanced, Size and Full pipelines. Full also enables independent SIMD
-dot accumulators on AArch64 NEON and x86 SSE2. Passes still obey function-local
-optimization policy and optimization levels; `-O0` records the permission
-without performing optional transformations. x86 FMA contraction and reciprocal
-estimate substitution are not enabled by this implementation. Explicit
-approximation intrinsics keep their existing semantics in either mode.
+The `fast-math` pass enables finite scalar identities and AArch64 scalar and
+128-bit packed FMA contraction in Balanced, Size and Full pipelines. Full also
+enables independent SIMD accumulators for dot products, sums of squares and
+squared distances, plus elementwise square-root maps on NEON and SSE2. Short
+bounded multiply/add maps on NEON can process four vectors per iteration,
+unless function policy disables unrolling. Passes still obey optimization
+levels and function-local policy. `-O0` records permission without running
+optional transformations.
+
+Packed f32 `1 / sqrt(x)` uses a reciprocal-square-root estimate followed by
+two NEON refinement steps or one SSE Newton step. Refinement computes `x*r`
+before multiplying by `r` to avoid the range loss of forming `r*r` first.
+The SSE path scales positive subnormal lanes into the normal range before its
+estimate and adjusts the result afterwards. Scalar tails, packed f64 roots,
+and general `x / sqrt(y)` keep hardware square root and division. The mode
+changes no process-wide floating-point control register.
+
+x86 FMA contraction and general reciprocal estimate substitution remain
+disabled. Explicit approximation intrinsics keep their existing semantics in
+either mode.

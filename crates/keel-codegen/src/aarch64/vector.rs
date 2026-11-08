@@ -160,6 +160,10 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
             };
         }
         match data {
+            InstData::Fma { args } => matches!(
+                f.value_type(f.resolve(args[0])),
+                Type::Vector(VectorType::F32x4 | VectorType::F64x2)
+            ),
             InstData::VectorReduce { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorExtract { .. }

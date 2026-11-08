@@ -268,11 +268,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// A recognized `sqrt`, `sqrtf` or `sqrtl` call. Darwin's libm never sets
     /// `errno`, so it is just `fsqrt`. Linux libm sets `errno` for negative
-    /// inputs, so those and NaNs still call the library, as Clang does.
+    /// inputs, so those and NaNs still call the library when preserving errno.
+    /// An explicit no-errno policy permits direct hardware square root there too.
     fn library_sqrt(&mut self, g: usize, fty: &FuncTy, arg: &Expr<'p>, loc: Loc) -> R<Value> {
         let x = self.val(arg)?;
         self.set_loc(loc);
-        if self.g.p.target == keel_ir::Target::Aarch64AppleDarwin {
+        if self.g.p.target == keel_ir::Target::Aarch64AppleDarwin
+            || !self.g.library_builtins.preserves_math_errno()
+        {
             return Ok(self.b.ins().fsqrt(x));
         }
         let ty = fty.ret.ir_with_layout(self.g.p.c_layout);

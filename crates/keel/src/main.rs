@@ -194,6 +194,9 @@ impl Options {
                 policy = policy.disable(builtin);
             }
         }
+        if self.fast_math {
+            policy = policy.without_math_errno();
+        }
         policy
     }
 

@@ -144,3 +144,66 @@ block3:
         assert!(output.status.success(), "{allocation:?}: {output:?}");
     }
 }
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn packed_fma_preserves_single_rounding_and_overlapping_operands() {
+    use std::{fs, process::Command};
+    let mut source = String::new();
+    for (name, ty) in [("fused32", "f32x4"), ("fused64", "f64x2")] {
+        source.push_str(&format!("func @{name}(ptr,ptr,ptr,ptr) cc(c) {{\nblock0(v0:ptr,v1:ptr,v2:ptr,v3:ptr):\n v4 = load.{ty} v0\n v5 = load.{ty} v1\n v6 = load.{ty} v2\n v7 = fma v4,v5,v6\n store v7,v3\n return\n}}\n"));
+    }
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let arm = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    assert!(
+        arm.lines().any(|l| l.contains("fmla") && l.contains(".4s")),
+        "{arm}"
+    );
+    assert!(
+        arm.lines().any(|l| l.contains("fmla") && l.contains(".2d")),
+        "{arm}"
+    );
+    keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("packed-fma");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("driver.c"), include_str!("fixtures/vector_fma.c")).unwrap();
+    let run = |cmd: &mut Command| {
+        let output = cmd.output().unwrap();
+        assert!(output.status.success(), "{cmd:?}: {output:?}");
+    };
+    run(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "-c",
+        "driver.c",
+        "-o",
+        "driver.o",
+    ]));
+    let target = if cfg!(target_arch = "aarch64") {
+        Target::Aarch64AppleDarwin
+    } else {
+        Target::X86_64LinuxGnu
+    };
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        let pipeline = CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &allocation,
+        };
+        let text = keel_codegen::compile_with_pipeline(&module, target, &pipeline).unwrap();
+        fs::write(dir.join("kernels.s"), text).unwrap();
+        run(Command::new("clang").current_dir(&dir).args([
+            "driver.o",
+            "kernels.s",
+            "-lm",
+            "-o",
+            "test",
+        ]));
+        run(&mut Command::new(dir.join("test")));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

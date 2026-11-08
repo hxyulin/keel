@@ -109,6 +109,7 @@ impl LibraryBuiltin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LibraryBuiltins {
     enabled: u8,
+    math_errno: bool,
 }
 
 impl Default for LibraryBuiltins {
@@ -120,12 +121,18 @@ impl Default for LibraryBuiltins {
 impl LibraryBuiltins {
     /// Recognize supported canonical library declarations in hosted C.
     pub const fn hosted() -> Self {
-        Self { enabled: 0x3f }
+        Self {
+            enabled: 0x3f,
+            math_errno: true,
+        }
     }
 
     /// Preserve ordinary calls, as required by the freestanding default.
     pub const fn disabled() -> Self {
-        Self { enabled: 0 }
+        Self {
+            enabled: 0,
+            math_errno: true,
+        }
     }
 
     /// Enable one operation without changing the other operation policies.
@@ -140,6 +147,19 @@ impl LibraryBuiltins {
     pub const fn disable(mut self, operation: LibraryBuiltin) -> Self {
         self.enabled &= !operation.bit();
         self
+    }
+
+    /// Permit recognized square roots to omit the library's errno side effect.
+    /// This leaves disabled operations as ordinary calls and does not grant
+    /// floating-point reassociation or approximation permissions.
+    #[must_use]
+    pub const fn without_math_errno(mut self) -> Self {
+        self.math_errno = false;
+        self
+    }
+
+    pub(crate) const fn preserves_math_errno(self) -> bool {
+        self.math_errno
     }
 
     pub(crate) const fn allows(self, operation: LibraryBuiltin) -> bool {

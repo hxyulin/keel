@@ -534,10 +534,21 @@ implementation without external assembly or old-format decoders. It does not
 measure an amalgamation or the upstream CLI. The driver checks round trips and
 runs compression and decompression separately on deterministic resident inputs.
 
-### Fast-math kernel baselines
+## Fast-math kernel baselines
 
-`suite/c/fastmath/run.py` compares division, the x component of 3D
-normalization (structure-of-arrays), and dot product in single precision:
+`suite/c/fastmath/run.py` compares nine single-precision kernels:
+
+| Kernel | Expression |
+| --- | --- |
+| `division` | `a / b` |
+| `normalize` | x component of `(x,y,z) / length(x,y,z)`, using separate arrays |
+| `dot` | Sum of `a * b` |
+| `rsqrt` | `1 / sqrt(c)`, with positive `c` |
+| `length3` | `sqrt(x*x + y*y + z*z)` |
+| `saxpy` | `0.75 * a + b` |
+| `polynomial` | `((0.125*x + 0.5)*x + 0.75)*x + 1` |
+| `sumsq` | Sum of `x*x` |
+| `distance2` | Sum of `(x-y)*(x-y)` |
 
 ```sh
 cargo build --release -p keel
@@ -567,9 +578,16 @@ and normal. This is a finite, bounded-domain baseline: it makes no accuracy
 claim for NaNs, infinities, zeros, subnormals or extreme exponents.
 
 Before timing any row, every build checks sizes 1, 3, 4, 7, 8 and 17 plus the
-requested sizes against a long-double oracle. Division and normalization must
-have relative error at most `2e-6`. Dot error divided by the sum of absolute
-products must be at most `5e-5`; this also permits scalar accumulation error.
+requested sizes against a long-double oracle. Division, normalization, and
+the square-root kernels must have relative error at most `2e-6`.
+SAXPY and polynomial error divided by the sum of absolute terms must be at
+most `2e-6`, which measures cancellation without dividing by a near-zero result.
+Dot error divided by the sum of absolute
+products must be at most `5e-5`. For sum of squares and squared distance,
+the limit is `5e-4` to admit sequential float accumulation over the default
+long arrays. Every row reports its actual error. These are gates for both
+strict and relaxed baselines, not an accuracy guarantee for compiler
+transformations.
 On hosts where long double equals double, the oracle still has more precision
 than the float kernels. Each timed invocation checks again before and after
 its loop, outside the measured region. These tolerances are benchmark gates,
@@ -590,4 +608,5 @@ the default application benchmark set.
 
 Run the numerical-gate regressions with
 `python3 -m unittest discover -s suite/c/fastmath -v`. They check a valid
-scalar implementation and reject NaN output and an incorrect reduction.
+scalar implementation and reject NaN output, an incorrect reduction, and
+incorrect output from each new map and reduction kernel.

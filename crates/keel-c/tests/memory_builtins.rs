@@ -936,9 +936,27 @@ fn library_sqrt_is_fsqrt_with_a_libm_fallback_where_libm_sets_errno() {
                 target != Target::Aarch64AppleDarwin,
                 "{target:?} {module}"
             );
+            let relaxed = keel_c::compile_with_policies(
+                &source,
+                "sqrt.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+                keel_c::FunctionBinding::default(),
+                keel_c::LibraryBuiltins::hosted().without_math_errno(),
+            )
+            .unwrap();
+            assert!(has_fsqrt(&relaxed) && !calls(&relaxed, name), "{relaxed}");
+            keel_ir::verify_module(&relaxed).unwrap();
+            keel_codegen::compile(&relaxed, target).unwrap();
             for policy in [
                 keel_c::LibraryBuiltins::disabled(),
                 keel_c::LibraryBuiltins::hosted().disable(builtin),
+                keel_c::LibraryBuiltins::disabled().without_math_errno(),
+                keel_c::LibraryBuiltins::hosted()
+                    .disable(builtin)
+                    .without_math_errno(),
             ] {
                 let module = keel_c::compile_with_policies(
                     &source,

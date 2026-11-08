@@ -386,6 +386,15 @@ impl Analyze<'_> {
                 self.c.stream_bytes = bytes;
                 self.address(addr)?;
             }
+            // Native packed square root preserves each lane's arithmetic.
+            // Restrict the new recipe to explicit fast-math functions so strict
+            // compilation retains its existing scheduling and generated code.
+            D::Unary {
+                op: keel_ir::UnaryOp::Fsqrt,
+                arg,
+            } if self.f.attrs.fast_math => {
+                self.expression_width(arg, depth + 1, shape)?;
+            }
             D::Binary { op: B::Sdiv, args }
                 if self.conditional
                     && self.target == VectorTarget::Aarch64Neon
@@ -1754,10 +1763,38 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let vector = f.create_block();
     let ty = f.value_type(c.iv);
     let vi = f.append_block_param(vector, ty);
-    let lanes = i64::from(c.shape.lanes());
+    let vector_lanes = i64::from(c.shape.lanes());
+    // A short multiply/add chain benefits from several independent vectors.
+    // Keep division/root maps and reductions on their existing recipes.
+    let chain = f
+        .block_insts(c.body)
+        .iter()
+        .filter(|&&i| matches!(f.inst_data(i), D::Binary { op: B::Fmul, .. }))
+        .count();
+    let only_arithmetic = f.block_insts(c.body).iter().all(|&i| {
+        !matches!(
+            f.inst_data(i),
+            D::Unary { .. } | D::Binary { op: B::Fdiv, .. }
+        )
+    });
+    let unroll = if f.attrs.fast_math
+        && target == VectorTarget::Aarch64Neon
+        && matches!(c.output, Output::Store(_))
+        && matches!(c.shape, VectorType::F32x4 | VectorType::F64x2)
+        && keel_ir::FunctionPolicy::resolve(&f.attrs).is_ok_and(|p| p.unroll != Some(false))
+        && c.vectors.len() <= 16
+        && c.addresses.len() <= 3
+        && (2..=4).contains(&chain)
+        && only_arithmetic
+    {
+        4
+    } else {
+        1
+    };
+    let lanes = vector_lanes * unroll;
     let bytes = c.stream_bytes;
     let zero = iconst(f, guard, ty, 0);
-    let min = iconst(f, guard, ty, lanes * 4);
+    let min = iconst(f, guard, ty, vector_lanes * 4);
     let from_zero = int_const(f, c.start) == Some(0);
     let count = if from_zero {
         c.bound
@@ -1981,48 +2018,68 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     };
     let mut addresses: Vec<_> = c.addresses.iter().map(|(&a, &b)| (a, b)).collect();
     addresses.sort();
-    for (a, base) in addresses {
-        let ptr = bin(f, vector, B::Ptradd, base, offset);
-        mapping.insert(a, ptr);
-    }
-    for i in f.block_insts(c.body).to_vec() {
-        let original = f.inst_data(i).clone();
-        let result = f.inst_results(i).first().copied().map(|v| f.resolve(v));
-        let data = match original {
-            D::Load {
-                mut flags, addr, ..
-            } if result.is_some_and(|v| c.vectors.contains(&v)) => {
-                flags.align = flags.align.min(bytes);
-                D::Load {
-                    flags,
-                    ty: Type::Vector(c.shape),
-                    addr: mapping[&f.resolve(addr)],
-                }
-            }
-            D::Binary { op, args } if result.is_some_and(|v| c.vectors.contains(&v)) => {
-                D::VectorBinary {
-                    op: target.binary(op, c.shape.lane_type()).unwrap(),
-                    args: args.map(|v| mapping[&f.resolve(v)]),
-                }
-            }
-            D::Store {
-                mut flags,
-                value,
-                addr,
-            } => {
-                flags.align = flags.align.min(bytes);
-                D::Store {
-                    flags,
-                    value: mapping[&f.resolve(value)],
-                    addr: mapping[&f.resolve(addr)],
-                }
-            }
-            _ => continue,
+    for chunk in 0..unroll {
+        let offset = if chunk == 0 {
+            offset
+        } else {
+            let delta = iconst(
+                f,
+                vector,
+                Type::I64,
+                chunk * vector_lanes * i64::from(bytes),
+            );
+            bin(f, vector, B::Iadd, offset, delta)
         };
-        let new = f.append_inst(vector, data);
-        f.set_inst_loc(new, f.inst_loc(i));
-        if let Some(v) = result {
-            mapping.insert(v, f.first_result(new));
+        for &(a, base) in &addresses {
+            let ptr = bin(f, vector, B::Ptradd, base, offset);
+            mapping.insert(a, ptr);
+        }
+        for i in f.block_insts(c.body).to_vec() {
+            let original = f.inst_data(i).clone();
+            let result = f.inst_results(i).first().copied().map(|v| f.resolve(v));
+            let data = match original {
+                D::Load {
+                    mut flags, addr, ..
+                } if result.is_some_and(|v| c.vectors.contains(&v)) => {
+                    flags.align = flags.align.min(bytes);
+                    D::Load {
+                        flags,
+                        ty: Type::Vector(c.shape),
+                        addr: mapping[&f.resolve(addr)],
+                    }
+                }
+                D::Unary {
+                    op: keel_ir::UnaryOp::Fsqrt,
+                    arg,
+                } if result.is_some_and(|v| c.vectors.contains(&v)) => D::VectorUnary {
+                    op: keel_ir::UnaryOp::Fsqrt,
+                    arg: mapping[&f.resolve(arg)],
+                },
+                D::Binary { op, args } if result.is_some_and(|v| c.vectors.contains(&v)) => {
+                    D::VectorBinary {
+                        op: target.binary(op, c.shape.lane_type()).unwrap(),
+                        args: args.map(|v| mapping[&f.resolve(v)]),
+                    }
+                }
+                D::Store {
+                    mut flags,
+                    value,
+                    addr,
+                } => {
+                    flags.align = flags.align.min(bytes);
+                    D::Store {
+                        flags,
+                        value: mapping[&f.resolve(value)],
+                        addr: mapping[&f.resolve(addr)],
+                    }
+                }
+                _ => continue,
+            };
+            let new = f.append_inst(vector, data);
+            f.set_inst_loc(new, f.inst_loc(i));
+            if let Some(v) = result {
+                mapping.insert(v, f.first_result(new));
+            }
         }
     }
     let step = iconst(f, vector, ty, lanes);

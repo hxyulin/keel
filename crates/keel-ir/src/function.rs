@@ -262,7 +262,7 @@ impl Signature {
 /// Function symbol binding, promises and optimization policy, separate from ABI types.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
-    /// Permit finite-only floating algebra, reassociation and contraction.
+    /// Permit finite-only floating algebra, reassociation, contraction and approximations.
     /// NaNs, infinities, signed zero and floating exception state are not preserved.
     pub fast_math: bool,
     /// Ordered x86 ISA permission edits, independent of optimization policy.

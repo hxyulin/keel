@@ -201,3 +201,46 @@ fn relaxed_dot_uses_vector_recurrences_and_preserves_seed_and_tails() {
         }
     }
 }
+
+#[test]
+fn square_and_distance_reductions_keep_seed_tails_and_stream_order() {
+    for ty in ["f32", "f64"] {
+        for distance in [false, true] {
+            let source = source(ty).replacen(" {\n", " fast_math {\n", 1);
+            let source = if distance {
+                source.replace(
+                    "v14 = fmul v11,v13",
+                    "v18 = fsub v11,v13\n v14 = fmul v18,v18",
+                )
+            } else {
+                // Remove the unused second stream so the accepted loop has no
+                // unrelated memory operation to erase.
+                source
+                    .replace(
+                        &format!(" v12 = ptradd v1,v9\n v13 = load.{ty} trap_ub v12\n"),
+                        "",
+                    )
+                    .replace("fmul v11,v13", "fmul v11,v11")
+            };
+            let original = keel_ir::parse(&source).unwrap();
+            for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+                let m = optimize(&source, target);
+                assert!(m.to_string().contains("vfadd"), "{m}");
+                if distance {
+                    assert!(m.to_string().contains("vfsub"), "{m}");
+                }
+                let left: Vec<_> = (0..65).map(|i| (i as f64 - 32.0) / 4.0).collect();
+                let right: Vec<_> = (0..65).map(|i| (i % 7) as f64 / 8.0).collect();
+                for n in [0, 1, 7, 8, 15, 16, 17, 33, 65] {
+                    assert_eq!(
+                        execute(&m, &left[..n], &right[..n], 3.5),
+                        execute(&original, &left[..n], &right[..n], 3.5),
+                        "{ty}, distance={distance}, {target:?}, n={n}"
+                    );
+                }
+                let volatile = optimize(&source.replace("trap_ub", "volatile"), target);
+                assert!(!volatile.to_string().contains("vfmul"), "{volatile}");
+            }
+        }
+    }
+}

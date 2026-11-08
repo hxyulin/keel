@@ -92,7 +92,7 @@ def main():
                     row.update(config=name, round=round_index)
                     report['samples'].append(row)
     for n in args.sizes:
-        for kernel in ('division', 'normalize', 'dot'):
+        for kernel in ('division', 'normalize', 'dot', 'rsqrt', 'length3', 'saxpy', 'polynomial', 'sumsq', 'distance2'):
             for name in configs:
                 rows = [r for r in report['samples'] if
                         (r['n'], r['kernel'], r['config']) == (n, kernel, name)]

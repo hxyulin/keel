@@ -118,3 +118,51 @@ fn merging_modules_preserves_body_permissions() {
     );
     keel_ir::verify_module(&merged).unwrap();
 }
+
+#[test]
+fn packed_contraction_is_gated_and_uses_generic_fused_ir() {
+    for ty in ["f32x4", "f64x2"] {
+        let src = format!(
+            "func @f({ty},{ty},{ty}) -> {ty} fast_math {{\nblock0(v0:{ty},v1:{ty},v2:{ty}):\n v3 = vfmul v0,v1\n v4 = vfadd v3,v2\n return v4\n}}"
+        );
+        for target in [
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+            VectorTarget::Portable,
+        ] {
+            let m = optimize(&src, target);
+            assert_eq!(
+                m.to_string().contains(" = fma "),
+                target == VectorTarget::Aarch64Neon,
+                "{m}"
+            );
+            let strict = optimize(&src.replace(" fast_math", ""), target);
+            assert!(!strict.to_string().contains(" = fma "), "{strict}");
+        }
+    }
+}
+
+#[test]
+fn reciprocal_root_estimates_are_f32_native_and_opt_in() {
+    for (ty, scalar) in [("f32x4", "f32"), ("f64x2", "f64")] {
+        let src = format!(
+            "func @f({ty}) -> {ty} fast_math {{\nblock0(v0:{ty}):\n v1 = fconst.{scalar} 1.0\n v2 = vsplat.{ty} v1\n v3 = vfsqrt v0\n v4 = vfdiv v2,v3\n return v4\n}}"
+        );
+        for target in [
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+            VectorTarget::Portable,
+        ] {
+            let m = optimize(&src, target);
+            let estimate = ty == "f32x4" && target != VectorTarget::Portable;
+            assert_eq!(!m.to_string().contains(" = vfdiv "), estimate, "{m}");
+            let strict = optimize(&src.replace(" fast_math", ""), target);
+            assert!(strict.to_string().contains(" = vfdiv "), "{strict}");
+            let general = optimize(&src.replace("vfdiv v2,v3", "vfdiv v0,v3"), target);
+            assert!(general.to_string().contains(" = vfdiv "), "{general}");
+            let mut twice = m.clone();
+            keel_opt::run_passes_for_target(&mut twice, &["fast-math", "dce"], target).unwrap();
+            assert_eq!(twice.to_string(), m.to_string());
+        }
+    }
+}

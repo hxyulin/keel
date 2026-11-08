@@ -228,8 +228,15 @@ impl FunctionCompiler<'_> {
         let d = self.def_freg(result);
         let accumulating = matches!(op, N::Fmla | N::Fmls | N::Suqadd | N::Usqadd);
         let work = if accumulating {
-            self.move_vector(FS0, a);
-            FS0
+            // A native FMA can write the final register directly unless that
+            // would destroy a multiplicand before the instruction reads it.
+            let work = if matches!(op, N::Fmla | N::Fmls) && b != Some(d) && c != Some(d) {
+                d
+            } else {
+                FS0
+            };
+            self.move_vector(work, a);
+            work
         } else {
             d
         };

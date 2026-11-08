@@ -1,9 +1,10 @@
 //! Floating dot products: ordered scalar folds or explicitly relaxed SIMD sums.
 //!
-//! Only read-only, zero-based unsigned i64 loops over two contiguous streams
-//! qualify. Reordered loads must be nonvolatile and either notrap or trap_ub.
-//! A guarded eight-element body retains every scalar FADD in its original order;
-//! the original loop handles short inputs, wrapping addresses and the tail.
+//! Read-only, zero-based unsigned i64 loops over contiguous streams qualify.
+//! Fast math also admits a single squared stream and squared differences.
+//! Reordered loads must be nonvolatile and either notrap or trap_ub. Strict
+//! batches retain scalar addition order; relaxed batches use four independent
+//! vector accumulators. Original loops handle short ranges, wrap and tails.
 use crate::counted_loop::{CountedLoop, invariant};
 use crate::ir_match::{def, int_const};
 use keel_ir::fxhash::FxHashSet;
@@ -18,7 +19,7 @@ impl crate::Pass for FastLoopDot {
         "fast-loop-dot"
     }
     fn description(&self) -> &'static str {
-        "vectorize reassociated dot products in fast_math functions"
+        "vectorize floating products, squares and squared differences in fast_math functions"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Vectorize
@@ -68,6 +69,12 @@ struct Stream {
     base: Value,
     flags: MemoryFlags,
 }
+#[derive(Clone, Copy)]
+enum Product {
+    Multiply,
+    Square,
+    SquaredDifference,
+}
 struct Candidate {
     header: Block,
     entry: Inst,
@@ -75,7 +82,8 @@ struct Candidate {
     zero: Value,
     seed: Value,
     shape: VectorType,
-    streams: [Stream; 2],
+    streams: Vec<Stream>,
+    product: Product,
 }
 fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let &[iv, sum] = f.block_params(header) else {
@@ -135,6 +143,23 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     }
     let mut allowed = FxHashSet::from_iter([update, product, counted.step, shape_loop.back]);
+    let (product_kind, factors) = if f.resolve(factors[0]) == f.resolve(factors[1]) {
+        let square = f.resolve(factors[0]);
+        let difference = def(f, square)?;
+        if f.attrs.fast_math
+            && let D::Binary { op: B::Fsub, args } = *f.inst_data(difference)
+        {
+            if f.inst_block(difference) != shape_loop.body {
+                return None;
+            }
+            allowed.insert(difference);
+            (Product::SquaredDifference, args.to_vec())
+        } else {
+            (Product::Square, vec![square])
+        }
+    } else {
+        (Product::Multiply, factors.to_vec())
+    };
     let bytes = shape.lane_type().bytes()?;
     let mut streams = Vec::new();
     for factor in factors {
@@ -225,7 +250,8 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         zero: f.resolve(initial.args[0]),
         seed: f.resolve(initial.args[1]),
         shape,
-        streams: streams.try_into().ok()?,
+        streams,
+        product: product_kind,
     })
 }
 fn emit(f: &mut Function, block: Block, data: D) -> Value {
@@ -242,19 +268,26 @@ fn cmp(f: &mut Function, block: Block, cond: IntCC, a: Value, b: Value) -> Value
     emit(f, block, D::Icmp { cond, args: [a, b] })
 }
 fn transform(f: &mut Function, c: Candidate) {
-    const GROUP: i64 = 8;
+    let relaxed = f.attrs.fast_math;
+    // Four independent recurrences amortize loop control without exhausting
+    // the baseline register banks. Strict left folds retain eight elements.
+    let group_size: i64 = if relaxed {
+        i64::from(c.shape.lanes()) * 4
+    } else {
+        8
+    };
     let gate = f.create_block();
     let guard = f.create_block();
     let body = f.create_block();
     let groups_left = f.append_block_param(body, Type::I64);
     let sum = f.append_block_param(body, c.shape.lane_type());
-    let pointers = [
-        f.append_block_param(body, Type::Ptr),
-        f.append_block_param(body, Type::Ptr),
-    ];
-    let relaxed = f.attrs.fast_math;
+    let pointers: Vec<_> = c
+        .streams
+        .iter()
+        .map(|_| f.append_block_param(body, Type::Ptr))
+        .collect();
     let accumulators: Vec<_> = if relaxed {
-        (0..GROUP / i64::from(c.shape.lanes()))
+        (0..group_size / i64::from(c.shape.lanes()))
             .map(|_| f.append_block_param(body, Type::Vector(c.shape)))
             .collect()
     } else {
@@ -265,7 +298,7 @@ fn transform(f: &mut Function, c: Candidate) {
         .lane_type()
         .bytes()
         .expect("floating lane has a size");
-    let group = integer(f, gate, GROUP);
+    let group = integer(f, gate, group_size);
     let enough = cmp(f, gate, IntCC::Uge, c.bound, group);
     f.append_inst(
         gate,
@@ -303,10 +336,11 @@ fn transform(f: &mut Function, c: Candidate) {
         let nowrap = cmp(f, guard, IntCC::Uge, end, pointer);
         safe = bin(f, guard, B::And, safe, nowrap);
     }
-    let group_shift = integer(f, guard, i64::from(GROUP.trailing_zeros()));
+    let group_shift = integer(f, guard, i64::from(group_size.trailing_zeros()));
     let groups = bin(f, guard, B::Ushr, c.bound, group_shift);
     let end = bin(f, guard, B::Shl, groups, group_shift);
-    let mut initial = vec![groups, c.seed, c.streams[0].base, c.streams[1].base];
+    let mut initial = vec![groups, c.seed];
+    initial.extend(c.streams.iter().map(|stream| stream.base));
     if relaxed {
         let zero = emit(
             f,
@@ -343,7 +377,7 @@ fn transform(f: &mut Function, c: Candidate) {
         },
     );
     let mut products = Vec::new();
-    for chunk in 0..GROUP / i64::from(c.shape.lanes()) {
+    for chunk in 0..group_size / i64::from(c.shape.lanes()) {
         let mut inputs = Vec::new();
         for (index, stream) in c.streams.iter().enumerate() {
             let addr = if chunk == 0 {
@@ -366,12 +400,27 @@ fn transform(f: &mut Function, c: Candidate) {
                 },
             ));
         }
+        let factors = match c.product {
+            Product::Multiply => [inputs[0], inputs[1]],
+            Product::Square => [inputs[0], inputs[0]],
+            Product::SquaredDifference => {
+                let difference = emit(
+                    f,
+                    body,
+                    D::VectorBinary {
+                        op: VectorBinaryOp::Fsub,
+                        args: [inputs[0], inputs[1]],
+                    },
+                );
+                [difference, difference]
+            }
+        };
         products.push(emit(
             f,
             body,
             D::VectorBinary {
                 op: VectorBinaryOp::Fmul,
-                args: [inputs[0], inputs[1]],
+                args: factors,
             },
         ));
     }
@@ -396,11 +445,15 @@ fn transform(f: &mut Function, c: Candidate) {
             }
         }
     }
-    let stride = integer(f, body, GROUP * i64::from(bytes));
-    let next_pointers = pointers.map(|p| bin(f, body, B::Ptradd, p, stride));
+    let stride = integer(f, body, group_size * i64::from(bytes));
+    let next_pointers: Vec<_> = pointers
+        .iter()
+        .map(|&p| bin(f, body, B::Ptradd, p, stride))
+        .collect();
     let one = integer(f, body, 1);
     let next_groups = bin(f, body, B::Isub, groups_left, one);
-    let mut back_args = vec![next_groups, total, next_pointers[0], next_pointers[1]];
+    let mut back_args = vec![next_groups, total];
+    back_args.extend(next_pointers);
     let exit = if relaxed {
         let reduce = f.create_block();
         let mut vectors = next_accumulators.iter().copied();

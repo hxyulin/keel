@@ -1,5 +1,6 @@
 """Exercise the numerical gate independently of the benchmark implementations."""
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,12 +24,34 @@ class DriverTests(unittest.TestCase):
     def test_scalar_passes(self):
         result = self.exercise(lambda text: text)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()), 3)
+        self.assertEqual(len(result.stdout.splitlines()), 9)
 
     def test_nan_output_fails(self):
         result = self.exercise(lambda text: text.replace('a[i] / b[i]', '(0.0f / 0.0f)'))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('division failed', result.stderr)
+
+    def test_new_kernel_errors_fail(self):
+        for function, kernel in [('fm_rsqrt', 'rsqrt'), ('fm_length3', 'length3'),
+                                 ('fm_saxpy', 'saxpy'), ('fm_poly', 'polynomial')]:
+            with self.subTest(kernel=kernel):
+                def corrupt(text):
+                    before, body = text.split('void ' + function + '(', 1)
+                    body = re.sub(r'out\[i\] = [^;]+;', 'out[i] = 0;', body, count=1)
+                    return before + 'void ' + function + '(' + body
+                result = self.exercise(corrupt)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(kernel + ' failed', result.stderr)
+
+    def test_new_reduction_errors_fail(self):
+        for function, kernel in [('fm_sumsq', 'sumsq'), ('fm_distance2', 'distance2')]:
+            with self.subTest(kernel=kernel):
+                def corrupt(text):
+                    before, body = text.split('float ' + function + '(', 1)
+                    return before + 'float ' + function + '(' + body.replace('return sum;', 'return 0;', 1)
+                result = self.exercise(corrupt)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(kernel + ' failed', result.stderr)
 
     def test_wrong_reduction_fails(self):
         result = self.exercise(lambda text: text.replace('return sum;', 'return 0;'))

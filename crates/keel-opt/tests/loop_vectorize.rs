@@ -8,6 +8,8 @@ mod loop_reduce_affine;
 mod loop_reduce_casts;
 #[path = "loop_vectorize/loop_reduce_multi.rs"]
 mod loop_reduce_multi;
+#[path = "loop_vectorize/math_maps.rs"]
+mod math_maps;
 #[path = "loop_vectorize/matmul.rs"]
 mod matmul;
 #[path = "loop_vectorize/mixed_narrow.rs"]
