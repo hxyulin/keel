@@ -78,6 +78,57 @@ fn arrays_sort_numeric_priorities_and_keep_input_ties_with_contiguous_tags() {
         assert_eq!(u64at(&exe.bytes, raw + 56), 8);
     }
 }
+
+#[test]
+fn retained_arrays_with_zero_entry_size_keep_relocations_and_dynamic_tags() {
+    let provider = interface();
+    for (name, kind, address_tag, size_tag) in [
+        (".init_array.00099", "init_array", 25, 27),
+        (".init_array", "init_array", 25, 27),
+        (".fini_array.00099", "fini_array", 26, 28),
+        (".fini_array", "fini_array", 26, 28),
+        (".preinit_array", "preinit_array", 32, 33),
+    ] {
+        let mut input = obj(&format!(
+            ".text\n.globl _start\n_start: ret\n.section .text.handler,\"ax\",@progbits\nhandler: ret\n.section {name},\"awR\",@{kind}\n.p2align 3\n.quad handler\n"
+        ));
+        let file = object::File::parse(input.as_slice()).unwrap();
+        let section = file.section_by_name(name).unwrap();
+        assert_eq!(section.size(), 8);
+        assert_eq!(section.align(), 8);
+        assert_eq!(
+            section.flags(),
+            object::SectionFlags::Elf { sh_flags: 0x200003 }
+        );
+        let header = u64at(&input, 40) as usize + section.index().0 * 64;
+        // Rust std emits this valid shape for its argc/argv initializer.
+        input[header + 56..header + 64].copy_from_slice(&0u64.to_le_bytes());
+        for gc_sections in [false, true] {
+            let exe = super::link_with(
+                "retained-array.o",
+                &[input.clone(), provider.clone()],
+                elf::Options {
+                    gc_sections,
+                    ..Default::default()
+                },
+            )
+            .unwrap_or_else(|error| panic!("{name}, gc={gc_sections}: {error}"));
+            let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+            let section = file.section_by_name(name).unwrap();
+            assert_eq!(
+                section.flags(),
+                object::SectionFlags::Elf { sh_flags: 0x200003 }
+            );
+            let tags = tags(&file);
+            assert_eq!(tags[&size_tag], 8);
+            assert_eq!(tags[&address_tag], section.address());
+            assert_eq!(
+                words(&exe.bytes, tags[&address_tag], 8),
+                [symbol(&file, "handler")]
+            );
+        }
+    }
+}
 #[test]
 fn legacy_code_fragments_are_joined_with_nop_alignment_and_dynamic_tags() {
     let a = obj(
@@ -120,17 +171,22 @@ fn explicit_wrong_array_type_entry_size_and_alignment_are_rejected() {
     let valid = obj(".section .init_array,\"aw\",@init_array\n.p2align 3\n.quad 0\n");
     let f = object::File::parse(valid.as_slice()).unwrap();
     let at = u64at(&valid, 40) as usize + f.section_by_name(".init_array").unwrap().index().0 * 64;
-    for (offset, bytes) in [
-        (4, 1u32.to_le_bytes().to_vec()),
-        (56, 4u64.to_le_bytes().to_vec()),
-        (48, 16u64.to_le_bytes().to_vec()),
-        (8, 2u64.to_le_bytes().to_vec()),
-    ] {
-        let mut malformed = valid.clone();
-        malformed[at + offset..at + offset + bytes.len()].copy_from_slice(&bytes);
-        let err = link(&[obj(".text\n.globl _start\n_start: ret\n"), malformed])
-            .expect_err("invalid array accepted");
-        assert!(err.contains("array"), "{err}");
+    for retain in [0, u64::from(object::elf::SHF_GNU_RETAIN)] {
+        for (offset, bytes) in [
+            (4, 1u32.to_le_bytes().to_vec()),
+            (56, 4u64.to_le_bytes().to_vec()),
+            (48, 16u64.to_le_bytes().to_vec()),
+            (8, (2 | retain).to_le_bytes().to_vec()),
+            (8, (7 | retain).to_le_bytes().to_vec()),
+            (8, (0x83 | retain).to_le_bytes().to_vec()),
+        ] {
+            let mut malformed = valid.clone();
+            malformed[at + 8..at + 16].copy_from_slice(&(3 | retain).to_le_bytes());
+            malformed[at + offset..at + offset + bytes.len()].copy_from_slice(&bytes);
+            let err = link(&[obj(".text\n.globl _start\n_start: ret\n"), malformed])
+                .expect_err("invalid array accepted");
+            assert!(err.contains("array"), "{err}");
+        }
     }
 }
 

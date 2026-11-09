@@ -80,7 +80,7 @@ pub(super) fn validate(
     } else {
         priority(name, g)?;
         if kind != ARRAYS[g - 2].1
-            || flags != 3
+            || flags & !u64::from(object::elf::SHF_GNU_RETAIN) != 3
             || !matches!(entsize, 0 | 8)
             || (alignment != 8 && (size != 0 || alignment > 8))
             || !size.is_multiple_of(8)

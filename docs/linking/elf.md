@@ -395,7 +395,8 @@ Dynamically linked output advertises `.preinit_array`, `.init_array` and
 with `.init_array.N`/`.fini_array.N` ordered by numeric priority (0–65535),
 input order for ties, and unsuffixed contributions last. Arrays need the
 matching ELF section type, WRITE/ALLOC flags, 8-byte entries and 8-byte
-alignment when nonempty.
+alignment when nonempty. They may also carry `SHF_GNU_RETAIN`; the flag is
+preserved in the output. Input entry sizes of zero or eight are accepted.
 
 Split `.init` and `.fini` contributions stay in input order with NOP padding.
 `DT_INIT`/`DT_FINI` reference the defined `_init`/`_fini` symbols (hidden is
