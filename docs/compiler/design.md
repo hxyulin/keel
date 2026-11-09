@@ -652,12 +652,13 @@ Allocation is selected through `RegisterAllocator`, independently of
 `InstructionSelector` and IR optimization tiers. `CodegenPipeline` pairs any
 selector with any allocator, so tiers can be compared on the same selected
 instruction plan and register pools. `--regalloc` picks the tier; `-O1` uses
-Fast, `-O2`/`-O3` use Bounded, and `-O0`/`-Os` use Full.
+Fast, `-O2`/`-O3` use Bounded, `-O0` uses Full, and `-Os` uses Compact.
 
 | Tier | Build | What it does |
 | --- | --- | --- |
 | `Full` | default | The algorithm below, with lifetime holes, selection register hints and loop-weighted spill choice |
 | `Bounded` | default | Full homes, then bounded call-free segments that cache repeated spilled scalar reads |
+| `Compact` | default | Full registers with copy-aware spill homes and bounded lifetime-hole reuse for size |
 | `Fast` | default | One contiguous interval per value, no hints, spills the interval that ends last |
 | `Local` | `experimental-regalloc` | Block-local register cache: cross-block values keep stack homes, and local homes appear only on eviction |
 | `Split` | `experimental-regalloc` | Linear scan, then spilled values stay in registers that are free at both ends of a lowering sequence, written back to their homes at block edges. Functions with vectors or `returns_twice` calls use Full |
@@ -722,6 +723,14 @@ value.
    spilled value lives in a stack slot for its whole life: no splitting.
    Spill slots are shared by intervals that do not overlap (holes ignored).
 
+   Compact retains Full's register choices. Its spill homes prefer the primary
+   input's home, then other branch-edge partners' homes, and can share
+   nonintersecting lifetime ranges. Separate width pools preserve each home's
+   size. Per width pool, discovery is bounded to 65,536 possible range
+   comparisons and 1,048,576 home and owner visits. A bitmap supplies
+   contiguous-span reuse after discovery is spent. `--regalloc compact`
+   selects this size policy explicitly; `-Os` selects it by default.
+
    Holes matter in big `switch`-based functions: without them, a value
    defined in one case and used in a tail block far below would block a
    register through every case in between.
@@ -777,8 +786,9 @@ opportunity filter, not a runtime profitability proof. Fast, Full and Split rema
 independently selectable. Application runtime gains are unproven.
 
 `Bounded` (`--regalloc bounded`) uses Full homes and bounded call-free segments.
-The CLI selects it at `-O2` and `-O3` (`-O`); `-O0` and `-Os` retain Full,
-and `-O1` retains Fast. Library callers retain Full unless they select Bounded.
+The CLI selects it at `-O2` and `-O3` (`-O`); `-O0` retains Full,
+`-Os` selects Compact, and `-O1` retains Fast. Library callers retain Full
+unless they select another allocator.
 Segment repair reuses Full's live intervals and skips functions without eligible
 scalar spills.
 Windows end at calls, constraints, block boundaries or 64 selected instructions.

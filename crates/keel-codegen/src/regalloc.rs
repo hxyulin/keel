@@ -44,8 +44,8 @@
 //! also supports per-instruction locations and transfers for splitting allocators.
 //! A spilled scalar lives in an 8-byte stack slot, a vector in 16 bytes, for
 //! its whole life. There is no interval splitting, so a value spilled anywhere is spilled
-//! everywhere. Spill slots are shared by values whose intervals do not
-//! overlap, holes ignored.
+//! everywhere. Compact prefers noninterfering copy partners' spill homes and
+//! searches lifetime holes with bounded work. Other tiers use contiguous spill spans.
 //!
 //! Integers and pointers go in general-purpose registers, floats and vectors
 //! in SIMD/FP registers: two register classes that never interfere. One scan
@@ -179,7 +179,8 @@ pub trait RegisterAllocator {
 }
 
 /// Fast uses conservative contiguous intervals without register affinities.
-/// Full preserves lifetime holes and uses selection affinities. Bounded adds
+/// Full preserves lifetime holes and uses selection affinities. Compact adds
+/// copy-aware spill homes for size; Bounded adds
 /// call-free scalar spill repair to Full. All tiers
 /// share sparse CFG liveness, but Fast constructs only scalar endpoints and
 /// uses a separate contiguous scan.
@@ -199,6 +200,8 @@ pub enum AllocationTier {
     Bounded,
     #[default]
     Full,
+    /// Full registers with copy-aware spill homes and bounded lifetime-hole reuse.
+    Compact,
 }
 impl RegisterAllocator for AllocationTier {
     fn name(&self) -> &'static str {
@@ -212,6 +215,7 @@ impl RegisterAllocator for AllocationTier {
             Self::Adaptive => "adaptive",
             Self::Bounded => "bounded",
             Self::Full => "full",
+            Self::Compact => "compact",
         }
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
@@ -317,13 +321,17 @@ fn allocate_tier_inner(
             let mut spilled = fast_scan(&intervals, pools, &mut locs);
             assign_fast_spill_slots(&mut spilled, &mut locs)
         }
-        AllocationTier::Full => {
+        AllocationTier::Full | AllocationTier::Compact => {
             let intervals =
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
             let mut spilled = weighted::linear_scan(
                 func, selection, &order, &intervals, pools, &mut locs, &weights,
             );
-            assign_spill_slots(&mut spilled, &mut locs)
+            if tier == AllocationTier::Compact {
+                assign_compact_spill_slots(func, &mut spilled, &mut locs, &selection.hints)
+            } else {
+                assign_spill_slots(&mut spilled, &mut locs)
+            }
         }
     };
 
@@ -338,7 +346,7 @@ fn allocation_order(
     tier: AllocationTier,
 ) -> (Vec<Block>, Vec<u32>) {
     let order = cfg.reverse_postorder(func);
-    if tier != AllocationTier::Full {
+    if !matches!(tier, AllocationTier::Full | AllocationTier::Compact) {
         return (order, Vec::new());
     }
     let weights = weighted::block_weights(func, cfg, &order);
@@ -928,8 +936,8 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     backend_scope!(SpillSlots);
     spilled.sort_unstable_by_key(|iv| (iv.start, iv.value, iv.half));
     let mut count = 0;
-    // Separate pools keep each reused home's width stable. Vector homes take
-    // two eight-byte units; the bitset still tracks one home per live vector.
+    // Separate pools keep each reused home's width stable. The bitmap tracks
+    // each home regardless of its number of eight-byte units.
     for units in [1, 2, 4, 8] {
         let base = count;
         let mut slots = SpillSlots::default();
@@ -1893,6 +1901,137 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
     count
 }
 
+struct SpillHome<'a> {
+    end: u32,
+    owners: Vec<&'a Interval>,
+}
+
+/// Prefer copy partners' noninterfering homes, including bounded searches
+/// through lifetime holes. The bitmap supplies span-based reuse after the
+/// search budget. Returns the number of eight-byte spill units.
+fn assign_compact_spill_slots(
+    func: &Function,
+    spilled: &mut [&Interval],
+    locs: &mut [Vec<Option<Loc>>; 2],
+    hints: &crate::select::Hints,
+) -> u32 {
+    if spilled.is_empty() {
+        return 0;
+    }
+    // Store all symmetric copy edges once, in value-indexed contiguous slices.
+    let mut pairs = Vec::new();
+    let mut starts = vec![0u32; func.num_values() + 1];
+    for (_, inst) in func.layout_insts() {
+        for edge in func.inst_data(inst).branch_dests() {
+            for (&param, &arg) in func.block_params(edge.block).iter().zip(&edge.args) {
+                let arg = func.resolve(arg);
+                if param != arg {
+                    pairs.push((param, arg));
+                    starts[param.index() + 1] += 1;
+                    starts[arg.index() + 1] += 1;
+                }
+            }
+        }
+    }
+    for i in 1..starts.len() {
+        starts[i] += starts[i - 1];
+    }
+    let mut next = starts.clone();
+    let mut edges = vec![Value::new(0); 2 * pairs.len()];
+    for (a, b) in pairs {
+        edges[next[a.index()] as usize] = b;
+        edges[next[b.index()] as usize] = a;
+        next[a.index()] += 1;
+        next[b.index()] += 1;
+    }
+    profiling::scope!("spill-slot-assignment");
+    backend_scope!(SpillSlots);
+    spilled.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
+    let mut count = 0;
+    // Separate pools keep each reused home's width stable. The bitmap tracks
+    // each home regardless of its number of eight-byte units.
+    for units in [1, 2, 4, 8] {
+        let base = count;
+        let mut homes: Vec<SpillHome<'_>> = Vec::new();
+        let mut slots = SpillSlots::default();
+        // Bound both precise range checks and visits to homes/owners. The
+        // bitmap supplies ordinary span-based reuse once discovery is spent.
+        let mut range_budget = 65_536usize;
+        let mut search_budget = 1_048_576usize;
+        for iv in spilled.iter().copied().filter(|iv| iv.spill_units == units) {
+            let home_count = homes.len();
+            let mut available = |slot: usize| {
+                let Some(home) = homes.get_mut(slot) else {
+                    return Some(false);
+                };
+                let cost = 1 + home.owners.len();
+                if cost > search_budget {
+                    search_budget = 0;
+                    return None;
+                }
+                search_budget -= cost;
+                if home.end < iv.start() {
+                    home.owners.clear();
+                    return Some(true);
+                }
+                home.owners.retain(|owner| owner.end() >= iv.start());
+                Some(home.owners.iter().all(|owner| {
+                    let cost = owner.ranges.len() + iv.ranges.len();
+                    if cost > range_budget {
+                        return false;
+                    }
+                    range_budget -= cost;
+                    !owner.intersects(iv)
+                }))
+            };
+            let preferred = hints
+                .get(iv.value)
+                .into_iter()
+                .chain(
+                    edges[starts[iv.value.index()] as usize..starts[iv.value.index() + 1] as usize]
+                        .iter()
+                        .copied(),
+                )
+                .filter_map(|value| {
+                    let Loc::Stack(home) = locs[iv.half][value.index()]? else {
+                        return None;
+                    };
+                    let relative = home.checked_sub(base)?;
+                    relative
+                        .is_multiple_of(units)
+                        .then_some((relative / units) as usize)
+                })
+                .find(|&slot| available(slot) == Some(true))
+                .or_else(|| {
+                    for slot in 0..home_count {
+                        match available(slot) {
+                            Some(true) => return Some(slot),
+                            Some(false) => {}
+                            None => break,
+                        }
+                    }
+                    None
+                });
+            let slot = slots.assign_preferred(iv.start(), iv.end(), preferred.map(|s| s as u32));
+            if slot as usize == homes.len() {
+                homes.push(SpillHome {
+                    end: iv.end(),
+                    owners: Vec::new(),
+                });
+            }
+            let home = &mut homes[slot as usize];
+            if home.end < iv.start() {
+                home.owners.clear();
+            }
+            home.end = home.end.max(iv.end());
+            home.owners.push(iv);
+            locs[iv.half][iv.value.index()] = Some(Loc::Stack(base + units * slot));
+        }
+        count += units * slots.count;
+    }
+    count
+}
+
 /// Assign the lowest free stack slot after expiring intervals in start order.
 /// The occupancy words avoid scanning every active interval for every smaller
 /// slot when pressure is high; expiration retains inclusive range endpoints.
@@ -1910,6 +2049,11 @@ struct SpillSlots {
 
 impl SpillSlots {
     fn assign(&mut self, start: u32, end: u32) -> u32 {
+        self.assign_preferred(start, end, None)
+    }
+
+    // The caller proves that a preferred home has no intersecting owner.
+    fn assign_preferred(&mut self, start: u32, end: u32, preferred: Option<u32>) -> u32 {
         if self.min_end.is_some_and(|until| until < start) {
             let first = &mut self.first_occupied;
             let tail = &mut self.occupied_tail;
@@ -1929,6 +2073,30 @@ impl SpillSlots {
                 }
             });
             self.min_end = min_end;
+        }
+        let preferred = preferred.filter(|&slot| slot < self.count);
+        if let Some(slot) = preferred {
+            let word = if slot < 64 {
+                &mut self.first_occupied
+            } else {
+                &mut self.occupied_tail[slot as usize / 64 - 1]
+            };
+            let occupied = *word & (1u64 << (slot % 64)) != 0;
+            *word |= 1u64 << (slot % 64);
+            if occupied {
+                // Several disjoint live ranges can share one home. Retain
+                // occupancy until the last owner's span ends.
+                let (until, _) = self
+                    .active
+                    .iter_mut()
+                    .find(|(_, home)| *home == slot)
+                    .expect("occupied spill home has an active span");
+                *until = (*until).max(end);
+            } else {
+                self.active.push((end, slot));
+            }
+            self.min_end = Some(self.min_end.map_or(end, |min| min.min(end)));
+            return slot;
         }
         let slot = if self.first_occupied != u64::MAX {
             let bit = self.first_occupied.trailing_ones();
@@ -1994,7 +2162,11 @@ mod tests {
             float_caller_saved: &[19],
             float_callee_saved: &[8],
         };
-        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for tier in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            AllocationTier::Compact,
+        ] {
             let a = allocate_tier(
                 &func,
                 &pools,
@@ -2028,7 +2200,11 @@ mod tests {
             float_caller_saved: &[0],
             float_callee_saved: &[],
         };
-        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for tier in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            AllocationTier::Compact,
+        ] {
             let allocation = allocate_tier(
                 &func,
                 &pools,
@@ -2065,7 +2241,11 @@ mod tests {
             float_caller_saved: &[19],
             float_callee_saved: &[8],
         };
-        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for tier in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            AllocationTier::Compact,
+        ] {
             let allocation = allocate_tier(
                 &func,
                 &pools,
@@ -2233,6 +2413,48 @@ mod tests {
             (0..193)
                 .map(|i| (0, i % 3))
                 .chain((0..193).map(|i| (i / 65 + 1, i / 65 + 2))),
+        );
+    }
+
+    #[test]
+    fn spill_holes_keep_all_owners_until_their_last_range() {
+        let intervals: Vec<_> = [
+            vec![(0, 1), (6, 7)],
+            vec![(2, 3), (8, 9)],
+            vec![(4, 5), (10, 11)],
+            vec![(7, 8)],
+            vec![(9, 9)],
+            vec![(12, 13)],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(value, ranges)| Interval {
+            value: Value::new(value),
+            half: 0,
+            ranges: ranges.into(),
+            crosses_call: false,
+            preserved_gprs: 0,
+            float: false,
+            vector: false,
+            spill_units: 1,
+        })
+        .collect();
+        let mut spilled: Vec<_> = intervals.iter().rev().collect();
+        let mut locs = [vec![None; intervals.len()], vec![None; intervals.len()]];
+        assert_eq!(
+            assign_compact_spill_slots(
+                &function(
+                    "func @homes(i64,i64,i64,i64,i64,i64)->i64 {\nblock0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64):\n return v0\n}"
+                ),
+                &mut spilled,
+                &mut locs,
+                &Default::default()
+            ),
+            2
+        );
+        assert_eq!(
+            locs[0],
+            [0, 0, 0, 1, 1, 0].map(|home| Some(Loc::Stack(home)))
         );
     }
 
@@ -2475,7 +2697,11 @@ mod tests {
             for func in &module.functions {
                 for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                     let selection = crate::select::Selection::compute(func, target);
-                    for tier in [AllocationTier::Fast, AllocationTier::Full] {
+                    for tier in [
+                        AllocationTier::Fast,
+                        AllocationTier::Full,
+                        AllocationTier::Compact,
+                    ] {
                         let alloc = allocate_tier(
                             func,
                             &pools,

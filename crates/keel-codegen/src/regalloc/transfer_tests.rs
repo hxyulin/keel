@@ -172,6 +172,7 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                 let tiers = vec![
                     AllocationTier::Fast,
                     AllocationTier::Full,
+                    AllocationTier::Compact,
                     AllocationTier::Bounded,
                 ];
                 #[cfg(feature = "experimental-regalloc")]

@@ -277,7 +277,11 @@ fn assert_reference_equivalence(
             float_callee_saved: &[],
         },
     ] {
-        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for tier in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            AllocationTier::Compact,
+        ] {
             let (order, _) = allocation_order(func, &cfg, tier);
             let full = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
             let (costs, lengths) = weighted::spill_costs(func, selection, &cfg, &order, &full);
@@ -306,7 +310,7 @@ fn assert_reference_equivalence(
                 &pools,
                 &mut expected,
                 hints,
-                if tier == AllocationTier::Full {
+                if tier != AllocationTier::Fast {
                     &density
                 } else {
                     &endpoint
@@ -315,12 +319,56 @@ fn assert_reference_equivalence(
             let expected_slots = reference_assign_spill_slots(&mut reference_spills, &mut expected);
             let actual = allocate_tier(func, &pools, is_call, returns_twice, selection, tier);
             assert_eq!(actual.order, order);
-            assert_eq!(
-                actual.locs, expected,
-                "{} {tier:?}, returns-twice={twice}",
-                func.name
-            );
-            assert_eq!(actual.spill_slots, expected_slots);
+            if tier != AllocationTier::Compact {
+                assert_eq!(
+                    actual.locs, expected,
+                    "{} {tier:?}, returns-twice={twice}",
+                    func.name
+                );
+                assert_eq!(actual.spill_slots, expected_slots);
+            } else {
+                // Spill-home coloring may differ; the independent scan still
+                // decides exactly which values keep each physical register.
+                for (actual, expected) in
+                    actual.locs.iter().flatten().zip(expected.iter().flatten())
+                {
+                    if !matches!(
+                        (actual, expected),
+                        (Some(Loc::Stack(_)), Some(Loc::Stack(_)))
+                    ) {
+                        assert_eq!(
+                            actual, expected,
+                            "{} {tier:?}, returns-twice={twice}",
+                            func.name
+                        );
+                    }
+                }
+                // Check every overlapping byte range, using the reference's
+                // live ranges rather than the coloring algorithm's conflict test.
+                for (i, a) in reference_spills.iter().enumerate() {
+                    let Some(Loc::Stack(home)) = actual.locs[a.half][a.value.index()] else {
+                        panic!("missing spill home");
+                    };
+                    assert!(home + a.spill_units <= actual.spill_slots);
+                    for b in &reference_spills[..i] {
+                        let Some(Loc::Stack(other)) = actual.locs[b.half][b.value.index()] else {
+                            panic!("missing spill home");
+                        };
+                        if home < other + b.spill_units && other < home + a.spill_units {
+                            assert_eq!((home, a.spill_units), (other, b.spill_units));
+                            for &(from, to) in &a.ranges {
+                                assert!(
+                                    b.ranges
+                                        .iter()
+                                        .all(|&(start, end)| to < start || end < from),
+                                    "{}: {a:?} and {b:?} share stack bytes",
+                                    func.name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

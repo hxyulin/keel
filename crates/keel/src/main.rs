@@ -690,8 +690,9 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     #[cfg(feature = "experimental-regalloc")]
                     Some("adaptive") => keel_codegen::regalloc::AllocationTier::Adaptive,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
+                    Some("compact") => keel_codegen::regalloc::AllocationTier::Compact,
                     Some("bounded") => keel_codegen::regalloc::AllocationTier::Bounded,
-                    _ => return Err("`--regalloc` needs fast, full or bounded (local/split/adaptive require experimental-regalloc)".into()),
+                    _ => return Err("`--regalloc` needs fast, full, compact or bounded (local/split/adaptive require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
@@ -822,7 +823,11 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat != 0
         && !explicit_allocation
-        && opts.allocation == keel_codegen::regalloc::AllocationTier::Bounded
+        && matches!(
+            opts.allocation,
+            keel_codegen::regalloc::AllocationTier::Bounded
+                | keel_codegen::regalloc::AllocationTier::Compact
+        )
     {
         opts.allocation = keel_codegen::regalloc::AllocationTier::Full;
     }
@@ -1932,6 +1937,29 @@ mod tests {
         assert_eq!(
             options(&["-O1", "-O0"]).unwrap().allocation,
             options(&[]).unwrap().allocation
+        );
+    }
+
+    #[test]
+    fn size_preset_selects_compact_spill_homes_with_explicit_overrides() {
+        use keel_codegen::regalloc::AllocationTier;
+        assert_eq!(
+            options(&["-Os"]).unwrap().allocation,
+            AllocationTier::Compact
+        );
+        for flags in [["-Os", "--regalloc", "full"], ["--regalloc", "full", "-Os"]] {
+            assert_eq!(options(&flags).unwrap().allocation, AllocationTier::Full);
+        }
+        assert_eq!(
+            options(&["-O2", "--regalloc", "compact"])
+                .unwrap()
+                .allocation,
+            AllocationTier::Compact
+        );
+        #[cfg(feature = "experimental-regalloc")]
+        assert_eq!(
+            options(&["-Os", "--remat", "null"]).unwrap().allocation,
+            AllocationTier::Full
         );
     }
 

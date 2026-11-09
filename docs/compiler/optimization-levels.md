@@ -13,12 +13,16 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 | `-O1` | Fast | Trees | Fast | Short builds with bounded cleanup. |
 | `-O2` | Balanced | Full | Bounded | Three bounded inlining rounds and scalar/memory optimization, without GCM. |
 | `-O3`, `-O` | Full | Full | Bounded | Three inlining rounds and guarded loop transformations. |
-| `-Os` | Size | Full | Full | Scalar cleanup and bounded helper inlining, without loop expansion. |
+| `-Os` | Size | Full | Compact | Scalar cleanup and bounded helper inlining, without loop expansion. |
 
 `-O2` and `-O3` also enable bounded integer pressure scheduling before target
 selection. Bounded allocation retains Full's homes and caches repeated spilled
 scalar reads within call-free windows. `--regalloc full --no-schedule-pressure`
 restores the previous backend policy. Both overrides work before or after `-O`.
+Compact allocation at `-Os` keeps Full's register choices but reuses spill homes
+across nonintersecting lifetime ranges and prefers branch-edge copy partners.
+`--regalloc full` retains contiguous-span spill homes. Both allocation policies
+remain independently selectable.
 See the [allocation and scheduling contracts](design.md#register-allocation).
 
 Balanced omits GCM, whose placement after stack promotion regressed Lua

@@ -44,7 +44,8 @@ impl Level {
     pub(crate) fn allocation(self) -> AllocationTier {
         match self {
             Self::O1 => AllocationTier::Fast,
-            Self::O0 | Self::Size => AllocationTier::Full,
+            Self::O0 => AllocationTier::Full,
+            Self::Size => AllocationTier::Compact,
             Self::O2 | Self::O3 => AllocationTier::Bounded,
         }
     }
