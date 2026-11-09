@@ -764,9 +764,10 @@ opportunity filter, not a runtime profitability proof. Fast, Full and Split rema
 independently selectable. Application runtime gains are unproven.
 
 With `experimental-regalloc`, `KEEL_BOUNDED_SPLIT=1 --regalloc split` replaces
-Split's cache with Full homes and bounded call-free segments. Windows end at
-calls, constraints, block boundaries or 64 selected instructions. A segment
-loads one spilled scalar at its first use and overrides its reads through
+Split's cache with Full homes and bounded call-free segments. Segment repair
+reuses Full's live intervals and skips functions without eligible scalar spills.
+Windows end at calls, constraints, block boundaries or 64 selected instructions.
+A segment loads one spilled scalar at its first use and overrides its reads through
 its last use. A free caller-saved register requires no owner transfer; otherwise
 the idle owner is saved and restored. A free register needs two distinct reads;
 displacing an owner needs four. I32, I64 and pointer values qualify. A source

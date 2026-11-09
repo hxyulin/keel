@@ -70,6 +70,46 @@ fn test_input<'a>(func: &'a Function, selection: &'a Selection) -> AllocationInp
     }
 }
 
+#[test]
+fn bounded_allocator_preserves_full_homes_and_selected_tokens() {
+    // Both inputs cross the call and must spill without callee-saved registers.
+    // Repeated reads before the call can use an otherwise free caller register.
+    let source = "decl @touch()
+func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    v3 = iadd v2, v0
+    v4 = iadd v3, v0
+    v5 = iadd v4, v0
+    call @touch()
+    v6 = iadd v5, v0
+    v7 = iadd v6, v1
+    return v7
+}";
+    let pools = Pools {
+        callee_saved: &[],
+        ..POOLS
+    };
+    for ty in ["i32", "i64"] {
+        let module = keel_ir::parse(&source.replace("i64", ty)).unwrap();
+        let selection = Selection::default();
+        let input = AllocationInput {
+            pools: &pools,
+            ..test_input(&module.functions[0], &selection)
+        };
+        let full = AllocationTier::Full.allocate(&input);
+        let bounded = allocate_bounded(&input);
+        assert_eq!(bounded.order, full.order, "{ty}");
+        assert_eq!(bounded.locs, full.locs, "{ty}");
+        assert_eq!(bounded.spill_slots, full.spill_slots, "{ty}");
+        assert!(!bounded.edits.is_empty(), "{ty}");
+        bounded.validate(&input).unwrap();
+        for seed in 0..8 {
+            super::super::transfer_tests::check(&input, &bounded, seed);
+        }
+    }
+}
+
 // A real selected Function and its computed intervals, with explicit baseline
 // homes. Earlier live inputs account for the already-saved, now-free callees.
 fn forced_baseline(input: &AllocationInput<'_>) -> (Allocation, Vec<Interval>) {
