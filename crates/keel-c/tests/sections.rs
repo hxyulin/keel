@@ -1601,7 +1601,7 @@ int main(void) {
 }
 
 #[test]
-fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
+fn elf_custom_tls_system_and_native_gc_pt_tls_and_relocations() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tls-elf");
     fs::create_dir_all(&dir).unwrap();
     let tool = |env: &str, suffix: &str| {
@@ -1619,7 +1619,7 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
     let readelf = tool("KEEL_TEST_GNU_READELF", "readelf");
     let target = Target::X86_64LinuxGnu;
     // A defined access uses local-exec TPOFF32; a separate TU's declaration
-    // uses initial-exec GOTTPOFF, requiring system-linker TLS GOT processing.
+    // uses initial-exec GOTTPOFF, requiring TLS GOT processing.
     let user = module(
         "extern _Thread_local int value; int imported(void) { return value; }",
         target,
@@ -1632,20 +1632,25 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
         false,
         false,
     );
-    let raw_tls =
-        keel_asm::x86::assemble_object(".section .anonymous_tls,\"awT\",@progbits\n.zero 4\n")
-            .unwrap();
-    let err = keel_link::elf::link(
+    let raw_tls = keel_asm::x86::assemble_object(
+        ".text\n.globl _start\n_start: ret\n.section .anonymous_tls,\"awT\",@progbits\n.zero 4\n",
+    )
+    .unwrap();
+    let raw = keel_link::elf::link(
         &[keel_link::Input {
             name: "raw.o",
             bytes: &raw_tls,
         }],
         Default::default(),
     )
-    .unwrap_err();
-    assert!(
-        err.contains("TLS section") && err.contains("external ELF linking"),
-        "{err}"
+    .unwrap();
+    let file = object::File::parse(raw.bytes.as_slice()).unwrap();
+    assert_eq!(
+        file.section_by_name(".anonymous_tls")
+            .unwrap()
+            .data()
+            .unwrap(),
+        &[0; 4]
     );
     for debug in [false, true] {
         for optimize in [false, true] {
@@ -1692,40 +1697,46 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
                     .arg(&input)
                     .arg("-o")
                     .arg(&exe));
-                let linked = fs::read(&exe).unwrap();
-                let names = symbol_names(&linked);
-                assert!(names.iter().any(|n| n == "kept"));
-                assert!(names.iter().any(|n| n == "kept_zero"));
-                assert!(!names.iter().any(|n| n == "compiler_only"));
-                let headers =
-                    String::from_utf8(run(Command::new(&readelf).arg("-lW").arg(&exe)).stdout)
-                        .unwrap();
-                assert!(
-                    headers.lines().any(|l| l.trim_start().starts_with("TLS ")),
-                    "{headers}"
-                );
-                let error = keel_link::elf::link(
-                    &[keel_link::Input {
-                        name: "input.o",
-                        bytes: &bytes,
-                    }],
-                    Default::default(),
+                let native = keel_link::elf::link(
+                    &[
+                        keel_link::Input {
+                            name: "start.o",
+                            bytes: &entry_bytes,
+                        },
+                        keel_link::Input {
+                            name: "other.o",
+                            bytes: &imported,
+                        },
+                        keel_link::Input {
+                            name: "input.o",
+                            bytes: &bytes,
+                        },
+                    ],
+                    keel_link::elf::Options {
+                        gc_sections: true,
+                        ..Default::default()
+                    },
                 )
-                .unwrap_err();
-                assert!(
-                    error.contains("external ELF linking") && error.contains("PT_TLS"),
-                    "{error}"
-                );
-                let error = keel_link::elf::link(
-                    &[keel_link::Input {
-                        name: "other.o",
-                        bytes: &imported,
-                    }],
-                    Default::default(),
-                )
-                .unwrap_err();
-                assert!(error.contains("external ELF linking"), "{error}");
-                // System ELF linker catches the cross-TU TLS/non-TLS symbol
+                .unwrap();
+                for (linker, linked) in [
+                    ("system", fs::read(&exe).unwrap()),
+                    ("native", native.bytes),
+                ] {
+                    let names = symbol_names(&linked);
+                    assert!(names.iter().any(|n| n == "kept"), "{linker}");
+                    assert!(names.iter().any(|n| n == "kept_zero"), "{linker}");
+                    assert!(!names.iter().any(|n| n == "compiler_only"), "{linker}");
+                    let path = dir.join(format!("{linker}-run"));
+                    fs::write(&path, linked).unwrap();
+                    let headers =
+                        String::from_utf8(run(Command::new(&readelf).arg("-lW").arg(&path)).stdout)
+                            .unwrap();
+                    assert!(
+                        headers.lines().any(|l| l.trim_start().starts_with("TLS ")),
+                        "{linker}: {headers}"
+                    );
+                }
+                // Both ELF linkers catch cross-TU TLS/non-TLS symbol
                 // incompatibility; C's erased object metadata cannot infer it.
                 let wrong = object(
                     &module("int value = 1;", target, false, false),
@@ -1746,6 +1757,24 @@ fn elf_custom_tls_system_gc_pt_tls_relocations_and_native_diagnostic() {
                     .unwrap();
                 assert!(!output.status.success());
                 assert!(String::from_utf8_lossy(&output.stderr).contains("TLS"));
+                let error = keel_link::elf::link(
+                    &[
+                        keel_link::Input {
+                            name: "other.o",
+                            bytes: &imported,
+                        },
+                        keel_link::Input {
+                            name: "wrong.o",
+                            bytes: &wrong,
+                        },
+                    ],
+                    keel_link::elf::Options {
+                        entry: "imported".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err();
+                assert!(error.contains("TLS"), "{error}");
             }
         }
     }

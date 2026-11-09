@@ -304,6 +304,7 @@ fn linux_loader_and_new_thread_execute_all_x86_tls_models() {
         keel_test_support::record_skip("keel-link", "elf_tls", keel_test_support::NO_CLANG);
         return;
     };
+    let loader = "/lib64/ld-linux-x86-64.so.2";
     let libc = [
         "/lib/x86_64-linux-gnu/libc.so.6",
         "/lib64/libc.so.6",
@@ -311,8 +312,7 @@ fn linux_loader_and_new_thread_execute_all_x86_tls_models() {
     ]
     .into_iter()
     .find(|p| std::path::Path::new(p).exists());
-    let Some(libc) = libc.filter(|_| std::path::Path::new("/lib64/ld-linux-x86-64.so.2").exists())
-    else {
+    let Some(libc) = libc.filter(|_| std::path::Path::new(loader).exists()) else {
         keel_test_support::record_skip(
             "keel-link",
             "elf_tls",
@@ -434,6 +434,8 @@ zero_tls: .zero 4
             std::fs::read(object).unwrap(),
             std::fs::read(&library).unwrap(),
             std::fs::read(libc).unwrap(),
+            // glibc exports __tls_get_addr from its loader.
+            std::fs::read(loader).unwrap(),
         ],
         elf::Options {
             runpath: vec![dir.path().to_str().unwrap().into()],
