@@ -292,7 +292,7 @@ fn group_dso_demands_trigger_rescans_and_keep_library_order_and_deduplication() 
             }
         )
         .unwrap_err()
-        .contains("freestanding static")
+        .contains("architecture does not match")
     );
     assert!(
         elf::link_selected(

@@ -15,6 +15,7 @@ pub mod relocatable;
 mod script;
 mod selected;
 mod sframe;
+mod tls;
 mod unwind;
 use crate::{Input, Result, elf_selection::Selection};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
@@ -243,6 +244,9 @@ fn resolve_options(mut options: Options) -> Result<ResolvedOptions> {
     }
     validate_entry(&options.entry)?;
     let arm = options.machine == Machine::Aarch64;
+    if arm && options.interpreter == "/lib64/ld-linux-x86-64.so.2" {
+        options.interpreter = "/lib/ld-linux-aarch64.so.1".into();
+    }
     if options.relax_got && (arm || script.is_some()) {
         return Err("GOT relaxation requires default-layout x86-64 ELF output".into());
     }
@@ -321,6 +325,7 @@ type ProgramHeader = (u32, u32, u64, u64, u64, u64);
 /// The `.got` output section and the slot offset of each selected
 /// `(unit, symbol)` that is not an import.
 struct Got {
+    tls: tls::Plan,
     section: usize,
     slots: BTreeMap<(usize, usize), u64>,
 }
@@ -338,8 +343,10 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     let arm = options.machine == Machine::Aarch64;
     let inputs = &prepared.inputs;
     let libraries = &prepared.libraries;
-    if arm && (!libraries.is_empty() || !options.runpath.is_empty()) {
-        return Err("native AArch64 ELF linking currently supports freestanding static executables; use `keel link --system` for shared libraries/libc".into());
+    for library in libraries {
+        if library.arm != arm {
+            return Err("shared library architecture does not match output".into());
+        }
     }
     if script.is_some() && (arm || !libraries.is_empty() || options.gc_sections) {
         return Err("scripts currently require static x86-64 output without --gc-sections".into());
@@ -385,7 +392,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         None
     } else {
         let definitions = dynamic_definitions(&units, &globals, &common_sizes);
-        let absolute = absolute_imports(&units, &sections, &selected)?;
+        let absolute = absolute_imports(arm, &units, &sections, &selected)?;
         let lifecycle = lifecycle::Plan::new(&sections, &units, &globals)?;
         Some(dynamic::Dynamic::prepare(
             &mut sections,
@@ -393,7 +400,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
             definitions,
             libraries,
             &options,
-            absolute,
+            absolute + got.tls.relocation_count(&selected)?,
             lifecycle,
         )?)
     };
@@ -421,6 +428,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     let entry = placed.entry(&options.entry)?;
     let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(page);
     let mut bytes = placed.image(file_end, &got, arm)?;
+    got.tls.emit(&placed, &mut bytes, &mut dynamic)?;
     placed.relocate(&mut bytes, &got, &mut dynamic, arm)?;
     if let Some((section, table)) = &sframe_section {
         table.finish(
@@ -788,6 +796,11 @@ impl Parsed {
                 } else {
                     reloc::x86_64::width(kind)?
                 };
+                let width = if !arm && kind == object::elf::R_X86_64_TLSDESC_CALL {
+                    2
+                } else {
+                    width
+                };
                 if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                     return Err("relocation field is outside file-backed section data".into());
                 }
@@ -832,6 +845,17 @@ impl Parsed {
                     .require_relocations(&sframe_relocations)?;
             }
         }
+        unit.symbols.insert(
+            0,
+            Symbol {
+                name: String::new(),
+                section: SymbolSection::Absolute,
+                value: 0,
+                size: 0,
+                info: 0,
+                other: 0,
+            },
+        );
         for s in file.symbols() {
             if group_plan.dead_symbol(s.index().0, s.section()) {
                 // Surviving named global references rebind through the
@@ -854,7 +878,10 @@ impl Parsed {
             else {
                 unreachable!()
             };
-            if info & 15 == object::elf::STT_TLS && s.is_definition() {
+            if info & 15 == object::elf::STT_TLS
+                && s.is_definition()
+                && !group_plan.dead_symbol(s.index().0, s.section())
+            {
                 let valid = s
                     .section()
                     .index()
@@ -985,9 +1012,6 @@ fn link_script(
     } = parsed;
     if sframe_section.is_some() {
         return Err("SFrame reconstruction with linker scripts is unsupported".into());
-    }
-    if sections.iter().any(is_tls) {
-        return Err("TLS with linker scripts is unsupported".into());
     }
     unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
     note_plan.prepare(&mut sections, &object_properties, false)?;
@@ -1156,7 +1180,10 @@ fn plan_imports(
                 Some((i, e)) => (Some(i), e.kind, e.version.map(str::to_owned)),
                 None => (None, s.info & 15, None),
             };
-            if !matches!(kind, 0 | 1 | 2 | 10) {
+            if (kind == object::elf::STT_TLS) != (s.info & 15 == object::elf::STT_TLS) {
+                return Err(format!("TLS type mismatch for import `{}`", s.name).into());
+            }
+            if !matches!(kind, 0 | 1 | 2 | 6 | 10) {
                 return Err(format!(
                     "unsupported shared-library symbol type {kind} for `{}`",
                     s.name
@@ -1238,13 +1265,14 @@ fn plan_got(
     selected: &selected::Index<'_>,
     arm: bool,
 ) -> Result<Got> {
+    let tls = tls::Plan::prepare(sections, units, selected, arm)?;
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
             if if arm {
                 aarch64::got(r.kind)
             } else {
-                matches!(r.kind, 9 | 22 | 41 | 42)
+                matches!(r.kind, 9 | 41 | 42)
             } {
                 let selection = selected.get(ui, r.symbol)?;
                 if selection.import.is_none() {
@@ -1268,6 +1296,7 @@ fn plan_got(
         offset: 0,
     });
     Ok(Got {
+        tls,
         section: got_section,
         slots: got,
     })
@@ -1302,6 +1331,7 @@ fn dynamic_definitions(
 /// Count absolute 64-bit relocations against imports in writable data, and
 /// reject the import relocations that would need copy or text relocations.
 fn absolute_imports(
+    arm: bool,
     units: &[Unit],
     sections: &[Section],
     selected: &selected::Index<'_>,
@@ -1310,10 +1340,32 @@ fn absolute_imports(
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
             if let Some(name) = selected.get(ui, r.symbol)?.import {
+                if selected.get(ui, r.symbol)?.definition.info & 15 == object::elf::STT_TLS {
+                    if tls::model(r.kind, arm).is_some() {
+                        continue;
+                    }
+                    return Err(format!(
+                        "unsupported relocation {} against imported TLS `{name}`",
+                        r.kind
+                    )
+                    .into());
+                }
                 match r.kind {
-                    1 if sections[r.section].flags & 1 != 0 => absolute += 1,
-                    4 => {}
-                    9 | 41 | 42 => {}
+                    kind if kind == if arm { 257 } else { 1 }
+                        && sections[r.section].flags & 1 != 0 =>
+                    {
+                        absolute += 1
+                    }
+                    kind if if arm {
+                        matches!(kind, 282 | 283)
+                    } else {
+                        kind == 4
+                    } => {}
+                    kind if if arm {
+                        aarch64::got(kind)
+                    } else {
+                        matches!(kind, 9 | 41 | 42)
+                    } => {}
                     _ => {
                         return Err(format!(
                             "{}: relocation {} against import `{name}` requires writable 64-bit data, a PLT32 call, or GOT addressing; use PIC (copy/text relocations are unsupported)",
@@ -1554,23 +1606,44 @@ impl Placed<'_> {
                 let selection = selected.get(ui, r.symbol)?;
                 let import = selection.import;
                 if let (Some(name), Some(d)) = (import, dynamic.as_mut())
-                    && r.kind == object::elf::R_X86_64_64
+                    && r.kind
+                        == if arm {
+                            object::elf::R_AARCH64_ABS64
+                        } else {
+                            object::elf::R_X86_64_64
+                        }
                 {
                     let offset = sections[r.section].offset + r.offset;
                     d.relocations.push((
                         BASE + offset,
                         d.imports[name].index,
-                        object::elf::R_X86_64_64,
+                        if arm {
+                            object::elf::R_AARCH64_ABS64
+                        } else {
+                            object::elf::R_X86_64_64
+                        },
                         r.addend,
                     ));
                     bytes[offset as usize..offset as usize + 8].fill(0);
                     continue;
                 }
+                if !arm && r.kind == object::elf::R_X86_64_TLSDESC_CALL {
+                    let at = (sections[r.section].offset + r.offset) as usize;
+                    if bytes.get(at..at + 2) != Some(&[0xff, 0x10]) {
+                        return Err("TLSDESC_CALL requires call *(%rax)".into());
+                    }
+                }
                 let result = || -> Result<(usize, [u8; 8], usize)> {
                     let offset = sections[r.section].offset + r.offset;
                     let p = i128::from(BASE + offset);
-                    let mut value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
-                        if reloc::x86_64::uses_got(r.kind) {
+                    let mut value = if let Some(model) = tls::model(r.kind, arm) {
+                        tls::value(self, got, r, ui, model)?
+                    } else if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
+                        if if arm {
+                            aarch64::got(r.kind)
+                        } else {
+                            reloc::x86_64::uses_got(r.kind)
+                        } {
                             i128::from(d.slot(name, sections))
                         } else {
                             i128::from(d.stub(name, sections)?)
@@ -1585,16 +1658,12 @@ impl Placed<'_> {
                         i128::from(self.definition_address(selection.key.0, selection.definition)?)
                     } + i128::from(r.addend);
                     let tls_reloc = if arm {
-                        matches!(r.kind, 549..=551)
+                        matches!(r.kind, 523..=538 | 544..=559 | 570..=573)
                     } else {
                         matches!(r.kind, 17 | 18 | 21 | 23)
                     };
-                    if !arm && r.kind == 22 {
-                        if selection.definition.info & 15 != object::elf::STT_TLS
-                            || import.is_some()
-                        {
-                            return Err("GOTTPOFF requires a defined TLS symbol".into());
-                        }
+                    if tls::model(r.kind, arm).is_some() {
+                        // TLS GOT addressing was resolved separately above.
                     } else if tls_reloc {
                         if selection.definition.info & 15 != object::elf::STT_TLS
                             || import.is_some()
@@ -1602,7 +1671,7 @@ impl Placed<'_> {
                             return Err("TLS relocation requires a defined TLS symbol".into());
                         }
                         let tls = tls_header(sections).ok_or("TLS relocation without template")?;
-                        if arm {
+                        if arm && matches!(r.kind, 544..=559 | 570 | 571) {
                             value += i128::from(align(16, tls.5)?);
                         } else if matches!(r.kind, 18 | 23) {
                             value -= i128::from(align(tls.4, tls.5)?);

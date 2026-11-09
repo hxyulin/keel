@@ -14,7 +14,8 @@ pub(super) mod x86_64 {
         match kind {
             // R_X86_64_PC8 is used by LOOP and J*CXZ.
             R_X86_64_PC8 => Ok(1),
-            21..=23 => Ok(4),
+            19..=23 | 34 => Ok(4),
+            35 => Ok(0),
             R_X86_64_64 | R_X86_64_PC64 | 17 | 18 => Ok(8),
             R_X86_64_PC32
             | R_X86_64_PLT32
@@ -63,6 +64,7 @@ pub(super) mod x86_64 {
         let value = value as u64;
         let pc = value.wrapping_sub(place) as i64;
         let (n, width) = match kind {
+            35 => (0, 0),
             R_X86_64_64 | 17 | 18 => (value, 8),
             R_X86_64_32 => (
                 u64::from(u32::try_from(value).map_err(|_| Error::Overflow)?),
@@ -75,7 +77,10 @@ pub(super) mod x86_64 {
             R_X86_64_PC8 => (i8::try_from(pc).map_err(|_| Error::Overflow)? as u64, 1),
             R_X86_64_PC64 => (pc as u64, 8),
             R_X86_64_PC32
+            | 19
+            | 20
             | 22
+            | 34
             | R_X86_64_PLT32
             | R_X86_64_GOTPCREL
             | R_X86_64_GOTPCRELX

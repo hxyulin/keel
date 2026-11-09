@@ -15,7 +15,7 @@ host, `cc`, `compile`, `opt`, `asm`, `archive` and `link` select it by default.
 |---|---|
 | C and IR compilation, assembly, object emission | In process, no external tools |
 | Freestanding static executables | Native Keel linker |
-| Hosted executables (libc, CRT, shared libraries) | `link --system` (invokes Clang) |
+| Automatic libc/CRT startup | `link --system` (invokes Clang) |
 | ABI | Base AAPCS64, including variadics and initial-exec TLS |
 | Debug info | CFI and DWARF line/type/variable info in assembly and objects |
 | Exception handling, `long double` arithmetic, SVE operations | Diagnosed as unsupported |
@@ -305,9 +305,14 @@ branches, literal loads, ADR, ADRP, ADD low-12, load/store low-12 and GOT page/l
 references. Overflow, misalignment and unsupported relocations are diagnosed;
 branch veneers are not generated.
 
-Native linking requires startup code. Shared libraries, automatic libc/CRT
-startup, TLS allocation, GNU properties and runtime initialization arrays remain
-outside its supported scope. Use `link --system` for a normal hosted executable.
+Native linking requires startup code. ELF shared-library interfaces use eager
+GOT/PLT binding and `/lib/ld-linux-aarch64.so.1` by default. TLS supports
+local-exec, initial-exec, general-dynamic, local-dynamic and TLSDESC accesses,
+including imported variables. Dynamic initialization arrays share the ELF
+linker's runtime metadata. See [ELF TLS](../../linking/elf.md#thread-local-storage)
+for the template and runtime contract. Automatic libc/CRT startup and GNU
+properties remain outside its supported scope. Use `link --system` for a normal
+hosted executable.
 Native linker debug inputs are omitted with warnings; use system linking when
 retaining full executable debug information.
 

@@ -425,6 +425,16 @@ impl Layout<'_> {
             o.holes.push((o.size, offset));
             o.size = size;
             o.align = o.align.max(input.align);
+            if self.placements.iter().flatten().any(|p| p.output == out)
+                && (o.flags ^ input.flags) & 0x400 != 0
+            {
+                return Err("TLS and non-TLS inputs cannot share a script output".into());
+            }
+            if o.flags & 0x400 != 0 && (o.kind == 8) != input.bss {
+                return Err(
+                    "initialized and zero-filled TLS require separate script outputs".into(),
+                );
+            }
             o.flags |= input.flags;
             if !input.bss {
                 o.kind = input.kind;
@@ -648,11 +658,16 @@ pub(in crate::elf) fn link(
         }
     }
     sections.push(common);
+    let imports = BTreeMap::new();
+    let selected = crate::elf::selected::Index::new(&units, &globals, &imports);
+    let tls_plan = crate::elf::tls::Plan::prepare(&mut sections, &units, &selected, false)?;
     // Bound orphan placement to the two compiler-generated classes present in
     // the pinned aggregate. Other orphans remain errors rather than guesses.
     for (name, anchors) in [
         (".eh_frame", &[".rodata", ".text"][..]),
         (".data.rel.ro", &[".data"][..]),
+        (".got.tls", &[".data", ".tdata"][..]),
+        (".text.tls", &[".text"][..]),
     ] {
         let selected = script.commands.iter().any(|c| match c {
             Command::Output(o) => o.body.iter().any(
@@ -746,6 +761,7 @@ pub(in crate::elf) fn link(
     }
     emit(
         &mut layout,
+        &tls_plan,
         &script.phdrs,
         &script_values,
         entry,
@@ -756,6 +772,7 @@ pub(in crate::elf) fn link(
 
 fn emit(
     layout: &mut Layout<'_>,
+    tls_plan: &crate::elf::tls::Plan,
     phdrs: &[Phdr],
     script_values: &BTreeMap<String, Value>,
     entry: u64,
@@ -775,7 +792,12 @@ fn emit(
     } else {
         Vec::new()
     };
-    let phnum = phdrs.len().max(automatic.len());
+    let has_tls = layout.outputs.iter().any(|o| o.flags & 0x400 != 0);
+    let automatic_tls = has_tls && phdrs.is_empty();
+    if has_tls && !phdrs.is_empty() && phdrs.iter().filter(|p| p.kind == 7).count() != 1 {
+        return Err("TLS script outputs require one PT_TLS header".into());
+    }
+    let phnum = phdrs.len().max(automatic.len()) + usize::from(automatic_tls);
     if 64 + phnum * 56 > page as usize {
         return Err("script program headers exceed first page".into());
     }
@@ -802,6 +824,7 @@ fn emit(
     }
     let mut cursor = page;
     let mut segment_origins: BTreeMap<usize, (u64, u64, u64)> = BTreeMap::new();
+    let mut tls_origin = None;
     for (index, o) in layout.outputs.iter_mut().enumerate() {
         if o.size == 0 {
             continue;
@@ -845,10 +868,70 @@ fn emit(
         } else {
             o.offset = address_align(cursor, o.align)?;
         }
+        if o.flags & 0x400 != 0 {
+            if let Some((vma, offset)) = tls_origin {
+                o.offset = end(
+                    offset,
+                    o.vma
+                        .checked_sub(vma)
+                        .ok_or("TLS script VMA moves backwards")?,
+                )?;
+                if o.kind != 8 && o.offset < cursor {
+                    return Err("TLS script file data overlaps".into());
+                }
+            } else {
+                tls_origin = Some((o.vma, o.offset));
+            }
+        }
         if o.kind != 8 {
             cursor = end(o.offset, o.size)?;
         }
     }
+    if layout
+        .outputs
+        .iter()
+        .any(|o| o.size != 0 && o.flags & 0x400 == 0 && o.phdrs.iter().any(|&i| phdrs[i].kind == 7))
+    {
+        return Err("non-TLS output assigned to PT_TLS".into());
+    }
+    let tls_outputs: Vec<_> = layout
+        .outputs
+        .iter()
+        .filter(|o| o.flags & 0x400 != 0)
+        .collect();
+    let tls = if let Some(first) = tls_outputs.first() {
+        let alignment = tls_outputs.iter().map(|o| o.align).max().unwrap_or(1);
+        if first.vma % alignment != 0 {
+            return Err("script TLS base must satisfy template alignment".into());
+        }
+        let end = tls_outputs
+            .iter()
+            .map(|o| o.vma + o.size)
+            .max()
+            .unwrap_or(first.vma);
+        let mut zero = false;
+        for o in &tls_outputs {
+            if zero && o.kind != 8 {
+                return Err("initialized TLS follows zero-filled TLS".into());
+            }
+            zero |= o.kind == 8;
+            if !phdrs.is_empty() && !o.phdrs.iter().any(|&p| phdrs[p].kind == 7) {
+                return Err("TLS output is missing its PT_TLS assignment".into());
+            }
+        }
+        if layout.outputs.iter().any(|o| {
+            o.flags & 2 != 0
+                && o.flags & 0x400 == 0
+                && o.size != 0
+                && o.vma < end
+                && o.vma + o.size > first.vma
+        }) {
+            return Err("non-TLS output overlaps TLS template".into());
+        }
+        Some((first.vma, first.offset, end - first.vma, alignment))
+    } else {
+        None
+    };
     let mut bytes = vec![0; cursor as usize];
     for o in &layout.outputs {
         if o.kind != 8 && o.size != 0 {
@@ -864,6 +947,26 @@ fn emit(
             }
         }
     }
+    let address = |index: usize| -> Result<(u64, u64)> {
+        let p = layout.placements[index].ok_or("TLS GOT input was discarded")?;
+        let out = &layout.outputs[p.output];
+        Ok((out.vma + p.offset, out.offset + p.offset))
+    };
+    if let Some((base, _, size, alignment)) = tls {
+        tls_plan.emit_script(
+            &mut bytes,
+            address,
+            |(u, i)| {
+                layout
+                    .raw_symbol(u, &layout.units[u].symbols[&i])?
+                    .n
+                    .checked_sub(base)
+                    .ok_or("TLS symbol outside script template".into())
+            },
+            size,
+            alignment,
+        )?;
+    }
     for (ui, unit) in layout.units.iter().enumerate() {
         for r in &unit.relocs {
             let Some(place) = layout.placements[r.section] else {
@@ -874,13 +977,51 @@ fn emit(
                 .symbols
                 .get(&r.symbol)
                 .ok_or("relocation references invalid symbol index")?;
-            let s = layout.symbol(ui, symbol, 0)?.n;
+            let mut s = layout.symbol(ui, symbol, 0)?.n;
+            let definition = if symbol.global() {
+                layout
+                    .globals
+                    .get(&symbol.name)
+                    .map(|&(u, i)| &layout.units[u].symbols[&i])
+                    .unwrap_or(symbol)
+            } else {
+                symbol
+            };
+            if let Some(model) = crate::elf::tls::model(r.kind, false) {
+                let key = if symbol.global() {
+                    layout
+                        .globals
+                        .get(&symbol.name)
+                        .copied()
+                        .unwrap_or((ui, r.symbol))
+                } else {
+                    (ui, r.symbol)
+                };
+                s = tls_plan.script_address(key, model, address)?;
+                if r.kind == 35 {
+                    let at = (out.offset + place.offset + r.offset) as usize;
+                    if bytes.get(at..at + 2) != Some(&[0xff, 0x10]) {
+                        return Err("TLSDESC_CALL requires call *(%rax)".into());
+                    }
+                }
+            } else if matches!(r.kind, 17 | 18 | 21 | 23) {
+                if definition.info & 15 != object::elf::STT_TLS {
+                    return Err("TLS relocation requires a TLS symbol".into());
+                }
+                let (base, _, size, alignment) = tls.ok_or("TLS relocation without template")?;
+                s = s.checked_sub(base).ok_or("TLS symbol outside template")?;
+                if matches!(r.kind, 18 | 23) {
+                    s = s.wrapping_sub(address_align(size, alignment)?);
+                }
+            } else if definition.info & 15 == object::elf::STT_TLS {
+                return Err("non-TLS script relocation against TLS symbol".into());
+            }
             let p = out
                 .vma
                 .checked_add(place.offset)
                 .and_then(|v| v.checked_add(r.offset))
                 .ok_or("relocation place overflow")?;
-            if x86_64::uses_got(r.kind) {
+            if x86_64::uses_got(r.kind) && r.kind != 22 {
                 return Err(format!(
                     "{}: relocation {} requires unsupported script GOT/dynamic layout",
                     unit.name, r.kind
@@ -937,7 +1078,11 @@ fn emit(
             info,
             other,
             index,
-            value.n,
+            if info & 15 == object::elf::STT_TLS {
+                value.n - tls.ok_or("TLS symbol without template")?.0
+            } else {
+                value.n
+            },
             size,
         ));
         Ok(())
@@ -992,7 +1137,11 @@ fn emit(
                 o.size != 0
                     && o.flags & 2 != 0
                     && if phdrs.is_empty() {
-                        *index == automatic[i].0
+                        if automatic_tls && i == automatic.len() {
+                            o.flags & 0x400 != 0
+                        } else {
+                            *index == automatic[i].0
+                        }
                     } else {
                         o.phdrs.contains(&i)
                     }
@@ -1000,9 +1149,17 @@ fn emit(
             .map(|(_, o)| o)
             .collect();
         let (kind, flags) = if phdrs.is_empty() {
-            let flags = automatic[i].1;
+            let flags = if automatic_tls && i == automatic.len() {
+                0
+            } else {
+                automatic[i].1
+            };
             (
-                1,
+                if automatic_tls && i == automatic.len() {
+                    7
+                } else {
+                    1
+                },
                 4 | if flags & 1 != 0 { 2 } else { 0 } | if flags & 4 != 0 { 1 } else { 0 },
             )
         } else {
@@ -1030,7 +1187,7 @@ fn emit(
                 if kind == 1 {
                     members.iter().map(|o| o.align).max().unwrap_or(1).max(page)
                 } else {
-                    first.align
+                    members.iter().map(|o| o.align).max().unwrap_or(1)
                 },
             );
         }

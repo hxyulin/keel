@@ -384,6 +384,7 @@ impl Script {
                         let kind = match p.take()?.as_str() {
                             "PT_LOAD" => 1,
                             "PT_NOTE" => 4,
+                            "PT_TLS" => 7,
                             _ => return Err(p.error("unsupported PHDR type")),
                         };
                         p.expect("FLAGS")?;

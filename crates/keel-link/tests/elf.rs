@@ -26,6 +26,8 @@ mod elf_script;
 mod elf_selection;
 #[path = "elf/elf_sframe.rs"]
 mod elf_sframe;
+#[path = "elf/elf_tls.rs"]
+mod elf_tls;
 #[path = "elf/elf_unwind.rs"]
 mod elf_unwind;
 use keel_link::{Input, elf};
@@ -591,7 +593,7 @@ fn tls_template_and_x86_offsets() {
             -64
         };
         let actual = if kind == 22 {
-            let got = f.section_by_name(".got").unwrap();
+            let got = f.section_by_name(".got.tls").unwrap();
             let at = (value(&f, "tls_offset") - 0x400000) as usize;
             let delta = i32::from_le_bytes(exe.bytes[at..at + 4].try_into().unwrap());
             assert_eq!(

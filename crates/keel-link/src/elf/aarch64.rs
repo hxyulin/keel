@@ -3,7 +3,7 @@ use crate::Result;
 
 pub(crate) fn width(kind: u32) -> Result<u64> {
     match kind {
-        549..=551 => Ok(4),
+        512..=573 => Ok(4),
         257 | 260 => Ok(8),
         258 | 261 | 273..=280 | 282..=286 | 299 | 311 | 312 => Ok(4),
         _ => Err(format!("unsupported AArch64 relocation {kind}").into()),
@@ -14,6 +14,19 @@ pub(super) fn got(kind: u32) -> bool {
 }
 
 pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result<Vec<u8>> {
+    // TLS GOT-address fields use the ordinary instruction encodings.
+    let alias = match kind {
+        512 | 517 | 561 => Some(274),
+        513 | 518 | 541 | 562 => Some(275),
+        514 | 519 | 564 => Some(277),
+        522 | 543 | 560 => Some(273),
+        542 | 563 => Some(312),
+        528..=530 => Some(kind + 21),
+        _ => None,
+    };
+    if let Some(alias) = alias {
+        return apply(alias, value, place, field);
+    }
     let overflow = || {
         crate::Error::from(format!(
             "AArch64 relocation {kind} overflow or misalignment"
@@ -60,6 +73,59 @@ pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result
         }
     };
     match kind {
+        515 | 516 | 520 | 521 | 523..=527 | 539 | 540 | 544..=548 | 565 | 566 => {
+            let (group, checked) = match kind {
+                515 | 520 | 539 | 565 | 524 | 545 => (1, true),
+                523 | 544 => (2, true),
+                525 | 546 => (1, false),
+                526 | 547 => (0, true),
+                _ => (0, false),
+            };
+            instruction(word & 0x1f800000 == 0x12800000 && word >> 29 & 3 != 1)?;
+            if checked
+                && (value < -(1i128 << (16 * (group + 1))) || value >= 1i128 << (16 * (group + 1)))
+            {
+                return Err(overflow());
+            }
+            let immediate = (((if checked && value < 0 { !value } else { value }) >> (16 * group))
+                & 65535) as u32;
+            if checked {
+                word = (word & !(3 << 29)) | if value < 0 { 0 } else { 2 << 29 }; // MOVN or MOVZ
+            }
+            word = (word & !((65535 << 5) | (3 << 21))) | immediate << 5 | group << 21;
+        }
+        531..=538 | 552..=559 | 570..=573 => {
+            let (scale, checked) = match kind {
+                531..=538 => ((kind - 531) / 2, !kind.is_multiple_of(2)),
+                552..=559 => ((kind - 552) / 2, kind.is_multiple_of(2)),
+                570..=573 => (4, kind.is_multiple_of(2)),
+                _ => unreachable!(),
+            };
+            if checked && !(0..4096).contains(&value) {
+                return Err(overflow());
+            }
+            return apply(
+                match scale {
+                    0 => 278,
+                    1 => 284,
+                    2 => 285,
+                    3 => 286,
+                    _ => 299,
+                },
+                value,
+                place,
+                field,
+            );
+        }
+        567 => {
+            instruction(word & 0xffc00000 == 0xf9400000)?;
+        }
+        568 => {
+            instruction(word & 0xffc00000 == 0x91000000)?;
+        }
+        569 => {
+            instruction(word & 0xfffffc1f == 0xd63f0000)?;
+        }
         549..=551 => {
             instruction(word & 0x7f000000 == 0x11000000)?;
             if value < 0 || (kind != 551 && value >= 1 << 24) || (kind == 550 && value >= 4096) {

@@ -4,8 +4,9 @@
 Linux. It consumes relocatable objects from Keel, Clang or GNU as, regular
 archives (including CLI-loaded GNU thin archives) and ELF shared-library interfaces, resolves symbols and relocations,
 and writes an `ET_EXEC` image without invoking a system linker. It can
-cross-link from macOS. (Freestanding AArch64 Linux linking is covered in
-[ARM Linux](../targets/aarch64/README.md).)
+cross-link from macOS. AArch64 uses the same dynamic metadata and TLS models;
+its instruction relocation coverage is documented in
+[ARM Linux](../targets/aarch64/README.md).
 
 ## Usage
 
@@ -113,7 +114,7 @@ For bounded GNU script final linking through the library API, see
   debugger.
 
 Not supported: automatic libc/CRT startup, static libc, PIE, shared-object
-output, dynamic TLS models (TLSGD/TLSLD/TLSDESC), imported TLS, native IFUNC/GNU-unique definitions, REL
+output, native IFUNC/GNU-unique definitions, REL
 relocations, other allocated notes, unrestricted GNU scripts, identical-code folding,
 general relaxation and source debugging. Runtime-loader IFUNC resolution and
 constructors inside input shared libraries do work. Unsupported sections,
@@ -522,10 +523,32 @@ failed link preserves the destination, and on Linux executes the result.
 Format references: [System V ELF ABI](https://gabi.xinuos.com/elf/) and
 [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI).
 
-Native TLS uses a contiguous, aligned `.tdata`/`.tbss` template and a `PT_TLS`
-header. TLS symbols hold offsets within that template. x86-64 supports
-TPOFF32/64, DTPOFF32/64 and GOTTPOFF for executable definitions. AArch64
-supports local-exec ADD_TPREL_HI12, ADD_TPREL_LO12 and ADD_TPREL_LO12_NC.
-The runtime must allocate per-thread storage and initialize the thread pointer;
-static syscall-only entry points must do this themselves. Linker scripts with
-TLS remain unsupported.
+## Thread-local storage
+
+Native TLS uses a contiguous, aligned initialized/zero-filled template and a
+`PT_TLS` header. TLS symbols hold offsets within that template. The linker
+supports local-exec, initial-exec, general-dynamic, local-dynamic and TLSDESC
+accesses on x86-64 and AArch64. Different access models for one symbol receive
+separate GOT records. Imported TLS uses loader relocations for TP offsets,
+module IDs, module offsets and descriptors. GD and LD calls use the ordinary
+`__tls_get_addr` definition or import; the linker does not provide that runtime.
+Executable TLS definitions use module ID 1 and link-time offsets. Their
+TLSDESC records call a generated resolver that returns the static TP offset.
+TLS instruction sequences are retained without model relaxation.
+
+x86-64 accepts TPOFF32/64, DTPOFF32/64, GOTTPOFF, TLSGD, TLSLD,
+GOTPC32_TLSDESC and TLSDESC_CALL. AArch64 accepts TLS GD/LD/IE GOT-address
+relocations, LD DTPREL fields, LE TPREL fields and TLSDESC fields and markers.
+Instruction encodings, overflow and load/store alignment are checked.
+
+The runtime must allocate per-thread storage and initialize the thread pointer.
+Static syscall-only entry points must do this themselves. Native linking does
+not add libc or CRT startup automatically.
+
+The bounded static x86-64 script path supports TLS output sections and all
+these x86-64 access models for executable definitions. Without `PHDRS`, it emits
+`PT_TLS` automatically. Explicit `PHDRS` requires one `PT_TLS FLAGS(4)` header
+and explicit TLS output assignments to it. Initialized and zero-filled TLS
+require separate outputs. The template base must satisfy its maximum alignment;
+non-TLS outputs cannot overlap its virtual range. The existing script limits
+(static x86-64, no section GC) still apply.

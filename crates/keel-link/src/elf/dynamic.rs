@@ -13,6 +13,7 @@ pub(super) struct Export<'data> {
 // Interfaces live only for this link. Borrow validated names/versions from the
 // caller-owned DSO bytes; demand and reference sets can share the same strings.
 pub(super) struct Library<'data> {
+    pub arm: bool,
     pub needed: String,
     pub exports: BTreeMap<&'data str, Export<'data>>,
     pub required: BTreeSet<&'data str>,
@@ -24,11 +25,13 @@ pub(super) struct Library<'data> {
 impl<'data> Library<'data> {
     pub fn parse(name: &str, bytes: &'data [u8]) -> Result<Self> {
         let file = ElfFile64::<object::Endianness>::parse(bytes).map_err(|e| e.to_string())?;
-        if file.architecture() != object::Architecture::X86_64
-            || !file.is_little_endian()
+        if !matches!(
+            file.architecture(),
+            object::Architecture::X86_64 | object::Architecture::Aarch64
+        ) || !file.is_little_endian()
             || file.kind() != object::ObjectKind::Dynamic
         {
-            return Err("expected an x86-64 little-endian ELF shared library".into());
+            return Err("expected an x86-64 or AArch64 little-endian ELF shared library".into());
         }
         if !matches!(file.elf_header().e_ident().os_abi, 0 | 3)
             || file.elf_header().e_flags(file.endian()) != 0
@@ -151,6 +154,7 @@ impl<'data> Library<'data> {
             );
         }
         Ok(Self {
+            arm: file.architecture() == object::Architecture::Aarch64,
             needed,
             exports,
             required,
@@ -340,18 +344,33 @@ fn relocation_symbols(
             let info = u64::from_le_bytes(row[8..16].try_into().unwrap());
             let kind = info as u32;
             let symbol = (info >> 32) as usize;
-            if kind == R_X86_64_IRELATIVE && symbol != 0 {
+            let arm = file.architecture() == object::Architecture::Aarch64;
+            if kind
+                == if arm {
+                    R_AARCH64_IRELATIVE
+                } else {
+                    R_X86_64_IRELATIVE
+                }
+                && symbol != 0
+            {
                 return Err("IRELATIVE dynamic relocation must be symbol-free".into());
             }
             // COPY lookup excludes the executable from its provider scope.
-            if matches!(
-                kind,
-                R_X86_64_NONE
-                    | R_X86_64_RELATIVE
-                    | R_X86_64_RELATIVE64
-                    | R_X86_64_IRELATIVE
-                    | R_X86_64_COPY
-            ) {
+            if if arm {
+                matches!(
+                    kind,
+                    0 | R_AARCH64_RELATIVE | R_AARCH64_IRELATIVE | R_AARCH64_COPY
+                )
+            } else {
+                matches!(
+                    kind,
+                    R_X86_64_NONE
+                        | R_X86_64_RELATIVE
+                        | R_X86_64_RELATIVE64
+                        | R_X86_64_IRELATIVE
+                        | R_X86_64_COPY
+                )
+            } {
                 continue;
             }
             if symbol >= symtab.len() {
@@ -388,6 +407,7 @@ struct Header {
     entsize: u64,
 }
 pub(super) struct Dynamic {
+    arm: bool,
     pub imports: BTreeMap<String, Import>,
     definitions: Vec<Definition>,
     pub stubs: BTreeMap<String, u64>,
@@ -423,6 +443,8 @@ impl Dynamic {
         absolute_relocations: usize,
         lifecycle: lifecycle::Plan,
     ) -> Result<Self> {
+        let arm = options.machine == super::Machine::Aarch64;
+        let stub_size = if arm { 16 } else { 8 };
         let interpreter = &options.interpreter;
         let runpath = &options.runpath;
         let lifecycle_tags = lifecycle.tag_count(sections);
@@ -540,20 +562,31 @@ impl Dynamic {
         );
         // One GOT slot per import. Function stubs jump through the same slot as
         // address-taking code, preserving function pointer identity.
-        let slots = imports
-            .keys()
+        let slots: BTreeMap<_, _> = imports
+            .iter()
+            .filter(|(_, i)| i.kind != 6)
             .enumerate()
-            .map(|(i, n)| (n.clone(), i as u64 * 8))
+            .map(|(i, (n, _))| (n.clone(), i as u64 * 8))
             .collect();
         let stubs = imports
             .iter()
             .filter(|(_, i)| matches!(i.kind, 0 | 2 | 10))
             .enumerate()
-            .map(|(i, (n, _))| (n.clone(), i as u64 * 8))
+            .map(|(i, (n, _))| (n.clone(), i as u64 * stub_size))
             .collect::<BTreeMap<_, _>>();
-        let got = add(".got.imports", 1, 3, 8, vec![0; imports.len() * 8], 0, 0, 0);
-        let plt = add(".plt", 1, 6, 8, vec![0; stubs.len() * 8], 0, 0, 8);
-        let expected_relocations = imports.len() + absolute_relocations;
+        let got = add(".got.imports", 1, 3, 8, vec![0; slots.len() * 8], 0, 0, 0);
+        let plt = add(
+            ".plt",
+            1,
+            6,
+            8,
+            vec![0; stubs.len() * stub_size as usize],
+            0,
+            0,
+            8,
+        );
+        let expected_relocations =
+            imports.values().filter(|i| i.kind != 6).count() + absolute_relocations;
         let rela = add(
             ".rela.dyn",
             4,
@@ -581,6 +614,7 @@ impl Dynamic {
             16,
         );
         Ok(Self {
+            arm,
             imports,
             definitions,
             stubs,
@@ -639,8 +673,14 @@ impl Dynamic {
                 _ => 1,
             };
             put16(&mut versym, i * 2, version);
-            self.relocations
-                .push((self.slot(name, sections), import.index, 6, 0));
+            if import.kind != 6 {
+                self.relocations.push((
+                    self.slot(name, sections),
+                    import.index,
+                    if self.arm { 1025 } else { 6 },
+                    0,
+                ));
+            }
         }
         for (i, d) in self.definitions.iter().enumerate() {
             let i = i + self.imports.len() + 1;
@@ -670,6 +710,23 @@ impl Dynamic {
         }
         for (name, offset) in &self.stubs {
             let start = at(self.plt) + *offset as usize;
+            if self.arm {
+                for (i, (kind, word)) in
+                    [(275, 0x90000010u32), (312, 0xf9400211), (277, 0x91000210)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let encoded = super::aarch64::apply(
+                        kind,
+                        i128::from(self.slot(name, sections)),
+                        i128::from(BASE + start as u64 + i as u64 * 4),
+                        &word.to_le_bytes(),
+                    )?;
+                    bytes[start + i * 4..start + i * 4 + 4].copy_from_slice(&encoded);
+                }
+                put32(bytes, start + 12, 0xd61f0220);
+                continue;
+            }
             let displacement = i32::try_from(
                 i128::from(self.slot(name, sections)) - i128::from(BASE + start as u64 + 6),
             )
