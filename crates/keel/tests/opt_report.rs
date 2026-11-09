@@ -213,10 +213,12 @@ fn report_errors_preserve_inputs_outputs_and_existing_evidence() {
 }
 
 /// 20 values live across a call: more than either target's callee-saved
-/// registers, so `pressure` must spill. `small` needs no spill.
+/// registers, so `pressure` must spill. The sum depends on the call result,
+/// keeping pressure scheduling from moving the reduction before the call.
+/// `small` needs no spill.
 fn pressure_ir() -> String {
     let mut ir = String::from(
-        "decl @clobber()\nfunc @small(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}\nfunc @pressure(i64) -> i64 {\nblock0(v0: i64):\n",
+        "decl @clobber() -> i64\nfunc @small(i64) -> i64 {\nblock0(v0: i64):\n return v0\n}\nfunc @pressure(i64) -> i64 {\nblock0(v0: i64):\n",
     );
     for i in 1..=20 {
         ir.push_str(&format!(
@@ -226,11 +228,11 @@ fn pressure_ir() -> String {
             2 * i - 1
         ));
     }
-    ir.push_str(" call @clobber()\n v41 = iadd v2, v4\n");
-    for i in 3..=20 {
-        ir.push_str(&format!(" v{} = iadd v{}, v{}\n", 39 + i, 38 + i, 2 * i));
+    ir.push_str(" v41 = call @clobber()\n");
+    for i in 1..=20 {
+        ir.push_str(&format!(" v{} = iadd v{}, v{}\n", 41 + i, 40 + i, 2 * i));
     }
-    ir.push_str(" return v58\n}\n");
+    ir.push_str(" return v61\n}\n");
     ir
 }
 #[test]
