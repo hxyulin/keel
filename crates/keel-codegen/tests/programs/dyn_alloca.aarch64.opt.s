@@ -4,7 +4,7 @@
 	.p2align	2
 _k_vla:
 Lk_vla_begin:
-	; regalloc: v0=x20 v1=x10 v2=x23 v4=x21 v5=x22 v6=x9 v7=x9 v8=x21 v12=x10 v13=x10 v15=x9 v16=x9 v18=x22 v19=x9 v20=x10 v22=x9 v23=x10 v24=x9 v25=x9 v31=x10 v37=x9 v38=x9 v39=x10 v40=x11 v41=x10 v42=x9 v45=x9 v47=d19 v48=d19 v49=d20 v50=d21 v51=d22 v52=x11 v53=d23 v54=d19 v57=d23 v58=d20 v61=d23 v62=d21 v65=d23 v66=d22 v68=x12 v70=x11 v73=d19 v74=d19 v75=d19 v76=x10 v88=x11 v89=x10 v91=x12 v92=x13
+	; regalloc: v0=x20 v1=x10 v2=x23 v4=x21 v5=x22 v6=x9 v7=x9 v8=x21 v12=x10 v13=x21 v15=x9 v16=x9 v18=x22 v19=x9 v20=x10 v22=x9 v23=x10 v24=x9 v25=x9 v31=x10 v37=x9 v38=x9 v39=x10 v40=x11 v41=x10 v42=x9 v45=x9 v47=d19 v48=d19 v49=d20 v50=d21 v51=d22 v52=x11 v53=d23 v54=d19 v57=d23 v58=d20 v61=d23 v62=d21 v65=d23 v66=d22 v68=x12 v70=x11 v73=d19 v74=d19 v75=d19 v76=x10 v88=x11 v89=x10 v91=x12 v92=x13
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -140,12 +140,11 @@ Lk_vla_block2:
 	; v12 = load.i64 v11
 	ldr	x10, [x22, x9, lsl #3]
 	; v13 = iadd v8, v12
-	add	x10, x21, x10
+	add	x21, x21, x10
 	; v14 = iconst.i64 1
 	; v15 = iadd v7, v14
 	add	x9, x9, #1
 	; jump block1(v15, v13)
-	mov	x21, x10
 	b	Lk_vla_block1
 Lk_vla_block3:
 	; v16 = iconst.i64 2
@@ -215,7 +214,7 @@ Lk_vla_end:
 	.p2align	2
 _k_loop:
 Lk_loop_begin:
-	; regalloc: v0=x9 v1=x10 v5=x12 v6=x13 v7=x13 v8=x13 v9=x11 v11=x10 v12=x10 v13=x11 v15=x9
+	; regalloc: v0=x9 v1=x10 v5=x12 v6=x13 v7=x13 v8=x13 v9=x11 v11=x10 v12=x10 v13=x11 v15=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -232,12 +231,8 @@ Lk_loop_block0:
 	; v4 = icmp.ugt v0, v1
 	; brif v4, block2(v1, v1), block3(v1)
 	cmp	x9, #0
-	b.ls	Lk_loop_inst3_else
+	b.ls	Lk_loop_block3
 	mov	x11, x10
-	b	Lk_loop_block2
-Lk_loop_inst3_else:
-	mov	x9, x10
-	b	Lk_loop_block3
 Lk_loop_block2:
 	; v5 = intrinsic stack_save()
 	mov	x12, sp
@@ -263,10 +258,10 @@ Lk_loop_block2:
 	; brif v16, block2(v11, v9), block3(v9)
 	cmp	x9, x10
 	b.hi	Lk_loop_block2
-	mov	x9, x11
+	mov	x10, x11
 Lk_loop_block3:
 	; return v15
-	mov	x0, x9
+	mov	x0, x10
 	sub	sp, x29, #16
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16

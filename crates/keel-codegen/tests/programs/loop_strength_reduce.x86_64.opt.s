@@ -27,31 +27,22 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4, v16), block3(v3)
 	cmp	esi, 0
-	jbe	".Lhot32p_inst3_else"
-	mov	r11, r8
-	mov	r8, r9
-	mov	r9, rbx
-	mov	rbx, r11
-	jmp	".Lhot32p_block2"
-.Lhot32p_inst3_else:
-	mov	rsi, r9
-	jmp	".Lhot32p_block3"
+	jbe	".Lhot32p_block3"
 .Lhot32p_block2:
 	# v10 = iadd v21, v23
-	add	r8d, ebx
+	add	r9d, r8d
 	# v11 = iconst.i32 1
 	# v14 = iadd v22, v11
-	add	r9d, 1
+	add	ebx, 1
 	# v20 = iadd v1, v23
-	add	ebx, edi
+	add	r8d, edi
 	# v27 = icmp.ugt v0, v14
 	# brif v27, block2(v10, v14, v20), block3(v10)
-	cmp	esi, r9d
+	cmp	esi, ebx
 	ja	".Lhot32p_block2"
-	mov	rsi, r8
 .Lhot32p_block3:
 	# return v24
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp
@@ -90,31 +81,22 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4, v16), block3(v3)
 	cmp	esi, 0
-	jbe	".Lhot32m_inst3_else"
-	mov	r11, r8
-	mov	r8, r9
-	mov	r9, rbx
-	mov	rbx, r11
-	jmp	".Lhot32m_block2"
-.Lhot32m_inst3_else:
-	mov	rsi, r9
-	jmp	".Lhot32m_block3"
+	jbe	".Lhot32m_block3"
 .Lhot32m_block2:
 	# v10 = iadd v21, v23
-	add	r8d, ebx
+	add	r9d, r8d
 	# v13 = iconst.i32 1
 	# v14 = iadd v22, v13
-	add	r9d, 1
+	add	ebx, 1
 	# v20 = iadd v18, v23
-	add	ebx, edi
+	add	r8d, edi
 	# v27 = icmp.ugt v0, v14
 	# brif v27, block2(v10, v14, v20), block3(v10)
-	cmp	esi, r9d
+	cmp	esi, ebx
 	ja	".Lhot32m_block2"
-	mov	rsi, r8
 .Lhot32m_block3:
 	# return v24
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp
@@ -149,9 +131,7 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4), block3(v3)
 	cmp	esi, 0
-	ja	".Lhot32z_block2"
-	mov	rsi, r9
-	jmp	".Lhot32z_block3"
+	jbe	".Lhot32z_block3"
 .Lhot32z_block2:
 	# v9 = imul v1, v2
 	mov	r12, rdi
@@ -165,10 +145,9 @@
 	# brif v20, block2(v10, v14), block3(v10)
 	cmp	esi, ebx
 	ja	".Lhot32z_block2"
-	mov	rsi, r9
 .Lhot32z_block3:
 	# return v18
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx
@@ -205,31 +184,22 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4, v16), block3(v3)
 	cmp	rsi, 0
-	jbe	".Lhot64p_inst3_else"
-	mov	r11, r8
-	mov	r8, r9
-	mov	r9, rbx
-	mov	rbx, r11
-	jmp	".Lhot64p_block2"
-.Lhot64p_inst3_else:
-	mov	rsi, r9
-	jmp	".Lhot64p_block3"
+	jbe	".Lhot64p_block3"
 .Lhot64p_block2:
 	# v10 = iadd v21, v23
-	add	r8, rbx
+	add	r9, r8
 	# v11 = iconst.i64 1
 	# v14 = iadd v22, v11
-	add	r9, 1
+	add	rbx, 1
 	# v20 = iadd v1, v23
-	add	rbx, rdi
+	add	r8, rdi
 	# v27 = icmp.ugt v0, v14
 	# brif v27, block2(v10, v14, v20), block3(v10)
-	cmp	rsi, r9
+	cmp	rsi, rbx
 	ja	".Lhot64p_block2"
-	mov	rsi, r8
 .Lhot64p_block3:
 	# return v24
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp
@@ -268,31 +238,22 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4, v16), block3(v3)
 	cmp	rsi, 0
-	jbe	".Lhot64m_inst3_else"
-	mov	r11, r8
-	mov	r8, r9
-	mov	r9, rbx
-	mov	rbx, r11
-	jmp	".Lhot64m_block2"
-.Lhot64m_inst3_else:
-	mov	rsi, r9
-	jmp	".Lhot64m_block3"
+	jbe	".Lhot64m_block3"
 .Lhot64m_block2:
 	# v10 = iadd v21, v23
-	add	r8, rbx
+	add	r9, r8
 	# v13 = iconst.i64 1
 	# v14 = iadd v22, v13
-	add	r9, 1
+	add	rbx, 1
 	# v20 = iadd v18, v23
-	add	rbx, rdi
+	add	r8, rdi
 	# v27 = icmp.ugt v0, v14
 	# brif v27, block2(v10, v14, v20), block3(v10)
-	cmp	rsi, r9
+	cmp	rsi, rbx
 	ja	".Lhot64m_block2"
-	mov	rsi, r8
 .Lhot64m_block3:
 	# return v24
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp
@@ -327,9 +288,7 @@
 	# v8 = icmp.ugt v0, v4
 	# brif v8, block2(v3, v4), block3(v3)
 	cmp	rsi, 0
-	ja	".Lhot64z_block2"
-	mov	rsi, r9
-	jmp	".Lhot64z_block3"
+	jbe	".Lhot64z_block3"
 .Lhot64z_block2:
 	# v9 = imul v1, v2
 	mov	r12, rdi
@@ -343,10 +302,9 @@
 	# brif v20, block2(v10, v14), block3(v10)
 	cmp	rsi, rbx
 	ja	".Lhot64z_block2"
-	mov	rsi, r9
 .Lhot64z_block3:
 	# return v18
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx
@@ -386,31 +344,24 @@
 	# v9 = icmp.ugt v0, v4
 	# brif v9, block2(v17, v4, v5), block3(v5)
 	cmp	esi, 0
-	jbe	".Loffset32_inst4_else"
-	mov	r9, rbx
-	mov	rbx, r12
-	jmp	".Loffset32_block2"
-.Loffset32_inst4_else:
-	mov	rsi, r12
-	jmp	".Loffset32_block3"
+	jbe	".Loffset32_block3"
 .Loffset32_block2:
 	# v11 = sext.i64 v18
-	movsxd	r12, r8d
+	movsxd	r9, r8d
 	# v12 = iadd v20, v11
-	add	rbx, r12
+	add	r12, r9
 	# v13 = iadd v1, v18
 	add	r8d, edi
 	# v14 = iconst.i32 1
 	# v15 = iadd v19, v14
-	add	r9d, 1
+	add	ebx, 1
 	# v24 = icmp.ugt v0, v15
 	# brif v24, block2(v13, v15, v12), block3(v12)
-	cmp	esi, r9d
+	cmp	esi, ebx
 	ja	".Loffset32_block2"
-	mov	rsi, rbx
 .Loffset32_block3:
 	# return v23
-	mov	rax, rsi
+	mov	rax, r12
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx
@@ -450,29 +401,26 @@
 	# v9 = icmp.ugt v0, v4
 	# brif v9, block2(v16, v4, v5), block3(v5)
 	cmp	rsi, 0
-	jbe	".Loffset64_inst4_else"
-	mov	r9, rbx
-	mov	rbx, r12
-	jmp	".Loffset64_block2"
-.Loffset64_inst4_else:
-	mov	rsi, r12
-	jmp	".Loffset64_block3"
+	jbe	".Loffset64_block3"
 .Loffset64_block2:
 	# v11 = iadd v17, v19
-	add	rbx, r8
+	lea	r9, [r8 + r12 * 1]
 	# v12 = iadd v1, v17
 	add	r8, rdi
 	# v13 = iconst.i64 1
 	# v14 = iadd v18, v13
-	add	r9, 1
+	add	rbx, 1
 	# v23 = icmp.ugt v0, v14
 	# brif v23, block2(v12, v14, v11), block3(v11)
-	cmp	rsi, r9
-	ja	".Loffset64_block2"
-	mov	rsi, rbx
+	cmp	rsi, rbx
+	jbe	".Loffset64_inst10_else"
+	mov	r12, r9
+	jmp	".Loffset64_block2"
+.Loffset64_inst10_else:
+	mov	r12, r9
 .Loffset64_block3:
 	# return v22
-	mov	rax, rsi
+	mov	rax, r12
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx

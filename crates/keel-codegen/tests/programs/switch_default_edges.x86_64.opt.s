@@ -25,25 +25,26 @@
 	mov	ebx, 29
 	# switch v0, block1, [259: block2(v3), 260: block2(v4), 288: block2(v0)]
 	cmp	esi, 259
-	je	".Lsparse_default_inst2_edge1"
+	je	".Lsparse_default_block2"
 	cmp	esi, 260
 	je	".Lsparse_default_inst2_edge2"
 	cmp	esi, 288
-	je	".Lsparse_default_block2"
+	je	".Lsparse_default_inst2_edge3"
 	jmp	".Lsparse_default_block1"
-.Lsparse_default_inst2_edge1:
-	mov	rsi, r9
-	jmp	".Lsparse_default_block2"
 .Lsparse_default_inst2_edge2:
-	mov	rsi, rbx
+	mov	r9, rbx
+	jmp	".Lsparse_default_block2"
+.Lsparse_default_inst2_edge3:
+	mov	r9, rsi
 	jmp	".Lsparse_default_block2"
 .Lsparse_default_block1:
 	# v5 = iconst.i32 41
 	mov	esi, 41
 	# jump block2(v5)
+	mov	r9, rsi
 .Lsparse_default_block2:
 	# store v6, v1
-	mov	dword ptr [rdi], esi
+	mov	dword ptr [rdi], r9d
 	# v7 = load.i32 v2
 	mov	esi, dword ptr [r8]
 	# return v7

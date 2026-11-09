@@ -4,7 +4,7 @@
 	.p2align	2
 _sum:
 Lsum_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v9=x13 v10=x13 v11=x12 v13=x11 v19=x13 v25=x14 v26=x14 v27=x12 v29=x11 v33=x14 v34=x14 v35=x13 v37=x11 v38=x12 v39=x12 v40=x11 v41=x12 v43=x9 v45=x11 v46=x12 v47=x13 v48=x11 v49=x12 v50=x13 v51=x14
+	; regalloc: v0=x9 v1=x10 v2=x11 v9=x13 v10=x13 v11=x12 v13=x11 v19=x13 v25=x14 v26=x14 v27=x12 v29=x11 v33=x14 v34=x14 v35=x13 v37=x11 v38=x12 v39=x12 v40=x11 v41=x12 v43=x12 v45=x11 v46=x12 v47=x13 v48=x11 v49=x12 v50=x13 v51=x14
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -70,9 +70,7 @@ Lsum_block6:
 	; v5 = icmp.ugt v1, v48
 	; brif v5, block2(v48, v38), block3(v38)
 	cmp	x10, x11
-	b.hi	Lsum_block2
-	mov	x9, x12
-	b	Lsum_block3
+	b.ls	Lsum_block3
 Lsum_block2:
 	; v15 = iconst.i64 2
 	; v7 = shl v40, v15
@@ -90,10 +88,9 @@ Lsum_block2:
 	; brif v44, block2(v13, v11), block3(v11)
 	cmp	x10, x11
 	b.hi	Lsum_block2
-	mov	x9, x12
 Lsum_block3:
 	; return v43
-	mov	x0, x9
+	mov	x0, x12
 	ldp	x29, x30, [sp], #16
 	ret
 Lsum_end:

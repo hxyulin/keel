@@ -903,6 +903,9 @@ free, permitted registers: they never override interference, register
 classes, or call preservation. Generated hints prefer the destructive
 input of x86 binary instructions and the source of integer bit-preserving
 conversions on both targets.
+Full selection also gives block arguments and their incoming values symmetric
+preferences, so either can reuse the other's free register in scan order.
+Instruction-input preferences take precedence over edge preferences.
 
 Immediate and address folding remain target-specific:
 

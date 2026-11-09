@@ -93,9 +93,7 @@
 	# v2 = icmp.ult v0, v1
 	# brif v2, block2(v0), block1
 	cmp	rbx, 2
-	jae	".Lfib_block1"
-	mov	rsi, rbx
-	jmp	".Lfib_block2"
+	jb	".Lfib_block2"
 .Lfib_block1:
 	# v3 = iconst.i64 1
 	# v4 = isub v0, v3
@@ -115,10 +113,10 @@
 	# v8 = iadd v5, v7
 	add	r12, rsi
 	# jump block2(v8)
-	mov	rsi, r12
+	mov	rbx, r12
 .Lfib_block2:
 	# return v9
-	mov	rax, rsi
+	mov	rax, rbx
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx
@@ -152,9 +150,7 @@
 	mov	edi, 1
 	# brif v2, block2(v3), block1
 	test	sil, sil
-	je	".Lfact_block1"
-	mov	rsi, rdi
-	jmp	".Lfact_block2"
+	jne	".Lfact_block2"
 .Lfact_block1:
 	# v10 = iconst.i64 1
 	# v4 = isub v0, v10
@@ -167,10 +163,10 @@
 	# v6 = imul v0, v5
 	imul	rbx, rsi
 	# jump block2(v6)
-	mov	rsi, rbx
+	mov	rdi, rbx
 .Lfact_block2:
 	# return v7
-	mov	rax, rsi
+	mov	rax, rdi
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp

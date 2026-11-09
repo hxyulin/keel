@@ -200,12 +200,8 @@
 	# v6 = icmp.ugt v0, v3
 	# brif v6, block2(v3, v3), block3(v3)
 	cmp	rsi, 0
-	jbe	".Lmemset_loop_inst5_else"
+	jbe	".Lmemset_loop_block3"
 	mov	r8, rdi
-	jmp	".Lmemset_loop_block2"
-.Lmemset_loop_inst5_else:
-	mov	rsi, rdi
-	jmp	".Lmemset_loop_block3"
 .Lmemset_loop_block2:
 	# v7 = trunc.i8 v15
 	mov	r9, rdi
@@ -224,10 +220,10 @@
 	# brif v19, block2(v11, v9), block3(v9)
 	cmp	rsi, rdi
 	ja	".Lmemset_loop_block2"
-	mov	rsi, r8
+	mov	rdi, r8
 .Lmemset_loop_block3:
 	# return v18
-	mov	rax, rsi
+	mov	rax, rdi
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp

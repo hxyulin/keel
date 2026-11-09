@@ -88,7 +88,7 @@ Lk_isort_end:
 	.p2align	2
 _k_matmul:
 Lk_matmul_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v7=x14 v10=x13 v11=x15 v17=x22 v18=x22 v22=x22 v25=x23 v28=x23 v30=x20 v32=x19 v33=x20 v34=x20 v39=x15 v44=x15 v45=x19 v50=x21 v56=x21 v59=x23 v60=x23 v64=x23 v65=x24 v68=x24 v70=x20 v72=x19 v73=x22 v74=x23 v75=x23 v79=x23 v80=x24 v83=x24 v85=x21 v87=x19 v88=x22 v89=x20 v90=x20 v91=x19 v92=x20 v93=x21 v95=x19 v98=x19 v99=x20 v100=x21 v101=x22 v102=x19 v103=x20 v104=x21 v105=x22 v106=x23
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x13 v7=x14 v10=x13 v11=x15 v17=x22 v18=x22 v22=x22 v25=x23 v28=x23 v30=x20 v32=x19 v33=x19 v34=x19 v39=x15 v44=x15 v45=x19 v50=x21 v56=x21 v59=x23 v60=x23 v64=x23 v65=x24 v68=x24 v70=x20 v72=x19 v73=x22 v74=x23 v75=x23 v79=x23 v80=x24 v83=x24 v85=x21 v87=x19 v88=x22 v89=x20 v90=x20 v91=x19 v92=x20 v93=x21 v95=x20 v98=x19 v99=x20 v100=x21 v101=x22 v102=x19 v103=x20 v104=x21 v105=x22 v106=x23
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -209,12 +209,8 @@ Lk_matmul_block12:
 	; v16 = icmp.sgt v3, v102
 	; brif v16, block8(v102, v89, v105), block9(v89)
 	cmp	w12, w19
-	b.le	Lk_matmul_inst16_else
+	b.le	Lk_matmul_block9
 	mov	x21, x22
-	b	Lk_matmul_block8
-Lk_matmul_inst16_else:
-	mov	x19, x20
-	b	Lk_matmul_block9
 Lk_matmul_block8:
 	; v17 = iadd v7, v91
 	add	w22, w14, w19
@@ -243,17 +239,16 @@ Lk_matmul_block8:
 	; brif v97, block8(v32, v30, v50), block9(v30)
 	cmp	w12, w19
 	b.gt	Lk_matmul_block8
-	mov	x19, x20
 Lk_matmul_block9:
 	; v33 = iadd v7, v11
-	add	w20, w14, w15
+	add	w19, w14, w15
 	; v34 = sext.i64 v33
-	sxtw	x20, w20
+	sxtw	x19, w19
 	; v35 = iconst.i64 2
 	; v36 = shl v34, v35
 	; v37 = ptradd v2, v36
 	; store v95, v37
-	str	w19, [x11, x20, lsl #2]
+	str	w20, [x11, x19, lsl #2]
 	; v38 = iconst.i32 1
 	; v39 = iadd v11, v38
 	add	w15, w15, #1
@@ -280,7 +275,7 @@ Lk_matmul_end:
 	.p2align	2
 _signed_dot32:
 Lsigned_dot32_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x14 v10=x14 v12=x15 v14=x14 v16=x13 v18=x12 v22=x15 v25=x15 v27=x15 v29=x19 v31=x15 v33=x13 v35=x12 v36=x15 v38=x15 v40=x19 v42=x15 v44=x14 v46=x12 v47=x13 v48=x14 v49=x12 v50=x13 v52=x9 v54=x12 v55=x13 v56=x14 v57=x12 v58=x13 v59=x14 v60=x15
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x14 v10=x14 v12=x15 v14=x14 v16=x13 v18=x12 v22=x15 v25=x15 v27=x15 v29=x19 v31=x15 v33=x12 v35=x13 v36=x15 v38=x15 v40=x19 v42=x15 v44=x14 v46=x13 v47=x12 v48=x14 v49=x12 v50=x13 v52=x13 v54=x13 v55=x12 v56=x14 v57=x13 v58=x12 v59=x14 v60=x15
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -304,19 +299,10 @@ Lsigned_dot32_block0:
 	; v24 = icmp.sge v22, v23
 	; brif v24, block5(v4, v3, v48), block6(v4, v3, v48)
 	cmp	w15, #2
-	b.lt	Lsigned_dot32_inst20_else
-	mov	x16, x12
-	mov	x12, x13
-	mov	x13, x16
-	b	Lsigned_dot32_block5
-Lsigned_dot32_inst20_else:
-	mov	x16, x12
-	mov	x12, x13
-	mov	x13, x16
-	b	Lsigned_dot32_block6
+	b.lt	Lsigned_dot32_block6
 Lsigned_dot32_block5:
 	; v25 = sext.i64 v54
-	sxtw	x15, w12
+	sxtw	x15, w13
 	; v26 = iconst.i64 2
 	; v27 = shl v25, v26
 	lsl	x15, x15, #2
@@ -328,12 +314,12 @@ Lsigned_dot32_block5:
 	ldr	w15, [x10, x15, lsl #0]
 	; v32 = imul v29, v31
 	; v33 = iadd v55, v32
-	madd	w13, w19, w15, w13
+	madd	w12, w19, w15, w12
 	; v34 = iconst.i32 1
 	; v35 = iadd v54, v34
-	add	w12, w12, #1
+	add	w13, w13, #1
 	; v36 = sext.i64 v35
-	sxtw	x15, w12
+	sxtw	x15, w13
 	; v37 = iconst.i64 2
 	; v38 = shl v36, v37
 	lsl	x15, x15, #2
@@ -348,9 +334,9 @@ Lsigned_dot32_block5:
 	madd	w14, w19, w15, w14
 	; v45 = iconst.i32 1
 	; v46 = iadd v35, v45
-	add	w12, w12, #1
+	add	w13, w13, #1
 	; v60 = isub v2, v46
-	sub	w15, w11, w12
+	sub	w15, w11, w13
 	; v61 = iconst.i32 2
 	; v62 = icmp.sge v60, v61
 	; brif v62, block5(v46, v33, v44), block6(v46, v33, v44)
@@ -358,12 +344,17 @@ Lsigned_dot32_block5:
 	b.ge	Lsigned_dot32_block5
 Lsigned_dot32_block6:
 	; v47 = iadd v58, v59
-	add	w13, w13, w14
+	add	w12, w12, w14
 	; v7 = icmp.sgt v2, v57
 	; brif v7, block2(v57, v47), block3(v47)
-	cmp	w11, w12
-	b.gt	Lsigned_dot32_block2
-	mov	x9, x13
+	cmp	w11, w13
+	b.le	Lsigned_dot32_inst3_else
+	mov	x16, x12
+	mov	x12, x13
+	mov	x13, x16
+	b	Lsigned_dot32_block2
+Lsigned_dot32_inst3_else:
+	mov	x13, x12
 	b	Lsigned_dot32_block3
 Lsigned_dot32_block2:
 	; v8 = sext.i64 v49
@@ -387,10 +378,9 @@ Lsigned_dot32_block2:
 	; brif v53, block2(v18, v16), block3(v16)
 	cmp	w11, w12
 	b.gt	Lsigned_dot32_block2
-	mov	x9, x13
 Lsigned_dot32_block3:
 	; return v52
-	mov	x0, x9
+	mov	x0, x13
 	sub	sp, x29, #16
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16
@@ -402,7 +392,7 @@ Lsigned_dot32_end:
 	.p2align	2
 _signed_dot64:
 Lsigned_dot64_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v9=x14 v11=x15 v13=x14 v15=x13 v17=x12 v21=x15 v25=x15 v27=x19 v29=x15 v31=x13 v33=x12 v35=x15 v37=x19 v39=x15 v41=x14 v43=x12 v44=x13 v45=x14 v46=x12 v47=x13 v49=x9 v51=x12 v52=x13 v53=x14 v54=x12 v55=x13 v56=x14 v57=x15
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v9=x14 v11=x15 v13=x14 v15=x13 v17=x12 v21=x15 v25=x15 v27=x19 v29=x15 v31=x12 v33=x13 v35=x15 v37=x19 v39=x15 v41=x14 v43=x13 v44=x12 v45=x14 v46=x12 v47=x13 v49=x13 v51=x13 v52=x12 v53=x14 v54=x13 v55=x12 v56=x14 v57=x15
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -426,20 +416,11 @@ Lsigned_dot64_block0:
 	; v23 = icmp.sge v21, v22
 	; brif v23, block5(v4, v3, v45), block6(v4, v3, v45)
 	cmp	x15, #2
-	b.lt	Lsigned_dot64_inst19_else
-	mov	x16, x12
-	mov	x12, x13
-	mov	x13, x16
-	b	Lsigned_dot64_block5
-Lsigned_dot64_inst19_else:
-	mov	x16, x12
-	mov	x12, x13
-	mov	x13, x16
-	b	Lsigned_dot64_block6
+	b.lt	Lsigned_dot64_block6
 Lsigned_dot64_block5:
 	; v24 = iconst.i64 3
 	; v25 = shl v51, v24
-	lsl	x15, x12, #3
+	lsl	x15, x13, #3
 	; v26 = ptradd v0, v25
 	; v27 = load.i64 v26
 	ldr	x19, [x9, x15, lsl #0]
@@ -448,13 +429,13 @@ Lsigned_dot64_block5:
 	ldr	x15, [x10, x15, lsl #0]
 	; v30 = imul v27, v29
 	; v31 = iadd v52, v30
-	madd	x13, x19, x15, x13
+	madd	x12, x19, x15, x12
 	; v32 = iconst.i64 1
 	; v33 = iadd v51, v32
-	add	x12, x12, #1
+	add	x13, x13, #1
 	; v34 = iconst.i64 3
 	; v35 = shl v33, v34
-	lsl	x15, x12, #3
+	lsl	x15, x13, #3
 	; v36 = ptradd v0, v35
 	; v37 = load.i64 v36
 	ldr	x19, [x9, x15, lsl #0]
@@ -466,9 +447,9 @@ Lsigned_dot64_block5:
 	madd	x14, x19, x15, x14
 	; v42 = iconst.i64 1
 	; v43 = iadd v33, v42
-	add	x12, x12, #1
+	add	x13, x13, #1
 	; v57 = isub v2, v43
-	sub	x15, x11, x12
+	sub	x15, x11, x13
 	; v58 = iconst.i64 2
 	; v59 = icmp.sge v57, v58
 	; brif v59, block5(v43, v31, v41), block6(v43, v31, v41)
@@ -476,12 +457,17 @@ Lsigned_dot64_block5:
 	b.ge	Lsigned_dot64_block5
 Lsigned_dot64_block6:
 	; v44 = iadd v55, v56
-	add	x13, x13, x14
+	add	x12, x12, x14
 	; v7 = icmp.sgt v2, v54
 	; brif v7, block2(v54, v44), block3(v44)
-	cmp	x11, x12
-	b.gt	Lsigned_dot64_block2
-	mov	x9, x13
+	cmp	x11, x13
+	b.le	Lsigned_dot64_inst3_else
+	mov	x16, x12
+	mov	x12, x13
+	mov	x13, x16
+	b	Lsigned_dot64_block2
+Lsigned_dot64_inst3_else:
+	mov	x13, x12
 	b	Lsigned_dot64_block3
 Lsigned_dot64_block2:
 	; v8 = iconst.i64 3
@@ -503,10 +489,9 @@ Lsigned_dot64_block2:
 	; brif v50, block2(v17, v15), block3(v15)
 	cmp	x11, x12
 	b.gt	Lsigned_dot64_block2
-	mov	x9, x13
 Lsigned_dot64_block3:
 	; return v49
-	mov	x0, x9
+	mov	x0, x13
 	sub	sp, x29, #16
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16
@@ -518,7 +503,7 @@ Lsigned_dot64_end:
 	.p2align	2
 _div_loop:
 Ldiv_loop_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x15 v9=x15 v10=x19 v11=x15 v12=x14 v14=x13 v15=x13 v16=x14 v18=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v8=x15 v9=x15 v10=x19 v11=x15 v12=x14 v14=x13 v15=x13 v16=x14 v18=x13
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -537,12 +522,8 @@ Ldiv_loop_block0:
 	; v7 = icmp.sgt v2, v4
 	; brif v7, block2(v4, v4), block3(v4)
 	cmp	x11, #0
-	b.le	Ldiv_loop_inst3_else
+	b.le	Ldiv_loop_block3
 	mov	x14, x13
-	b	Ldiv_loop_block2
-Ldiv_loop_inst3_else:
-	mov	x9, x13
-	b	Ldiv_loop_block3
 Ldiv_loop_block2:
 	; v8 = load.i64 v0
 	ldr	x15, [x9]
@@ -566,10 +547,10 @@ Ldiv_loop_block2:
 	; brif v19, block2(v14, v12), block3(v12)
 	cmp	x11, x13
 	b.gt	Ldiv_loop_block2
-	mov	x9, x14
+	mov	x13, x14
 Ldiv_loop_block3:
 	; return v18
-	mov	x0, x9
+	mov	x0, x13
 	sub	sp, x29, #16
 	ldr	x19, [sp], #16
 	ldp	x29, x30, [sp], #16

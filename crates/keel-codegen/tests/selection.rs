@@ -172,6 +172,25 @@ block0(v0: i64, v1: i64):
 }
 
 #[test]
+fn loop_and_join_affinities_reduce_edge_copies() {
+    let source = include_str!("programs/phi_loop.keel");
+    let module = keel_ir::parse(source).unwrap();
+    let target = Target::Aarch64AppleDarwin;
+    let copies = |hints| {
+        let options = SelectionOptions {
+            register_hints: hints,
+            ..SelectionOptions::ALL
+        };
+        let output = compile_with_options(&module, target, options).unwrap();
+        let body = output.split("_edge_transfers:").nth(1).unwrap();
+        body.lines()
+            .filter(|line| line.starts_with("\tmov\t"))
+            .count()
+    };
+    assert!(copies(true) < copies(false));
+}
+
+#[test]
 fn x86_scaled_address_assembles() {
     use std::io::Write;
     use std::process::{Command, Stdio};

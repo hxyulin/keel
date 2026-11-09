@@ -77,9 +77,7 @@
 	# v5 = icmp.ugt v1, v48
 	# brif v5, block2(v48, v38), block3(v38)
 	cmp	rdi, r8
-	ja	".Lsum_block2"
-	mov	rsi, r9
-	jmp	".Lsum_block3"
+	jbe	".Lsum_block3"
 .Lsum_block2:
 	# v15 = iconst.i64 2
 	# v7 = shl v40, v15
@@ -97,10 +95,9 @@
 	# brif v44, block2(v13, v11), block3(v11)
 	cmp	rdi, r8
 	ja	".Lsum_block2"
-	mov	rsi, r9
 .Lsum_block3:
 	# return v43
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx

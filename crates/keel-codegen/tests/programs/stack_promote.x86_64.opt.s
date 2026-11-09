@@ -36,14 +36,13 @@
 	jmp	".Lprivate_acc_block2"
 .Lprivate_acc_inst14_else:
 	mov	rsi, r9
-	mov	rdi, r9
 	jmp	".Lprivate_acc_block3"
 .Lprivate_acc_block2:
 	# v13 = iconst.i64 3
 	# v14 = shl v75, v13
 	# v15 = ptradd v0, v14
 	# v16 = load.i64 v15
-	mov	r13, qword ptr [rsi + r8 * 8]
+	mov	r13, qword ptr [rsi + r9 * 8]
 	# v54 = iconst.i64 0
 	# v18 = icmp.slt v16, v54
 	# brif v18, block5, block4
@@ -53,39 +52,42 @@
 	# v36 = iadd v16, v77
 	add	r13, rbx
 	# jump block6(v76, v36)
-	mov	rbx, r13
 	jmp	".Lprivate_acc_block6"
 .Lprivate_acc_block5:
 	# v39 = iadd v16, v76
-	add	r13, r9
+	add	r13, r8
 	# jump block6(v39, v77)
-	mov	r9, r13
+	mov	r8, r13
+	mov	r13, rbx
 .Lprivate_acc_block6:
 	# v44 = iconst.i32 1
 	# v45 = iadd v78, v44
 	add	r12d, 1
 	# v46 = iconst.i64 1
 	# v47 = iadd v75, v46
-	add	r8, 1
+	add	r9, 1
 	# v83 = icmp.ugt v1, v47
 	# brif v83, block2(v47, v62, v68, v45), block3(v62, v68, v45)
-	cmp	rdi, r8
-	ja	".Lprivate_acc_block2"
-	mov	rsi, r9
-	mov	rdi, rbx
+	cmp	rdi, r9
+	jbe	".Lprivate_acc_inst57_else"
+	mov	rbx, r13
+	jmp	".Lprivate_acc_block2"
+.Lprivate_acc_inst57_else:
+	mov	r9, r8
+	mov	rsi, r13
 	mov	r8, r12
 .Lprivate_acc_block3:
 	# v21 = iconst.i64 3
 	# v22 = imul v80, v21
-	imul	rsi, rsi, 3
+	imul	r9, r9, 3
 	# v26 = iadd v22, v81
-	add	rsi, rdi
+	add	r9, rsi
 	# v30 = uext.i64 v82
-	mov	edi, r8d
+	mov	esi, r8d
 	# v31 = iadd v26, v30
-	add	rsi, rdi
+	add	r9, rsi
 	# return v31
-	mov	rax, rsi
+	mov	rax, r9
 	lea	rsp, [rbp + -24]
 	pop	r13
 	pop	r12

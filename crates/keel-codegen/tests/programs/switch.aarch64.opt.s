@@ -293,7 +293,7 @@ Lnarrow_end:
 	.p2align	2
 _machine:
 Lmachine_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x12 v7=x10 v10=x12 v13=x11 v14=x11 v15=x12 v18=x11 v22=x9 v23=x9 v28=x11 v29=x12
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v4=x12 v7=x10 v10=x12 v13=x11 v14=x12 v15=x11 v18=x12 v22=x9 v23=x12 v28=x11 v29=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -311,9 +311,7 @@ Lmachine_block1:
 	; v5 = icmp.ugt v0, v2
 	; brif v5, block2, block7(v4)
 	cmp	x9, x10
-	b.hi	Lmachine_block2
-	mov	x9, x12
-	b	Lmachine_block7
+	b.ls	Lmachine_block7
 Lmachine_block2:
 	; v6 = iconst.i64 1
 	; v7 = iadd v2, v6
@@ -328,25 +326,19 @@ Lmachine_block2:
 	b	Lmachine_block6
 Lmachine_block5:
 	; v18 = isub v4, v7
-	sub	x11, x12, x10
+	sub	x12, x12, x10
 	; v29 = iconst.i64 0
-	movz	x12, #0x0
+	movz	x11, #0x0
 	; jump block1(v7, v29, v18)
-	mov	x16, x11
-	mov	x11, x12
-	mov	x12, x16
 	b	Lmachine_block1
 Lmachine_block4:
 	; v13 = iconst.i64 3
 	movz	x11, #0x3
 	; v14 = imul v4, v13
-	mul	x11, x12, x11
+	mul	x12, x12, x11
 	; v15 = iconst.i64 2
-	movz	x12, #0x2
+	movz	x11, #0x2
 	; jump block1(v7, v15, v14)
-	mov	x16, x11
-	mov	x11, x12
-	mov	x12, x16
 	b	Lmachine_block1
 Lmachine_block3:
 	; v28 = iconst.i64 1
@@ -359,9 +351,10 @@ Lmachine_block6:
 	; v22 = iconst.i64 -1
 	movn	x9, #0x0
 	; jump block7(v22)
+	mov	x12, x9
 Lmachine_block7:
 	; return v23
-	mov	x0, x9
+	mov	x0, x12
 	ldp	x29, x30, [sp], #16
 	ret
 Lmachine_end:

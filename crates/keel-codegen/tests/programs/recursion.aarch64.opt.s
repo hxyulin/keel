@@ -68,7 +68,7 @@ Lmain_end:
 	.p2align	2
 _fib:
 Lfib_begin:
-	; regalloc: v0=x19 v4=x9 v5=x20 v6=x9 v7=x9 v8=x9 v9=x9
+	; regalloc: v0=x19 v4=x9 v5=x20 v6=x9 v7=x9 v8=x9 v9=x19
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -84,9 +84,7 @@ Lfib_block0:
 	; v2 = icmp.ult v0, v1
 	; brif v2, block2(v0), block1
 	cmp	x19, #2
-	b.hs	Lfib_block1
-	mov	x9, x19
-	b	Lfib_block2
+	b.lo	Lfib_block2
 Lfib_block1:
 	; v3 = iconst.i64 1
 	; v4 = isub v0, v3
@@ -105,9 +103,10 @@ Lfib_block1:
 	; v8 = iadd v5, v7
 	add	x9, x20, x9
 	; jump block2(v8)
+	mov	x19, x9
 Lfib_block2:
 	; return v9
-	mov	x0, x9
+	mov	x0, x19
 	sub	sp, x29, #16
 	ldp	x19, x20, [sp], #16
 	ldp	x29, x30, [sp], #16

@@ -4,7 +4,7 @@
 	.p2align	2
 _private_acc:
 Lprivate_acc_begin:
-	; regalloc: v0=x9 v1=x10 v3=x11 v5=x12 v16=x15 v21=x12 v26=x9 v30=x10 v31=x9 v36=x13 v39=x12 v45=x14 v47=x11 v62=x12 v68=x13 v75=x11 v76=x12 v77=x13 v78=x14 v80=x9 v81=x10 v82=x11
+	; regalloc: v0=x9 v1=x10 v3=x11 v5=x12 v16=x15 v21=x10 v26=x9 v30=x10 v31=x9 v36=x13 v39=x11 v45=x14 v47=x12 v62=x11 v68=x13 v75=x12 v76=x11 v77=x13 v78=x14 v80=x12 v81=x9 v82=x11
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -28,14 +28,13 @@ Lprivate_acc_block0:
 	b	Lprivate_acc_block2
 Lprivate_acc_inst14_else:
 	mov	x9, x12
-	mov	x10, x12
 	b	Lprivate_acc_block3
 Lprivate_acc_block2:
 	; v13 = iconst.i64 3
 	; v14 = shl v75, v13
 	; v15 = ptradd v0, v14
 	; v16 = load.i64 v15
-	ldr	x15, [x9, x11, lsl #3]
+	ldr	x15, [x9, x12, lsl #3]
 	; v54 = iconst.i64 0
 	; v18 = icmp.slt v16, v54
 	; brif v18, block5, block4
@@ -48,7 +47,7 @@ Lprivate_acc_block4:
 	b	Lprivate_acc_block6
 Lprivate_acc_block5:
 	; v39 = iadd v16, v76
-	add	x12, x15, x12
+	add	x11, x15, x11
 	; jump block6(v39, v77)
 Lprivate_acc_block6:
 	; v44 = iconst.i32 1
@@ -56,20 +55,20 @@ Lprivate_acc_block6:
 	add	w14, w14, #1
 	; v46 = iconst.i64 1
 	; v47 = iadd v75, v46
-	add	x11, x11, #1
+	add	x12, x12, #1
 	; v83 = icmp.ugt v1, v47
 	; brif v83, block2(v47, v62, v68, v45), block3(v62, v68, v45)
-	cmp	x10, x11
+	cmp	x10, x12
 	b.hi	Lprivate_acc_block2
-	mov	x9, x12
-	mov	x10, x13
+	mov	x12, x11
+	mov	x9, x13
 	mov	x11, x14
 Lprivate_acc_block3:
 	; v21 = iconst.i64 3
-	movz	x12, #0x3
+	movz	x10, #0x3
 	; v22 = imul v80, v21
 	; v26 = iadd v22, v81
-	madd	x9, x9, x12, x10
+	madd	x9, x12, x10, x9
 	; v30 = uext.i64 v82
 	mov	w10, w11
 	; v31 = iadd v26, v30

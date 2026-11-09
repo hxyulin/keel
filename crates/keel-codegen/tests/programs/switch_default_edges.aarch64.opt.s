@@ -4,7 +4,7 @@
 	.p2align	2
 _sparse_default:
 Lsparse_default_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x9 v6=x9 v7=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v4=x13 v5=x9 v6=x12 v7=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -21,25 +21,26 @@ Lsparse_default_block0:
 	movz	w13, #0x1d
 	; switch v0, block1, [259: block2(v3), 260: block2(v4), 288: block2(v0)]
 	cmp	w9, #259
-	b.eq	Lsparse_default_inst2_edge1
+	b.eq	Lsparse_default_block2
 	cmp	w9, #260
 	b.eq	Lsparse_default_inst2_edge2
 	cmp	w9, #288
-	b.eq	Lsparse_default_block2
+	b.eq	Lsparse_default_inst2_edge3
 	b	Lsparse_default_block1
-Lsparse_default_inst2_edge1:
-	mov	x9, x12
-	b	Lsparse_default_block2
 Lsparse_default_inst2_edge2:
-	mov	x9, x13
+	mov	x12, x13
+	b	Lsparse_default_block2
+Lsparse_default_inst2_edge3:
+	mov	x12, x9
 	b	Lsparse_default_block2
 Lsparse_default_block1:
 	; v5 = iconst.i32 41
 	movz	w9, #0x29
 	; jump block2(v5)
+	mov	x12, x9
 Lsparse_default_block2:
 	; store v6, v1
-	str	w9, [x10]
+	str	w12, [x10]
 	; v7 = load.i32 v2
 	ldr	w9, [x11]
 	; return v7

@@ -47,14 +47,7 @@
 	# v6 = icmp.sgt v0, v3
 	# brif v6, block2(v3, v2), block3(v2)
 	cmp	esi, 0
-	jle	".Lk_sum_inst6_else"
-	mov	r11, rdi
-	mov	rdi, r8
-	mov	r8, r11
-	jmp	".Lk_sum_block2"
-.Lk_sum_inst6_else:
-	mov	rsi, rdi
-	jmp	".Lk_sum_block3"
+	jle	".Lk_sum_block3"
 .Lk_sum_block2:
 	# v13 = stack_addr ss0
 	lea	r9, [rbp + -32]
@@ -74,18 +67,17 @@
 .Lk_sum_inst7_load:
 	mov	r9, qword ptr [rax]
 	# v8 = iadd v15, v7
-	add	r8, r9
+	add	rdi, r9
 	# v9 = iconst.i32 1
 	# v10 = iadd v14, v9
-	add	edi, 1
+	add	r8d, 1
 	# v18 = icmp.sgt v0, v10
 	# brif v18, block2(v10, v8), block3(v8)
-	cmp	esi, edi
+	cmp	esi, r8d
 	jg	".Lk_sum_block2"
-	mov	rsi, r8
 .Lk_sum_block3:
 	# return v17
-	mov	rax, rsi
+	mov	rax, rdi
 	mov	rsp, rbp
 	pop	rbp
 	ret

@@ -244,12 +244,8 @@
 	# v4 = icmp.ugt v0, v1
 	# brif v4, block2(v1, v1), block3(v1)
 	cmp	rsi, 0
-	jbe	".Lk_loop_inst3_else"
+	jbe	".Lk_loop_block3"
 	mov	r8, rdi
-	jmp	".Lk_loop_block2"
-.Lk_loop_inst3_else:
-	mov	rsi, rdi
-	jmp	".Lk_loop_block3"
 .Lk_loop_block2:
 	# v5 = intrinsic stack_save()
 	mov	r9, rsp
@@ -274,10 +270,10 @@
 	# brif v16, block2(v11, v9), block3(v9)
 	cmp	rsi, rdi
 	ja	".Lk_loop_block2"
-	mov	rsi, r8
+	mov	rdi, r8
 .Lk_loop_block3:
 	# return v15
-	mov	rax, rsi
+	mov	rax, rdi
 	lea	rsp, [rbp + -8]
 	pop	rbx
 	pop	rbp

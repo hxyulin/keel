@@ -25,25 +25,18 @@
 	# v6 = icmp.ugt v3, v5
 	# brif v6, block2(v5, v4), block3(v4)
 	cmp	rdi, 1
-	jbe	".Lrk_adjacent_inst4_else"
-	mov	r11, r8
-	mov	r8, r9
-	mov	r9, r11
-	jmp	".Lrk_adjacent_block2"
-.Lrk_adjacent_inst4_else:
-	mov	rsi, r8
-	jmp	".Lrk_adjacent_block3"
+	jbe	".Lrk_adjacent_block3"
 .Lrk_adjacent_block2:
 	# v9 = iconst.i64 2
 	# v10 = shl v7, v9
 	# v11 = ptradd v0, v10
 	# v12 = load.i32 v11
-	mov	ebx, dword ptr [rsi + r8 * 4]
+	mov	ebx, dword ptr [rsi + r9 * 4]
 	# v13 = sext.i64 v12
 	movsxd	rbx, ebx
 	# v36 = iconst.i64 1
 	# v15 = isub v7, v36
-	mov	r12, r8
+	mov	r12, r9
 	sub	r12, 1
 	# v16 = shl v15, v9
 	# v17 = ptradd v0, v16
@@ -65,17 +58,16 @@
 	cmovl	rdx, r11
 	mov	rbx, rdx
 	# v26 = iadd v8, v33
-	add	r9, rbx
+	add	r8, rbx
 	# v28 = iadd v7, v36
-	add	r8, 1
+	add	r9, 1
 	# v29 = icmp.ugt v3, v28
 	# brif v29, block2(v28, v26), block3(v26)
-	cmp	rdi, r8
+	cmp	rdi, r9
 	ja	".Lrk_adjacent_block2"
-	mov	rsi, r9
 .Lrk_adjacent_block3:
 	# return v23
-	mov	rax, rsi
+	mov	rax, r8
 	lea	rsp, [rbp + -16]
 	pop	r12
 	pop	rbx

@@ -17,11 +17,7 @@
 .Loption_code_block0:
 	# switch v0, block2, [1: block1(v1)]
 	cmp	rsi, 1
-	je	".Loption_code_inst0_edge1"
-	jmp	".Loption_code_block2"
-.Loption_code_inst0_edge1:
-	mov	rsi, rdi
-	jmp	".Loption_code_block1"
+	je	".Loption_code_block1"
 .Loption_code_block2:
 	# brif v0, block3, block4
 	test	rsi, rsi
@@ -30,9 +26,10 @@
 	# v3 = iconst.i64 -1
 	mov	rsi, -1
 	# jump block1(v3)
+	mov	rdi, rsi
 .Loption_code_block1:
 	# return v2
-	mov	rax, rsi
+	mov	rax, rdi
 	mov	rsp, rbp
 	pop	rbp
 	ret

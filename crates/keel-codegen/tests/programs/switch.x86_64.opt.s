@@ -332,9 +332,7 @@
 	# v5 = icmp.ugt v0, v2
 	# brif v5, block2, block7(v4)
 	cmp	rsi, rdi
-	ja	".Lmachine_block2"
-	mov	rsi, r9
-	jmp	".Lmachine_block7"
+	jbe	".Lmachine_block7"
 .Lmachine_block2:
 	# v6 = iconst.i64 1
 	# v7 = iadd v2, v6
@@ -373,9 +371,10 @@
 	# v22 = iconst.i64 -1
 	mov	rsi, -1
 	# jump block7(v22)
+	mov	r9, rsi
 .Lmachine_block7:
 	# return v23
-	mov	rax, rsi
+	mov	rax, r9
 	mov	rsp, rbp
 	pop	rbp
 	ret

@@ -56,7 +56,7 @@ Lrotate3_end:
 	.p2align	2
 _rotate_many:
 Lrotate_many_begin:
-	; regalloc: v0=x9 v1=[sp, #0] v5=[sp, #8] v7=[sp, #16] v9=[sp, #24] v11=x14 v13=x15 v15=x19 v17=x20 v19=x21 v21=x22 v23=x23 v25=x24 v27=x25 v29=x26 v31=x27 v33=x28 v35=x10 v37=x11 v39=x12 v41=x13 v42=x9 v43=x10 v44=x11 v45=x12 v46=x13 v47=x14 v48=x15 v49=x19 v50=x20 v51=x21 v52=x22 v53=x23 v54=x24 v55=x25 v56=x26 v57=[sp, #0] v58=[sp, #8] v59=[sp, #16] v60=[sp, #24] v61=[sp, #32] v62=x28 v64=x27 v66=x28 v67=x27 v72=x9 v74=x9 v76=x9 v78=x9 v80=x9 v82=x9 v84=x9 v86=x9 v88=x9 v90=x9 v92=x9 v94=x9 v96=x9 v98=x9 v100=x9 v102=x9 v104=x9 v106=x9 v108=x9
+	; regalloc: v0=x9 v1=[sp, #0] v5=[sp, #8] v7=[sp, #16] v9=[sp, #24] v11=x14 v13=x15 v15=x19 v17=x20 v19=x21 v21=x22 v23=x23 v25=x24 v27=x25 v29=x26 v31=x27 v33=x28 v35=x10 v37=x11 v39=x12 v41=x13 v42=x9 v43=x10 v44=x11 v45=x12 v46=x14 v47=x15 v48=x19 v49=x20 v50=x21 v51=x22 v52=x23 v53=x24 v54=x25 v55=x26 v56=x27 v57=[sp, #0] v58=[sp, #8] v59=[sp, #16] v60=[sp, #24] v61=[sp, #32] v62=x13 v64=x28 v66=x13 v67=x13 v72=x9 v74=x9 v76=x9 v78=x9 v80=x9 v82=x9 v84=x9 v86=x9 v88=x9 v90=x9 v92=x9 v94=x9 v96=x9 v98=x9 v100=x9 v102=x9 v104=x9 v106=x9 v108=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -144,7 +144,33 @@ Lrotate_many_block0:
 	add	x13, x9, #19
 	; jump block1(v0, v5, v7, v9, v11, v13, v15, v17, v19, v21, v23, v25, v27, v29, v31, v33, v35, v37, v39, v41, v1)
 	str	x13, [sp, #32]
-	mov	x13, x14
+	ldr	x13, [sp, #0]
+	str	x28, [sp, #0]
+	mov	x16, x10
+	ldr	x10, [sp, #8]
+	str	x16, [sp, #8]
+	mov	x16, x11
+	ldr	x11, [sp, #16]
+	str	x16, [sp, #16]
+	mov	x16, x12
+	ldr	x12, [sp, #24]
+	str	x16, [sp, #24]
+Lrotate_many_block1:
+	; v2 = iconst.i64 0
+	; v64 = icmp.eq v62, v2
+	cmp	x13, #0
+	cset	w28, eq
+	; v111 = iconst.i64 1
+	; v66 = isub v62, v111
+	sub	x13, x13, #1
+	; brif v64, block2, block1(v43, v44, v45, v46, v47, v48, v49, v50, v51, v52, v53, v54, v55, v56, v57, v58, v59, v60, v61, v42, v66)
+	tst	w28, #255
+	b.ne	Lrotate_many_block2
+	mov	x16, x9
+	mov	x9, x10
+	mov	x10, x11
+	mov	x11, x12
+	mov	x12, x14
 	mov	x14, x15
 	mov	x15, x19
 	mov	x19, x20
@@ -155,45 +181,7 @@ Lrotate_many_block0:
 	mov	x24, x25
 	mov	x25, x26
 	mov	x26, x27
-	mov	x16, x10
-	ldr	x10, [sp, #8]
-	str	x16, [sp, #8]
-	mov	x16, x11
-	ldr	x11, [sp, #16]
-	str	x16, [sp, #16]
-	mov	x16, x12
-	ldr	x12, [sp, #24]
-	str	x16, [sp, #24]
-	ldr	x16, [sp, #0]
-	str	x28, [sp, #0]
-	mov	x28, x16
-Lrotate_many_block1:
-	; v2 = iconst.i64 0
-	; v64 = icmp.eq v62, v2
-	cmp	x28, #0
-	cset	w27, eq
-	; v111 = iconst.i64 1
-	; v66 = isub v62, v111
-	sub	x28, x28, #1
-	; brif v64, block2, block1(v43, v44, v45, v46, v47, v48, v49, v50, v51, v52, v53, v54, v55, v56, v57, v58, v59, v60, v61, v42, v66)
-	tst	w27, #255
-	b.ne	Lrotate_many_block2
-	mov	x16, x9
-	mov	x9, x10
-	mov	x10, x11
-	mov	x11, x12
-	mov	x12, x13
-	mov	x13, x14
-	mov	x14, x15
-	mov	x15, x19
-	mov	x19, x20
-	mov	x20, x21
-	mov	x21, x22
-	mov	x22, x23
-	mov	x23, x24
-	mov	x24, x25
-	mov	x25, x26
-	ldr	x26, [sp, #0]
+	ldr	x27, [sp, #0]
 	ldr	x17, [sp, #8]
 	str	x17, [sp, #0]
 	ldr	x17, [sp, #16]
@@ -206,69 +194,69 @@ Lrotate_many_block1:
 	b	Lrotate_many_block1
 Lrotate_many_block2:
 	; v67 = iconst.i64 31
-	movz	x27, #0x1f
+	movz	x13, #0x1f
 	; v71 = imul v42, v67
 	; v72 = iadd v43, v71
-	madd	x9, x9, x27, x10
+	madd	x9, x9, x13, x10
 	; v73 = imul v72, v67
 	; v74 = iadd v44, v73
-	madd	x9, x9, x27, x11
+	madd	x9, x9, x13, x11
 	; v75 = imul v74, v67
 	; v76 = iadd v45, v75
-	madd	x9, x9, x27, x12
+	madd	x9, x9, x13, x12
 	; v77 = imul v76, v67
 	; v78 = iadd v46, v77
-	madd	x9, x9, x27, x13
+	madd	x9, x9, x13, x14
 	; v79 = imul v78, v67
 	; v80 = iadd v47, v79
-	madd	x9, x9, x27, x14
+	madd	x9, x9, x13, x15
 	; v81 = imul v80, v67
 	; v82 = iadd v48, v81
-	madd	x9, x9, x27, x15
+	madd	x9, x9, x13, x19
 	; v83 = imul v82, v67
 	; v84 = iadd v49, v83
-	madd	x9, x9, x27, x19
+	madd	x9, x9, x13, x20
 	; v85 = imul v84, v67
 	; v86 = iadd v50, v85
-	madd	x9, x9, x27, x20
+	madd	x9, x9, x13, x21
 	; v87 = imul v86, v67
 	; v88 = iadd v51, v87
-	madd	x9, x9, x27, x21
+	madd	x9, x9, x13, x22
 	; v89 = imul v88, v67
 	; v90 = iadd v52, v89
-	madd	x9, x9, x27, x22
+	madd	x9, x9, x13, x23
 	; v91 = imul v90, v67
 	; v92 = iadd v53, v91
-	madd	x9, x9, x27, x23
+	madd	x9, x9, x13, x24
 	; v93 = imul v92, v67
 	; v94 = iadd v54, v93
-	madd	x9, x9, x27, x24
+	madd	x9, x9, x13, x25
 	; v95 = imul v94, v67
 	; v96 = iadd v55, v95
-	madd	x9, x9, x27, x25
+	madd	x9, x9, x13, x26
 	; v97 = imul v96, v67
 	; v98 = iadd v56, v97
-	madd	x9, x9, x27, x26
+	madd	x9, x9, x13, x27
 	; v99 = imul v98, v67
 	; v100 = iadd v57, v99
 	ldr	x16, [sp, #0]
-	madd	x9, x9, x27, x16
+	madd	x9, x9, x13, x16
 	; v101 = imul v100, v67
 	; v102 = iadd v58, v101
 	ldr	x16, [sp, #8]
-	madd	x9, x9, x27, x16
+	madd	x9, x9, x13, x16
 	; v103 = imul v102, v67
 	; v104 = iadd v59, v103
 	ldr	x16, [sp, #16]
-	madd	x9, x9, x27, x16
+	madd	x9, x9, x13, x16
 	; v105 = imul v104, v67
 	; v106 = iadd v60, v105
 	ldr	x16, [sp, #24]
-	madd	x9, x9, x27, x16
+	madd	x9, x9, x13, x16
 	; v107 = imul v106, v67
 	; v108 = iadd v61, v107
 	ldr	x16, [sp, #32]
-	madd	x9, x9, x27, x16
+	madd	x9, x9, x13, x16
 	; return v108
 	mov	x0, x9
 	sub	sp, x29, #80

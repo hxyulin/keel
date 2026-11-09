@@ -1410,6 +1410,28 @@ impl Selection {
                 plan.hints.insert(result, func.resolve(input));
             }
         }
+        if options.register_hints {
+            // Edge copies have the same free-register preference as instruction
+            // copies. Keep destructive-input hints first. Symmetric hints let
+            // either definition win in scan order, including loop backedges;
+            // the allocator still checks interference and call constraints.
+            for (_, inst) in func.layout_insts() {
+                for edge in func.inst_data(inst).branch_dests() {
+                    for (&param, &arg) in func.block_params(edge.block).iter().zip(&edge.args) {
+                        let arg = func.resolve(arg);
+                        if param == arg {
+                            continue;
+                        }
+                        if plan.hints.get(param).is_none() {
+                            plan.hints.insert(param, arg);
+                        }
+                        if plan.hints.get(arg).is_none() {
+                            plan.hints.insert(arg, param);
+                        }
+                    }
+                }
+            }
+        }
         plan
     }
 

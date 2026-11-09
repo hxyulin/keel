@@ -4,7 +4,7 @@
 	.p2align	2
 _k_sum:
 Lk_sum_begin:
-	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v7=x12 v8=x11 v10=x10 v13=x12 v14=x10 v15=x11 v17=x9
+	; regalloc: v0=x9 v1=x10 v2=x10 v3=x11 v7=x12 v8=x10 v10=x11 v13=x12 v14=x11 v15=x10 v17=x10
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -26,14 +26,7 @@ Lk_sum_block0:
 	; v6 = icmp.sgt v0, v3
 	; brif v6, block2(v3, v2), block3(v2)
 	cmp	w9, #0
-	b.le	Lk_sum_inst6_else
-	mov	x16, x10
-	mov	x10, x11
-	mov	x11, x16
-	b	Lk_sum_block2
-Lk_sum_inst6_else:
-	mov	x9, x10
-	b	Lk_sum_block3
+	b.le	Lk_sum_block3
 Lk_sum_block2:
 	; v13 = stack_addr ss0
 	add	x12, sp, #0
@@ -43,18 +36,17 @@ Lk_sum_block2:
 	str	x17, [x12]
 	ldr	x12, [x16]
 	; v8 = iadd v15, v7
-	add	x11, x11, x12
+	add	x10, x10, x12
 	; v9 = iconst.i32 1
 	; v10 = iadd v14, v9
-	add	w10, w10, #1
+	add	w11, w11, #1
 	; v18 = icmp.sgt v0, v10
 	; brif v18, block2(v10, v8), block3(v8)
-	cmp	w9, w10
+	cmp	w9, w11
 	b.gt	Lk_sum_block2
-	mov	x9, x11
 Lk_sum_block3:
 	; return v17
-	mov	x0, x9
+	mov	x0, x10
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
 	ret
