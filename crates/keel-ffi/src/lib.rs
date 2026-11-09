@@ -714,7 +714,9 @@ mod atomics;
 mod linking;
 mod numeric;
 mod pipeline;
-pub use linking::{KeelLinkInput, KeelLinkOptions, KeelString, keel_link_signed};
+pub use linking::{
+    KeelElfLinkOptions, KeelLinkInput, KeelLinkOptions, KeelString, keel_link_elf, keel_link_signed,
+};
 mod systems;
 
 #[cfg(test)]

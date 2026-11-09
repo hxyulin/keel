@@ -136,3 +136,68 @@ fn signed_link_returns_buffers_and_dead_strips_unused_code() {
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn elf_link_rejects_invalid_options_and_returns_owned_errors() {
+    let mut options = KeelElfLinkOptions {
+        target: 3,
+        flags: 0,
+        entry: text(""),
+        interpreter: text(""),
+        runpaths: ptr::null(),
+        runpath_count: 0,
+        script: text(""),
+        max_page_size: 0,
+    };
+    for case in 0..7 {
+        options.target = if case == 0 { 1 } else { 3 };
+        options.flags = if case == 1 { 8 } else { 0 };
+        options.runpath_count = usize::from(case == 2);
+        options.entry = if case == 3 {
+            text("bad\0entry")
+        } else {
+            text("")
+        };
+        let mut image = ptr::null_mut();
+        let mut warnings = ptr::null_mut();
+        let mut error = ptr::null_mut();
+        // SAFETY: All spans are readable; null inputs intentionally test validation.
+        let status = unsafe {
+            keel_link_elf(
+                ptr::null(),
+                usize::from(case == 4),
+                if case == 5 { ptr::null() } else { &options },
+                &mut image,
+                &mut warnings,
+                &mut error,
+            )
+        };
+        assert_eq!(
+            status,
+            if case == 6 { COMPILE } else { INVALID },
+            "case {case}"
+        );
+        assert!(image.is_null());
+        assert!(warnings.is_null());
+        assert!(!error.is_null());
+        // SAFETY: The call returned an owned diagnostic.
+        unsafe {
+            assert!(!(*error).0.is_empty());
+            super::super::keel_buffer_destroy(error);
+        }
+    }
+    assert_eq!(
+        // SAFETY: Missing output slots are rejected before any input is read.
+        unsafe {
+            keel_link_elf(
+                ptr::null(),
+                0,
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        },
+        INVALID
+    );
+}

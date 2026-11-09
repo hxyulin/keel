@@ -435,3 +435,66 @@ fn c_api_links_in_memory_object_and_archive_with_sdk() {
     );
     std::fs::remove_dir_all(work).unwrap();
 }
+
+#[test]
+fn c_client_cross_links_linux_executables() {
+    use object::Object;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let exe = std::env::current_exe().unwrap();
+    let work = std::env::temp_dir().join(format!("keel-ffi-elf-{}", std::process::id()));
+    std::fs::create_dir_all(&work).unwrap();
+    let client = work.join("link-elf");
+    let cc = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    compile_client(
+        &cc,
+        root,
+        exe.parent().unwrap(),
+        "examples/link_elf.c",
+        &client,
+    );
+    for (target, source, architecture, native) in [
+        (
+            "linux-arm64",
+            ".text\n.globl _start\n_start: mov x0,#0\nmov x8,#93\nsvc #0\n",
+            object::Architecture::Aarch64,
+            cfg!(all(target_os = "linux", target_arch = "aarch64")),
+        ),
+        (
+            "linux-x86_64",
+            ".text\n.globl _start\n_start: mov eax,60\nmov edi,0\nsyscall\n",
+            object::Architecture::X86_64,
+            cfg!(all(target_os = "linux", target_arch = "x86_64")),
+        ),
+    ] {
+        let bytes = if architecture == object::Architecture::Aarch64 {
+            keel_asm::assemble_elf_object(source).unwrap()
+        } else {
+            keel_asm::x86::assemble_object(source).unwrap()
+        };
+        let input = work.join(format!("{target}.o"));
+        let output = work.join(target);
+        std::fs::write(&input, bytes).unwrap();
+        execute(Command::new(&client).arg(target).arg(&output).arg(&input));
+        let bytes = std::fs::read(&output).unwrap();
+        let image = object::File::parse(bytes.as_slice()).unwrap();
+        assert_eq!(image.architecture(), architecture);
+        assert_eq!(image.kind(), object::ObjectKind::Executable);
+        assert_ne!(image.entry(), 0);
+        if native {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o755)).unwrap();
+            execute(&mut Command::new(&output));
+        }
+        std::fs::write(&input, b"invalid object").unwrap();
+        let result = Command::new(&client)
+            .arg(target)
+            .arg(&output)
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(!result.stderr.is_empty());
+        assert_eq!(std::fs::read(&output).unwrap(), bytes);
+    }
+    std::fs::remove_dir_all(work).unwrap();
+}

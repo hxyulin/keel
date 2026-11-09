@@ -234,8 +234,8 @@ are diagnostic labels; the linker never opens them as paths.
 Set `KEEL_LINK_DEAD_STRIP` to discard unreachable code/data. The output path is
 replaced atomically after linking and ad-hoc signing. This uses the arm64 macOS
 linker directly, with macOS 11.0 as the minimum version, without invoking a host
-linker or `codesign`. Other executable formats and retained debug maps are not
-exposed through this C entry point.
+linker or `codesign`. ELF executables use the separate entry point below. Retained debug maps are not
+exposed through these C entry points.
 
 This call needs no module. Both output buffer slots are required. On success it
 returns an owned newline-separated warning buffer, possibly empty, and a null
@@ -247,6 +247,43 @@ DWARF omitted from selected inputs produces one warning per link.
 For small leaf functions, `keel_codegen_options.unwind = 1` requests only
 required unwind tables. The default (`0`) retains full unwind coverage and can
 require an AArch64 frame even for a leaf. This is independent of optimization.
+
+## Cross-link a Linux executable
+
+`keel_link_elf` links borrowed ELF objects, archives and shared-library bytes on
+macOS or Linux. Select `KEEL_AARCH64_LINUX_GNU` or `KEEL_X86_64_LINUX_GNU`
+explicitly, independently of the host. Use the same target for object emission.
+It returns an owned executable image and warning buffer on success, or an owned
+diagnostic buffer on failure. Release all returned buffers with
+`keel_buffer_destroy`. It does not write files or invoke a system linker.
+
+Zero-initialize `keel_elf_link_options`, then set `target`. Empty optional strings
+select defaults: `_start` for entry and the target's GNU loader for interpreter.
+Supply an entry override, interpreter, runpaths, linker script or maximum page
+size as needed. Flags expose section garbage collection, GOT relaxation and
+constant merging. The [ELF linker contract](../../docs/linking/elf.md) describes
+supported inputs and policy restrictions; the C wrapper uses the same checks.
+
+Cross-linking does not discover a sysroot or add startup code or libc. Supply
+those target inputs yourself, including shared libraries as bytes. A freestanding
+`_start` can instead issue a Linux exit syscall without runtime libraries.
+
+The [linking client](examples/link_elf.c) writes the returned image only after a
+successful link. Build and use it with caller-provided target objects:
+
+```sh
+cargo build -p keel-ffi --release
+cc -std=c11 crates/keel-ffi/examples/link_elf.c \
+  -I crates/keel-ffi/include -L target/release -lkeel_ffi \
+  -Wl,-rpath,"$PWD/target/release" -o target/link-elf
+target/link-elf linux-x86_64 target/program target/start.o target/program.o
+chmod +x target/program
+```
+
+Run the executable on the matching Linux architecture. Use `linux-arm64` for
+AArch64 output. Tests cross-link both architectures on every supported host and
+execute only the matching Linux image. macOS tests inspect both ELF images;
+they do not establish Linux execution coverage.
 
 ## Tern integration requirements
 

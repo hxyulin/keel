@@ -107,6 +107,39 @@ keel_status keel_link_signed(const keel_link_input *inputs, size_t input_count,
     const keel_string *tbd_paths, size_t tbd_count,
     const keel_link_options *options, keel_buffer **warnings, keel_buffer **error);
 
+/* Host-independent Linux ELF64 linking. Inputs may include objects, archives,
+ * and shared-library bytes. Use KEEL_AARCH64_LINUX_GNU or KEEL_X86_64_LINUX_GNU.
+ * Optional strings of length zero select defaults; their data may be NULL.
+ * Default entry is _start; interpreter defaults to the target's GNU loader.
+ * Library/startup discovery is caller-owned. No host tools are invoked.
+ */
+enum {
+    KEEL_ELF_GC_SECTIONS = 1,
+    KEEL_ELF_RELAX_GOT = 2,
+    KEEL_ELF_MERGE_CONSTANTS = 4
+};
+typedef struct {
+    uint32_t target;
+    uint32_t flags;
+    keel_string entry;
+    keel_string interpreter;
+    const keel_string *runpaths;
+    size_t runpath_count;
+    keel_string script;
+    uint64_t max_page_size; /* Zero selects the target default. */
+} keel_elf_link_options;
+/* All three output slots are required, distinct, and free of live buffers.
+ * Success returns owned image and warning buffers, and NULL error.
+ * Failure returns NULL image/warnings and an owned error buffer.
+ * NULL output slots return INVALID without writing any output.
+ * Status, lifetime and panic contracts match keel_link_signed above.
+ * No file is written. Save image bytes and set executable permissions to run.
+ * Backend restrictions (including script and relaxation policies) still apply.
+ */
+keel_status keel_link_elf(const keel_link_input *inputs, size_t input_count,
+    const keel_elf_link_options *options, keel_buffer **image,
+    keel_buffer **warnings, keel_buffer **error);
+
 typedef uint32_t keel_type;
 enum { KEEL_I8 = 1, KEEL_I16 = 2, KEEL_I32 = 3, KEEL_I64 = 4, KEEL_PTR = 5, KEEL_I128 = 6, KEEL_F32 = 7, KEEL_F64 = 8, KEEL_F80 = 9 };
 typedef uint32_t keel_binary_op;
