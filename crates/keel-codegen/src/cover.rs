@@ -69,6 +69,8 @@ covers! {
     PackedAbs = "packed-abs", None;
     /// An i32 `and` with a literal mask tested against zero, as one TEST.
     X86MaskTest = "x86-mask-test", X86;
+    /// An i32/i64 AND with an encodable literal tested against zero, as one TST.
+    Aarch64MaskTest = "aarch64-mask-test", AARCH64;
     /// A single-use scalar compare re-emitted at its select.
     X86SelectCompare = "x86-select-compare", X86;
     /// An i64 load, splat and strictly positive filter, widened.

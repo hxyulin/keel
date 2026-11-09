@@ -1662,7 +1662,8 @@ impl<'a> FunctionCompiler<'a> {
                 | Cover::X86SelectCompare,
             ) => return false,
             Some(
-                cover @ (Cover::Aarch64RotateImmediate
+                cover @ (Cover::Aarch64MaskTest
+                | Cover::Aarch64RotateImmediate
                 | Cover::Aarch64Ubfx
                 | Cover::Aarch64MultiplyShift
                 | Cover::Aarch64Abs
@@ -4019,7 +4020,10 @@ impl<'a> FunctionCompiler<'a> {
                 unreachable!("ZF-only mask test")
             };
             let a = self.use_reg(source, S0);
-            self.emit(Opcode::Test, [asm_arg(reg(a, Type::I32)), asm_arg(mask)]);
+            self.emit(
+                Opcode::Test,
+                [asm_arg(reg(a, Type::I32)), asm_arg(mask as i32)],
+            );
             return cond_code(cond);
         }
         if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {

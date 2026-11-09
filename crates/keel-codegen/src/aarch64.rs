@@ -1811,6 +1811,7 @@ impl<'a> FunctionCompiler<'a> {
                 | Cover::ZeroTest
                 | Cover::CompareBranch
                 | Cover::Aarch64SelectCompare
+                | Cover::Aarch64MaskTest
                 | Cover::Aarch64VectorImmediate,
             ) => return false,
             Some(
@@ -4176,6 +4177,19 @@ impl<'a> FunctionCompiler<'a> {
     /// Emits the compare of `icmp`/`fcmp` `inst`, returning the condition
     /// code that holds when its condition does.
     fn compare(&mut self, inst: Inst) -> &'static str {
+        if let Some(&(source, mask)) = self.selection.mask_tests.get(&inst) {
+            let InstData::Icmp {
+                cond: cond @ (IntCC::Eq | IntCC::Ne),
+                ..
+            } = *self.func.inst_data(inst)
+            else {
+                unreachable!("equality-only mask test")
+            };
+            let ty = self.ty(source);
+            let a = self.use_reg(source, S0);
+            self.mach("tst", [reg(a, ty).into(), Arg::imm(mask)]);
+            return cond_code(cond);
+        }
         if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {
             let cc = self.compare(source);
             return if invert { invert_cond(cc) } else { cc };

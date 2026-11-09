@@ -426,7 +426,7 @@ impl Covers {
         .map(on);
         let signed_byte = on(Cover::X86SignedByteLoad);
         if present.compare && mask_tests {
-            selection.fold_x86_mask_tests(func, uses);
+            selection.fold_mask_tests(func, uses, Cover::X86MaskTest, |ty, _| ty == Type::I32);
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.

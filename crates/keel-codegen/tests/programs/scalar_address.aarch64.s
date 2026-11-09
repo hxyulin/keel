@@ -199,7 +199,7 @@ Lscalar_bool_end:
 	.p2align	2
 _scalar_bool_value:
 Lscalar_bool_value_begin:
-	; regalloc: v0=x9 v1=x10 v2=x9 v3=x10 v4=x9 v5=x9 v6=x9 v7=x9
+	; regalloc: v0=x9 v1=x10 v3=x10 v4=x9 v5=x9 v6=x9 v7=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -210,10 +210,9 @@ Lscalar_bool_value_begin:
 Lscalar_bool_value_block0:
 	; v1 = iconst.i32 15
 	; v2 = and v0, v1
-	and	w9, w9, #0xf
 	; v3 = iconst.i32 0
 	; v4 = icmp.eq v2, v3
-	cmp	w9, #0
+	tst	w9, #15
 	cset	w9, eq
 	; v5 = uext.i32 v4
 	; v6 = icmp.eq v5, v3

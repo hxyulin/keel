@@ -117,8 +117,8 @@ pub struct Selection {
     pub(crate) conditions: HashMap<Inst, (Inst, bool)>,
     /// X86 exact-width adjacent ordinary load encoded as an integer CMP RHS.
     pub(crate) compare_memory: HashMap<Inst, Value>,
-    /// X86 register TEST i32 with a literal mask, consumed only for ZF.
-    pub(crate) mask_tests: HashMap<Inst, (Value, i32)>,
+    /// Literal-mask zero tests, consumed only for equality flags.
+    pub(crate) mask_tests: HashMap<Inst, (Value, i64)>,
     /// X86 adjacent load encoded as an integer binary RHS.
     pub(crate) binary_memory: HashMap<Inst, Value>,
     /// X86 adjacent quotient/multiply/subtract using the native remainder.
@@ -166,7 +166,13 @@ impl Hints {
 impl Selection {
     /// Run after custom selection/constraints and before compare fusion. Keep
     /// the unmasked leaf live at the eventual compare/branch/select boundary.
-    pub(crate) fn fold_x86_mask_tests(&mut self, func: &Function, uses: &[u8]) {
+    pub(crate) fn fold_mask_tests(
+        &mut self,
+        func: &Function,
+        uses: &[u8],
+        cover: Cover,
+        valid: impl Fn(Type, i64) -> bool,
+    ) {
         // Debug locations retain their existing materialized-value contract.
         if func.debug_loc.is_some()
             || !func.debug_vars.is_empty()
@@ -185,7 +191,7 @@ impl Selection {
                     continue;
                 };
                 let masked = func.resolve(args[0]);
-                if func.value_type(masked) != Type::I32
+                if !matches!(func.value_type(masked), Type::I32 | Type::I64)
                     || crate::fold::iconst(func, args[1]) != Some(0)
                     || uses[masked.index()] != 1
                 {
@@ -229,8 +235,11 @@ impl Selection {
                     {
                         continue;
                     }
-                    self.claim(Cover::X86MaskTest, compare);
-                    self.mask_tests.insert(compare, (source, mask as i32));
+                    if !valid(func.value_type(masked), mask) {
+                        continue;
+                    }
+                    self.claim(cover, compare);
+                    self.mask_tests.insert(compare, (source, mask));
                     self.set_operands(compare, vec![source]);
                     // The zero RHS is encoded by this recipe. Prevent later
                     // folding/fusion from removing an equal-valued source leaf.

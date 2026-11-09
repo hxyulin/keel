@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v5=x12 v6=x12 v7=x12 v8=x13 v9=x13 v10=x13 v11=x12 v12=x11 v13=x10 v14=x11 v15=x12 v17=x12 v18=x12 v19=x12 v20=x12 v21=x12 v22=x11 v23=x12 v24=x10 v25=x9 v26=x10 v28=x10 v29=x9 v30=x10 v31=x11 v32=x12 v33=x12 v34=x13 v35=x12 v37=x13 v38=x9 v39=x11 v40=x12 v41=x11 v43=x12 v44=x9 v45=x11 v46=x11 v47=x12 v48=x11 v49=x12 v50=x9 v51=x11 v52=x11 v53=x11 v54=x12 v55=x11 v56=x12 v57=x9 v58=x11 v59=x12 v60=x13 v61=x10 v62=x14 v63=x10 v64=x10 v65=x10 v66=x11 v67=x9 v68=x10 v69=x11 v70=x10 v71=x11 v72=x10 v74=x12 v75=x9 v76=x10 v77=x11 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9
+	; regalloc: v0=x9 v1=x10 v2=x11 v3=x12 v5=x12 v6=x12 v7=x12 v8=x13 v9=x13 v10=x13 v11=x12 v12=x11 v13=x10 v14=x11 v15=x12 v17=x12 v18=x12 v19=x12 v20=x12 v21=x12 v22=x11 v23=x12 v24=x10 v25=x9 v26=x10 v28=x10 v29=x9 v30=x10 v31=x11 v32=x12 v33=x12 v34=x13 v37=x13 v38=x9 v39=x11 v40=x12 v43=x12 v44=x9 v45=x11 v46=x11 v47=x12 v48=x11 v49=x12 v50=x9 v51=x11 v52=x11 v53=x11 v54=x12 v55=x11 v56=x12 v57=x9 v58=x11 v59=x12 v60=x13 v61=x10 v62=x14 v63=x10 v64=x10 v65=x10 v66=x11 v67=x9 v68=x10 v69=x11 v70=x10 v71=x11 v72=x10 v74=x12 v75=x9 v76=x10 v77=x11 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -73,22 +73,20 @@ Lmain_block5:
 	mov	x12, x10
 	; v34 = iconst.i64 7
 	; v35 = and v33, v34
-	and	x12, x12, #0x7
 	; v36 = icmp.ne v35, v32
 	; v37 = iconst.i32 2
 	movz	w13, #0x2
 	; v38 = select v36, v37, v29
-	cmp	x12, #0
+	tst	x12, #7
 	csel	w9, w13, w9, ne
 	; v39 = ptrtoint.i64 v31
 	; v40 = iconst.i64 15
 	; v41 = and v39, v40
-	and	x11, x11, #0xf
 	; v42 = icmp.ne v41, v32
 	; v43 = iconst.i32 3
 	movz	w12, #0x3
 	; v44 = select v42, v43, v38
-	cmp	x11, #0
+	tst	x11, #15
 	csel	w9, w12, w9, ne
 	; v45 = iconst.i32 287454020
 	movz	w11, #0x3344

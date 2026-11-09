@@ -162,3 +162,45 @@ fn bisect_disable_and_print_changed_flags() {
         assert!(stderr.contains(error), "{all:?}: {stderr}");
     }
 }
+
+#[test]
+fn reduced_ascii_tag_and_flag_kernels_use_aarch64_mask_tests() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("opt-controls-mask-tests");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("in.c"), include_str!("../fixtures/masked_tests.c")).unwrap();
+    for level in ["-O0", "-O"] {
+        let compile = |isel: &str| {
+            text(successful(
+                &dir,
+                &[
+                    "cc",
+                    "in.c",
+                    "--target",
+                    "aarch64-apple-darwin",
+                    level,
+                    "--isel",
+                    isel,
+                ],
+            ))
+        };
+        let on = compile("all");
+        let off = compile("all,-aarch64-mask-test");
+        // The first three functions test a byte flag, a tag and a 64-bit
+        // wrapping mask. The loop also exercises the frontend's promoted load.
+        for function in ["ascii", "tag", "flags"] {
+            let body = |asm: &str| {
+                asm.split(&format!("L{function}_block0:"))
+                    .nth(1)
+                    .unwrap()
+                    .split(&format!("L{function}_end:"))
+                    .next()
+                    .unwrap()
+                    .to_owned()
+            };
+            assert!(body(&on).contains("\ttst\t"), "{on}");
+            assert!(!body(&on).contains("\tand\t"), "{on}");
+            assert!(body(&off).contains("\tand\t"), "{off}");
+            assert!(body(&off).contains("\tcmp\t"), "{off}");
+        }
+    }
+}

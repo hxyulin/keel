@@ -571,9 +571,10 @@ fn aliased_select_arm_nonadjacent_consumer_and_constant_source() {
         assert!(tests(&text).is_empty(), "{text}");
         assert!(text.contains("\tand\t"), "{text}");
     }
-    // ARM selection/emission still materializes its original AND/CMP recipe.
+    // AArch64 uses its own equality-only TST cover for the same source.
     let m = keel_ir::parse(&source("arm", 15, "ne", "bool", true)).unwrap();
     keel_ir::verify_module(&m).unwrap();
     let text = keel_codegen::aarch64::compile(&m).unwrap();
-    assert!(text.contains("\tand\t"), "{text}");
+    assert!(text.contains("\ttst\t"), "{text}");
+    assert!(!text.contains("\tand\t"), "{text}");
 }

@@ -512,6 +512,14 @@ impl Covers {
         } else {
             HashMap::default()
         };
+        // TST changes NZCV differently from CMP for non-equality flags.
+        // Inline assembly can observe those flags without declaring inputs.
+        if present.compare && !present.inline_asm && selection.enabled(Cover::Aarch64MaskTest) {
+            selection.fold_mask_tests(func, uses, Cover::Aarch64MaskTest, |ty, mask| {
+                native::logical_immediate(mask as u64, if ty == Type::I32 { 32 } else { 64 })
+                    .is_some()
+            });
+        }
         if present.select && select_compare {
             selection.fuse_aarch64_selects(
                 func,

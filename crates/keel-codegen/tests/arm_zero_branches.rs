@@ -382,3 +382,73 @@ fn overflow_flag_extra_users_and_intervening_work_keep_materialization() {
         assert!(text.contains("cset"), "{text}");
     }
 }
+
+fn masked_source(bits: u32, mask: i64, cc: &str, branch: bool, live: bool) -> String {
+    let tail = if branch {
+        "brif v4, block1, block2\nblock1:\n v5 = iconst.i64 37\n return v5\nblock2:\n v6 = iconst.i64 91\n return v6".to_string()
+    } else if live {
+        format!("v5 = uext.i{bits} v4\n v6 = xor v5, v2\n return v6")
+    } else {
+        "v5 = uext.i64 v4\n return v5".to_string()
+    };
+    let ret_bits = if live { bits } else { 64 };
+    format!(
+        "func @f(i{bits}) -> i{ret_bits} {{
+block0(v0: i{bits}):
+ v1 = iconst.i{bits} {mask}
+ v2 = and v0, v1
+ v3 = iconst.i{bits} 0
+ v4 = icmp.{cc} v2, v3
+ {tail}
+}}"
+    )
+}
+
+#[test]
+fn masked_equality_tests_fuse_with_spills_and_native_execution() {
+    for (bits, mask) in [(32, 128), (32, i32::MIN as i64), (64, i64::MIN + 1)] {
+        for cc in ["eq", "ne"] {
+            for branch in [false, true] {
+                let src = masked_source(bits, mask, cc, branch, false);
+                let expected = if cc == "eq" { "==" } else { "!=" };
+                let result = if branch { "? 37 : 91" } else { "" };
+                let oracle = native_oracle::PreparedOracle::new(
+                    "masked-test",
+                    &format!(
+                        "#include <stdint.h>\nextern uint64_t f(uint{bits}_t);\nint main(void) {{\n uint{bits}_t m = (uint{bits}_t)UINT64_C({});\n uint{bits}_t values[] = {{0, 1, 127, 128, 255, (uint{bits}_t)-1, m, ~m}};\n for (unsigned i=0;i<8;i++) {{ uint{bits}_t x=values[i];\n if (f(x) != (((x & m) {expected} 0) {result})) return 1; }}\n return 0; }}",
+                        mask as u64
+                    ),
+                    &["-O2"],
+                );
+                for (tier, alloc, pools) in codegen::matrix(
+                    &[SelectionTier::Covers, SelectionTier::Full],
+                    &[&SPILLED, &keel_codegen::aarch64::REGISTERS],
+                ) {
+                    let (text, object) = compile(&src, tier, alloc, pools);
+                    assert!(text.contains("\ttst\t"), "{text}");
+                    assert!(!text.contains("\tand\t"), "{text}");
+                    assert!(!text.contains("\tcmp\t"), "{text}");
+                    oracle.run(&object, &text);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn masked_tests_preserve_live_results_signed_conditions_and_unencodable_masks() {
+    for (bits, mask, cc, live) in [
+        (32, 128, "eq", true),
+        (64, 128, "slt", false),
+        (64, 0x12345678, "ne", false),
+    ] {
+        let (text, _) = compile(
+            &masked_source(bits, mask, cc, false, live),
+            SelectionTier::Full,
+            AllocationTier::Full,
+            &keel_codegen::aarch64::REGISTERS,
+        );
+        assert!(text.contains("\tand\t"), "{text}");
+        assert!(text.contains("\tcmp\t"), "{text}");
+    }
+}
