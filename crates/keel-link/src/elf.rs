@@ -521,15 +521,6 @@ impl Parsed {
             return Err("unsupported ELF OS ABI or machine flags".into());
         }
         let group_plan = &input.groups;
-        if let Some(symbol) = file.symbols().find(|s| {
-            matches!(s.flags(),
-            SymbolFlags::Elf { st_info, .. } if st_info & 15 == object::elf::STT_TLS)
-        }) {
-            return Err(format!(
-                "TLS symbol {} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported",
-                symbol.name().unwrap_or("?")
-            ).into());
-        }
         // object ignores REL/RELA tables not linked to its chosen symbol
         // table (and sh_info=0). Validate every association before consuming
         // notes or trusting its per-section relocation iterators.
@@ -571,19 +562,6 @@ impl Parsed {
         };
         for section in file.sections() {
             if group_plan.discarded.contains(&section.index().0) {
-                // TLS is a whole-input unsupported contract, including
-                // losing groups without STT_TLS symbols. Keep ordinary
-                // live-section validation (notably unwind) in its original
-                // order, but do not let selection hide this boundary.
-                let flags = section.elf_section_header().sh_flags(file.endian());
-                if flags & u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
-                    == u64::from(object::elf::SHF_ALLOC | object::elf::SHF_TLS)
-                {
-                    let name = section.name().map_err(|e| e.to_string())?;
-                    return Err(format!(
-                        "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
-                    ).into());
-                }
                 continue;
             }
             let name = section.name().map_err(|e| e.to_string())?.to_owned();
@@ -706,18 +684,22 @@ impl Parsed {
                 }
                 continue;
             }
-            if sh_flags & u64::from(object::elf::SHF_TLS) != 0 {
-                return Err(format!(
-                    "TLS section {name} requires external ELF linking: native PT_TLS layout and TLS relocations are unsupported"
-                ).into());
+            if sh_flags & 0x400 != 0
+                && (sh_flags & 5 != 1
+                    || !matches!(section.elf_section_header().sh_type(file.endian()), 1 | 8))
+            {
+                return Err(format!("invalid TLS section {name}").into());
             }
             // SHF_WRITE/ALLOC/EXECINSTR/MERGE/STRINGS/GNU_RETAIN. In particular,
-            // TLS, compression and link-order semantics are rejected.
+            // Compression and link-order semantics are rejected.
             // Group membership was validated and selected before parsing.
-            if sh_flags & !0x200237 != 0 || sh_flags & 5 == 5 {
+            if sh_flags & !0x200637 != 0 || sh_flags & 5 == 5 {
                 return Err(format!("unsupported flags {sh_flags:#x} on {name}").into());
             }
-            let bss = section.kind() == object::SectionKind::UninitializedData;
+            let bss = matches!(
+                section.kind(),
+                object::SectionKind::UninitializedData | object::SectionKind::UninitializedTls
+            );
             if !lifecycle
                 && !sframe
                 && note.is_none()
@@ -726,6 +708,8 @@ impl Parsed {
                     section.kind(),
                     object::SectionKind::Text
                         | object::SectionKind::Data
+                        | object::SectionKind::Tls
+                        | object::SectionKind::UninitializedTls
                         | object::SectionKind::ReadOnlyData
                         | object::SectionKind::ReadOnlyString
                         | object::SectionKind::UninitializedData
@@ -762,7 +746,7 @@ impl Parsed {
                 merge: (sh_flags & 0x10 != 0)
                     .then_some((raw.sh_entsize(file.endian()), sh_flags & 0x20 != 0)),
                 name,
-                flags: sh_flags & 0x200007,
+                flags: sh_flags & 0x200407,
                 kind,
                 align: alignment,
                 size,
@@ -870,7 +854,21 @@ impl Parsed {
             else {
                 unreachable!()
             };
-            if info >> 4 > 2 || !matches!(info & 15, 0..=4) {
+            if info & 15 == object::elf::STT_TLS && s.is_definition() {
+                let valid = s
+                    .section()
+                    .index()
+                    .and_then(|i| unit.sections.get(&i.0))
+                    .is_some_and(|&i| is_tls(&sections[i]));
+                if !valid {
+                    return Err(format!(
+                        "TLS symbol {} requires a TLS section",
+                        s.name().unwrap_or("?")
+                    )
+                    .into());
+                }
+            }
+            if info >> 4 > 2 || !matches!(info & 15, 0..=4 | 6) {
                 return Err(format!(
                     "unsupported symbol binding/type for {}",
                     s.name().unwrap_or("?")
@@ -987,6 +985,9 @@ fn link_script(
     } = parsed;
     if sframe_section.is_some() {
         return Err("SFrame reconstruction with linker scripts is unsupported".into());
+    }
+    if sections.iter().any(is_tls) {
+        return Err("TLS with linker scripts is unsupported".into());
     }
     unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
     note_plan.prepare(&mut sections, &object_properties, false)?;
@@ -1243,7 +1244,7 @@ fn plan_got(
             if if arm {
                 aarch64::got(r.kind)
             } else {
-                matches!(r.kind, 9 | 41 | 42)
+                matches!(r.kind, 9 | 22 | 41 | 42)
             } {
                 let selection = selected.get(ui, r.symbol)?;
                 if selection.import.is_none() {
@@ -1326,9 +1327,34 @@ fn absolute_imports(
     Ok(absolute)
 }
 
-/// Assign file offsets to every section, grouped into read-only, executable
-/// and writable LOAD segments.
+fn is_tls(section: &Section) -> bool {
+    section.flags & u64::from(object::elf::SHF_TLS) != 0
+}
+
+fn tls_header(sections: &[Section]) -> Option<ProgramHeader> {
+    let tls: Vec<_> = sections.iter().filter(|s| is_tls(s)).collect();
+    let start = tls.iter().map(|s| s.offset).min()?;
+    let memory_end = tls.iter().map(|s| s.offset + s.size).max()?;
+    let file_end = tls
+        .iter()
+        .filter(|s| !s.bss)
+        .map(|s| s.offset + s.size)
+        .max()
+        .unwrap_or(start);
+    let alignment = tls.iter().map(|s| s.align).max()?;
+    Some((
+        object::elf::PT_TLS,
+        4,
+        start,
+        file_end - start,
+        memory_end - start,
+        alignment,
+    ))
+}
+
+/// Assign file offsets, keeping initialized and zero-filled TLS adjacent.
 fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
+    let has_tdata = sections.iter().any(|s| is_tls(s) && !s.bss);
     let registration_alignments = bounds::alignments(sections);
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
@@ -1342,8 +1368,30 @@ fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
         cursor = if permissions == 4 { page } else { start };
         let mut file_end = cursor;
         for bss in [false, true] {
-            for index in bounds::order(sections, lifecycle::order(sections, permissions, bss)) {
+            let mut order = bounds::order(sections, lifecycle::order(sections, permissions, bss));
+            order.sort_by_key(|&i| {
+                if bss {
+                    !is_tls(&sections[i])
+                } else {
+                    is_tls(&sections[i])
+                }
+            });
+            let tls_align = sections
+                .iter()
+                .filter(|s| is_tls(s))
+                .map(|s| s.align)
+                .max()
+                .unwrap_or(1);
+            let mut first_tls = true;
+            for index in order {
                 let section = &mut sections[index];
+                if is_tls(section) && first_tls {
+                    // Align the template base to every TLS contribution.
+                    if !bss || !has_tdata {
+                        cursor = align(cursor, tls_align)?;
+                    }
+                    first_tls = false;
+                }
                 cursor = align(
                     cursor,
                     registration_alignments
@@ -1414,7 +1462,12 @@ impl Placed<'_> {
                         units[ui].name, s.name
                     )
                 })?;
-                Ok(BASE + sections[*out].offset + s.value)
+                if s.info & 15 == object::elf::STT_TLS {
+                    let tls = tls_header(sections).ok_or("TLS symbol without template")?;
+                    Ok(sections[*out].offset - tls.2 + s.value)
+                } else {
+                    Ok(BASE + sections[*out].offset + s.value)
+                }
             }
             _ => Err(format!("{}: unresolved symbol `{}`", units[ui].name, s.name).into()),
         }
@@ -1466,7 +1519,16 @@ impl Placed<'_> {
             put64(
                 &mut bytes,
                 (sections[got.section].offset + offset) as usize,
-                self.address(ui, si)?,
+                {
+                    let selection = self.selected.get(ui, si)?;
+                    let value = self.address(ui, si)?;
+                    if selection.definition.info & 15 == object::elf::STT_TLS {
+                        let tls = tls_header(sections).ok_or("TLS GOT without template")?;
+                        value.wrapping_sub(align(tls.4, tls.5)?)
+                    } else {
+                        value
+                    }
+                },
             );
         }
         Ok(bytes)
@@ -1507,7 +1569,7 @@ impl Placed<'_> {
                 let result = || -> Result<(usize, [u8; 8], usize)> {
                     let offset = sections[r.section].offset + r.offset;
                     let p = i128::from(BASE + offset);
-                    let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
+                    let mut value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
                         if reloc::x86_64::uses_got(r.kind) {
                             i128::from(d.slot(name, sections))
                         } else {
@@ -1522,6 +1584,32 @@ impl Placed<'_> {
                     } else {
                         i128::from(self.definition_address(selection.key.0, selection.definition)?)
                     } + i128::from(r.addend);
+                    let tls_reloc = if arm {
+                        matches!(r.kind, 549..=551)
+                    } else {
+                        matches!(r.kind, 17 | 18 | 21 | 23)
+                    };
+                    if !arm && r.kind == 22 {
+                        if selection.definition.info & 15 != object::elf::STT_TLS
+                            || import.is_some()
+                        {
+                            return Err("GOTTPOFF requires a defined TLS symbol".into());
+                        }
+                    } else if tls_reloc {
+                        if selection.definition.info & 15 != object::elf::STT_TLS
+                            || import.is_some()
+                        {
+                            return Err("TLS relocation requires a defined TLS symbol".into());
+                        }
+                        let tls = tls_header(sections).ok_or("TLS relocation without template")?;
+                        if arm {
+                            value += i128::from(align(16, tls.5)?);
+                        } else if matches!(r.kind, 18 | 23) {
+                            value -= i128::from(align(tls.4, tls.5)?);
+                        }
+                    } else if selection.definition.info & 15 == object::elf::STT_TLS {
+                        return Err("non-TLS relocation against TLS symbol is unsupported".into());
+                    }
                     if arm {
                         let width = aarch64::width(r.kind)? as usize;
                         let encoded = aarch64::apply(
@@ -1733,7 +1821,9 @@ fn program_headers(
     sframe_section: Option<usize>,
     note_plan: &notes::Plan,
 ) -> Result<Vec<ProgramHeader>> {
+    let tls = tls_header(sections);
     let phnum = segments.len()
+        + usize::from(tls.is_some())
         + 1
         + usize::from(unwind_header.is_some())
         + usize::from(sframe_section.is_some())
@@ -1769,6 +1859,9 @@ fn program_headers(
     if let Some(section) = sframe_section {
         let s = &sections[section];
         phdrs.push((sframe::PT_GNU_SFRAME, 4, s.offset, s.size, s.size, 8));
+    }
+    if let Some(tls) = tls {
+        phdrs.push(tls);
     }
     phdrs.extend(note_plan.headers(sections));
     phdrs.push((0x6474e551, 6, 0, 0, 0, 16));

@@ -380,13 +380,6 @@ fn malformed_truncated_and_foreign_inputs_are_errors() {
 }
 #[test]
 fn unsupported_tls_and_relocations_are_diagnostics() {
-    let tls =
-        object(".text\n.globl _start\n_start:\nret\n.section .tdata,\"awT\",@progbits\n.quad 1\n");
-    let error = link(&[tls]).unwrap_err();
-    assert!(
-        error.contains("external ELF linking") && error.contains("PT_TLS"),
-        "{error}"
-    );
     let relocation = object(".text\n.globl _start\n_start:\nret\n.data\n.short _start\n");
     assert!(
         link(&[relocation])
@@ -553,5 +546,104 @@ fn omitted_symbol_addresses_remain_lazy_and_errors_follow_relocation_order() {
             .unwrap_err(),
             format!("fixture.o: fixture.o: reference to omitted section for `{first}`")
         );
+    }
+}
+
+#[test]
+fn tls_template_and_x86_offsets() {
+    for (zero_only, kind) in [false, true]
+        .into_iter()
+        .flat_map(|zero| [17u32, 18, 21, 22, 23].map(|kind| (zero, kind)))
+    {
+        let mut input = object(&format!(
+            ".text\n.globl _start\n_start: ret\n{}\n.section .tbss,\"awT\",@nobits\n.balign 32\n.globl zero_tls\n.type zero_tls,@tls_object\nzero_tls: .zero 40\n.data\n.globl tls_offset\ntls_offset: .quad zero_tls\n",
+            if zero_only {
+                ""
+            } else {
+                ".section .tdata,\"awT\",@progbits\n.balign 16\n.globl init_tls\n.type init_tls,@tls_object\ninit_tls: .long 73"
+            }
+        ));
+        let f = object::File::parse(input.as_slice()).unwrap();
+        let (at, _) = f
+            .section_by_name(".rela.data")
+            .unwrap()
+            .file_range()
+            .unwrap();
+        // Keep the symbol index, replace ABS64 with TPOFF64.
+        input[at as usize + 8..at as usize + 12].copy_from_slice(&kind.to_le_bytes());
+        let exe = link(&[input]).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        let phnum = u16::from_le_bytes(exe.bytes[56..58].try_into().unwrap());
+        let header = (0..usize::from(phnum))
+            .map(|i| &exe.bytes[64 + i * 56..64 + (i + 1) * 56])
+            .find(|h| u32::from_le_bytes(h[..4].try_into().unwrap()) == 7)
+            .unwrap();
+        let field = |at| u64::from_le_bytes(header[at..at + 8].try_into().unwrap());
+        assert_eq!(field(48), 32);
+        assert_eq!(field(8) % 32, 0);
+        assert_eq!(field(32), if zero_only { 0 } else { 4 });
+        assert_eq!(field(40), if zero_only { 40 } else { 72 });
+        let offset = value(&f, "zero_tls");
+        assert_eq!(offset, if zero_only { 0 } else { 32 });
+        let expected = if matches!(kind, 17 | 21) {
+            offset as i64
+        } else {
+            -64
+        };
+        let actual = if kind == 22 {
+            let got = f.section_by_name(".got").unwrap();
+            let at = (value(&f, "tls_offset") - 0x400000) as usize;
+            let delta = i32::from_le_bytes(exe.bytes[at..at + 4].try_into().unwrap());
+            assert_eq!(
+                (value(&f, "tls_offset") as i64 + i64::from(delta)) as u64,
+                got.address()
+            );
+            word(&exe.bytes, got.address()) as i64
+        } else if matches!(kind, 21 | 23) {
+            word(&exe.bytes, value(&f, "tls_offset")) as i32 as i64
+        } else {
+            word(&exe.bytes, value(&f, "tls_offset")) as i64
+        };
+        assert_eq!(actual, expected, "relocation {kind}, zero-only {zero_only}");
+        assert_eq!(
+            f.section_by_name(".tbss").unwrap().kind(),
+            object::SectionKind::UninitializedTls
+        );
+    }
+}
+
+#[test]
+fn aarch64_tls_local_exec_template_offset() {
+    // Build an ELF64 fixture with an ADD instruction and a symbol relocation,
+    // then select AArch64 and its local-exec relocation explicitly.
+    for (kind, expected) in [
+        (549u32, 0x91400000u32),
+        (550, 0x91008000),
+        (551, 0x91008000),
+    ] {
+        let mut input = object(
+            ".text\n.globl _start\n_start: .quad zero_tls\n.section .tbss,\"awT\",@nobits\n.balign 32\n.globl zero_tls\n.type zero_tls,@tls_object\nzero_tls: .zero 8\n",
+        );
+        let f = object::File::parse(input.as_slice()).unwrap();
+        let (rela, _) = f
+            .section_by_name(".rela.text")
+            .unwrap()
+            .file_range()
+            .unwrap();
+        let (text, _) = f.section_by_name(".text").unwrap().file_range().unwrap();
+        input[18..20].copy_from_slice(&183u16.to_le_bytes());
+        input[rela as usize + 8..rela as usize + 12].copy_from_slice(&kind.to_le_bytes());
+        input[text as usize..text as usize + 4].copy_from_slice(&0x91000000u32.to_le_bytes());
+        let exe = link_with(
+            "tls-arm.o",
+            &[input],
+            elf::Options {
+                machine: elf::Machine::Aarch64,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        assert_eq!(word(&exe.bytes, value(&f, "_start")) as u32, expected);
     }
 }

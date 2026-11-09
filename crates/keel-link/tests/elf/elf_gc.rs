@@ -303,11 +303,13 @@ fn same_named_local_targets_keep_their_original_object_identity() {
     assert_eq!(read(read(pointers[1])), 22);
 }
 #[test]
-fn gc_does_not_hide_unsupported_tls_contracts() {
+fn gc_discards_unreferenced_tls() {
     let o = object(&format!(
         "{START}.section .tdata.dead,\"awT\",@progbits\n.long 1\n"
     ));
-    assert!(link(&[o], true).unwrap_err().contains("TLS"));
+    let exe = link(&[o], true).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert!(f.section_by_name(".tdata.dead").is_none());
 }
 
 #[test]

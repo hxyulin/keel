@@ -40,45 +40,18 @@ fn losing_references_do_not_become_imports_or_undefined_errors() {
 }
 
 #[test]
-fn tls_contract_is_rejected_even_in_discarded_comdat_payloads() {
+fn tls_comdat_selection() {
     for kind in ["progbits", "nobits"] {
-        for retain in ["", "R"] {
-            for symbol in [
-                "",
-                ".globl tls_value\n.type tls_value,@tls_object\ntls_value:\n",
-            ] {
-                let tls = object(&format!(
-                    ".section .tls.choice,\"awTG{retain}\",@{kind},key,comdat\n{symbol}.zero 4\n"
-                ));
-                // TLS is unsupported for a selected input as a whole. Losing
-                // a group must not make support depend on whether the producer
-                // emitted a TLS symbol, or on initialized/zero-fill storage.
-                for rest in [[group(1, ""), tls.clone()], [tls, group(1, "")]] {
-                    let err = link(&[object(START), rest[0].clone(), rest[1].clone()]).unwrap_err();
-                    let subject = if symbol.is_empty() {
-                        "TLS section .tls.choice"
-                    } else {
-                        "TLS symbol tls_value"
-                    };
-                    assert!(
-                        err.contains(subject)
-                            && err.contains(
-                                "native PT_TLS layout and TLS relocations are unsupported"
-                            ),
-                        "{err}"
-                    );
-                }
-            }
-        }
+        let tls = object(&format!(
+            ".section .tls.choice,\"awTG\",@{kind},key,comdat\n.zero 4\n"
+        ));
+        let exe = link(&[object(START), group(1, ""), tls.clone()]).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        assert!(f.section_by_name(".tls.choice").is_none());
+        let exe = link(&[object(START), tls, group(1, "")]).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        assert_eq!(f.section_by_name(".tls.choice").unwrap().size(), 4);
     }
-    let imports = object(
-        ".type tls_import,@tls_object\n.section .data.choice,\"awG\",@progbits,key,comdat\n.quad tls_import\n",
-    );
-    let err = link(&[object(START), group(1, ""), imports]).unwrap_err();
-    assert!(
-        err.contains("TLS symbol tls_import") && err.contains("external ELF linking"),
-        "{err}"
-    );
 }
 
 #[test]
@@ -94,12 +67,7 @@ fn tls_archive_member_is_checked_only_after_extraction() {
     );
     let archive = self::archive(&[("tls.o", &tls)]);
     let entry = object(&format!("{START}.data\n.quad pull_tls_member\n"));
-    let err = link(&[entry, group(1, ""), archive]).unwrap_err();
-    assert!(
-        err.contains("comdat.o(tls.o): TLS section .tls.choice")
-            && err.contains("external ELF linking"),
-        "{err}"
-    );
+    link(&[entry, group(1, ""), archive]).unwrap();
 }
 #[test]
 fn ordinary_and_cross_group_references_rebind_globals() {

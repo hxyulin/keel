@@ -14,7 +14,8 @@ pub(super) mod x86_64 {
         match kind {
             // R_X86_64_PC8 is used by LOOP and J*CXZ.
             R_X86_64_PC8 => Ok(1),
-            R_X86_64_64 | R_X86_64_PC64 => Ok(8),
+            21..=23 => Ok(4),
+            R_X86_64_64 | R_X86_64_PC64 | 17 | 18 => Ok(8),
             R_X86_64_PC32
             | R_X86_64_PLT32
             | R_X86_64_GOTPCREL
@@ -30,7 +31,7 @@ pub(super) mod x86_64 {
     pub(in crate::elf) fn uses_got(kind: u32) -> bool {
         matches!(
             kind,
-            R_X86_64_GOTPCREL | R_X86_64_GOTPCRELX | R_X86_64_REX_GOTPCRELX
+            22 | R_X86_64_GOTPCREL | R_X86_64_GOTPCRELX | R_X86_64_REX_GOTPCRELX
         )
     }
 
@@ -62,18 +63,19 @@ pub(super) mod x86_64 {
         let value = value as u64;
         let pc = value.wrapping_sub(place) as i64;
         let (n, width) = match kind {
-            R_X86_64_64 => (value, 8),
+            R_X86_64_64 | 17 | 18 => (value, 8),
             R_X86_64_32 => (
                 u64::from(u32::try_from(value).map_err(|_| Error::Overflow)?),
                 4,
             ),
-            R_X86_64_32S => (
+            R_X86_64_32S | 21 | 23 => (
                 i32::try_from(value as i64).map_err(|_| Error::Overflow)? as u64,
                 4,
             ),
             R_X86_64_PC8 => (i8::try_from(pc).map_err(|_| Error::Overflow)? as u64, 1),
             R_X86_64_PC64 => (pc as u64, 8),
             R_X86_64_PC32
+            | 22
             | R_X86_64_PLT32
             | R_X86_64_GOTPCREL
             | R_X86_64_GOTPCRELX

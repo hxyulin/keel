@@ -113,7 +113,7 @@ For bounded GNU script final linking through the library API, see
   debugger.
 
 Not supported: automatic libc/CRT startup, static libc, PIE, shared-object
-output, native TLS relocations, native IFUNC/GNU-unique definitions, REL
+output, dynamic TLS models (TLSGD/TLSLD/TLSDESC), imported TLS, native IFUNC/GNU-unique definitions, REL
 relocations, other allocated notes, unrestricted GNU scripts, identical-code folding,
 general relaxation and source debugging. Runtime-loader IFUNC resolution and
 constructors inside input shared libraries do work. Unsupported sections,
@@ -251,8 +251,8 @@ Order of operations: archive extraction, COMDAT selection, symbol resolution,
 GC, unwind filtering and merging, common/import/GOT/stub sizing, then layout
 and relocation. Extraction sees undefined references even from sections GC
 later discards. `SHF_GNU_RETAIN` never extracts an archive member. Duplicate
-strong definitions and unsupported inputs are diagnosed before GC, and TLS is
-rejected even in dead sections.
+strong definitions and unsupported inputs are diagnosed before GC. TLS follows
+COMDAT selection and section GC.
 
 Granularity is the input section: a live function keeps unrelated functions in
 the same section, and mergeable sections are not split. For finer collection,
@@ -521,3 +521,11 @@ failed link preserves the destination, and on Linux executes the result.
 
 Format references: [System V ELF ABI](https://gabi.xinuos.com/elf/) and
 [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI).
+
+Native TLS uses a contiguous, aligned `.tdata`/`.tbss` template and a `PT_TLS`
+header. TLS symbols hold offsets within that template. x86-64 supports
+TPOFF32/64, DTPOFF32/64 and GOTTPOFF for executable definitions. AArch64
+supports local-exec ADD_TPREL_HI12, ADD_TPREL_LO12 and ADD_TPREL_LO12_NC.
+The runtime must allocate per-thread storage and initialize the thread pointer;
+static syscall-only entry points must do this themselves. Linker scripts with
+TLS remain unsupported.

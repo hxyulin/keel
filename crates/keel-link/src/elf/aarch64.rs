@@ -3,6 +3,7 @@ use crate::Result;
 
 pub(crate) fn width(kind: u32) -> Result<u64> {
     match kind {
+        549..=551 => Ok(4),
         257 | 260 => Ok(8),
         258 | 261 | 273..=280 | 282..=286 | 299 | 311 | 312 => Ok(4),
         _ => Err(format!("unsupported AArch64 relocation {kind}").into()),
@@ -59,6 +60,20 @@ pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result
         }
     };
     match kind {
+        549..=551 => {
+            instruction(word & 0x7f000000 == 0x11000000)?;
+            if value < 0 || (kind != 551 && value >= 1 << 24) || (kind == 550 && value >= 4096) {
+                return Err(overflow());
+            }
+            let immediate = if kind == 549 {
+                (value >> 12) & 4095
+            } else {
+                value & 4095
+            };
+            word = (word & !((4095 << 10) | (1 << 22)))
+                | (immediate as u32) << 10
+                | if kind == 549 { 1 << 22 } else { 0 };
+        }
         282 | 283 => {
             instruction(word & 0xfc000000 == if kind == 283 { 0x94000000 } else { 0x14000000 })?;
             word = (word & !0x03ffffff) | signed(value - place, 26, 2)?;
@@ -118,4 +133,22 @@ pub(super) fn apply(kind: u32, value: i128, place: i128, field: &[u8]) -> Result
         _ => return Err(format!("unsupported AArch64 relocation {kind}").into()),
     }
     Ok(word.to_le_bytes().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply;
+
+    #[test]
+    fn tls_local_exec_add_fields_and_overflow() {
+        let add = 0x91000000u32.to_le_bytes();
+        let hi = apply(549, 0x123456, 0, &add).unwrap();
+        let lo = apply(551, 0x123456, 0, &add).unwrap();
+        assert_eq!(u32::from_le_bytes(hi.try_into().unwrap()), 0x91448c00);
+        assert_eq!(u32::from_le_bytes(lo.try_into().unwrap()), 0x91115800);
+        assert!(apply(549, 1 << 24, 0, &add).is_err());
+        assert!(apply(550, 4096, 0, &add).is_err());
+        assert!(apply(550, 4095, 0, &add).is_ok());
+        assert!(apply(549, 16, 0, &[0; 4]).is_err());
+    }
 }
