@@ -918,6 +918,10 @@ struct FunctionCompiler<'a> {
     frame_size: usize,
     /// A private leaf that neither needs nor observes a stack frame.
     frameless: bool,
+    /// Share ordinary return restoration after allocation, leaving value homes
+    /// and the first return path unchanged. Tiny epilogues stay duplicated.
+    share_returns: bool,
+    return_epilogue_emitted: bool,
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
@@ -1088,6 +1092,30 @@ impl<'a> FunctionCompiler<'a> {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         let frameless = plan::frameless(func, module, has_tls_getter, frame_size, incoming, &alloc);
+        let share_returns = crate::emission::function_goal(&func.attrs, request.emission.goal)
+            == crate::CodegenGoal::Size
+            && !func.attrs.optnone
+            && !frameless
+            && !has_inline_asm
+            && func.personality.is_none()
+            && !func.attrs.naked
+            && !func.attrs.interrupt
+            && !func.sig.returns_twice
+            && func.debug_loc.is_none()
+            && func.debug_vars.is_empty()
+            && (frame_size != 0
+                || !alloc.callee_saved_used.is_empty()
+                || !alloc.float_callee_saved_used.is_empty())
+            && func
+                .blocks()
+                .filter(|&b| {
+                    func.block_insts(b)
+                        .last()
+                        .is_some_and(|&i| matches!(func.inst_data(i), InstData::Return { .. }))
+                })
+                .take(2)
+                .count()
+                == 2;
         let plan::Covers {
             selection,
             absolute_values,
@@ -1157,6 +1185,8 @@ impl<'a> FunctionCompiler<'a> {
             variadic_offset: 16 + (incoming as usize).next_multiple_of(8),
             frame_size,
             frameless,
+            share_returns,
+            return_epilogue_emitted: false,
             next_block: None,
             out: if linux && !structured {
                 Output::ElfText(Default::default())

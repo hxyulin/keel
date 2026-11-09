@@ -43,6 +43,13 @@ An interval live across a call takes a callee-saved register or is spilled.
 The prologue saves the callee-saved registers the function uses with
 `stp`/`ldp` pairs, and the epilogue restores them.
 
+Size emission shares ordinary return epilogues when restoration needs at least
+three instructions including `ret`. Each return first moves its results into
+the ABI registers. The first return keeps its epilogue; later returns branch
+to it. Allocation and tail-call epilogues are unchanged. Debug files, inline
+assembly, exception handlers, special entry conventions and `optnone` keep
+separate epilogues. Function-level size and cold policies also enable sharing.
+
 Parallel copies break a cycle by saving one destination in x16; `fmov` moves
 a float's bits into x16 and back, so one temporary serves both classes. A
 slot-to-slot move goes through x17. Moves are always 64-bit, since narrow

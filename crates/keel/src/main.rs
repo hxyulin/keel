@@ -66,7 +66,7 @@ const USAGE: &str = "usage:
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF) and the aliases x86_64-linux-gnu and aarch64-linux-gnu.
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
-  -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
+  -Os favors size: less optional inlining/expansion and smaller native layout/epilogues.
   --schedule-pressure / --no-schedule-pressure override integer pressure scheduling (-O2/-O3 default).
   --isel / --isel-tier and --regalloc override preset stages in either order.
   --isel-tier baseline|covers|trees|full: baseline runs no optional pass or cover; -O0 uses covers.

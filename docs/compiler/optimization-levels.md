@@ -104,6 +104,9 @@ language/inline-assembly inlining remains active.
 The `-Os` preset also selects [size-oriented x86 emission](../targets/x86_64/codegen.md):
 less alignment padding, eligible scalar leaf-frame removal, unused leaf
 call-padding removal, smaller epilogues and profitable return sharing.
+On [AArch64](../targets/aarch64/codegen.md#calls-and-copies), it shares ordinary
+return restoration after register allocation when the epilogue has at least
+three instructions.
 `--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
 
 `KEEL_TARGET_BYTE_SIZE=1` enables an experimental target byte estimate for

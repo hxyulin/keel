@@ -233,12 +233,27 @@ impl FunctionCompiler<'_> {
                     let ret = &func.sig.returns[0];
                     self.extend_in_place(0, ret.ty, ret.ext);
                 }
-                self.epilogue();
-                self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], |out| {
-                    out.write_str("ret")
-                });
+                self.return_epilogue();
             }
             _ => unreachable!("not control flow"),
         }
+    }
+
+    fn return_epilogue(&mut self) {
+        // Return values already occupy the ABI registers. Every ordinary
+        // return has the same frame restoration, independent of its value.
+        if self.share_returns && !self.debug {
+            let label = format!("L{}_return_epilogue", self.func.name);
+            if self.return_epilogue_emitted {
+                self.out.branch_name(false, Name::Text(&label));
+                return;
+            }
+            self.out.label(label);
+            self.return_epilogue_emitted = true;
+        }
+        self.epilogue();
+        self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], |out| {
+            out.write_str("ret")
+        });
     }
 }
