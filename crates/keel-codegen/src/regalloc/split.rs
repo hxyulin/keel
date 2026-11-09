@@ -90,44 +90,6 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     cache_spills(input, alloc, &intervals, true)
 }
 
-/// Full homes with one register segment per bounded call-free window.
-pub(super) fn allocate_bounded(input: &AllocationInput<'_>) -> Allocation {
-    // Retain Full's intervals for segment repair rather than reconstructing
-    // CFG liveness after the scan. Allocation order, weights and homes match Full.
-    let func = input.func;
-    let cfg = ControlFlowGraph::compute(func);
-    let (order, weights) = allocation_order(func, &cfg, AllocationTier::Full);
-    let intervals = build_intervals(
-        func,
-        &cfg,
-        &order,
-        input.is_call,
-        input.returns_twice,
-        input.selection,
-    );
-    let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
-    let mut spills = weighted::linear_scan(
-        func,
-        input.selection,
-        &order,
-        &intervals,
-        input.pools,
-        &mut locs,
-        &weights,
-    );
-    let spill_slots = assign_spill_slots(&mut spills, &mut locs);
-    let alloc = baseline_allocation(order, locs, spill_slots, input.pools);
-    // Region repair only reloads low halves of these scalar types. Other
-    // spills, including i128 halves and vector values, cannot create a segment.
-    if !spills.iter().any(|iv| {
-        iv.half == 0 && matches!(func.value_type(iv.value), Type::I32 | Type::I64 | Type::Ptr)
-    }) {
-        return alloc;
-    }
-    drop((spills, weights, cfg));
-    super::region::repair_free(input, alloc, &intervals)
-}
-
 pub(super) fn allocate_adaptive(input: &AllocationInput<'_>) -> Allocation {
     profiling::scope!("split-spilled-ranges");
     backend_scope!(Allocation);

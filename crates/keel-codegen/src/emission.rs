@@ -47,8 +47,8 @@ pub struct EmissionOptions {
     /// markers show that two slots are never live at once. For bisecting a
     /// producer's markers; sharing is on by default.
     pub separate_slots: bool,
-    /// Experimental bounded integer scheduling before target selection. Disabled
-    /// by default. Debug functions, inline assembly and exceptional control flow
+    /// Bounded integer scheduling before target selection. Library callers opt in;
+    /// the CLI enables it at -O2/-O3. Debug functions, inline assembly and exceptional control flow
     /// retain their original order. Does not change memory operation order.
     pub pressure_schedule: bool,
 }

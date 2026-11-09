@@ -641,11 +641,12 @@ Allocation is selected through `RegisterAllocator`, independently of
 `InstructionSelector` and IR optimization tiers. `CodegenPipeline` pairs any
 selector with any allocator, so tiers can be compared on the same selected
 instruction plan and register pools. `--regalloc` picks the tier; `-O1` uses
-Fast and the other `-O` levels use Full.
+Fast, `-O2`/`-O3` use Bounded, and `-O0`/`-Os` use Full.
 
 | Tier | Build | What it does |
 | --- | --- | --- |
 | `Full` | default | The algorithm below, with lifetime holes, selection register hints and loop-weighted spill choice |
+| `Bounded` | default | Full homes, then bounded call-free segments that cache repeated spilled scalar reads |
 | `Fast` | default | One contiguous interval per value, no hints, spills the interval that ends last |
 | `Local` | `experimental-regalloc` | Block-local register cache: cross-block values keep stack homes, and local homes appear only on eviction |
 | `Split` | `experimental-regalloc` | Linear scan, then spilled values stay in registers that are free at both ends of a lowering sequence, written back to their homes at block edges. Functions with vectors or `returns_twice` calls use Full |
@@ -663,15 +664,16 @@ pools. Typed clobber enumeration distinguishes scalar FP preservation from full
 SIMD preservation across calls; supported native ABIs preserve no entire vector
 value in their callee-saved SIMD registers.
 
-`EmissionOptions::pressure_schedule` (CLI `--schedule-pressure`) opts into bounded
-integer scheduling before target selection. At each position it examines at most
+`EmissionOptions::pressure_schedule` controls bounded integer scheduling before
+target selection. The CLI enables it at `-O2` and `-O3` (`-O`);
+`--schedule-pressure` and `--no-schedule-pressure` override the preset in either
+order. Library callers opt in. At each position it examines at most
 64 instructions and moves only ready wrapping i32/i64 operations that strictly
 reduce live-value pressure. It preserves arithmetic dependencies and memory order;
 it can complete a reduction before an ordinary call. Debug locations, function
 policies requesting None/Fast/Size, inline assembly, EH, returns-twice and opaque
-intrinsics disable it. Producer facts survive moves. The default pipeline does not
-schedule. Prepared private Fast-convention ARM call chains retain their original
-order.
+intrinsics disable it. Producer facts survive moves. Prepared private
+Fast-convention ARM call chains retain their original order.
 
 Full runs these steps; Fast shares the first two and builds one range per
 value.
@@ -763,9 +765,11 @@ and returns-twice functions skip displacement. The four-use threshold is a stati
 opportunity filter, not a runtime profitability proof. Fast, Full and Split remain
 independently selectable. Application runtime gains are unproven.
 
-With `experimental-regalloc`, `KEEL_BOUNDED_SPLIT=1 --regalloc split` replaces
-Split's cache with Full homes and bounded call-free segments. Segment repair
-reuses Full's live intervals and skips functions without eligible scalar spills.
+`Bounded` (`--regalloc bounded`) uses Full homes and bounded call-free segments.
+The CLI selects it at `-O2` and `-O3` (`-O`); `-O0` and `-Os` retain Full,
+and `-O1` retains Fast. Library callers retain Full unless they select Bounded.
+Segment repair reuses Full's live intervals and skips functions without eligible
+scalar spills.
 Windows end at calls, constraints, block boundaries or 64 selected instructions.
 A segment loads one spilled scalar at its first use and overrides its reads through
 its last use. A free caller-saved register requires no owner transfer; otherwise
@@ -773,7 +777,10 @@ the idle owner is saved and restored. A free register needs two distinct reads;
 displacing an owner needs four. I32, I64 and pointer values qualify. A source
 location alone does not exclude a function; debug variables, personality and
 returns-twice still exclude it.
-This opt-in leaves Adaptive and the default Split policy available for comparison.
+Full remains selectable with `--regalloc full`. The experimental
+`KEEL_BOUNDED_SPLIT=1 --regalloc split` route uses the same implementation.
+Rematerialization requests retain their existing Full base at `-O2`/`-O3` unless
+an allocator is explicitly selected.
 
 **Rematerialization.** Under `experimental-regalloc`,
 `RematerializingAllocator` wraps Fast or Full and replaces some spill homes

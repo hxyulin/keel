@@ -68,7 +68,11 @@ fn backends_use_supplied_stages() {
 fn independent_tiers_preserve_legacy_defaults_and_tree_selection() {
     let module = keel_ir::parse(SOURCE).unwrap();
     for target in Target::NATIVE {
-        for allocator in [AllocationTier::Fast, AllocationTier::Full] {
+        for allocator in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            AllocationTier::Bounded,
+        ] {
             for selector in [
                 SelectionTier::Baseline,
                 SelectionTier::Trees,

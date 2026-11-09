@@ -1,7 +1,8 @@
 use super::*;
 use crate::regalloc::{
-    ControlFlowGraph, Pools, baseline_allocation, build_intervals, transfer_tests,
+    Pools, RegisterAllocator, baseline_allocation, build_intervals, transfer_tests,
 };
+use crate::select::Selection;
 
 const ACROSS_CALL: &str = r#"
 decl @touch()
@@ -293,6 +294,50 @@ fn two_reads_need_a_free_register_and_restore_stable_homes_at_call() {
         actual.validate(&input).unwrap();
         for seed in 0..16 {
             transfer_tests::check(&input, &actual, seed);
+        }
+    }
+}
+
+#[test]
+fn bounded_allocator_preserves_full_homes_and_selected_tokens() {
+    // Both inputs cross the call and must spill without callee-saved registers.
+    // Repeated reads before the call can use an otherwise free caller register.
+    let source = "decl @touch()
+func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    v3 = iadd v2, v0
+    v4 = iadd v3, v0
+    v5 = iadd v4, v0
+    call @touch()
+    v6 = iadd v5, v0
+    v7 = iadd v6, v1
+    return v7
+}";
+    let pools = Pools {
+        caller_saved: &[6, 7, 8, 9],
+        callee_saved: &[],
+        ..pools()
+    };
+    for ty in ["i32", "i64"] {
+        let module = keel_ir::parse(&source.replace("i64", ty)).unwrap();
+        let selection = Selection::default();
+        let input = AllocationInput {
+            pools: &pools,
+            func: &module.functions[0],
+            selection: &selection,
+            is_call: &|d| matches!(d, InstData::Call { .. }),
+            returns_twice: &|_| false,
+        };
+        let full = AllocationTier::Full.allocate(&input);
+        let bounded = AllocationTier::Bounded.allocate(&input);
+        assert_eq!(bounded.order, full.order, "{ty}");
+        assert_eq!(bounded.locs, full.locs, "{ty}");
+        assert_eq!(bounded.spill_slots, full.spill_slots, "{ty}");
+        assert!(!bounded.edits.is_empty(), "{ty}");
+        bounded.validate(&input).unwrap();
+        for seed in 0..8 {
+            transfer_tests::check(&input, &bounded, seed);
         }
     }
 }

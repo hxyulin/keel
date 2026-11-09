@@ -140,7 +140,7 @@ fn native_presets_and_stable_backends_execute_the_same_program() {
     for level in ["-O0", "-O1", "-O2", "-O3", "-Os"] {
         if level == "-O0" || level == "-O3" {
             for selection in ["baseline", "covers", "trees", "full"] {
-                for allocation in ["fast", "full"] {
+                for allocation in ["fast", "full", "bounded"] {
                     runs.push(vec![
                         level,
                         "--isel-tier",

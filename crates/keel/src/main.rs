@@ -67,7 +67,7 @@ const USAGE: &str = "usage:
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller x86 layout/frames.
-  --schedule-pressure opts into bounded integer pressure scheduling before selection.
+  --schedule-pressure / --no-schedule-pressure override integer pressure scheduling (-O2/-O3 default).
   --isel / --isel-tier and --regalloc override preset stages in either order.
   --isel-tier baseline|covers|trees|full: baseline runs no optional pass or cover; -O0 uses covers.
   --isel none|all|<term,..>: terms trees, folds, hints, covers or a cover name; -term turns one off (all,-x86-mask-test).
@@ -140,7 +140,7 @@ struct Options {
     inline_allowance: usize,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
-    pressure_schedule: bool,
+    pressure_schedule: Option<bool>,
     #[cfg(feature = "experimental-regalloc")]
     remat: u8,
     tuning: keel_codegen::tuning::TuningCpu,
@@ -228,7 +228,10 @@ impl Options {
         emission.x86_code_model = self.x86_code_model;
         emission.function_sections = self.function_sections;
         emission.data_sections = self.data_sections;
-        emission.pressure_schedule = self.pressure_schedule;
+        emission.pressure_schedule = self.pressure_schedule.unwrap_or(matches!(
+            self.optimization_level,
+            Some(optimization::Level::O2 | optimization::Level::O3)
+        ));
         emission
     }
 
@@ -648,7 +651,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     };
                 }
             }
-            "--schedule-pressure" => opts.pressure_schedule = true,
+            "--schedule-pressure" => opts.pressure_schedule = Some(true),
+            "--no-schedule-pressure" => opts.pressure_schedule = Some(false),
             "--regalloc" => {
                 explicit_allocation = true;
                 opts.allocation = match args.next().map(String::as_str) {
@@ -660,7 +664,8 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     #[cfg(feature = "experimental-regalloc")]
                     Some("adaptive") => keel_codegen::regalloc::AllocationTier::Adaptive,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full (local/split/adaptive require experimental-regalloc)".into()),
+                    Some("bounded") => keel_codegen::regalloc::AllocationTier::Bounded,
+                    _ => return Err("`--regalloc` needs fast, full or bounded (local/split/adaptive require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
@@ -779,6 +784,15 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         if !explicit_allocation {
             opts.allocation = level.allocation();
         }
+    }
+    // Keep rematerialization experiments on their existing base allocator unless
+    // the user explicitly selects another one. Segment edits prevent recipe substitution.
+    #[cfg(feature = "experimental-regalloc")]
+    if opts.remat != 0
+        && !explicit_allocation
+        && opts.allocation == keel_codegen::regalloc::AllocationTier::Bounded
+    {
+        opts.allocation = keel_codegen::regalloc::AllocationTier::Full;
     }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat & (4 | 8) != 0
@@ -1018,6 +1032,7 @@ const COMPILE_FLAGS: &[&str] = &[
     "--opt-tier",
     "--regalloc",
     "--schedule-pressure",
+    "--no-schedule-pressure",
     "--remat",
     "--isel-tier",
     "--tune",
@@ -1096,6 +1111,7 @@ const CC_FLAGS: &[&str] = &[
     "--opt-tier",
     "--regalloc",
     "--schedule-pressure",
+    "--no-schedule-pressure",
     "--remat",
     "--isel-tier",
     "--tune",
@@ -1554,6 +1570,9 @@ mod tests {
                 "--isel-tier",
                 "--isel",
                 "--regalloc",
+                "--schedule-pressure",
+                "--no-schedule-pressure",
+                "--remat",
                 "--verify-each",
                 "--no-verify-each",
             ],
@@ -1747,6 +1766,70 @@ mod tests {
             options(&["-O1", "-O0"]).unwrap().allocation,
             options(&[]).unwrap().allocation
         );
+    }
+
+    #[test]
+    fn speed_presets_enable_bounded_allocation_and_scheduling_with_overrides() {
+        use keel_codegen::regalloc::AllocationTier;
+        for level in ["-O", "-O2", "-O3"] {
+            let opts = options(&[level]).unwrap();
+            assert_eq!(opts.allocation, AllocationTier::Bounded, "{level}");
+            assert!(opts.emission_options().pressure_schedule, "{level}");
+            for flags in [
+                vec![level, "--no-schedule-pressure"],
+                vec!["--no-schedule-pressure", level],
+            ] {
+                assert!(
+                    !options(&flags)
+                        .unwrap()
+                        .emission_options()
+                        .pressure_schedule
+                );
+            }
+        }
+        for flags in [
+            vec![],
+            vec!["-O0"],
+            vec!["-O1"],
+            vec!["-Os"],
+            vec!["-O3", "-O0"],
+        ] {
+            assert!(
+                !options(&flags)
+                    .unwrap()
+                    .emission_options()
+                    .pressure_schedule,
+                "{flags:?}"
+            );
+        }
+        for flags in [
+            vec!["-O0", "--schedule-pressure"],
+            vec!["-O3", "--no-schedule-pressure", "--schedule-pressure"],
+        ] {
+            assert!(
+                options(&flags)
+                    .unwrap()
+                    .emission_options()
+                    .pressure_schedule
+            );
+        }
+        for flags in [
+            vec!["-O3", "--regalloc", "full"],
+            vec!["--regalloc", "full", "-O3"],
+        ] {
+            assert_eq!(options(&flags).unwrap().allocation, AllocationTier::Full);
+        }
+        assert_eq!(
+            options(&["-O0", "--regalloc", "bounded"])
+                .unwrap()
+                .allocation,
+            AllocationTier::Bounded
+        );
+        #[cfg(feature = "experimental-regalloc")]
+        for mode in ["constants", "stack", "all", "null", "pressure"] {
+            let opts = options(&["-O", "--remat", mode]).unwrap();
+            assert_eq!(opts.allocation, AllocationTier::Full, "{mode}");
+        }
     }
 
     #[test]

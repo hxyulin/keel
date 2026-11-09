@@ -38,9 +38,9 @@ fn native_control_and_pressure_match_handwritten_and_clang() {
         "clang.o",
     ]));
     #[cfg(not(feature = "experimental-regalloc"))]
-    let allocators = ["fast", "full"];
+    let allocators = ["fast", "full", "bounded"];
     #[cfg(feature = "experimental-regalloc")]
-    let allocators = ["fast", "full", "adaptive"];
+    let allocators = ["fast", "full", "bounded", "adaptive"];
     for tier in ["-O0", "-O1", "-O3"] {
         for allocator in allocators {
             for scheduled in [false, true] {
@@ -50,7 +50,7 @@ fn native_control_and_pressure_match_handwritten_and_clang() {
                     .args(if scheduled {
                         vec!["--schedule-pressure"]
                     } else {
-                        vec![]
+                        vec!["--no-schedule-pressure"]
                     })
                     .args([
                         tier,

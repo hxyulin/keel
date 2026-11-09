@@ -169,7 +169,11 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     is_call: &is_call,
                     returns_twice: &returns_twice,
                 };
-                let tiers = vec![AllocationTier::Fast, AllocationTier::Full];
+                let tiers = vec![
+                    AllocationTier::Fast,
+                    AllocationTier::Full,
+                    AllocationTier::Bounded,
+                ];
                 #[cfg(feature = "experimental-regalloc")]
                 let tiers = {
                     let mut tiers = tiers;

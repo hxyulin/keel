@@ -97,7 +97,7 @@ Commonly used configurations:
 | Configuration | Meaning |
 |---------------|---------|
 | `keel` | Default unoptimized Keel with covers selection, the `-O0` default |
-| `keel-O` | The CLI `-O` preset; enables all selection passes |
+| `keel-O` | The CLI `-O` preset; enables all selection passes, bounded spill repair and pressure scheduling |
 | `keel-O-lto` | `keel-O` for the whole program: each unit is emitted as unoptimized IR, and `keel compile --internalize main` merges and compiles them as one module ([whole-program compilation](../docs/toolchain.md#whole-program-compilation)) |
 | `keel-select`, `keel-O-select` | Explicit `--isel all` |
 | `keel-g` | Keel with debug info |

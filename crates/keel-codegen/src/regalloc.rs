@@ -97,7 +97,6 @@ pub use remat::RematerializingAllocator;
 pub(crate) use remat::{RematRecipe, remat_recipe};
 #[cfg(feature = "experimental-regalloc")]
 mod loop_region;
-#[cfg(feature = "experimental-regalloc")]
 mod region;
 #[cfg(feature = "experimental-regalloc")]
 mod split;
@@ -180,7 +179,8 @@ pub trait RegisterAllocator {
 }
 
 /// Fast uses conservative contiguous intervals without register affinities.
-/// Full preserves lifetime holes and uses selection affinities. Both tiers
+/// Full preserves lifetime holes and uses selection affinities. Bounded adds
+/// call-free scalar spill repair to Full. All tiers
 /// share sparse CFG liveness, but Fast constructs only scalar endpoints and
 /// uses a separate contiguous scan.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -195,6 +195,8 @@ pub enum AllocationTier {
     /// Experimental Full allocation with repeated-use scalar spill repair.
     #[cfg(feature = "experimental-regalloc")]
     Adaptive,
+    /// Full homes with repeated scalar reads cached in bounded call-free windows.
+    Bounded,
     #[default]
     Full,
 }
@@ -208,14 +210,18 @@ impl RegisterAllocator for AllocationTier {
             Self::Split => "split",
             #[cfg(feature = "experimental-regalloc")]
             Self::Adaptive => "adaptive",
+            Self::Bounded => "bounded",
             Self::Full => "full",
         }
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        if *self == Self::Bounded {
+            return region::allocate(input);
+        }
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Split {
             if std::env::var_os("KEEL_BOUNDED_SPLIT").is_some() {
-                return split::allocate_bounded(input);
+                return region::allocate(input);
             }
             return split::allocate(input);
         }
@@ -300,6 +306,7 @@ fn allocate_tier_inner(
     let (order, weights) = allocation_order(func, &cfg, tier);
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
+        AllocationTier::Bounded => unreachable!("bounded allocation has its own entry point"),
         #[cfg(feature = "experimental-regalloc")]
         AllocationTier::Local | AllocationTier::Split | AllocationTier::Adaptive => {
             unreachable!("experimental allocators have their own entry points")

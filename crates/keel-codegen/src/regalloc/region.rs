@@ -1,5 +1,9 @@
 //! Temporarily displace idle scalar owners inside bounded call-free regions.
-use super::{Allocation, AllocationInput, Constraint, Interval, Loc, OperandKind, ValuePart};
+use super::{
+    Allocation, AllocationInput, AllocationTier, Constraint, ControlFlowGraph, Interval, Loc,
+    OperandKind, ValuePart, allocation_order, assign_spill_slots, baseline_allocation,
+    build_intervals, weighted,
+};
 use keel_ir::Inst;
 use keel_ir::{EntityRef, InstData, Type};
 
@@ -11,6 +15,47 @@ const MAX_REGION_INSTRUCTIONS: usize = 64;
 #[path = "region_tests.rs"]
 mod tests;
 
+/// Full homes with one register segment per bounded call-free window.
+pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
+    profiling::scope!("bounded-spill-repair");
+    backend_scope!(Allocation);
+    // Retain Full's intervals for segment repair rather than reconstructing
+    // CFG liveness after the scan. Allocation order, weights and homes match Full.
+    let func = input.func;
+    let cfg = ControlFlowGraph::compute(func);
+    let (order, weights) = allocation_order(func, &cfg, AllocationTier::Full);
+    let intervals = build_intervals(
+        func,
+        &cfg,
+        &order,
+        input.is_call,
+        input.returns_twice,
+        input.selection,
+    );
+    let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
+    let mut spills = weighted::linear_scan(
+        func,
+        input.selection,
+        &order,
+        &intervals,
+        input.pools,
+        &mut locs,
+        &weights,
+    );
+    let spill_slots = assign_spill_slots(&mut spills, &mut locs);
+    let alloc = baseline_allocation(order, locs, spill_slots, input.pools);
+    // Region repair only reloads low halves of these scalar types. Other
+    // spills, including i128 halves and vector values, cannot create a segment.
+    if !spills.iter().any(|iv| {
+        iv.half == 0 && matches!(func.value_type(iv.value), Type::I32 | Type::I64 | Type::Ptr)
+    }) {
+        return alloc;
+    }
+    drop((spills, weights, cfg));
+    repair_free(input, alloc, &intervals)
+}
+
+#[cfg(any(test, feature = "experimental-regalloc"))]
 pub(super) fn repair(
     input: &AllocationInput<'_>,
     alloc: Allocation,
