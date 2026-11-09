@@ -158,9 +158,10 @@ fn cleanup_policy_is_full_only() {
     }
     let full = keel_opt::OptimizationTier::Full.pipeline();
     assert_eq!(
-        &full[..5],
+        &full[..6],
         [
             "private-aggregate-cleanup",
+            "known-bits",
             "const-fold",
             "devirtualize-const-table",
             "loop-matmul",

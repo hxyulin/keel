@@ -691,6 +691,7 @@ const RELEASE_EPILOGUE: [&str; 13] = [
 // literals, such as `ineg 1`, and inliner admission counts instructions.
 const BALANCED_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
+    &["known-bits"],
     &["const-fold"],
     &["inline-noninterposable"],
     &RELEASE_ROUND_SCALAR,
@@ -714,6 +715,7 @@ pub const BALANCED_PIPELINE: &[&str] = &concat::<{ total_len(BALANCED_PARTS) }>(
 // The first Size round cleans up before any inlining.
 const SIZE_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
+    &["known-bits"],
     &RELEASE_ROUND_SCALAR,
     &RELEASE_ROUND_MEMORY,
     &["inline-size"],
@@ -812,6 +814,7 @@ const FULL_EPILOGUE: [&str; 32] = [
 // Fold operations on literals before the first inliner, as in Balanced.
 const FULL_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
+    &["known-bits"],
     &["const-fold"],
     &["devirtualize-const-table"],
     &["loop-matmul"],

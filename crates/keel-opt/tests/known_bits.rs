@@ -372,3 +372,109 @@ fn carry_and_borrow_facts_prove_arithmetic_bounds_at_every_width() {
         check(&original, &module, &[x]);
     }
 }
+
+#[test]
+fn unsigned_checked_arithmetic_uses_operand_bounds() {
+    for (producer, op, rhs, removed) in [
+        ("and v0, v1", "uadd", 1, true),
+        ("urem v0, v1", "umul", 31, true),
+        ("ushr v0, v1", "umul", 2, true),
+        ("and v0, v1", "uadd", 255, false),
+        ("and v0, v1", "umul", 255, false),
+        ("and v0, v1", "usub", 1, false),
+        ("and v0, v1", "usub", 0, true),
+        ("and v0, v1", "sadd", 1, false),
+    ] {
+        let source = format!(
+            "func @f(i8) -> i8 {{
+block0(v0: i8):
+ v1 = iconst.i8 3
+ v2 = {producer}
+ v3 = iconst.i8 {rhs}
+ v4, v5 = {op}_overflow v2, v3
+ brif v5, block1, block2
+block1:
+ return v5
+block2:
+ return v4
+}}"
+        );
+        let (original, module) = apply(&source, &["known-bits", "simplify-cfg", "dce"]);
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(
+            module.to_string().contains("_overflow"),
+            !removed,
+            "{module}"
+        );
+        for x in 0..256 {
+            check(&original, &module, &[x]);
+        }
+    }
+}
+
+#[test]
+fn remainder_bounds_survive_release_pipeline_ordering() {
+    for pipeline in [
+        keel_opt::BALANCED_PIPELINE,
+        keel_opt::SIZE_PIPELINE,
+        keel_opt::DEFAULT_PIPELINE,
+    ] {
+        let source = "func @f(i64) -> i64 cc(c) {
+block0(v0: i64):
+ v1 = iconst.i64 1000003
+ v2 = urem v0, v1
+ v3 = iconst.i64 31
+ v4, v5 = umul_overflow v2, v3
+ brif v5, block1, block2
+block1:
+ trap
+block2:
+ return v4
+}";
+        let (original, module) = apply(source, pipeline);
+        keel_ir::verify_module(&module).unwrap();
+        assert!(!module.to_string().contains("_overflow"), "{module}");
+        for x in [0, 1, 1000002, 1000003, u64::MAX] {
+            check(&original, &module, &[x]);
+        }
+    }
+}
+
+#[test]
+fn unsigned_overflow_bounds_cover_wide_types_and_unknown_remainders() {
+    for width in [16, 32, 64, 128] {
+        for (producer, removed) in [
+            (format!("uext.i{width} v0"), true),
+            ("urem v1, v2".to_owned(), false),
+            ("urem v1, v1".to_owned(), false),
+        ] {
+            let source = format!(
+                "func @f(i8, i{width}, i{width}) -> i8 {{
+block0(v0: i8, v1: i{width}, v2: i{width}):
+ v3 = {producer}
+ v4 = iconst.i{width} 31
+ v5, v6 = umul_overflow v3, v4
+ return v6
+}}"
+            );
+            let (_, module) = apply(&source, &["known-bits", "dce"]);
+            keel_ir::verify_module(&module).unwrap();
+            assert_eq!(
+                module.to_string().contains("_overflow"),
+                !removed,
+                "{module}"
+            );
+        }
+        // Even u128's host arithmetic must reject an overflowing upper bound.
+        let source = format!(
+            "func @f(i{width}) -> i8 {{
+block0(v0: i{width}):
+ v1 = iconst.i{width} -1
+ v2, v3 = uadd_overflow v0, v1
+ return v3
+}}"
+        );
+        let (_, module) = apply(&source, &["known-bits"]);
+        assert!(module.to_string().contains("uadd_overflow"), "{module}");
+    }
+}

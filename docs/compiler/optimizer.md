@@ -264,7 +264,11 @@ comparisons and overflow flags, and carry-aware add, subtract and negate. The
 pass removes masks that the operands already establish and proves comparisons
 from the resulting bounds, including signed ordering. Values are materialized
 only when the immediate can represent them. It does not remove loads, stores or
-trapping operations. Balanced, Size and Full run it late.
+trapping operations. Constant nonzero unsigned remainders establish zero high
+bits. Unsigned checked add, subtract and multiply become plain arithmetic and a
+false flag when the operand bounds exclude overflow. Signed checks remain.
+Balanced, Size and Full also run it before scalar lowering so constant division
+expansion does not hide remainder bounds.
 
 ## Phi cleanup
 

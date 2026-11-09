@@ -4,7 +4,8 @@
 //! Facts flow through bit operations, constant shifts, casts, selects and all
 //! incoming block edges. No edge is assumed executable or branch fact inferred.
 use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, UnaryOp, Value, ValueDef,
+    BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, OverflowOp, Type,
+    UnaryOp, Value, ValueDef,
 };
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -159,6 +160,15 @@ fn infer(func: &Function, value: Value, facts: &[Bits], incoming: &Incoming) -> 
             InstData::Binary { op, args } => {
                 let (a, b) = (get(args[0]), get(args[1]));
                 match op {
+                    BinaryOp::Urem if b.zero | b.one == m && b.one != 0 => {
+                        // A nonzero divisor bounds the remainder below itself.
+                        let maximum = b.one - 1;
+                        let used = 128 - maximum.leading_zeros();
+                        Bits {
+                            zero: m & !if used == 0 { 0 } else { mask(used) },
+                            one: 0,
+                        }
+                    }
                     BinaryOp::Iadd => add(a, b, false, w),
                     BinaryOp::Isub => add(
                         a,
@@ -281,7 +291,8 @@ fn analyze(func: &Function) -> Vec<Bits> {
                     ..
                 }
                 | InstData::Binary {
-                    op: BinaryOp::Iadd
+                    op: BinaryOp::Urem
+                        | BinaryOp::Iadd
                         | BinaryOp::Isub
                         | BinaryOp::And
                         | BinaryOp::Or
@@ -341,8 +352,32 @@ pub fn run(func: &mut Function) -> bool {
     let facts = analyze(func);
     let get = |v| facts[func.resolve(v).index()];
     let mut replacements = Vec::new();
+    let mut unchecked = Vec::new();
     for (_, inst) in func.layout_insts() {
         let data = func.inst_data(inst);
+        if let InstData::Overflow { op, args } = *data {
+            let Some(w) = width(func.value_type(func.resolve(args[0]))) else {
+                continue;
+            };
+            let ((lo_a, hi_a), (_, hi_b)) = (
+                bounds(get(args[0]), w, false),
+                bounds(get(args[1]), w, false),
+            );
+            let plain = match op {
+                OverflowOp::Uadd if hi_a.checked_add(hi_b).is_some_and(|n| n <= mask(w)) => {
+                    Some(BinaryOp::Iadd)
+                }
+                OverflowOp::Umul if hi_a.checked_mul(hi_b).is_some_and(|n| n <= mask(w)) => {
+                    Some(BinaryOp::Imul)
+                }
+                OverflowOp::Usub if lo_a >= hi_b => Some(BinaryOp::Isub),
+                _ => None,
+            };
+            if let Some(op) = plain {
+                unchecked.push((inst, op, args));
+            }
+            continue;
+        }
         if data.is_pinned()
             || func.inst_results(inst).len() != 1
             || matches!(data, InstData::Iconst { .. })
@@ -388,7 +423,19 @@ pub fn run(func: &mut Function) -> bool {
             replacements.push((inst, None, Some(InstData::Iconst { ty, imm })));
         }
     }
-    let changed = !replacements.is_empty();
+    let changed = !replacements.is_empty() || !unchecked.is_empty();
+    for (inst, op, args) in unchecked {
+        let results = func.inst_results(inst).to_vec();
+        for (result, data) in results
+            .into_iter()
+            .zip([InstData::Binary { op, args }, InstData::iconst(Type::I8, 0)])
+        {
+            let replacement = func.insert_inst(InsertPoint::Before(inst), data);
+            func.set_inst_loc(replacement, func.inst_loc(inst));
+            func.replace_all_uses(result, func.first_result(replacement));
+        }
+        func.remove_inst(inst);
+    }
     for (inst, value, data) in replacements {
         if let Some(value) = value {
             func.replace_all_uses(func.first_result(inst), value);
