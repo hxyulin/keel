@@ -1266,7 +1266,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 for path in &opts.more_inputs {
                     modules.push(c_module(&opts, path, cache.as_mut())?);
                 }
+                // Each TU owns its IR; header tokens need not survive merging.
+                drop(cache);
                 module = merge_inputs(&mut opts, modules)?;
+            } else {
+                drop(cache);
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;

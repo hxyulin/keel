@@ -64,11 +64,12 @@ Each TU has fresh macros, counters, include search, include guards and pragma
 once state. The first inclusion per TU rereads disk contents and compares
 bytes before reusing tokens, including same-length edits. Canonical paths key
 storage; tokens receive the current include spelling for locations and
-`__FILE__`. No expanded header output is cached. Storage grows with distinct
-headers until the caller clears or drops the cache. Headers must stay stable
-during each call, as with ordinary preprocessing; edits between calls are
-allowed. This opt-in experiment awaits compile-time instruction and RSS
-measurement on application inputs.
+`__FILE__`. No expanded header output is cached. The CLI drops the cache before
+merging and optimizing the owned translation units. Caller-owned storage grows with
+distinct headers until the caller clears or drops the cache. Headers must stay
+stable during each call, as with ordinary preprocessing; edits between calls
+are allowed. Reuse saves lexical work when a batch shares headers; retained
+header contents and tokens can increase peak memory during preprocessing.
 
 The preprocessor runs no external commands and has no Clang fallback. Gaps
 include trigraphs, universal character names in identifiers, C23
