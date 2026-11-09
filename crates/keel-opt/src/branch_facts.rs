@@ -89,3 +89,8 @@ pub fn run_ranges(f: &mut Function) -> bool {
     let changed = run(f);
     ranges::run(f) || changed
 }
+
+/// Apply scoped bounds only to checked arithmetic in the default pipelines.
+pub(crate) fn run_checked_ranges(f: &mut Function, known: Vec<(u128, u128)>) -> bool {
+    ranges::run_checked(f, known)
+}

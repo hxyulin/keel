@@ -266,9 +266,24 @@ from the resulting bounds, including signed ordering. Values are materialized
 only when the immediate can represent them. It does not remove loads, stores or
 trapping operations. Constant nonzero unsigned remainders establish zero high
 bits. Unsigned checked add, subtract and multiply become plain arithmetic and a
-false flag when the operand bounds exclude overflow. Signed checks remain.
-Balanced, Size and Full also run it before scalar lowering so constant division
-expansion does not hide remainder bounds.
+false flag when the operand bounds exclude overflow. Signed checked arithmetic
+uses signed endpoint bounds through i128, retaining checks when endpoint
+arithmetic would overflow the host type.
+
+For i8 through i64, the pass also uses scoped intervals seeded by these masks.
+Exact unsigned remainder bounds and nonwrapping add, subtract and multiply
+results retain endpoints that bit masks cannot express. Dominating conditional
+edges refine both comparison operands, including comparisons with a variable
+whose interval is bounded. This proves checked arithmetic in a loop body from
+`i < n` when `n` has a sufficiently small upper bound. It does not infer an
+induction recurrence or assume that a loop counter starts at zero. Only unique
+incoming conditional edges supply facts. Joins and duplicate destinations
+establish no new edge facts, and sibling paths do not inherit each other's
+bounds. Expression queries have a fixed budget of at most 32 definitions and fall
+back to conservative bounds when it is exhausted. Potentially wrapping
+arithmetic supplies no narrower interval unless one signed or unsigned domain
+proves a nonwrapping result. Balanced, Size and Full also run known-bits before
+scalar lowering so division expansion does not hide remainder bounds.
 
 ## Phi cleanup
 
@@ -753,11 +768,14 @@ Full runs `branch-facts` and `outline-cold` after tail-call cleanup. Branch fact
 use canonical integer comparisons and their complements. The opt-in
 `range-facts` pass also propagates scoped signed/unsigned constant bounds for
 i8 through i64. They also track zero/nonzero conditions and
-bounded add/subtract expressions when their endpoints stay in the relevant
-integer domain. Bitwise AND supplies an unsigned upper bound. Signed and
+bounded add, subtract and multiply expressions when their endpoints stay in the
+relevant integer domain. Known-bit masks and unsigned remainder bounds also
+supply intervals. Both operands of a conditional comparison can gain bounds,
+including comparisons with bounded variables. Signed and
 unsigned intervals only constrain each other when their sign region is known;
 a wrapped endpoint never becomes a nonwrapping bound. Each expression query
-visits at most sixteen definitions. No default tier schedules `range-facts`.
+visits at most sixteen definitions. No default tier schedules `range-facts`;
+known-bits uses the same scoped analysis for checked arithmetic only.
 
 Only a unique incoming conditional edge establishes a new fact; joins, loops
 with another predecessor, and duplicate branch destinations do not. Facts are

@@ -2,7 +2,9 @@
 //!
 //! Unknown is the conservative starting point, including loop parameters.
 //! Facts flow through bit operations, constant shifts, casts, selects and all
-//! incoming block edges. No edge is assumed executable or branch fact inferred.
+//! incoming block edges. The bit fixed point assumes no executable edges.
+//! Scoped interval reasoning then uses dominating conditional edges to prove
+//! checked arithmetic safe without feeding path facts into the global masks.
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, OverflowOp, Type,
     UnaryOp, Value, ValueDef,
@@ -348,8 +350,69 @@ fn analyze(func: &Function) -> Vec<Bits> {
     facts
 }
 
+/// Unsigned bounds used to seed scoped interval reasoning without losing masks.
+pub(crate) fn unsigned_bounds(func: &Function) -> Vec<(u128, u128)> {
+    bounds_for_values(func, &analyze(func))
+}
+
+fn bounds_for_values(func: &Function, facts: &[Bits]) -> Vec<(u128, u128)> {
+    facts
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, bits)| {
+            width(func.value_type(Value::new(index)))
+                .map_or((0, u128::MAX), |w| bounds(bits, w, false))
+        })
+        .collect()
+}
+
+fn signed_safe(op: OverflowOp, a: Bits, b: Bits, w: u32) -> bool {
+    let signed = |bits| {
+        let (lo, hi) = bounds(bits, w, true);
+        let decode = |n| ((n ^ (1u128 << (w - 1))) << (128 - w)) as i128 >> (128 - w);
+        (decode(lo), decode(hi))
+    };
+    let ((al, ah), (bl, bh)) = (signed(a), signed(b));
+    let endpoints = match op {
+        OverflowOp::Sadd => [al.checked_add(bl), ah.checked_add(bh), Some(0), Some(0)],
+        OverflowOp::Ssub => [al.checked_sub(bh), ah.checked_sub(bl), Some(0), Some(0)],
+        OverflowOp::Smul => [
+            al.checked_mul(bl),
+            al.checked_mul(bh),
+            ah.checked_mul(bl),
+            ah.checked_mul(bh),
+        ],
+        _ => return false,
+    };
+    let min = i128::MIN >> (128 - w);
+    let max = i128::MAX >> (128 - w);
+    endpoints
+        .into_iter()
+        .all(|n| n.is_some_and(|n| n >= min && n <= max))
+}
+
+pub(crate) fn replace_checked_with_plain(
+    func: &mut Function,
+    inst: Inst,
+    op: BinaryOp,
+    args: [Value; 2],
+) {
+    let results = func.inst_results(inst).to_vec();
+    for (result, data) in results
+        .into_iter()
+        .zip([InstData::Binary { op, args }, InstData::iconst(Type::I8, 0)])
+    {
+        let replacement = func.insert_inst(InsertPoint::Before(inst), data);
+        func.set_inst_loc(replacement, func.inst_loc(inst));
+        func.replace_all_uses(result, func.first_result(replacement));
+    }
+    func.remove_inst(inst);
+}
+
 pub fn run(func: &mut Function) -> bool {
     let facts = analyze(func);
+    let interval_seeds = bounds_for_values(func, &facts);
     let get = |v| facts[func.resolve(v).index()];
     let mut replacements = Vec::new();
     let mut unchecked = Vec::new();
@@ -371,6 +434,15 @@ pub fn run(func: &mut Function) -> bool {
                     Some(BinaryOp::Imul)
                 }
                 OverflowOp::Usub if lo_a >= hi_b => Some(BinaryOp::Isub),
+                OverflowOp::Sadd | OverflowOp::Ssub | OverflowOp::Smul
+                    if signed_safe(op, get(args[0]), get(args[1]), w) =>
+                {
+                    Some(match op {
+                        OverflowOp::Sadd => BinaryOp::Iadd,
+                        OverflowOp::Ssub => BinaryOp::Isub,
+                        _ => BinaryOp::Imul,
+                    })
+                }
                 _ => None,
             };
             if let Some(op) = plain {
@@ -425,16 +497,7 @@ pub fn run(func: &mut Function) -> bool {
     }
     let changed = !replacements.is_empty() || !unchecked.is_empty();
     for (inst, op, args) in unchecked {
-        let results = func.inst_results(inst).to_vec();
-        for (result, data) in results
-            .into_iter()
-            .zip([InstData::Binary { op, args }, InstData::iconst(Type::I8, 0)])
-        {
-            let replacement = func.insert_inst(InsertPoint::Before(inst), data);
-            func.set_inst_loc(replacement, func.inst_loc(inst));
-            func.replace_all_uses(result, func.first_result(replacement));
-        }
-        func.remove_inst(inst);
+        replace_checked_with_plain(func, inst, op, args);
     }
     for (inst, value, data) in replacements {
         if let Some(value) = value {
@@ -444,7 +507,7 @@ pub fn run(func: &mut Function) -> bool {
             *func.inst_data_mut(inst) = data;
         }
     }
-    changed
+    crate::branch_facts::run_checked_ranges(func, interval_seeds) || changed
 }
 
 #[cfg(test)]

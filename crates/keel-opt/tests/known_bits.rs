@@ -383,7 +383,7 @@ fn unsigned_checked_arithmetic_uses_operand_bounds() {
         ("and v0, v1", "umul", 255, false),
         ("and v0, v1", "usub", 1, false),
         ("and v0, v1", "usub", 0, true),
-        ("and v0, v1", "sadd", 1, false),
+        ("and v0, v1", "sadd", 1, true),
     ] {
         let source = format!(
             "func @f(i8) -> i8 {{
@@ -477,4 +477,207 @@ block0(v0: i{width}):
         let (_, module) = apply(&source, &["known-bits"]);
         assert!(module.to_string().contains("uadd_overflow"), "{module}");
     }
+}
+
+#[test]
+fn signed_checked_arithmetic_preserves_both_results_for_all_byte_pairs() {
+    for (mask, offset, safe) in [(15, 8, true), (31, 16, false)] {
+        for op in ["sadd", "ssub", "smul"] {
+            let source = format!(
+                "func @f(i8, i8) -> i8 {{
+block0(v0: i8, v1: i8):
+ v2 = iconst.i8 {mask}
+ v3 = and v0, v2
+ v4 = and v1, v2
+ v5 = iconst.i8 {offset}
+ v6 = isub v3, v5
+ v7 = isub v4, v5
+ v8, v9 = {op}_overflow v6, v7
+ brif v9, block1, block2
+block1:
+ return v9
+block2:
+ return v8
+}}"
+            );
+            let (original, module) = apply(&source, &["known-bits", "simplify-cfg", "dce"]);
+            keel_ir::verify_module(&module).unwrap();
+            let expected_safe = safe || op != "smul";
+            assert_eq!(
+                module.to_string().contains("_overflow"),
+                !expected_safe,
+                "{module}"
+            );
+            for x in 0..256 {
+                for y in 0..256 {
+                    check(&original, &module, &[x, y]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn signed_checks_cover_i128_and_keep_sign_boundary_overflow() {
+    for width in [8, 16, 32, 64, 128] {
+        for op in ["sadd", "ssub", "smul"] {
+            for (mask, rhs, safe) in [(3, 2, true), (-1, -1, false)] {
+                let source = format!(
+                    "func @f(i{width}) -> i8 {{
+block0(v0: i{width}):
+ v1 = iconst.i{width} {mask}
+ v2 = and v0, v1
+ v3 = iconst.i{width} {rhs}
+ v4, v5 = {op}_overflow v2, v3
+ return v5
+}}"
+                );
+                let (_, module) = apply(&source, &["known-bits", "dce"]);
+                keel_ir::verify_module(&module).unwrap();
+                assert_eq!(module.to_string().contains("_overflow"), !safe, "{module}");
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_remainder_and_product_bounds_preserve_byte_semantics() {
+    for (expression, op, rhs, safe) in [
+        ("urem v0, v1", "uadd", 246, true),
+        ("urem v0, v1", "uadd", 247, false),
+        ("imul v2, v2", "uadd", 1, true),
+        ("imul v2, v2", "uadd", 175, false),
+    ] {
+        let source = format!(
+            "func @f(i8) -> i8 {{
+block0(v0: i8):
+ v1 = iconst.i8 10
+ v2 = and v0, v1
+ v3 = {expression}
+ v4 = iconst.i8 {rhs}
+ v5, v6 = {op}_overflow v3, v4
+ brif v6, block1, block2
+block1:
+ return v6
+block2:
+ return v5
+}}"
+        );
+        let (original, module) = apply(&source, &["known-bits", "simplify-cfg", "dce"]);
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(module.to_string().contains("_overflow"), !safe, "{module}");
+        for x in 0..256 {
+            check(&original, &module, &[x]);
+        }
+    }
+}
+
+#[test]
+fn scoped_overflow_proofs_respect_edges_joins_and_siblings() {
+    for (destinations, safe) in [("block1, block2", true), ("block1, block1", false)] {
+        for (op, constant, can_fold) in [("umul", 2, safe), ("umul", 3, false)] {
+            let source = format!(
+                "func @f(i8) -> i8 {{
+block0(v0: i8):
+ v1 = iconst.i8 100
+ v2 = icmp.ult v0, v1
+ brif v2, {destinations}
+block1:
+ v3 = iconst.i8 {constant}
+ v4, v5 = {op}_overflow v0, v3
+ brif v5, block3, block4
+block2:
+ v6 = iconst.i8 2
+ v7, v8 = umul_overflow v0, v6
+ brif v8, block3, block5
+block3:
+ v9 = iconst.i8 42
+ return v9
+block4:
+ return v4
+block5:
+ return v7
+}}"
+            );
+            let (original, module) = apply(&source, &["known-bits", "simplify-cfg", "dce"]);
+            keel_ir::verify_module(&module).unwrap();
+            let count = module.to_string().matches("_overflow").count();
+            let expected = if safe {
+                if can_fold { 1 } else { 2 }
+            } else {
+                1
+            };
+            assert_eq!(count, expected, "{module}");
+            for x in 0..256 {
+                check(&original, &module, &[x]);
+            }
+        }
+    }
+    // A guard on one predecessor cannot bound a value after a join.
+    let source = "func @f(i8) -> i8 {
+block0(v0: i8):
+ v1 = iconst.i8 100
+ v2 = icmp.ult v0, v1
+ brif v2, block1, block2
+block1:
+ jump block3
+block2:
+ jump block3
+block3:
+ v3 = iconst.i8 2
+ v4, v5 = umul_overflow v0, v3
+ return v5
+}";
+    let (original, module) = apply(source, &["known-bits"]);
+    assert!(module.to_string().contains("umul_overflow"), "{module}");
+    for x in 0..256 {
+        check(&original, &module, &[x]);
+    }
+}
+
+#[test]
+fn bounded_loop_body_checks_fold_in_all_release_pipelines() {
+    let source = "func @f(i64) -> i64 cc(c) {
+block0(v0: i64):
+ v1 = iconst.i64 5
+ v2 = urem v0, v1
+ v3 = iconst.i64 18
+ v4 = iadd v2, v3
+ v5 = iconst.i64 0
+ jump block1(v5, v5)
+block1(v6: i64, v7: i64):
+ v8 = icmp.ult v6, v4
+ brif v8, block2, block5
+block2:
+ v9 = iconst.i64 7
+ v10, v11 = umul_overflow v6, v9
+ brif v11, block6, block3
+block3:
+ v12 = iadd v7, v10
+ v13 = iconst.i64 1
+ v14, v15 = uadd_overflow v6, v13
+ brif v15, block6, block4
+block4:
+ jump block1(v14, v12)
+block5:
+ return v7
+block6:
+ trap
+}";
+    for pipeline in [
+        keel_opt::BALANCED_PIPELINE,
+        keel_opt::SIZE_PIPELINE,
+        keel_opt::DEFAULT_PIPELINE,
+    ] {
+        let (original, module) = apply(source, pipeline);
+        keel_ir::verify_module(&module).unwrap();
+        assert!(!module.to_string().contains("_overflow"), "{module}");
+        for x in [0, 1, 2, 3, 4, 5, u64::MAX] {
+            check(&original, &module, &[x]);
+        }
+    }
+    // An unbounded limit must leave the multiply check, even on i < n.
+    let source = source.replace("v4 = iadd v2, v3", "v4 = iadd v0, v2");
+    let (_, module) = apply(&source, &["known-bits"]);
+    assert!(module.to_string().contains("umul_overflow"), "{module}");
 }
