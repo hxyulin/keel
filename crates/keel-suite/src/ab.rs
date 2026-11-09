@@ -119,7 +119,7 @@ impl Options {
 }
 
 /// One of the two compilers.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Keel {
     /// The revision or file it was given as.
     label: String,
@@ -198,7 +198,7 @@ struct Series {
 }
 
 /// A ratio to the baseline over all placements.
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 struct Change {
     /// The geometric mean of the placements' ratios.
     ratio: f64,
@@ -230,7 +230,7 @@ impl Change {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Workload {
     name: String,
     cycles: Change,
@@ -241,7 +241,7 @@ struct Workload {
     baseline_placements: Vec<f64>,
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 enum Decision {
     Accept,
@@ -249,7 +249,7 @@ enum Decision {
     Reject,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Verdict {
     /// The cycles geomean over workloads.
     geomean: f64,
@@ -263,14 +263,14 @@ struct Verdict {
     reason: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Report {
     schema: u32,
     baseline: Keel,
     candidate: Keel,
     config: String,
     host: String,
-    metric: &'static str,
+    metric: String,
     placements: usize,
     rounds: u32,
     warmup: u32,
@@ -411,7 +411,7 @@ pub fn run(root: &Path, options: Options, jobs: usize, input_mode: InputMode) ->
         candidate,
         config: config.name.clone(),
         host,
-        metric,
+        metric: metric.into(),
         placements: options.placements,
         rounds: options.rounds,
         warmup: options.warmup,
@@ -434,6 +434,85 @@ fn shown(root: &Path, file: &Path) -> String {
         .unwrap_or(file)
         .display()
         .to_string()
+}
+
+/// Re-evaluate saved measurements without modifying the original report.
+pub fn show_saved(file: &Path) -> Result<bool> {
+    let mut report: Report = serde_json::from_slice(&fs::read(file)?)
+        .with_context(|| format!("reading A/B report {}", file.display()))?;
+    let previous = report.verdict.decision;
+    refresh_verdict(&mut report)?;
+    println!("saved verdict: {previous:?}; re-evaluating with the current acceptance rule");
+    print_report(
+        &report.workloads,
+        &report.verdict,
+        &report.identical_images,
+        &report.trailer,
+    );
+    Ok(true)
+}
+
+fn refresh_verdict(report: &mut Report) -> Result<()> {
+    if report.schema != 1 || report.workloads.is_empty() || report.placements == 0 {
+        bail!("unsupported or empty A/B report");
+    }
+    for w in &report.workloads {
+        for change in [
+            Some(&w.cycles),
+            Some(&w.control),
+            Some(&w.wall),
+            w.instructions.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if change.placements.len() != report.placements
+                || !change.ratio.is_finite()
+                || change.ratio <= 0.0
+                || change
+                    .placements
+                    .iter()
+                    .any(|r| !r.is_finite() || *r <= 0.0)
+                || (change.ratio - geomean(&change.placements)).abs() > 1e-9 * change.ratio
+            {
+                bail!("{}: invalid A/B placement ratios", w.name);
+            }
+        }
+        if w.baseline_placements.len() != report.placements
+            || w.baseline_placements
+                .iter()
+                .any(|r| !r.is_finite() || *r <= 0.0)
+        {
+            bail!("{}: invalid baseline placement ratios", w.name);
+        }
+    }
+    if report
+        .trailer
+        .lines()
+        .filter(|l| l.starts_with("AB-Verdict:"))
+        .count()
+        != 1
+    {
+        bail!("A/B report must contain one AB-Verdict trailer");
+    }
+    report.verdict = verdict(&report.workloads);
+    let decision = serde_json::to_value(report.verdict.decision)?;
+    report.trailer = report
+        .trailer
+        .lines()
+        .map(|line| {
+            if line.starts_with("AB-Verdict:") {
+                format!(
+                    "AB-Verdict: {}",
+                    decision.as_str().expect("decision serializes as a string")
+                )
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(())
 }
 
 /// A keel binary, or a release build of a revision, cached by commit.
@@ -861,6 +940,8 @@ fn percent(ratio: f64) -> String {
 /// The acceptance rule: accept at a cycles geomean of -0.5% or better
 /// unless a workload is slower than +1.5% at every placement and beyond its
 /// control; a geomean inside the identical-control spread is neutral.
+/// Smaller gains are neutral too: they can justify size or simplicity work,
+/// but do not meet the threshold for a runtime gain.
 fn verdict(workloads: &[Workload]) -> Verdict {
     let ratios: Vec<f64> = workloads.iter().map(|w| w.cycles.ratio).collect();
     let geomean_ratio = geomean(&ratios);
@@ -906,10 +987,18 @@ fn verdict(workloads: &[Workload]) -> Verdict {
             Decision::Accept,
             format!("geomean {shown} is at or below {}", percent(ACCEPT_GEOMEAN)),
         )
+    } else if geomean_ratio <= 1.0 {
+        (
+            Decision::Neutral,
+            format!(
+                "geomean {shown} improves cycles but does not reach {}",
+                percent(ACCEPT_GEOMEAN)
+            ),
+        )
     } else {
         (
             Decision::Reject,
-            format!("geomean {shown} is above {}", percent(ACCEPT_GEOMEAN)),
+            format!("geomean {shown} slows cycles beyond the identical-control spread"),
         )
     };
     Verdict {
@@ -1282,12 +1371,107 @@ mod tests {
     }
 
     #[test]
-    fn a_small_gain_outside_the_control_is_not_accepted() {
+    fn a_small_gain_outside_the_control_is_neutral() {
         let quiet = [1.0005, 0.9995, 1.0, 1.0];
         let workloads = [workload("a/x", &[0.997, 0.997, 0.997, 0.997], &quiet)];
         let v = verdict(&workloads);
-        assert_eq!(v.decision, Decision::Reject, "{}", v.reason);
-        assert!(v.reason.contains("above -0.50%"), "{}", v.reason);
+        assert_eq!(v.decision, Decision::Neutral, "{}", v.reason);
+        assert!(v.reason.contains("does not reach -0.50%"), "{}", v.reason);
+    }
+
+    #[test]
+    fn gains_noise_and_slowdowns_have_monotone_verdicts() {
+        let control = [1.0005, 0.9995, 1.0, 1.0];
+        for (ratio, expected) in [
+            (0.99, Decision::Accept),
+            (0.9949, Decision::Accept),
+            (0.9951, Decision::Neutral),
+            (0.997, Decision::Neutral),
+            (1.0, Decision::Neutral),
+            (1.0004, Decision::Neutral),
+            (1.0006, Decision::Reject),
+            (1.02, Decision::Reject),
+        ] {
+            let v = verdict(&[workload("a/x", &[ratio; 4], &control)]);
+            assert_eq!(v.decision, expected, "ratio {ratio}: {}", v.reason);
+        }
+    }
+
+    fn saved_report() -> Report {
+        let workloads = vec![workload("a/x", &[0.997; 4], &[1.0005, 0.9995, 1.0, 1.0])];
+        let mut previous = verdict(&workloads);
+        previous.decision = Decision::Reject;
+        Report {
+            schema: 1,
+            baseline: Keel {
+                label: "base".into(),
+                path: "base".into(),
+                sha256: "abc".into(),
+            },
+            candidate: Keel {
+                label: "candidate".into(),
+                path: "candidate".into(),
+                sha256: "def".into(),
+            },
+            config: "keel-O".into(),
+            host: "test host".into(),
+            metric: "cycles:u".into(),
+            placements: 4,
+            rounds: 3,
+            warmup: 1,
+            identical_images: vec![],
+            workloads,
+            verdict: previous,
+            trailer: "AB-Baseline: base\nAB-Result: original measurements\nAB-Verdict: reject"
+                .into(),
+        }
+    }
+
+    #[test]
+    fn saved_report_rechecks_preserve_measurements_and_provenance() {
+        let original = serde_json::to_vec(&saved_report()).unwrap();
+        let mut report: Report = serde_json::from_slice(&original).unwrap();
+        refresh_verdict(&mut report).unwrap();
+        assert_eq!(report.verdict.decision, Decision::Neutral);
+        let before: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let after = serde_json::to_value(&report).unwrap();
+        for key in [
+            "baseline",
+            "candidate",
+            "host",
+            "metric",
+            "config",
+            "placements",
+            "rounds",
+            "warmup",
+            "identical_images",
+            "workloads",
+        ] {
+            assert_eq!(before[key], after[key], "changed {key}");
+        }
+        assert_eq!(
+            report.trailer,
+            "AB-Baseline: base\nAB-Result: original measurements\nAB-Verdict: neutral"
+        );
+    }
+
+    #[test]
+    fn malformed_saved_reports_are_rejected() {
+        for case in 0..6 {
+            let mut report = saved_report();
+            match case {
+                0 => report.schema = 99,
+                1 => report.workloads.clear(),
+                2 => {
+                    report.workloads[0].control.placements.pop();
+                }
+                3 => report.workloads[0].cycles.placements[0] = 0.0,
+                4 => report.workloads[0].cycles.ratio = 0.5,
+                5 => report.trailer.clear(),
+                _ => unreachable!(),
+            }
+            assert!(refresh_verdict(&mut report).is_err(), "case {case}");
+        }
     }
 
     #[test]

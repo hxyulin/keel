@@ -480,12 +480,17 @@ verdict applies the acceptance rule to cycles:
   spread, the control's largest distance from no change overall or at any one
   placement;
 - **accept** if the geomean is -0.5% or better;
-- **reject** otherwise.
+- **neutral** for a smaller speedup outside the control spread; it can support
+  a measured size or simplicity improvement, but is not an accepted runtime gain;
+- **reject** for an overall slowdown outside the control spread.
 
 The table lists each workload's cycles change, its range over placements, the
 control, the instruction and wall-time changes, and the baseline's own range
 over placements. The run ends with a commit trailer block for the commit
 message. The plan, raw runs and report go to `target/keel-suite/ab/runs/<time>/`.
+Use `cargo suite ab-report <path/to/report.json>` to print a saved report under
+the current rule. This preserves its measurements and input file, prints the
+original verdict, and emits the current verdict and trailer without retiming.
 
 | Option | Effect |
 |--------|--------|

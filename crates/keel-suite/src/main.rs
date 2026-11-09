@@ -123,6 +123,8 @@ enum Command {
     CodegenDiff(codegen_diff::Options),
     /// Time two keel compilers' builds against each other and give a verdict.
     Ab(ab::Options),
+    /// Re-evaluate a saved A/B report under the current rule, without retiming.
+    AbReport { report: PathBuf },
     /// Total `--opt-report` per pass and `--codegen-report` per counter over every suite file.
     Stats(stats::Options),
     /// Check compatible same-host runtime runs for slowdowns.
@@ -172,6 +174,7 @@ fn run(cli: Cli) -> Result<bool> {
         Command::Check { groups, python } => checks::run(&root, &groups, &python),
         Command::CodegenDiff(options) => codegen_diff::run(&root, options, jobs, cli.input_mode),
         Command::Ab(options) => ab::run(&root, options, jobs, cli.input_mode),
+        Command::AbReport { report } => ab::show_saved(&report),
         Command::Stats(options) => stats::run(&root, options, jobs, cli.input_mode),
         Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {

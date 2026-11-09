@@ -58,15 +58,26 @@ Each run gives one of three verdicts:
 
 - **Neutral:** the cycles geomean over workloads is inside the
   identical-control spread. The control is a copy of the baseline image, timed
-  in the same blocks.
+  in the same blocks. A speedup smaller than 0.5% is also neutral, even when
+  it is outside the spread. A larger speedup must exceed the spread to count
+  as accepted.
 - **Reject:** one workload is more than 1.5% slower at every placement, and its
   smallest slowdown is larger than its control's largest deviation. A geomean
-  outside the control spread but above -0.5% is also a reject.
+  slowdown outside the control spread is also a reject.
 - **Accept:** the geomean is -0.5% or better and no workload is rejected.
 
 A runtime change lands when at least one host accepts it and no host rejects
 it. A neutral result is not a runtime gain: a neutral change needs another
 reason, such as simpler code or smaller output, stated in the commit.
+Size or simplicity changes may land when every host is neutral. Record the
+measured size or maintenance benefit and run the same slowdown checks; smaller
+output does not excuse a rejected runtime result. Compiler-time gains still
+require the separate instruction-count and RSS measurements above.
+
+`cargo suite ab-report <report.json>` re-evaluates a saved report with the
+current rule and prints its original verdict and a current verdict/trailer.
+It does not retime workloads or change the input file. Keep the original
+measurements and identify a policy re-evaluation in the commit body.
 
 `cargo suite ab` prints the verdict and saves the plan, raw runs and report
 under `target/keel-suite/ab/runs/`. Those files stay out of Git; the commit
