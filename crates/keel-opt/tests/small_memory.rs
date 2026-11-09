@@ -463,3 +463,35 @@ fn tiers_expand_memory_by_their_inlining() {
         }
     }
 }
+
+#[test]
+fn copied_stack_struct_fields_leave_no_memory() {
+    let source = "func @f(i64,i64) -> i64 {
+ ss0 = stack_slot 16, align 8
+ ss1 = stack_slot 16, align 8
+block0(v0:i64,v1:i64):
+ v2 = stack_addr ss0
+ v3 = stack_addr ss1
+ v4 = iconst.i64 8
+ v5 = ptradd v2,v4
+ store v0,v2
+ store v1,v5
+ v6 = iconst.i64 16
+ intrinsic memcpy(v3,v2,v6)
+ v7 = ptradd v3,v4
+ v8 = load.i64 v3
+ v9 = load.i64 v7
+ v10 = iadd v8,v9
+ return v10
+}";
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_opt::optimize_with_tier(&mut m, keel_opt::OptimizationTier::Full).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert!(
+        !m.functions[0].layout_insts().any(|(_, i)| matches!(
+            m.functions[0].inst_data(i),
+            InstData::Load { .. } | InstData::Store { .. } | InstData::Intrinsic { .. }
+        )),
+        "{m}"
+    );
+}

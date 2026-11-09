@@ -37,6 +37,24 @@ pub(crate) fn expanded_length(f: &Function, inst: Inst, limit: i64) -> Option<u6
     }
 }
 
+// Keep small copies involving fixed stack objects scalar so byte forwarding
+// can reconstruct their fields and promotion can remove the objects.
+fn stack_address(f: &Function, mut value: Value) -> bool {
+    loop {
+        let ValueDef::Result(inst, _) = f.value_def(f.resolve(value)) else {
+            return false;
+        };
+        match f.inst_data(inst) {
+            InstData::StackAddr { .. } => return true,
+            InstData::Binary {
+                op: BinaryOp::Ptradd,
+                args,
+            } => value = args[0],
+            _ => return false,
+        }
+    }
+}
+
 /// Expands memcpy, memmove and memset of at most `limit` bytes, and memcmp
 /// equality tests of at most [`MAX_BYTES`].
 pub fn run(f: &mut Function, limit: i64) -> bool {
@@ -74,7 +92,9 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
         // memset stays scalar, and memmove too while its snapshot fits in
         // four registers.
         let vectors = match id {
-            Intrinsic::Memcpy => true,
+            Intrinsic::Memcpy => {
+                size > MAX_BYTES || !(stack_address(f, args[0]) || stack_address(f, args[1]))
+            }
             Intrinsic::Memmove => size > MAX_BYTES,
             _ => false,
         };

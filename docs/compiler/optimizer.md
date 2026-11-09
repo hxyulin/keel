@@ -495,7 +495,9 @@ other expressions and mixed widths stay in memory.
 
 `small-memory` expands `memcpy`, `memmove` and `memset` intrinsics with constant
 i64 lengths from 0 to 32 bytes into exact accesses with alignment 1. `memcpy`
-uses 16-byte `i8x16` chunks, then 8, 4, 2 and 1-byte chunks. `memmove` and
+uses 16-byte `i8x16` chunks, then 8, 4, 2 and 1-byte chunks. Copies of at
+most 32 bytes involving a fixed stack address use scalar chunks so stack
+forwarding can reconstruct their fields. `memmove` and
 `memset` use only the scalar chunks, because `stack-forward` and
 `stack-promote` see through scalar stores only. Every source chunk is loaded
 before any store, so overlap in either direction works. `memset` multiplies
