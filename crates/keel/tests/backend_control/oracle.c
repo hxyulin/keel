@@ -18,6 +18,10 @@ DECL(keel_)
 DECL(clang_)
 DECL(hand_)
 
+typedef struct { U payload, tag; } Boxed;
+U keel_guarded_values(const Boxed *, unsigned, unsigned, unsigned, unsigned *);
+U clang_guarded_values(const Boxed *, unsigned, unsigned, unsigned, unsigned *);
+
 static unsigned char ops[4096];
 static U data[4096];
 static U rand64(U *s) {
@@ -36,6 +40,27 @@ static U rand64(U *s) {
     }                                                                          \
   } while (0)
 int main(void) {
+  {
+    U (*functions[])(const Boxed *, unsigned, unsigned, unsigned, unsigned *) = {
+      keel_guarded_values, clang_guarded_values
+    };
+    for (unsigned f = 0; f < 2; ++f) {
+      unsigned effects = 0;
+      Boxed numbers[] = {{11, 0}, {17, 1}, {23, 0xffffffff00000000ULL}};
+      CHECK(functions[f](numbers, 3, 0, 2047, &effects), 51);
+      CHECK(functions[f](numbers, 3, 1, 2047, &effects), 1);
+      CHECK(functions[f](numbers, 3, 2, 2047, &effects), 52);
+      if (effects) return 4;
+      for (unsigned k = 0; k < 3; ++k) {
+        int count = k == 0 ? 2 : k == 1 ? 1 : -1;
+        Boxed object = {(U)(__UINTPTR_TYPE__)&count, k == 0 ? (U)-11 : (U)-1};
+        effects = 0;
+        CHECK(functions[f](&object, 1, 0, 0, &effects), object.payload);
+        if (count != (k == 0 ? 1 : k == 1 ? 0 : -2)) return 5;
+        if (effects != (k != 0)) return 6;
+      }
+    }
+  }
   U seed = 123456789;
   for (unsigned i = 0; i < 4096; i++) {
     data[i] = rand64(&seed);

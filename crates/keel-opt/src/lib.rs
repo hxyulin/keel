@@ -411,6 +411,7 @@ pub(crate) static RANGE_FACTS: &dyn Pass = &BuiltinPass::new(
 );
 pub(crate) static OUTLINE_COLD: &dyn Pass = &outline_cold::OutlineCold;
 pub(crate) static EMPTY_CALLS: &dyn Pass = &module_cleanup::EmptyCalls;
+pub(crate) static INLINE_GUARDS: &dyn Pass = &inline::InlineGuards;
 pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions;
 pub(crate) static COMPACT_UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::CompactUnusedFunctions;
 pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
@@ -465,6 +466,7 @@ pub static PASSES: &[&dyn Pass] = &[
     RANGE_FACTS,
     CONSTANT_ARGS,
     EMPTY_CALLS,
+    INLINE_GUARDS,
     UNUSED_FUNCTIONS,
     COMPACT_UNUSED_FUNCTIONS,
     PRIVATE_AGGREGATE_CLEANUP,
@@ -758,7 +760,7 @@ const FULL_ROUND: [&str; 18] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 32] = [
+const FULL_EPILOGUE: [&str; 33] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -782,6 +784,7 @@ const FULL_EPILOGUE: [&str; 32] = [
     "load-reuse",
     "dce",
     "empty-calls",
+    "inline-guards",
     "dce",
     "unused-functions",
     "dce",

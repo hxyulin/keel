@@ -12,9 +12,12 @@
 mod clone;
 mod cost;
 mod eligibility;
+mod guard;
 mod required;
 mod schedule;
 mod specialize;
+
+pub(crate) use guard::InlineGuards;
 
 pub(crate) use cost::CHEAP_MODULE_GROWTH;
 pub use required::{

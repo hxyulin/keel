@@ -138,6 +138,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-matmul` | Guarded four-column tiling of bounded wrapping i32 matrix products on AArch64 |
 | `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
+| `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
@@ -341,6 +342,21 @@ variants inline `alwaysinline` callees before their callers, so a cloned
 wrapper already contains them, and freeze templates before the ordinary sites.
 Template instruction and stack costs are cached within that invocation.
 Caller stack checks and growth ledgers still use the current caller state.
+
+Full also runs `inline-guards` after its ordinary inlining rounds. For a bound
+void helper whose entry has a scalar guard and an empty return edge, it clones
+only the guard and retains the original call on the other edge. The caller gains
+no aggregate snapshots or stack declarations. Entry effects must be pure scalar
+operations or bounded private stack initialization; loads, external stores and
+volatile accesses decline. Explicit aggregate transport and debugger homes also
+decline. Argument evaluation remains before the guard.
+
+Guard expressions contain at most eight instructions. Growth is capped at 1024
+instructions per caller, 4096 per module and 256 sites, and also charges Full's
+shared inlining allowance. Binding, noinline, function policies, target features
+and caller frame restrictions remain active. An existing matching incoming guard
+prevents wrapping the retained call again. Balanced and Size keep their existing
+pipelines.
 Full fixes its module allowance from pipeline-entry IR, half of its
 instructions with a floor of 196,608, and shares conservative clone charges
 across rounds. The floor preserves the old three-round aggregate allowance; it

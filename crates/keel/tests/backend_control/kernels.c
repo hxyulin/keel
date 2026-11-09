@@ -78,3 +78,31 @@ U FN(across)(const U *p, U seed) {
   U result = callback(seed);
   return a + b + c + d + e + f + g + h + i + j + k + l + result;
 }
+
+typedef struct { U payload, tag; } Boxed;
+U FN(guarded_values)(const Boxed *, unsigned, unsigned, unsigned, unsigned *);
+static void FN(release_slow)(unsigned *effects, Boxed value) {
+  ++*effects;
+  if (value.tag == 1)
+    (void)FN(guarded_values)((const Boxed *)0, 0, 0, 0, effects);
+}
+static inline void FN(release)(unsigned *effects, Boxed value) {
+  if ((unsigned)value.tag >= (unsigned)-11) {
+    int *count = (int *)(__UINTPTR_TYPE__)value.payload;
+    if (--*count <= 0)
+      FN(release_slow)(effects, value);
+  }
+}
+U FN(guarded_values)(const Boxed *values, unsigned n, unsigned depth,
+                     unsigned slot, unsigned *effects) {
+  volatile unsigned char frame[2048];
+  frame[slot & 2047] = (unsigned char)depth;
+  U sum = 0;
+  for (unsigned i = 0; i < n; ++i) {
+    sum += values[i].payload;
+    FN(release)(effects, values[i]);
+  }
+  if (depth)
+    sum ^= FN(guarded_values)(values, n, depth - 1, slot + 1, effects);
+  return sum + frame[slot & 2047];
+}
