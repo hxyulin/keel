@@ -348,6 +348,7 @@ fn compiler_api_records_floats_varargs_and_atomics_execute() {
                         ])
                         .arg(root.join("tests/compiler_consumer.c"))
                         .arg(&object)
+                        .arg("-lm")
                         .arg("-o")
                         .arg(&consumer),
                 );
