@@ -49,6 +49,7 @@ Lchecked_peek_block5:
 	ldrb	w9, [x9]
 	; return v19
 	mov	x0, x9
+Lchecked_peek_return_epilogue:
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
 	ret
@@ -69,9 +70,7 @@ Lchecked_peek_block3:
 	movz	w9, #0x0
 	; return v15
 	mov	x0, x9
-	mov	sp, x29
-	ldp	x29, x30, [sp], #16
-	ret
+	b	Lchecked_peek_return_epilogue
 Lchecked_peek_block2:
 	; v13 = stack_addr ss0
 	add	x9, sp, #0

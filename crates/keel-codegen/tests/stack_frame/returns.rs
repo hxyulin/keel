@@ -1,4 +1,4 @@
-//! Size emission shares restoration only after moving results into ABI registers.
+//! Shared restoration starts after moving results into ABI registers.
 use keel_codegen::{
     CodegenGoal, CodegenPipeline, EmissionOptions, Request, SelectionTier, Target,
     regalloc::AllocationTier,
@@ -103,11 +103,7 @@ int main(void) {
                 options.goal = goal;
                 let request = Request::new(target, pipeline).emission(options);
                 let text = request.text(&module).unwrap();
-                assert_eq!(
-                    text.matches("\tret\n").count(),
-                    if goal == CodegenGoal::Size { 4 } else { 8 },
-                    "{allocation:?}: {text}"
-                );
+                assert_eq!(text.matches("\tret\n").count(), 4, "{allocation:?}: {text}");
                 let bytes = keel_asm::assemble_source_for(target, &text).unwrap();
                 let program = request.program(&module).unwrap();
                 assert_eq!(
@@ -151,7 +147,7 @@ int main(void) {
                     assert!(run.status.success(), "{allocation:?}: {run:?}");
                 }
             }
-            assert!(sizes[1] < sizes[0], "{target:?}/{allocation:?}: {sizes:?}");
+            assert_eq!(sizes[1], sizes[0], "{target:?}/{allocation:?}: {sizes:?}");
         }
     }
     std::fs::remove_dir_all(dir).unwrap();
@@ -160,11 +156,11 @@ int main(void) {
 #[test]
 fn return_sharing_respects_function_policy_debug_and_tiny_frames() {
     for (attrs, goal, debug, shared) in [
-        ("", CodegenGoal::Speed, false, false),
+        ("", CodegenGoal::Speed, false, true),
         ("", CodegenGoal::Size, false, true),
         ("cold", CodegenGoal::Speed, false, true),
         ("optimize(\"Os\")", CodegenGoal::Speed, false, true),
-        ("optimize(2)", CodegenGoal::Size, false, false),
+        ("optimize(2)", CodegenGoal::Size, false, true),
         ("optnone", CodegenGoal::Size, false, false),
         ("", CodegenGoal::Size, true, false),
     ] {

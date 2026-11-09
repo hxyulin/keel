@@ -1091,9 +1091,7 @@ impl<'a> FunctionCompiler<'a> {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         let frameless = plan::frameless(func, module, has_tls_getter, frame_size, incoming, &alloc);
-        let share_returns = crate::emission::function_goal(&func.attrs, request.emission.goal)
-            == crate::CodegenGoal::Size
-            && !func.attrs.optnone
+        let share_returns = !func.attrs.optnone
             && !frameless
             && !has_inline_asm
             && func.personality.is_none()

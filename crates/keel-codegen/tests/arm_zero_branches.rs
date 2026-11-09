@@ -109,7 +109,7 @@ fn full_width_truth_edges_and_spills_use_register_branches_in_all_tiers() {
                             "{text}"
                         );
                         assert!(
-                            !text.contains("\tb\t"),
+                            !text.contains("\tb\tLf_block"),
                             "redundant fallthrough jump: {text}"
                         );
                     }
