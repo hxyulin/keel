@@ -99,18 +99,19 @@ The fixture covers all eight source/destination/signedness combinations.
 
 ## Explicit limitations
 
-Integer division/remainder are rejected: Keel requires a trap for a zero
-divisor and signed division overflow, whereas naive LLVM instructions introduce
-undefined behavior/poison. Signed remainder MIN/-1 also needs deliberate
-handling. Rotates and high-half multiply are currently rejected. Other rejected
-features include vectors, atomics/fences, inline assembly, tail calls,
+Unsigned remainder exports with a zero-divisor check and an explicit trap.
+Integer division and signed remainder are rejected: Keel requires traps for
+zero divisors and signed division overflow, whereas naive LLVM instructions
+introduce undefined behavior/poison. Signed remainder MIN/-1 also needs
+deliberate handling. Rotates and high-half multiply are currently rejected.
+Other rejected features include vectors, atomics/fences, inline assembly, tail calls,
 exception handling, debug metadata/locations, TLS, varargs/va_arg/va_start,
 returns-twice, frame-address, multiple returns, aggregate parameters/returns,
 and user symbols in LLVM's reserved `llvm.` namespace. Invalid IR is rejected
 by the existing verifier. This is not a full-application compatibility claim.
 
-The next useful expansion is guarded integer division/remainder in reduced
-hot functions, with explicit trap CFGs and MIN/-1 tests. Aggregate ABI support
+The next useful expansion is guarded integer division and signed remainder
+in reduced hot functions, with explicit trap CFGs and MIN/-1 tests. Aggregate ABI support
 and full application linking need a separate design and validation effort.
 
 ## Compare before/after Keel optimization and Clang

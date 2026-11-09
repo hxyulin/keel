@@ -224,3 +224,34 @@ fn exported_fixtures_run_like_keel_and_clang() {
         }
     }
 }
+
+#[test]
+fn unsigned_remainder_values_and_zero_trap() {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        keel_test_support::skip!("the AppleArm64 profile runs only on arm64 macOS");
+    }
+    if keel_test_support::clang().is_none() {
+        keel_test_support::skip!(keel_test_support::NO_CLANG);
+    }
+    let dir = Dir(keel_test_support::TempDir::new("llvm-urem"));
+    for width in [8, 16, 32, 64] {
+        let src = format!(
+            "func @rem(i{width},i{width})->i{width} {{\nblock0(v0:i{width},v1:i{width}):\n v2 = urem v0,v1\n jump block1(v2)\nblock1(v3:i{width}):\n v4 = urem v3,v1\n return v4\n}}"
+        );
+        let ll = dir.write("rem.ll", &translate(&src).unwrap());
+        let c = dir.write("driver.c", &format!("#include <stdint.h>\nextern uint{width}_t rem(uint{width}_t,uint{width}_t);\nint main(int argc,char **argv) {{ volatile uint{width}_t a = UINT{width}_MAX; volatile uint{width}_t b = 10; if (argc > 1) {{ b = 0; return rem(a,b); }} return rem(a,b) != a % b; }}"));
+        for level in ["-O0", "-O2"] {
+            dir.succeeds(level, &[&ll, &c]);
+            let exe = "zero";
+            dir.clang(&[level, &ll, &c, "-o", exe]);
+            let out = Command::new(dir.0.join(exe)).arg("zero").output().unwrap();
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(
+                out.status.signal(),
+                Some(5),
+                "width {width}: {:?}",
+                out.status
+            );
+        }
+    }
+}

@@ -738,6 +738,21 @@ impl Emitter<'_> {
                     BinaryOp::Fsub => "fsub",
                     BinaryOp::Fmul => "fmul",
                     BinaryOp::Fdiv => "fdiv",
+                    BinaryOp::Urem => {
+                        // LLVM's remainder is poison on zero; Keel traps.
+                        self.intrinsic("llvm.trap", "void", "");
+                        self.line(format!("{tmp}.zero = icmp eq {t} {b}, 0"));
+                        self.line(format!(
+                            "br i1 {tmp}.zero, label %urem{}.trap, label %urem{}.ok",
+                            i.index(),
+                            i.index()
+                        ));
+                        writeln!(self.out, "urem{}.trap:", i.index()).unwrap();
+                        self.line("call void @llvm.trap()".into());
+                        self.line("unreachable".into());
+                        writeln!(self.out, "urem{}.ok:", i.index()).unwrap();
+                        "urem"
+                    }
                     BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                         let width = input_type.bytes().ok_or("shift on pointer")? * 8;
                         let amount = if input_type != amount_type {
@@ -779,7 +794,7 @@ impl Emitter<'_> {
                         self.line(format!("{dst} = call {t} @{name}({t} {a}, {t} {b})"));
                         return Ok(());
                     }
-                    // LLVM div/rem introduce poison/UB where Keel requires traps.
+                    // Remaining div/rem introduce poison/UB where Keel requires traps.
                     // Reject until explicit trap CFG and srem MIN/-1 are validated.
                     _ => return Err(format!("unsupported binary operation {op:?}")),
                 };

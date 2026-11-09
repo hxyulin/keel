@@ -61,7 +61,7 @@ fn cfg_and_semantic_shapes() {
 }
 #[test]
 fn reject_division_with_context() {
-    for op in ["sdiv", "udiv", "srem", "urem"] {
+    for op in ["sdiv", "udiv", "srem"] {
         let src = format!(
             "func @bad(i64, i64) -> i64 {{\nblock0(v0: i64, v1: i64):\n v2 = {op} v0, v1\n return v2\n}}\n"
         );
@@ -401,4 +401,20 @@ fn byte_pointer_storage_and_function_alignment_reach_llvm() {
         String::from_utf8_lossy(&output.stderr)
     );
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unsigned_remainder_traps_on_zero_before_evaluation() {
+    for width in [8, 16, 32, 64] {
+        let src = format!(
+            "func @rem(i{width}, i{width}) -> i{width} {{\nblock0(v0:i{width},v1:i{width}):\n v2 = urem v0,v1\n return v2\n}}"
+        );
+        let ll = translate(&src).unwrap();
+        assert!(ll.contains(&format!("icmp eq i{width} %v1, 0")), "{ll}");
+        assert!(ll.contains("call void @llvm.trap()\n  unreachable"), "{ll}");
+        assert!(
+            ll.contains(&format!("urem0.ok:\n  %v2 = urem i{width}")),
+            "{ll}"
+        );
+    }
 }
