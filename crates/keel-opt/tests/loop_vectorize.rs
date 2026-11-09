@@ -914,3 +914,36 @@ fn conditional_multi_sums_fold_only_proved_full_loop_unit_counts() {
         }
     }
 }
+
+#[test]
+fn short_maps_branch_to_scalar_before_pointer_safety_checks() {
+    let source = kernel(Type::I32, Type::I64, "iadd", false);
+    for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+        let m = optimize(&source, target);
+        assert!(packed(&m) > 0, "{m}");
+        let f = &m.functions[0];
+        let pre = f.entry_block().unwrap();
+        let InstData::Jump { dest } = f.inst_data(*f.block_insts(pre).last().unwrap()) else {
+            panic!("expected preheader jump: {m}");
+        };
+        let guard = dest.block;
+        assert!(
+            !f.block_insts(guard).iter().any(|&i| matches!(
+                f.inst_data(i),
+                InstData::Convert {
+                    op: keel_ir::ConvertOp::PtrToInt,
+                    ..
+                }
+            )),
+            "short maps must skip pointer-range arithmetic: {m}"
+        );
+        for n in [0, 1, 15, 16, 17] {
+            let before = keel_ir::parse(&source).unwrap();
+            assert_eq!(
+                run_short_map(&m, n, n),
+                run_short_map(&before, n, n),
+                "n={n}"
+            );
+        }
+    }
+}

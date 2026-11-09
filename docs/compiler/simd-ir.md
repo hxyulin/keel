@@ -228,7 +228,8 @@ are left unchanged. Empty ranges and subtraction wraparound cannot enter the
 vector path. The trip threshold uses `n - lo`, and the vector tail starts at
 `lo + floor((n - lo) / lanes) * lanes`, without rounding the absolute index.
 
-A runtime guard requires at least four vector groups, checks byte-range overflow,
+A runtime guard first rejects trips shorter than four vector groups, then
+checks byte-range overflow,
 and permits each input to be either identical to the output or disjoint from it.
 Partial overlap runs the unchanged scalar loop, preserving dependencies such as
 `out == input + 1`. Reads may overlap one another freely. The vector loop covers

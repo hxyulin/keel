@@ -13,6 +13,7 @@
 //! single-use constant grouping (`iadd`/`isub`/`ptradd`, ...) run only in the
 //! worklist; the bounded Fast visit also handles literal extension masks.
 
+mod byte_loads;
 mod constant_division;
 mod vector;
 
@@ -41,6 +42,7 @@ macro_rules! rules {
 
 rules! {
     Vector = "vector",
+    ByteLoads = "byte-loads",
     OverflowConstants = "overflow-constants",
     Select = "select",
     ConstantFold = "constant-fold",
@@ -1413,9 +1415,10 @@ pub(crate) fn run_canonical(func: &mut Function) -> bool {
 }
 
 fn run_from(func: &mut Function, canonical: bool) -> bool {
+    let combined_loads = byte_loads::run(func);
     let reused_quotients = reuse_quotients(func);
     // Until the function first changes, every instruction is still canonical.
-    let mut canonical = canonical && !reused_quotients;
+    let mut canonical = canonical && !reused_quotients && !combined_loads;
     let mut lazy = LazyUsers::new(func);
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
     let mut work: Scratch<Inst> = Scratch::new();
@@ -1427,7 +1430,7 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
     // notifications make the final result independent of layout order.
     work.reverse();
     let mut queued = Scratch::filled(func.num_insts(), true);
-    let mut changed = reused_quotients;
+    let mut changed = reused_quotients || combined_loads;
     let mut waiting: Scratch<Inst> = Scratch::new();
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;

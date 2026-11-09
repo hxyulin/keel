@@ -2,6 +2,8 @@
 mod algebra;
 #[path = "instcombine/boolean.rs"]
 mod boolean;
+#[path = "instcombine/byte_loads.rs"]
+mod byte_loads;
 #[path = "instcombine/canonical_constants.rs"]
 mod canonical_constants;
 #[path = "instcombine/overflow_fold.rs"]

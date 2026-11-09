@@ -223,7 +223,13 @@ becomes constant. Rules include:
 - a bounded three-producer possible-bits query that removes redundant masks
   and shifts and decides comparisons against type or mask bounds;
 - constant shift pairs, equality through invertible wrapping operations,
-  zero-test selects and grouping of single-use offsets.
+  zero-test selects and grouping of single-use offsets;
+- adjacent byte loads assembled as a little-endian i32/i64 value, replaced by
+  one unaligned i16 load and zero extension. Both reads and their extension/
+  shift chain must have one use, and both reads must be `trap_ub` or both
+  `notrap`. A bounded same-block window admits only that chain, literal
+  constants and pointer additions. Other reads, effects, source locations,
+  volatile accesses and observable faults retain the original byte operations.
 
 `simplify-cfg` folds a `brif` whose two edges reach the same non-self block
 into a jump with one select per differing argument. This does not move or
@@ -415,8 +421,9 @@ cross an end, since an access after it is undefined. Passes that do not
 handle markers see the registry's `Barrier` effect. Functions with debugger-visible variable homes are
 excluded, because a debugger can edit a home between source locations.
 Alignment, `notrap` and `trap_ub` never establish alias freedom.
-`loop-vectorize` is the one pass that uses `trap_ub`: it may reorder accesses
-whose fault is undefined behavior.
+`loop-vectorize` may reorder accesses whose fault is undefined behavior.
+The `instcombine` byte-load rule may combine two such reads over their exact
+byte footprint; it neither reads extra bytes nor crosses another memory access.
 
 ### stack-forward
 

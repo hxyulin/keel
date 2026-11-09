@@ -5,6 +5,8 @@ mod compatible_flags;
 mod fast_math;
 #[path = "optimization_levels/loop_unroll.rs"]
 mod loop_unroll;
+#[path = "optimization_levels/memory_kernels.rs"]
+mod memory_kernels;
 #[path = "optimization_levels/opt_controls.rs"]
 mod opt_controls;
 #[path = "optimization_levels/verification_policy.rs"]

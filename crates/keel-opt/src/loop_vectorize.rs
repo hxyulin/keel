@@ -1835,16 +1835,12 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
         scalar_args.push(initial);
         scalar_args.extend(c.extra_sums.iter().map(|r| r.initial));
     }
-    // Avoid address-overflow checks and vector setup on short/reversed/negative
-    // reductions. Keep the established map guard unchanged.
+    // Short, reversed and negative ranges take the scalar path before any
+    // pointer-wrap or overlap checks. Those checks only serve vector execution.
     let reduction = matches!(c.output, Output::Sum { .. });
-    let guard = if reduction {
-        let range = f.create_block();
-        branch(f, guard, safe, range, vec![], c.header, scalar_args.clone());
-        range
-    } else {
-        guard
-    };
+    let range = f.create_block();
+    branch(f, guard, safe, range, vec![], c.header, scalar_args.clone());
+    let guard = range;
     let n64 = if ty == Type::I64 {
         c.bound
     } else {
@@ -1865,11 +1861,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
         let len = bin(f, guard, B::Shl, n64, shift);
         let recovered = bin(f, guard, B::Ushr, len, shift);
         let fits = cmp(f, guard, IntCC::Eq, n64, recovered);
-        safe = if reduction {
-            fits
-        } else {
-            bin(f, guard, B::And, safe, fits)
-        };
+        safe = fits;
         len
     };
     // Hoist base + offset*element_size only after checking that the
@@ -2089,7 +2081,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let pre = *f.block_insts(c.pre).last().unwrap();
     *f.inst_data_mut(pre) = D::Jump {
         dest: BlockCall {
-            block: guard,
+            block: entry,
             args: vec![],
         },
     };
