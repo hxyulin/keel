@@ -720,18 +720,22 @@ const SIZE_PARTS: &[&[&str]] = &[
     &["private-aggregate-cleanup"],
     &["known-bits"],
     &RELEASE_ROUND_SCALAR,
+    &["small-memory"],
     &RELEASE_ROUND_MEMORY,
     &["inline-size"],
     &RELEASE_ROUND_SCALAR,
+    &["small-memory"],
     &RELEASE_ROUND_MEMORY,
     &["inline-size"],
     &RELEASE_ROUND_SCALAR,
+    &["small-memory"],
     &RELEASE_ROUND_MEMORY,
     &RELEASE_EPILOGUE,
 ];
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining
-/// exposes dead branches. Omits memory expansion, code motion, unrolling and vectorization.
+/// exposes dead branches. Expands bounded memory intrinsics before stack cleanup.
+/// Omits code motion, unrolling and vectorization.
 /// Mandatory frontend inlining still runs to satisfy language/operand contracts.
 /// This is an IR growth policy, not a guarantee about final machine-code size.
 pub const SIZE_PIPELINE: &[&str] = &concat::<{ total_len(SIZE_PARTS) }>(SIZE_PARTS);

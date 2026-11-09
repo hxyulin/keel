@@ -95,8 +95,9 @@ The Size pipeline runs two bounded helper-inlining rounds interleaved with
 scalar cleanup. It admits hinted helpers, constant-argument calls and single-use
 non-escaping local helpers, capped at 128 IR instructions for optional cases.
 Existing legality, recursion, stack and growth limits remain active. Shared
-unhinted helpers with variable arguments can remain calls. Size omits
-small-memory expansion, GCM, unrolling and automatic vectorization. It retains
+unhinted helpers with variable arguments can remain calls. Size expands memory
+intrinsics of at most 32 bytes before stack cleanup. It omits GCM, unrolling
+and automatic vectorization. It retains
 CFG, load, stack, constant-argument and unreachable-function cleanup, including
 DCE after empty-call elimination to remove unused symbol references. Required
 language/inline-assembly inlining remains active.

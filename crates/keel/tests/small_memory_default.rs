@@ -1,11 +1,16 @@
-//! Full's implicit pipeline expands bounded intrinsics on both backends.
+//! Full and Size expand bounded intrinsics on both backends.
 use std::{fs, path::Path, process::Command};
 
 #[test]
-fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
+fn implicit_release_pipelines_expand_16_bytes_and_preserve_fallbacks() {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("small-memory-default");
     fs::create_dir_all(&dir).unwrap();
-    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+    for (target, level) in [
+        ("aarch64-apple-darwin", "-O"),
+        ("aarch64-apple-darwin", "-Os"),
+        ("x86_64-unknown-linux-gnu", "-O"),
+        ("x86_64-unknown-linux-gnu", "-Os"),
+    ] {
         for length in ["16", "33", "n"] {
             fs::write(dir.join("copy.c"), format!(
                 "void copy(char *d, char *s, unsigned long n) {{ __builtin_memcpy(d, s, {length}); }}"
@@ -16,7 +21,7 @@ fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
                 let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));
                 command
                     .current_dir(&dir)
-                    .args(["cc", "--target", target, "-O"])
+                    .args(["cc", "--target", target, level])
                     .args(if emit == "asm" {
                         vec!["copy.c"]
                     } else {
@@ -32,7 +37,7 @@ fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
                 assert_eq!(
                     text.contains("memcpy"),
                     length != "16",
-                    "{target} {length} {emit}: {text}"
+                    "{target} {level} {length} {emit}: {text}"
                 );
             }
         }
@@ -71,10 +76,15 @@ void fill7(void *d, int v) { memset(d, v, 7); }
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+    for (target, level) in [
+        ("aarch64-apple-darwin", "-O"),
+        ("aarch64-apple-darwin", "-Os"),
+        ("x86_64-unknown-linux-gnu", "-O"),
+        ("x86_64-unknown-linux-gnu", "-Os"),
+    ] {
         let assembly = run(Command::new(env!("CARGO_BIN_EXE_keel"))
             .current_dir(&dir)
-            .args(["cc", "-O", "--target", target, "memory.c"]));
+            .args(["cc", level, "--target", target, "memory.c"]));
         for name in ["memcpy", "memmove", "memset"] {
             assert!(
                 !assembly.contains(name),
@@ -86,7 +96,7 @@ void fill7(void *d, int v) { memset(d, v, 7); }
             .current_dir(&dir)
             .args([
                 "cc",
-                "-O",
+                level,
                 "--target",
                 target,
                 "--emit-object",

@@ -409,10 +409,14 @@ int main(void) {{
 
 #[test]
 fn tiers_expand_memory_by_their_inlining() {
-    use keel_opt::{BALANCED_PIPELINE, DEFAULT_PIPELINE, OptimizationTier};
+    use keel_opt::{BALANCED_PIPELINE, DEFAULT_PIPELINE, OptimizationTier, SIZE_PIPELINE};
     assert_eq!(OptimizationTier::Full.pipeline(), DEFAULT_PIPELINE);
     assert_eq!(OptimizationTier::Balanced.pipeline(), BALANCED_PIPELINE);
-    for (pipeline, small) in [(DEFAULT_PIPELINE, 3), (BALANCED_PIPELINE, 1)] {
+    for (pipeline, small) in [
+        (DEFAULT_PIPELINE, 3),
+        (BALANCED_PIPELINE, 1),
+        (SIZE_PIPELINE, 3),
+    ] {
         let positions: Vec<_> = pipeline
             .iter()
             .enumerate()
@@ -448,7 +452,7 @@ fn tiers_expand_memory_by_their_inlining() {
         OptimizationTier::Full,
     ] {
         let limit = match tier {
-            OptimizationTier::None | OptimizationTier::Size => 0,
+            OptimizationTier::None => 0,
             OptimizationTier::Fast | OptimizationTier::Basic => 128,
             _ => 32,
         };

@@ -505,7 +505,7 @@ its unsigned-extended fill by the repeated 0x01 pattern. A zero
 length removes only the intrinsic. Each operation is expanded alone, never
 merged with a neighbouring one. Variable and larger lengths stay. It also
 replaces a `memcmp` of at most 32 bytes whose result is only compared with
-zero by chunked loads and compares. Balanced and Full run it before
+zero by chunked loads and compares. Balanced, Size and Full run it before
 `stack-forward` in the inlining rounds, and the inliner charges an expandable
 copy as its loads and stores.
 
@@ -515,9 +515,9 @@ copy as its loads and stores.
 `memmove` and `memset`; the `memcmp` limit stays 32. A `memmove` longer than
 32 bytes uses 16-byte chunks, so its snapshot needs at most 11 registers.
 Fast and Basic run it before `stack-notrap`. They do not inline, so no inliner
-prices the larger copies. Balanced and Full keep `small-memory`: the 128-byte
+prices the larger copies. Balanced, Size and Full keep `small-memory`: the 128-byte
 limit after their last inlining round gave no gain on the acceptance hosts and
-slowed x86-64 by 0.17%. Size and None run neither pass, and longer or variable
+slowed x86-64 by 0.17%. None runs neither pass, and longer or variable
 copies call the C library.
 
 ### stack-notrap
