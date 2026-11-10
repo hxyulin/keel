@@ -63,9 +63,6 @@ pub fn run(f: &mut Function) -> bool {
         let [neg, jump] = *f.block_insts(arm) else {
             continue;
         };
-        if ControlFlowGraph::compute(f).preds(arm) != [head] {
-            continue;
-        }
         let D::Unary {
             op: UnaryOp::Ineg,
             arg,
@@ -102,6 +99,11 @@ pub fn run(f: &mut Function) -> bool {
             continue;
         }
         let index = *index;
+        // Check predecessors last: the CFG is rebuilt per candidate, because
+        // each rewrite changes it, and most blocks fail the cheaper tests.
+        if ControlFlowGraph::compute(f).preds(arm) != [head] {
+            continue;
+        }
 
         // Reuse the original ineg instruction, preserving its source location.
         // Moving only this pure operation cannot change read/fault/write order.

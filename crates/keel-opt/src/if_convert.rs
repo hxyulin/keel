@@ -47,10 +47,6 @@ pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
         {
             continue;
         }
-        let cfg = ControlFlowGraph::compute(f);
-        if arms.iter().any(|&b| cfg.preds(b) != [head]) {
-            continue;
-        }
         let count = f.block_insts(arms[0])[0];
         let literal = f.block_insts(arms[1])[0];
         let D::Unary {
@@ -87,6 +83,12 @@ pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
             || f.resolve(yes.args[0]) != f.first_result(count)
             || f.resolve(no.args[0]) != f.resolve(f.first_result(literal))
         {
+            continue;
+        }
+        // Check predecessors last: the CFG is rebuilt per candidate, because
+        // each rewrite changes it, and most blocks fail the cheaper tests.
+        let cfg = ControlFlowGraph::compute(f);
+        if arms.iter().any(|&b| cfg.preds(b) != [head]) {
             continue;
         }
         let dest = yes.clone();
