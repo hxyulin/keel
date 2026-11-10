@@ -92,16 +92,20 @@ fn repair_inner(
     let mut region = Vec::new();
     let mut temp = None;
     let mut live = None;
+    // Repair only edits instructions of the block it is in, so a later block
+    // has edits only if the allocation came with some.
+    let had_edits = !alloc.edits.is_empty();
     for block in alloc.order.clone() {
         // Existing local edits own this entire block, including boundary copies.
         // Local caching flushes dirty homes at edges, so untouched blocks start
         // with stable homes and cannot overlap its resident cache segments.
         if reserved.contains(&block)
-            || f.block_insts(block).iter().any(|&inst| {
-                alloc.edits.instruction_index(inst).is_some()
-                    || (0..f.inst_data(inst).branch_dests().len())
-                        .any(|edge| !alloc.edits.edge(inst, edge).is_empty())
-            })
+            || had_edits
+                && f.block_insts(block).iter().any(|&inst| {
+                    alloc.edits.instruction_index(inst).is_some()
+                        || (0..f.inst_data(inst).branch_dests().len())
+                            .any(|edge| !alloc.edits.edge(inst, edge).is_empty())
+                })
         {
             slot += 1 + f.block_insts(block).len() as u32;
             continue;
@@ -163,7 +167,7 @@ struct Live<'a> {
 impl<'a> Live<'a> {
     fn new(intervals: &'a [Interval]) -> Self {
         let mut by_start: Vec<_> = intervals.iter().collect();
-        by_start.sort_by_key(|iv| iv.start());
+        by_start.sort_unstable_by_key(|iv| iv.start());
         Self {
             by_start,
             next: 0,
