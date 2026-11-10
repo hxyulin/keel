@@ -13,6 +13,11 @@ fn st(n: u8) -> Register {
 
 pub(super) fn validate(module: &Module) -> Result<(), CodegenError> {
     for f in &module.functions {
+        // Every checked instruction has an F80 result or operand. Scanning the
+        // value types is cheaper than walking every operand of a function without one.
+        if !(0..f.num_values()).any(|i| f.value_type(Value::new(i)) == Type::F80) {
+            continue;
+        }
         for (_, i) in f.layout_insts() {
             let d = f.inst_data(i);
             let mut extended = f
