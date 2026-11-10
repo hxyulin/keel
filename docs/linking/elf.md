@@ -48,7 +48,7 @@ link the installed CRT objects explicitly (see
 | `-Bstatic`, `-Bdynamic` | Switch how subsequent `-l` options search. |
 | `--static`, `-static` | Static library search only; shared inputs are rejected. |
 | `--sysroot DIR` | Search target-relative library directories under `DIR`. |
-| `--dynamic-linker PATH` | Interpreter path (default `/lib64/ld-linux-x86-64.so.2`); not opened at link time. |
+| `--dynamic-linker PATH` | Interpreter path (default `/lib64/ld-linux-x86-64.so.2`). |
 | `--rpath PATH`, `-rpath PATH` | Emit `DT_RUNPATH`; repeat to join paths with colons. |
 | `--gc-sections`, `--no-gc-sections` | Opt-in section garbage collection (last option wins). |
 | `--relax-got`, `--no-relax-got` | Opt-in x86-64 GOT-load relaxation (last option wins). |
@@ -535,7 +535,10 @@ module IDs, module offsets and descriptors. GD and LD calls use the ordinary
 `__tls_get_addr` definition or import; the linker does not provide that runtime.
 Executable TLS definitions use module ID 1 and link-time offsets. Their
 TLSDESC records call a generated resolver that returns the static TP offset.
-TLS instruction sequences are retained without model relaxation.
+On x86-64, canonical padded GD LEA/call sequences relax to local-exec for
+executable definitions and initial-exec for imports. The rewrite preserves
+instruction sizes and removes the resolver call. Other sequences, including LD
+and AArch64 accesses, retain their original model and resolver requirements.
 
 x86-64 accepts TPOFF32/64, DTPOFF32/64, GOTTPOFF, TLSGD, TLSLD,
 GOTPC32_TLSDESC and TLSDESC_CALL. AArch64 accepts TLS GD/LD/IE GOT-address
@@ -544,7 +547,14 @@ Instruction encodings, overflow and load/store alignment are checked.
 
 The runtime must allocate per-thread storage and initialize the thread pointer.
 Static syscall-only entry points must do this themselves. Native linking does
-not add libc or CRT startup automatically.
+not add libc or CRT startup automatically. When the CLI receives a concrete
+`libc.so.6` input for an executable dynamic link, it also supplies
+`libgcc_s.so.1` and the dynamic loader, unless already supplied. It searches
+`-L` and target sysroot directories for the exact runtime filenames, avoiding
+GCC's `libgcc_s.so` linker script. The loader is opened under the sysroot at
+the interpreter path, falling back to the library search directories. These
+inputs add needed-library entries even if relaxation removes all TLS calls.
+The library API continues to use only the inputs provided by its caller.
 
 The bounded static x86-64 script path supports TLS output sections and all
 these x86-64 access models for executable definitions. Without `PHDRS`, it emits

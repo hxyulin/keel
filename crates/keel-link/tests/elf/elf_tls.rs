@@ -375,11 +375,15 @@ check:
     mov imported@gottpoff(%rip), %rbx
     cmpl $37, %fs:(%rbx)
     jne fail
+    .byte 0x66
     lea imported@tlsgd(%rip), %rdi
+    .byte 0x66, 0x66, 0x48
     call __tls_get_addr@PLT
     cmpl $37, (%rax)
     jne fail
+    .byte 0x66
     lea local_tls@tlsgd(%rip), %rdi
+    .byte 0x66, 0x66, 0x48
     call __tls_get_addr@PLT
     cmpl $11, (%rax)
     jne fail
@@ -551,5 +555,67 @@ fn scripts_preserve_tbss_and_reject_invalid_template_layouts() {
             )
             .is_err()
         );
+    }
+}
+
+#[test]
+fn canonical_general_dynamic_relaxes_without_a_resolver() {
+    for imported in [false, true] {
+        let mut input = object(&format!(
+            ".text\n.globl _start\n_start:\n.byte 0x66,0x48,0x8d,0x3d\n.long tls-4\n.byte 0x66,0x66,0x48,0xe8\n.long __tls_get_addr-4\nret\n.type tls,@tls_object\n.globl tls\n{}",
+            if imported {
+                ""
+            } else {
+                ".section .tdata,\"awT\",@progbits\ntls: .quad 73\n"
+            }
+        ));
+        let f = object::File::parse(input.as_slice()).unwrap();
+        let at = f
+            .section_by_name(".rela.text")
+            .unwrap()
+            .file_range()
+            .unwrap()
+            .0 as usize;
+        input[at + 8..at + 12].copy_from_slice(&19u32.to_le_bytes());
+        input[at + 32..at + 36].copy_from_slice(&4u32.to_le_bytes());
+        let mut malformed = input.clone();
+        let f = object::File::parse(input.as_slice()).unwrap();
+        let text = f.section_by_name(".text").unwrap().file_range().unwrap().0 as usize;
+        malformed[text] = 0x90;
+        let mut unrelaxed = vec![malformed];
+        if imported {
+            unrelaxed.push(shared(false));
+        }
+        assert!(link(&unrelaxed).unwrap_err().contains("__tls_get_addr"));
+        let mut retained = vec![input.clone(), object(".data\n.quad __tls_get_addr\n")];
+        if imported {
+            retained.push(shared(false));
+        }
+        assert!(link(&retained).unwrap_err().contains("__tls_get_addr"));
+        let mut inputs = vec![input];
+        if imported {
+            inputs.push(shared(false));
+        }
+        let exe = link(&inputs).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        let code = f.section_by_name(".text").unwrap().data().unwrap();
+        assert_eq!(&code[..9], &[0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0]);
+        assert_eq!(
+            &code[9..12],
+            if imported {
+                &[0x48, 0x03, 0x05]
+            } else {
+                &[0x48, 0x8d, 0x80]
+            }
+        );
+        assert!(
+            !f.dynamic_symbols()
+                .any(|s| s.name().unwrap() == "__tls_get_addr")
+        );
+        if imported {
+            assert_eq!(records(&exe).iter().map(|r| r.1).collect::<Vec<_>>(), [18]);
+        } else {
+            assert_eq!(i32::from_le_bytes(code[12..16].try_into().unwrap()), -8);
+        }
     }
 }

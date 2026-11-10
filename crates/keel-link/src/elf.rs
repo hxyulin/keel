@@ -379,6 +379,9 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     let (common_locations, common_sizes) =
         allocate_commons(&mut sections, &units, &globals, commons)?;
     let bounds = bounds::symbols(&sections, &units, &globals)?;
+    if !arm {
+        relax::tls_general(&mut sections, &mut units, &globals)?;
+    }
     let imports = plan_imports(&units, &globals, &bounds, libraries)?;
     if options.relax_got {
         relax::got_loads(&mut sections, &mut units, &globals, &imports)?;

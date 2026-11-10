@@ -587,7 +587,10 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
     }
     // Cross links consult only explicitly supplied paths or the target sysroot.
     // Native Linux links also search conventional target-library directories.
-    if let Some(root) = sysroot.or_else(|| cfg!(target_os = "linux").then(|| PathBuf::from("/"))) {
+    if let Some(root) = sysroot
+        .clone()
+        .or_else(|| cfg!(target_os = "linux").then(|| PathBuf::from("/")))
+    {
         for dir in [
             if machine == keel_link::elf::Machine::Aarch64 {
                 "lib/aarch64-linux-gnu"
@@ -607,7 +610,7 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             directories.push(root.join(dir));
         }
     }
-    let paths = requests
+    let mut paths = requests
         .iter()
         .map(|r| match r {
             Request::Control(_) => Ok(None),
@@ -632,6 +635,53 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             }
         })
         .collect::<Result<Vec<_>, String>>()?;
+    // Concrete glibc input opts into the runtime libraries a C driver supplies.
+    // Keep raw freestanding and relocatable links independent of host libraries.
+    if !force_static
+        && !relocatable
+        && paths
+            .iter()
+            .flatten()
+            .any(|p| p.file_name().is_some_and(|n| n == "libc.so.6"))
+    {
+        let loader = if machine == keel_link::elf::Machine::Aarch64
+            && options.interpreter == "/lib64/ld-linux-x86-64.so.2"
+        {
+            "/lib/ld-linux-aarch64.so.1"
+        } else {
+            &options.interpreter
+        };
+        let root = sysroot.as_deref().unwrap_or_else(|| Path::new("/"));
+        let loader_path = root.join(loader.trim_start_matches('/'));
+        for name in [
+            "libgcc_s.so.1",
+            Path::new(loader)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or("invalid dynamic loader path")?,
+        ] {
+            if paths
+                .iter()
+                .flatten()
+                .any(|p| p.file_name().is_some_and(|n| n == name))
+            {
+                continue;
+            }
+            let path = if name != "libgcc_s.so.1" && loader_path.is_file() {
+                loader_path.clone()
+            } else {
+                directories
+                    .iter()
+                    .map(|d| d.join(name))
+                    .find(|p| p.is_file())
+                    .ok_or_else(|| {
+                        format!("runtime library `{name}` not found; pass -L or --sysroot")
+                    })?
+            };
+            requests.push(Request::Path(path.clone()));
+            paths.push(Some(path));
+        }
+    }
     let mut owned = paths
         .iter()
         .map(|path| {

@@ -716,3 +716,62 @@ fn elf_cli_constant_merging_is_explicit_and_rejected_for_partial_links() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn concrete_glibc_adds_exact_runtime_libraries_from_sysroot() {
+    let dir = keel_test_support::TempDir::new("elf-cli-glibc-runtime");
+    std::fs::create_dir_all(dir.join("root/usr/lib")).unwrap();
+    std::fs::create_dir_all(dir.join("root/lib64")).unwrap();
+    std::fs::write(
+        dir.join("start.o"),
+        keel_asm::x86::assemble_object(".text\n.globl _start\n_start: ret\n").unwrap(),
+    )
+    .unwrap();
+    // Reuse a real, host-independent DSO interface. Its symbols need not be
+    // referenced: this checks input discovery, including unused runtime inputs.
+    let library = include_bytes!("../../keel-link/tests/fixtures/gnu-notes/libdefined.so");
+    std::fs::write(dir.join("root/usr/lib/libc.so.6"), library).unwrap();
+    // An unversioned linker script must never satisfy the unwind-library lookup.
+    std::fs::write(
+        dir.join("root/usr/lib/libgcc_s.so"),
+        "GROUP ( libgcc_s.so.1 )",
+    )
+    .unwrap();
+    let args = [
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--sysroot",
+        "root",
+        "start.o",
+        "-l",
+        ":libc.so.6",
+        "-o",
+        "program",
+    ];
+    let result = invoke(dir.path(), &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("libgcc_s.so.1"));
+    std::fs::write(dir.join("root/usr/lib/libgcc_s.so.1"), library).unwrap();
+    let result = invoke(dir.path(), &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("ld-linux-x86-64.so.2"));
+    std::fs::write(dir.join("root/lib64/ld-linux-x86-64.so.2"), library).unwrap();
+    let result = invoke(dir.path(), &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let expected = std::fs::read(dir.join("program")).unwrap();
+    // Explicit inputs must not be appended a second time.
+    let mut explicit = args.to_vec();
+    explicit.extend(["-l:libgcc_s.so.1", "root/lib64/ld-linux-x86-64.so.2"]);
+    let result = invoke(dir.path(), &explicit);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read(dir.join("program")).unwrap(), expected);
+}
