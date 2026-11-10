@@ -3,6 +3,7 @@
 //! layout passes copy the cached encoding and fixups. A compact operand
 //! record with interned symbols rebuilds the instruction for those cases.
 use super::{Expr, RelocKind, SymId, Symbols, encode};
+use crate::fxhash::FxHashMap;
 use keel_asm_ir::{
     Expression,
     x86::{self, Address, Memory, Modifier, Operand, Register, RegisterClass},
@@ -60,6 +61,110 @@ pub(super) struct Symbolic {
 }
 const NONE: u32 = u32::MAX;
 
+/// An instruction without its symbol names. The encoder only asks whether
+/// an address has a symbol, so instructions of one shape encode to the same
+/// bytes and fixups: every `jne` to a label, or `call` of a function.
+#[derive(PartialEq, Eq, Hash)]
+struct Shape {
+    opcode: x86::Opcode,
+    lock: bool,
+    short: bool,
+    operands: SmallVec<[OperandShape; 3]>,
+}
+#[derive(PartialEq, Eq, Hash)]
+enum OperandShape {
+    Register(Register),
+    Immediate(AddressShape),
+    Memory {
+        width: u16,
+        base: Option<Register>,
+        index: Option<Register>,
+        scale: u8,
+        segment: Option<u8>,
+        displacement: AddressShape,
+    },
+}
+#[derive(PartialEq, Eq, Hash)]
+struct AddressShape {
+    add: bool,
+    subtract: bool,
+    constant: i128,
+    modifier: Modifier,
+}
+impl Shape {
+    fn of(i: &x86::Instruction, short: bool) -> Self {
+        let address = |a: &Address| AddressShape {
+            add: a.expression.add.is_some(),
+            subtract: a.expression.subtract.is_some(),
+            constant: a.expression.constant,
+            modifier: a.modifier,
+        };
+        Self {
+            opcode: i.opcode,
+            lock: i.lock,
+            short,
+            operands: i
+                .operands
+                .iter()
+                .map(|o| match o {
+                    Operand::Register(r) => OperandShape::Register(*r),
+                    Operand::Immediate(a) => OperandShape::Immediate(address(a)),
+                    Operand::Memory(m) => OperandShape::Memory {
+                        width: m.width,
+                        base: m.base,
+                        index: m.index,
+                        scale: m.scale,
+                        segment: m.segment,
+                        displacement: address(&m.displacement),
+                    },
+                })
+                .collect(),
+        }
+    }
+}
+/// The encoding of a [`Shape`]. Each fixup names the operand whose address
+/// it encodes; the address's constant is added when the template is used.
+struct Template {
+    bytes: SmallVec<[u8; 16]>,
+    fixups: SmallVec<[TemplateFix; 1]>,
+}
+struct TemplateFix {
+    operand: u8,
+    adjust: i128,
+    offset: u8,
+    width: u8,
+    kind: RelocKind,
+}
+impl Template {
+    /// `None` when `i` does not encode, or a fixup is not an operand's.
+    fn encode(i: &x86::Instruction, short: bool) -> Option<Self> {
+        let e = encode::encode(i, short).ok()?;
+        let fixups = e
+            .fixups
+            .iter()
+            .map(|f| {
+                let operand = i.operands.iter().position(|o| match o {
+                    Operand::Immediate(a) => std::ptr::eq(a, f.address),
+                    Operand::Memory(m) => std::ptr::eq(&m.displacement, f.address),
+                    Operand::Register(_) => false,
+                })?;
+                Some(TemplateFix {
+                    operand: u8::try_from(operand).ok()?,
+                    adjust: f.adjust,
+                    // Within one instruction, and of the encoder's few kinds.
+                    offset: f.offset as u8,
+                    width: f.width,
+                    kind: f.kind,
+                })
+            })
+            .collect::<Option<_>>()?;
+        Some(Self {
+            bytes: e.bytes,
+            fixups,
+        })
+    }
+}
+
 /// Cached encodings and operand records of all symbolic instructions.
 #[derive(Default)]
 pub(super) struct Cache {
@@ -67,6 +172,7 @@ pub(super) struct Cache {
     bytes: Vec<u8>,
     fixups: Vec<CachedFix>,
     operands: Vec<u8>,
+    templates: FxHashMap<Shape, Option<Template>>,
 }
 impl Cache {
     /// Record a symbolic instruction; returns its index.
@@ -141,20 +247,29 @@ impl Cache {
         intern: &mut impl FnMut(&str) -> SymId,
     ) {
         s.cached = false;
-        let Ok(e) = encode::encode(i, s.short) else {
+        let template = self
+            .templates
+            .entry(Shape::of(i, s.short))
+            .or_insert_with(|| Template::encode(i, s.short));
+        let Some(t) = template else {
             return;
         };
-        let (Ok(len), Ok(count)) = (u8::try_from(e.bytes.len()), u8::try_from(e.fixups.len()))
+        let (Ok(len), Ok(count)) = (u8::try_from(t.bytes.len()), u8::try_from(t.fixups.len()))
         else {
             return;
         };
         s.bytes = u32::try_from(self.bytes.len()).expect("instruction cache exceeds 4 GiB");
         s.len = len;
-        self.bytes.extend_from_slice(&e.bytes);
+        self.bytes.extend_from_slice(&t.bytes);
         s.fixups = u32::try_from(self.fixups.len()).expect("instruction cache exceeds 4 GiB");
         s.count = count;
-        for f in e.fixups {
-            let e = &f.address.expression;
+        for f in &t.fixups {
+            let a = match &i.operands[usize::from(f.operand)] {
+                Operand::Immediate(a) => a,
+                Operand::Memory(m) => &m.displacement,
+                Operand::Register(_) => unreachable!("a template fixup names an address"),
+            };
+            let e = &a.expression;
             let Ok(constant) = i64::try_from(e.constant + f.adjust) else {
                 return;
             };
@@ -162,11 +277,10 @@ impl Cache {
                 add: e.add.as_deref().map_or(NONE, &mut *intern),
                 subtract: e.subtract.as_deref().map_or(NONE, &mut *intern),
                 constant,
-                // Within one instruction, and of the encoder's few kinds.
-                offset: f.offset as u8,
+                offset: f.offset,
                 width: f.width,
                 kind: f.kind,
-                modifier: f.address.modifier,
+                modifier: a.modifier,
             });
         }
         s.cached = true;
