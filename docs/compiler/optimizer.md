@@ -332,7 +332,10 @@ exceptions:
   address keep the original, which is computed there anyway.
 
 Repeating GVN and GCM to a fixed point would undo this placement, so GCM runs
-last in each round.
+last in each Full round. Size runs `gcm,gvn,gcm,dce` after its last scalar and
+memory round, before the shared release epilogue. The middle GVN merges
+equivalent computations exposed by motion; the second GCM restores local
+constant and address copies instead of leaving them live across the function.
 
 ## Inlining
 

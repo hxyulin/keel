@@ -730,12 +730,16 @@ const SIZE_PARTS: &[&[&str]] = &[
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
     &RELEASE_ROUND_MEMORY,
+    // Motion exposes equivalent computations for GVN. Restore local constant
+    // and address copies afterward to avoid long-lived values and their spills.
+    &["gcm", "gvn", "gcm", "dce"],
     &RELEASE_EPILOGUE,
 ];
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining
 /// exposes dead branches. Expands bounded memory intrinsics before stack cleanup.
-/// Omits code motion, unrolling and vectorization.
+/// Runs code motion and value numbering after scalar cleanup, without unrolling
+/// or vectorization.
 /// Mandatory frontend inlining still runs to satisfy language/operand contracts.
 /// This is an IR growth policy, not a guarantee about final machine-code size.
 pub const SIZE_PIPELINE: &[&str] = &concat::<{ total_len(SIZE_PARTS) }>(SIZE_PARTS);

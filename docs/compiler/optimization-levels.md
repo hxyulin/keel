@@ -111,8 +111,10 @@ scalar cleanup. It admits hinted helpers, constant-argument calls and single-use
 non-escaping local helpers, capped at 128 IR instructions for optional cases.
 Existing legality, recursion, stack and growth limits remain active. Shared
 unhinted helpers with variable arguments can remain calls. Size expands memory
-intrinsics of at most 32 bytes before stack cleanup. It omits GCM, unrolling
-and automatic vectorization. It retains
+intrinsics of at most 32 bytes before stack cleanup. After the last scalar
+round, GCM moves pure computations, GVN merges newly exposed equivalents,
+and GCM restores local constant and address copies to reduce register pressure.
+It omits unrolling and automatic vectorization. It retains
 CFG, load, stack, constant-argument and unreachable-function cleanup, including
 DCE after empty-call elimination to remove unused symbol references. Required
 language/inline-assembly inlining remains active.

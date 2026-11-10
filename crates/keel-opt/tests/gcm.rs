@@ -89,7 +89,7 @@ block2(v10: i64):
 }";
     let original = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&original).unwrap();
-    for subset in 0..32 {
+    let schedules = (0..32).map(|subset| {
         let other = ["const-fold", "phi-simplify", "simplify-cfg", "gvn", "dce"];
         let mut names = vec!["gcm"];
         names.extend(
@@ -99,6 +99,11 @@ block2(v10: i64):
                 .filter(|(i, _)| subset & (1 << i) != 0)
                 .map(|(_, &name)| name),
         );
+        names
+    });
+    // The Size schedule numbers values between two motion passes. Exercise
+    // both results and the loop-carried value through that composition too.
+    for names in schedules.chain(std::iter::once(keel_opt::SIZE_PIPELINE.to_vec())) {
         let mut module = original.clone();
         keel_opt::run_passes(&mut module, &names).unwrap();
         keel_opt::run_passes(&mut module, &names).unwrap();
