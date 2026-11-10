@@ -27,26 +27,6 @@ impl VectorShape {
                 .max()
                 .unwrap_or(16)
         };
-        let abi_align = std::iter::once(abi_align(&func.sig))
-            .chain(func.callees().map(|(_, d)| abi_align(&d.sig)))
-            .chain(func.signatures().map(|(_, s)| abi_align(s)))
-            .chain(func.layout_insts().flat_map(|(_, i)| {
-                let d = func.inst_data(i);
-                let mut align = Vec::new();
-                if let Some(args) = d.call_args() {
-                    align.extend((0..args.len()).filter_map(|i| {
-                        args.abi(i)
-                            .and_then(|p| p.layout())
-                            .map(|l| l.align() as usize)
-                    }));
-                }
-                if let InstData::AggregateVaArg { layout, .. } = d {
-                    align.push(layout.align() as usize);
-                }
-                align
-            }))
-            .max()
-            .unwrap_or(16);
         let wrappers = |sig: &keel_ir::Signature| {
             sig.params
                 .iter()
@@ -67,19 +47,40 @@ impl VectorShape {
             .chain(func.signatures().map(|(_, s)| wrappers(s)))
             .max()
             .unwrap_or(0);
-        let simd_bytes = func
-            .blocks()
-            .flat_map(|block| func.block_params(block))
-            .chain(
-                func.layout_insts()
-                    .flat_map(|(_, inst)| func.inst_results(inst)),
-            )
-            .filter_map(|&value| func.value_type(func.resolve(value)).vector())
-            .map(|shape| shape.bytes())
+        let mut abi_align = std::iter::once(abi_align(&func.sig))
+            .chain(func.callees().map(|(_, d)| abi_align(&d.sig)))
+            .chain(func.signatures().map(|(_, s)| abi_align(s)))
             .max()
-            .unwrap_or(16)
-            .max(wrapper_bytes)
-            .max(16);
+            .unwrap_or(16);
+        // One walk takes the widest vector value and the strictest
+        // alignment of an argument or `va_arg` aggregate.
+        let vector_bytes = |value: Value| {
+            func.value_type(func.resolve(value))
+                .vector()
+                .map_or(0, |v| v.bytes())
+        };
+        let mut simd_bytes = wrapper_bytes.max(16);
+        for block in func.blocks() {
+            for &param in func.block_params(block) {
+                simd_bytes = simd_bytes.max(vector_bytes(param));
+            }
+            for &inst in func.block_insts(block) {
+                let d = func.inst_data(inst);
+                if let Some(args) = d.call_args() {
+                    for i in 0..args.len() {
+                        if let Some(layout) = args.abi(i).and_then(|p| p.layout()) {
+                            abi_align = abi_align.max(layout.align() as usize);
+                        }
+                    }
+                }
+                if let InstData::AggregateVaArg { layout, .. } = d {
+                    abi_align = abi_align.max(layout.align() as usize);
+                }
+                for &result in func.inst_results(inst) {
+                    simd_bytes = simd_bytes.max(vector_bytes(result));
+                }
+            }
+        }
         let simd_bits = (simd_bytes * 8) as u16;
         let wide_vectors = simd_bytes >= 32;
         let frame_align = func
