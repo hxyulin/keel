@@ -165,13 +165,13 @@ pub(super) struct CallArea {
 impl CallArea {
     pub fn plan(
         func: &Function,
-        present: crate::kinds::InstKinds,
+        facts: &crate::kinds::FunctionFacts<'_>,
         param_locs: &[ArgLoc],
         linux: bool,
     ) -> Result<Self, String> {
         let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
         let mut call_layouts = HashMap::default();
-        for (_, inst) in func.layout_insts().filter(|_| present.call) {
+        for &inst in &facts.calls {
             let (args, params) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args }
                 | InstData::Invoke {
@@ -561,8 +561,7 @@ impl Covers {
         if present.atomic_cas && present.brif && compare_branch {
             fused_compares.extend(selection.fuse_cas_branches(func, uses));
         }
-        let calls = present.call && !leaf_summaries.is_empty();
-        for (_, inst) in func.layout_insts().filter(|_| calls) {
+        for &inst in facts.calls.iter().filter(|_| !leaf_summaries.is_empty()) {
             if let InstData::Call { func: callee, .. } = func.inst_data(inst) {
                 let decl = func.callee(*callee);
                 if let Some((sig, preserved)) = leaf_summaries.get(&decl.name)

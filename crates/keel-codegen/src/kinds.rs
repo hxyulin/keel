@@ -6,7 +6,7 @@ use std::cell::OnceCell;
 
 use keel_ir::fxhash::FxHashSet;
 use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, InstData, Intrinsic, OverflowOp, UnaryOp, Value,
+    BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic, OverflowOp, UnaryOp, Value,
 };
 
 use crate::stack_frame::SlotUses;
@@ -38,14 +38,17 @@ pub(crate) struct InstKinds {
     pub vector_select: bool,
     /// `swiden_low` or `uwiden_low`.
     pub widen_low: bool,
+    pub fma: bool,
 }
 
 impl InstKinds {
     /// The kinds, and in the same walk the machine-relevant IR use counts of
-    /// [`crate::fold::use_counts`] and the slot uses of frame layout.
-    fn walk(func: &Function) -> (Self, Vec<u8>, SlotUses) {
+    /// [`crate::fold::use_counts`], the calls and the slot uses of frame
+    /// layout.
+    fn walk(func: &Function) -> (Self, Vec<u8>, Vec<Inst>, SlotUses) {
         let mut kinds = Self::default();
         let mut uses = vec![0u8; func.num_values()];
+        let mut calls = Vec::new();
         let mut slots = SlotUses::new(func);
         for block in func.blocks() {
             slots.enter_block();
@@ -60,13 +63,16 @@ impl InstKinds {
                         slots.mark(slot, block, id == Intrinsic::LifetimeStart);
                     }
                 } else {
+                    if data.call_args().is_some() {
+                        calls.push(inst);
+                    }
                     visit(&mut kinds, func, data, &mut uses, &mut slots);
                 }
                 slots.step();
             }
             slots.leave_block(block);
         }
-        (kinds, uses, slots)
+        (kinds, uses, calls, slots)
     }
 }
 
@@ -133,6 +139,7 @@ fn visit(
             op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
             ..
         } => kinds.widen_low = true,
+        InstData::Fma { .. } => kinds.fma = true,
         _ => {}
     }
 }
@@ -159,17 +166,20 @@ pub(crate) struct FunctionFacts<'a> {
     pub func: &'a Function,
     pub kinds: InstKinds,
     pub machine_uses: Vec<u8>,
+    /// The calls, invokes and tail calls, in layout order.
+    pub calls: Vec<Inst>,
     pub slots: SlotUses,
     raw_uses: OnceCell<Vec<u8>>,
 }
 
 impl<'a> FunctionFacts<'a> {
     pub fn new(func: &'a Function) -> Self {
-        let (kinds, machine_uses, slots) = InstKinds::walk(func);
+        let (kinds, machine_uses, calls, slots) = InstKinds::walk(func);
         Self {
             func,
             kinds,
             machine_uses,
+            calls,
             slots,
             raw_uses: OnceCell::new(),
         }

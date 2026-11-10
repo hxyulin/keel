@@ -270,19 +270,26 @@ pub(super) struct CallArea {
 }
 
 impl CallArea {
-    pub fn plan(func: &Function, named: &sysv::Placement, frame_align: usize) -> Self {
-        let (mut outgoing, mut staging, mut needs_sret_save) = (0, 0, false);
+    pub fn plan(
+        func: &Function,
+        facts: &crate::kinds::FunctionFacts<'_>,
+        named: &sysv::Placement,
+        frame_align: usize,
+    ) -> Self {
+        // An f80 FMA calls `fmal` with its three operands on the stack.
+        let f80_fma = facts.kinds.fma
+            && func
+                .layout_insts()
+                .any(|(_, inst)| match func.inst_data(inst) {
+                    InstData::Fma { args } => func.value_type(func.resolve(args[0])) == Type::F80,
+                    _ => false,
+                });
+        let (mut outgoing, mut staging, mut needs_sret_save) =
+            (if f80_fma { 48 } else { 0 }, 0, false);
         let mut scalar_result = false;
-        for (_, inst) in func.layout_insts() {
+        for &inst in &facts.calls {
             let data = func.inst_data(inst);
             let (args, sig) = match data {
-                // An f80 FMA calls `fmal` with its three operands on the stack.
-                InstData::Fma { args } => {
-                    if func.value_type(func.resolve(args[0])) == Type::F80 {
-                        outgoing = outgoing.max(48);
-                    }
-                    continue;
-                }
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::CallIndirect { sig, args, .. }
                 | InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),

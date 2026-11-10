@@ -1047,7 +1047,7 @@ impl<'a> FunctionCompiler<'a> {
             ExceptionTable::default()
         };
         plan::check_tail_calls(func, present, linux).map_err(err)?;
-        let calls = plan::CallArea::plan(func, present, &param_locs, linux).map_err(err)?;
+        let calls = plan::CallArea::plan(func, &facts, &param_locs, linux).map_err(err)?;
         let moves_sp = present.intrinsic
             && func.layout_insts().any(|(_, inst)| {
                 matches!(

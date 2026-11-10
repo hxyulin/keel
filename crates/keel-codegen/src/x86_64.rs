@@ -1086,7 +1086,7 @@ impl<'a> FunctionCompiler<'a> {
         let facts = crate::kinds::FunctionFacts::new(func);
         let present = facts.kinds;
         plan::check_guaranteed_tails(func, &named, present).map_err(err)?;
-        let calls = plan::CallArea::plan(func, &named, shape.frame_align);
+        let calls = plan::CallArea::plan(func, &facts, &named, shape.frame_align);
         let covers = plan::Covers::select(func, pipeline, &facts);
         crate::backend_profile::count_covers(&covers.selection);
         let (alloc, f80_homes) =
