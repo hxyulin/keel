@@ -188,7 +188,11 @@ relocations into read-only sections are diagnosed. Lazy binding and
   A library without a SONAME is named by its input basename. Transitive
   dependencies are left to the runtime loader.
 - An absent weak reference stays a weak dynamic lookup when shared libraries
-  are present.
+  are present. On x86-64, an absent weak non-TLS symbol referenced with
+  `R_X86_64_32`, `R_X86_64_32S` or `R_X86_64_PC32` instead binds to zero
+  throughout the executable, including GOT references to the same symbol.
+  This supports optional callbacks in non-PIC CRT objects. A DSO-provided
+  symbol still requires supported import relocations.
 - Default imported GNU symbol versions become `.gnu.version` and
   `.gnu.version_r` requirements; non-default/hidden versions are excluded.
   Explicit `name@VERSION` aliases are unsupported.
@@ -554,6 +558,15 @@ not add libc or CRT startup automatically. When the CLI receives a concrete
 GCC's `libgcc_s.so` linker script. The loader is opened under the sysroot at
 the interpreter path, falling back to the library search directories. These
 inputs add needed-library entries even if relaxation removes all TLS calls.
+The CLI also appends `libc_nonshared.a` for a concrete `libc.so.6` input and
+`libmvec.so.1` for a concrete `libm.so.6` input when those companions are
+available in the library search directories. The archive supplies `atexit`,
+`at_quick_exit` and `pthread_atfork` on glibc systems that keep these helpers
+outside the DSO. Its members are selected only when referenced. The vector
+library supplies compiler-generated vector math calls. An automatically added
+vector library becomes `DT_NEEDED` even when no vector call is used. Explicit
+companion inputs are not added again. Missing companions leave normal symbol
+resolution to diagnose any required helpers.
 The library API continues to use only the inputs provided by its caller.
 
 The bounded static x86-64 script path supports TLS output sections and all

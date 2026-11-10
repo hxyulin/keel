@@ -775,3 +775,229 @@ fn concrete_glibc_adds_exact_runtime_libraries_from_sysroot() {
     );
     assert_eq!(std::fs::read(dir.join("program")).unwrap(), expected);
 }
+
+#[test]
+fn glibc_nonshared_helpers_are_extracted_after_user_objects() {
+    let dir = keel_test_support::TempDir::new("elf-cli-nonshared");
+    std::fs::create_dir_all(dir.join("root/usr/lib")).unwrap();
+    let library = include_bytes!("../../keel-link/tests/fixtures/gnu-notes/libdefined.so");
+    for name in ["libc.so.6", "libgcc_s.so.1", "ld-linux-x86-64.so.2"] {
+        std::fs::write(dir.join(format!("root/usr/lib/{name}")), library).unwrap();
+    }
+    let assemble = |s: &str| keel_asm::x86::assemble_object(s).unwrap();
+    std::fs::write(
+        dir.join("start.o"),
+        assemble(".text\n.globl _start\n_start: call atexit\nret\n"),
+    )
+    .unwrap();
+    let helper = assemble(".text\n.globl atexit\natexit: ret\n");
+    let archive = keel_link::archive::build(
+        &[keel_link::Input {
+            name: "atexit.o",
+            bytes: &helper,
+        }],
+        keel_link::archive::Target::X86_64LinuxGnu,
+    )
+    .unwrap();
+    let args = [
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--sysroot",
+        "root",
+        "-l:libc.so.6",
+        "start.o",
+        "-o",
+        "program",
+    ];
+    let result = invoke(dir.path(), &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("atexit"));
+    std::fs::write(dir.join("root/usr/lib/libc_nonshared.a"), archive).unwrap();
+    let result = invoke(dir.path(), &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
+fn concrete_libm_finds_its_vector_companion_without_glibc_input() {
+    let dir = keel_test_support::TempDir::new("elf-cli-libmvec");
+    std::fs::create_dir_all(dir.join("root/usr/lib")).unwrap();
+    let library = include_bytes!("../../keel-link/tests/fixtures/gnu-notes/libdefined.so");
+    let mut primary = library.to_vec();
+    // Give the primary DSO a distinct SONAME and export so only its companion
+    // can satisfy the reference. Keep all ELF string offsets unchanged.
+    for (from, to) in [
+        (b"prop\0".as_slice(), b"base\0".as_slice()),
+        (b"libdefined.so\0".as_slice(), b"libprimary.so\0".as_slice()),
+    ] {
+        for i in 0..=primary.len() - from.len() {
+            if &primary[i..i + from.len()] == from {
+                primary[i..i + to.len()].copy_from_slice(to);
+            }
+        }
+    }
+    std::fs::write(dir.join("root/usr/lib/libm.so.6"), primary).unwrap();
+    std::fs::write(
+        dir.join("start.o"),
+        keel_asm::x86::assemble_object(
+            ".text\n.globl _start\n_start: mov rax,qword ptr [rip+prop@GOTPCREL]\nret\n",
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let args = [
+        "link",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "--sysroot",
+        "root",
+        "start.o",
+        "-l:libm.so.6",
+        "-o",
+        "program",
+    ];
+    let result = invoke(dir.path(), &args);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("prop"));
+    std::fs::write(dir.join("root/usr/lib/libmvec.so.1"), library).unwrap();
+    let result = invoke(dir.path(), &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let expected = std::fs::read(dir.join("program")).unwrap();
+    let mut explicit = args.to_vec();
+    explicit.push("-l:libmvec.so.1");
+    let result = invoke(dir.path(), &explicit);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read(dir.join("program")).unwrap(), expected);
+}
+
+#[test]
+fn installed_glibc_helpers_nonpic_crt_and_vector_math_execute() {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        keel_test_support::record_skip(
+            "keel",
+            "elf_link",
+            "installed glibc runtime requires x86-64 Linux",
+        );
+        return;
+    }
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::record_skip("keel", "elf_link", keel_test_support::NO_CLANG);
+        return;
+    };
+    let mut crt = Vec::new();
+    for name in [
+        "crt1.o",
+        "crti.o",
+        "crtbegin.o",
+        "crtend.o",
+        "crtn.o",
+        "libc_nonshared.a",
+        "libmvec.so.1",
+    ] {
+        let result = clang
+            .command()
+            .arg(format!("-print-file-name={name}"))
+            .output()
+            .unwrap();
+        let path = String::from_utf8(result.stdout).unwrap().trim().to_owned();
+        if !result.status.success() || !Path::new(&path).is_file() {
+            keel_test_support::record_skip(
+                "keel",
+                "elf_link",
+                "installed glibc development files and libmvec are required",
+            );
+            return;
+        }
+        crt.push(path);
+    }
+    let dir = keel_test_support::TempDir::new("elf-cli-installed-glibc");
+    let source = dir.join("main.c");
+    std::fs::write(
+        &source,
+        r#"
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/wait.h>
+typedef double pair __attribute__((vector_size(16)));
+extern pair _ZGVbN2v_sin(pair);
+static int flags;
+static void prepare(void) { flags += 1; }
+static void parent(void) { flags += 2; }
+static void child(void) { flags += 4; }
+static void finish(void) { if (flags != 3) _Exit(9); write(1, "ok\n", 3); }
+int main(int argc, char **argv) {
+    pair input = {0, 1.5707963267948966};
+    pair result = _ZGVbN2v_sin(input);
+    if (result[0] != 0 || result[1] < 0.999999 || result[1] > 1.000001) return 1;
+    if (pthread_atfork(prepare, parent, child)) return 2;
+    pid_t pid = fork();
+    if (pid < 0) return 3;
+    if (!pid) _Exit(flags == 5 ? 0 : 4);
+    int status;
+    if (waitpid(pid, &status, 0) != pid || status != 0 || flags != 3) return 5;
+    if (argc > 1) {
+        if (at_quick_exit(finish)) return 6;
+        quick_exit(0);
+    }
+    return atexit(finish);
+}
+"#,
+    )
+    .unwrap();
+    let object = dir.join("main.o");
+    let result = clang
+        .command()
+        .args(["-fPIC", "-O2", "-fcf-protection=none", "-c"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    // Only primary DSOs are explicit. The CLI must find both companions and
+    // handle the optional weak callbacks in the installed non-PIC crtbegin.o.
+    let args = [
+        "link",
+        &crt[0],
+        &crt[1],
+        &crt[2],
+        "main.o",
+        "-l:libm.so.6",
+        "-l:libc.so.6",
+        &crt[3],
+        &crt[4],
+        "-o",
+        "program",
+    ];
+    let result = invoke(dir.path(), &args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    for args in [&[][..], &["quick"][..]] {
+        let result = Command::new(dir.join("program"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(result.stdout, b"ok\n");
+    }
+}

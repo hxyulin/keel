@@ -649,3 +649,69 @@ fn aarch64_tls_local_exec_template_offset() {
         assert_eq!(word(&exe.bytes, value(&f, "_start")) as u32, expected);
     }
 }
+
+#[test]
+fn absent_weak_direct_addresses_bind_zero_without_losing_dynamic_lookups() {
+    let shared = shared_interface();
+    let main = object(
+        ".text\n.globl _start\n_start: mov eax, offset absent\nmov rax, qword ptr [rip+absent@GOTPCREL]\nret\n.weak absent\n.data\n.globl fields\nfields: .long absent+3\n.quad absent+7\n",
+    );
+    let exe = link(&[main, shared.clone()]).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let text = f.section_by_name(".text").unwrap().data().unwrap();
+    assert_eq!(&text[1..5], &[0; 4]);
+    let fields = value(&f, "fields");
+    assert_eq!(word(&exe.bytes, fields) as u32, 3);
+    assert_eq!(word(&exe.bytes, fields + 4), 7);
+    assert!(!f.dynamic_symbols().any(|s| s.name().unwrap() == "absent"));
+    let got = f.section_by_name(".got").unwrap();
+    assert_eq!(got.data().unwrap(), &[0; 8]);
+
+    for kind in [object::elf::R_X86_64_32S, object::elf::R_X86_64_PC32] {
+        let mut input = object(
+            ".text\n.globl _start\n_start: ret\n.data\n.globl field\nfield: .long absent+3\n.weak absent\n",
+        );
+        let f = object::File::parse(input.as_slice()).unwrap();
+        let at = f
+            .section_by_name(".rela.data")
+            .unwrap()
+            .file_range()
+            .unwrap()
+            .0 as usize;
+        input[at + 8..at + 12].copy_from_slice(&kind.to_le_bytes());
+        let exe = link(&[input, shared.clone()]).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        let field = value(&f, "field");
+        let expected = if kind == object::elf::R_X86_64_PC32 {
+            3u64.wrapping_sub(field)
+        } else {
+            3
+        };
+        assert_eq!(word(&exe.bytes, field) as u32, expected as u32);
+    }
+
+    // A real provider still requires a runtime relocation; never turn a
+    // provided weak symbol into zero to get around an unsupported relocation.
+    let provided =
+        object(".text\n.globl _start\n_start: mov eax, offset answer\nret\n.weak answer\n");
+    assert!(
+        link(&[provided, shared.clone()])
+            .unwrap_err()
+            .contains("copy/text relocations")
+    );
+    let strong = object(".text\n.globl _start\n_start: mov eax, offset absent\nret\n");
+    assert!(
+        link(&[strong, shared.clone()])
+            .unwrap_err()
+            .contains("undefined symbol")
+    );
+    let pic = object(
+        ".text\n.globl _start\n_start: mov rax, qword ptr [rip+absent@GOTPCREL]\nret\n.weak absent\n",
+    );
+    let exe = link(&[pic, shared]).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    assert!(
+        f.dynamic_symbols()
+            .any(|s| s.name().unwrap() == "absent" && s.is_weak())
+    );
+}

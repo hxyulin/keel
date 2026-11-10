@@ -382,7 +382,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     if !arm {
         relax::tls_general(&mut sections, &mut units, &globals)?;
     }
-    let imports = plan_imports(&units, &globals, &bounds, libraries)?;
+    let imports = plan_imports(&units, &globals, &bounds, libraries, arm)?;
     if options.relax_got {
         relax::got_loads(&mut sections, &mut units, &globals, &imports)?;
     }
@@ -1141,7 +1141,32 @@ fn plan_imports(
     globals: &Globals,
     bounds: &BTreeMap<String, (usize, bool)>,
     libraries: &[dynamic::Library<'_>],
+    arm: bool,
 ) -> Result<BTreeMap<String, dynamic::Import>> {
+    // Non-PIC executable startup objects take direct addresses of optional
+    // functions. With no DSO provider, these references bind to zero, as in GNU
+    // ld. Bind the whole symbol consistently, including any GOT references in
+    // other units; PIC-only weak references keep their runtime lookup.
+    let mut direct_weak = BTreeSet::new();
+    if !arm {
+        for unit in units {
+            for r in &unit.relocs {
+                if matches!(
+                    r.kind,
+                    object::elf::R_X86_64_32
+                        | object::elf::R_X86_64_32S
+                        | object::elf::R_X86_64_PC32
+                ) && let Some(s) = unit.symbols.get(&r.symbol)
+                    && s.global()
+                    && s.weak()
+                    && s.section == SymbolSection::Undefined
+                    && s.info & 15 != object::elf::STT_TLS
+                {
+                    direct_weak.insert(s.name.as_str());
+                }
+            }
+        }
+    }
     let mut imports: BTreeMap<String, dynamic::Import> = BTreeMap::new();
     for u in units {
         for s in u.symbols.values() {
@@ -1169,7 +1194,9 @@ fn plan_imports(
             if export.is_none() && !s.weak() {
                 return Err(format!("{}: undefined symbol `{}`", u.name, s.name).into());
             }
-            if libraries.is_empty() {
+            if libraries.is_empty()
+                || (export.is_none() && s.weak() && direct_weak.contains(s.name.as_str()))
+            {
                 continue;
             }
             if s.other & 3 != 0 {

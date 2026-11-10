@@ -682,6 +682,37 @@ fn run_elf(args: &[String], machine: keel_link::elf::Machine) -> Result<(), Stri
             paths.push(Some(path));
         }
     }
+    if !force_static && !relocatable {
+        // The glibc and libm linker scripts also name these companions. Some
+        // runtime-only sysroots omit them, so discover them when available and
+        // leave missing symbol diagnostics to normal resolution otherwise.
+        for (primary, companion) in [
+            ("libc.so.6", "libc_nonshared.a"),
+            ("libm.so.6", "libmvec.so.1"),
+        ] {
+            if !paths
+                .iter()
+                .flatten()
+                .any(|p| p.file_name().is_some_and(|n| n == primary))
+                || paths
+                    .iter()
+                    .flatten()
+                    .any(|p| p.file_name().is_some_and(|n| n == companion))
+            {
+                continue;
+            }
+            if let Some(path) = directories
+                .iter()
+                .map(|d| d.join(companion))
+                .find(|p| p.is_file())
+            {
+                // Append archives after user objects so their unresolved
+                // references can select the required helper members.
+                requests.push(Request::Path(path.clone()));
+                paths.push(Some(path));
+            }
+        }
+    }
     let mut owned = paths
         .iter()
         .map(|path| {
