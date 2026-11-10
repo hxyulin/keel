@@ -1,10 +1,15 @@
 //! Which kinds of instruction a function contains, found in one walk. Most
 //! target covers and frame checks look for rare instructions; testing this
-//! summary first skips their own whole-function scans.
+//! summary first skips their own whole-function scans. The same walk
+//! gathers what frame layout reads from the instructions.
 use std::cell::OnceCell;
 
 use keel_ir::fxhash::FxHashSet;
-use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp, UnaryOp, Value};
+use keel_ir::{
+    BinaryOp, ConvertOp, EntityRef, Function, InstData, Intrinsic, OverflowOp, UnaryOp, Value,
+};
+
+use crate::stack_frame::SlotUses;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct InstKinds {
@@ -37,69 +42,98 @@ pub(crate) struct InstKinds {
 
 impl InstKinds {
     /// The kinds, and in the same walk the machine-relevant IR use counts of
-    /// [`crate::fold::use_counts`].
-    pub(crate) fn with_uses(func: &Function) -> (Self, Vec<u8>) {
+    /// [`crate::fold::use_counts`] and the slot uses of frame layout.
+    fn walk(func: &Function) -> (Self, Vec<u8>, SlotUses) {
         let mut kinds = Self::default();
         let mut uses = vec![0u8; func.num_values()];
-        for (_, inst) in func.layout_insts() {
-            let data = func.inst_data(inst);
-            if data.is_lifetime_marker() {
-                continue;
+        let mut slots = SlotUses::new(func);
+        for block in func.blocks() {
+            slots.enter_block();
+            for &inst in func.block_insts(block) {
+                let data = func.inst_data(inst);
+                if let InstData::Intrinsic {
+                    id: id @ (Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd),
+                    ..
+                } = *data
+                {
+                    if let Some(slot) = func.lifetime_marker_slot(inst) {
+                        slots.mark(slot, block, id == Intrinsic::LifetimeStart);
+                    }
+                } else {
+                    visit(&mut kinds, func, data, &mut uses, &mut slots);
+                }
+                slots.step();
             }
-            data.for_each_operand(|v| {
-                let count = &mut uses[func.resolve(v).index()];
-                *count = (*count + 1).min(2);
-            });
-            match data {
-                InstData::InlineAsm { .. } => kinds.inline_asm = true,
-                InstData::LandingPad { .. } => kinds.landing_pad = true,
-                InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => {
-                    kinds.call = true
-                }
-                InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
-                    kinds.return_call = true
-                }
-                InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => {
-                    kinds.intrinsic = true
-                }
-                InstData::SymbolAddr { .. } => kinds.symbol_addr = true,
-                InstData::Binary {
-                    op: BinaryOp::Umulhi | BinaryOp::Smulhi,
-                    ..
-                }
-                | InstData::Overflow {
-                    op: OverflowOp::Umul | OverflowOp::Smul,
-                    ..
-                } => kinds.high_multiply = true,
-                InstData::Binary {
-                    op: BinaryOp::Ptradd,
-                    ..
-                } => kinds.ptradd = true,
-                InstData::Select { .. } => kinds.select = true,
-                InstData::Icmp { .. } | InstData::Fcmp { .. } => kinds.compare = true,
-                InstData::Brif { .. } => kinds.brif = true,
-                InstData::AtomicCas { .. } => {
-                    kinds.atomic_cas = true;
-                    kinds.atomic = true;
-                }
-                InstData::AtomicLoad { .. }
-                | InstData::AtomicStore { .. }
-                | InstData::AtomicRmw { .. } => kinds.atomic = true,
-                InstData::Unary {
-                    op: UnaryOp::Fnearest | UnaryOp::Ffloor | UnaryOp::Fceil | UnaryOp::Ftrunc,
-                    ..
-                } => kinds.rounding = true,
-                InstData::VectorSplat { .. } => kinds.vector_splat = true,
-                InstData::VectorIcmp { .. } => kinds.vector_icmp = true,
-                InstData::VectorSelect { .. } => kinds.vector_select = true,
-                InstData::Convert {
-                    op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
-                    ..
-                } => kinds.widen_low = true,
-                _ => {}
-            }
+            slots.leave_block(block);
         }
-        (kinds, uses)
+        (kinds, uses, slots)
+    }
+}
+
+#[inline]
+fn visit(
+    kinds: &mut InstKinds,
+    func: &Function,
+    data: &InstData,
+    uses: &mut [u8],
+    slots: &mut SlotUses,
+) {
+    data.for_each_operand(|v| {
+        let count = &mut uses[func.resolve(v).index()];
+        *count = (*count + 1).min(2);
+    });
+    match data {
+        InstData::StackAddr { slot } => slots.address(*slot),
+        InstData::AggregateVaArg { home, .. } => slots.va_arg_home(*home),
+        InstData::InlineAsm { .. } => kinds.inline_asm = true,
+        InstData::LandingPad { .. } => kinds.landing_pad = true,
+        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
+            kinds.call = true;
+            slots.call(func.callee(*callee).sig.returns_twice);
+        }
+        InstData::CallIndirect { sig, .. } => {
+            kinds.call = true;
+            slots.call(func.signature(*sig).returns_twice);
+        }
+        InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
+            kinds.return_call = true
+        }
+        InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => kinds.intrinsic = true,
+        InstData::SymbolAddr { .. } => kinds.symbol_addr = true,
+        InstData::Binary {
+            op: BinaryOp::Umulhi | BinaryOp::Smulhi,
+            ..
+        }
+        | InstData::Overflow {
+            op: OverflowOp::Umul | OverflowOp::Smul,
+            ..
+        } => kinds.high_multiply = true,
+        InstData::Binary {
+            op: BinaryOp::Ptradd,
+            ..
+        } => kinds.ptradd = true,
+        InstData::Select { .. } => kinds.select = true,
+        InstData::Icmp { .. } | InstData::Fcmp { .. } => kinds.compare = true,
+        InstData::Brif { .. } => kinds.brif = true,
+        InstData::AtomicCas { .. } => {
+            kinds.atomic_cas = true;
+            kinds.atomic = true;
+        }
+        InstData::AtomicLoad { .. } | InstData::AtomicStore { .. } | InstData::AtomicRmw { .. } => {
+            kinds.atomic = true
+        }
+        InstData::Unary {
+            op: UnaryOp::Fnearest | UnaryOp::Ffloor | UnaryOp::Fceil | UnaryOp::Ftrunc,
+            ..
+        } => kinds.rounding = true,
+        InstData::VectorSplat { .. } => kinds.vector_splat = true,
+        InstData::VectorIcmp { .. } => kinds.vector_icmp = true,
+        InstData::VectorSelect { .. } => kinds.vector_select = true,
+        InstData::Convert {
+            op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+            ..
+        } => kinds.widen_low = true,
+        _ => {}
     }
 }
 
@@ -125,16 +159,18 @@ pub(crate) struct FunctionFacts<'a> {
     pub func: &'a Function,
     pub kinds: InstKinds,
     pub machine_uses: Vec<u8>,
+    pub slots: SlotUses,
     raw_uses: OnceCell<Vec<u8>>,
 }
 
 impl<'a> FunctionFacts<'a> {
     pub fn new(func: &'a Function) -> Self {
-        let (kinds, machine_uses) = InstKinds::with_uses(func);
+        let (kinds, machine_uses, slots) = InstKinds::walk(func);
         Self {
             func,
             kinds,
             machine_uses,
+            slots,
             raw_uses: OnceCell::new(),
         }
     }

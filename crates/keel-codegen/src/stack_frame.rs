@@ -5,8 +5,83 @@
 //! slot is dead on entry, live from a start and dead after an end, along
 //! every path. Unmarked slots, and every slot of a function that has debug
 //! homes or a returns-twice call, keep bytes of their own.
-use keel_ir::{Block, EntityRef, Function, InstData};
+use keel_ir::{Block, EntityRef, Function, StackSlot};
 use std::ops::Index;
+
+/// What layout reads from the instructions, gathered by the walk of
+/// [`crate::kinds::FunctionFacts`]. Program points run in layout order: a
+/// header point per block, then one per instruction.
+pub(crate) struct SlotUses {
+    /// Slots a `stack_addr` or `aggregate_va_arg` names.
+    used: Vec<bool>,
+    /// Slots a lifetime marker names.
+    marked: Vec<bool>,
+    /// `aggregate_va_arg` homes, whose storage nothing tracks through markers.
+    va_arg_homes: Vec<bool>,
+    returns_twice: bool,
+    /// Each marker's slot, block, point and whether it is a start.
+    markers: Vec<(usize, Block, usize, bool)>,
+    /// Each block's header and last point.
+    points: Vec<(usize, usize)>,
+    header: usize,
+    point: usize,
+}
+
+impl SlotUses {
+    pub(crate) fn new(func: &Function) -> Self {
+        let slots = func.num_stack_slots();
+        Self {
+            used: vec![false; slots],
+            marked: vec![false; slots],
+            va_arg_homes: vec![false; slots],
+            returns_twice: false,
+            markers: Vec::new(),
+            points: vec![(0, 0); func.num_blocks()],
+            header: 0,
+            point: 0,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn enter_block(&mut self) {
+        self.header = self.point;
+        self.point += 1;
+    }
+
+    /// Moves past the current instruction.
+    #[inline]
+    pub(crate) fn step(&mut self) {
+        self.point += 1;
+    }
+
+    #[inline]
+    pub(crate) fn leave_block(&mut self, block: Block) {
+        self.points[block.index()] = (self.header, self.point - 1);
+    }
+
+    #[inline]
+    pub(crate) fn address(&mut self, slot: StackSlot) {
+        self.used[slot.index()] = true;
+    }
+
+    #[inline]
+    pub(crate) fn va_arg_home(&mut self, slot: StackSlot) {
+        self.used[slot.index()] = true;
+        self.va_arg_homes[slot.index()] = true;
+    }
+
+    #[inline]
+    pub(crate) fn call(&mut self, returns_twice: bool) {
+        self.returns_twice |= returns_twice;
+    }
+
+    /// A lifetime marker of `slot` at the current point.
+    #[inline]
+    pub(crate) fn mark(&mut self, slot: StackSlot, block: Block, start: bool) {
+        self.marked[slot.index()] = true;
+        self.markers.push((slot.index(), block, self.point, start));
+    }
+}
 
 /// Indexed by the original SlotId, including holes with no frame storage.
 /// Address emission must never turn an omitted home into a valid offset.
@@ -20,8 +95,21 @@ fn edge_budget(marked: usize) -> usize {
 impl SlotOffsets {
     /// Lays out the slots from `offset` and returns the end. `debug` keeps a
     /// home for every declared slot; `separate` turns off byte sharing.
+    #[cfg(test)]
     pub(crate) fn layout(
         func: &Function,
+        offset: usize,
+        debug: bool,
+        separate: bool,
+    ) -> (Self, usize) {
+        let facts = crate::kinds::FunctionFacts::new(func);
+        Self::layout_with(func, &facts.slots, offset, debug, separate)
+    }
+
+    /// [`Self::layout`], given the function's slot uses.
+    pub(crate) fn layout_with(
+        func: &Function,
+        uses: &SlotUses,
         mut offset: usize,
         debug: bool,
         separate: bool,
@@ -33,56 +121,20 @@ impl SlotOffsets {
         // conservative, including escapes, aliases and unused address results.
         // Debug emission indexes slots independently of executing instructions;
         // retain all declared homes whenever this module emits debug information.
-        let mut used = vec![debug; slots];
+        let used = |slot: usize| debug || uses.used[slot];
         // Marked slots that may share bytes: no `AggregateVaArg` home or
         // debug variable, whose storage nothing tracks through markers.
-        let mut shareable = vec![false; slots];
-        let mut own = vec![false; slots];
-        let mut returns_twice = false;
-        let mut markers = Vec::new();
-        // Program points in layout order: a header point per block, then one
-        // per instruction.
-        let mut points = vec![(0, 0); func.num_blocks()];
-        let mut point = 0;
-        for block in func.blocks() {
-            let header = point;
-            point += 1;
-            for &inst in func.block_insts(block) {
-                match *func.inst_data(inst) {
-                    InstData::StackAddr { slot } => used[slot.index()] = true,
-                    InstData::AggregateVaArg { home: slot, .. } => {
-                        used[slot.index()] = true;
-                        own[slot.index()] = true;
-                    }
-                    InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
-                        returns_twice |= func.callee(callee).sig.returns_twice
-                    }
-                    InstData::CallIndirect { sig, .. } => {
-                        returns_twice |= func.signature(sig).returns_twice
-                    }
-                    InstData::Intrinsic { id, .. } => {
-                        if let Some(slot) = func.lifetime_marker_slot(inst) {
-                            shareable[slot.index()] = true;
-                            let start = id == keel_ir::Intrinsic::LifetimeStart;
-                            markers.push((slot.index(), block, point, start));
-                        }
-                    }
-                    _ => {}
-                }
-                point += 1;
-            }
-            points[block.index()] = (header, point - 1);
-        }
+        let mut shareable: Vec<bool> = (uses.marked.iter().zip(&uses.va_arg_homes))
+            .map(|(&marked, &home)| marked && !home)
+            .collect();
         for var in &func.debug_vars {
-            own[var.slot.index()] = true;
+            shareable[var.slot.index()] = false;
         }
-        for (shared, own) in shareable.iter_mut().zip(&own) {
-            *shared &= !*own;
-        }
+        let (returns_twice, markers, points) = (uses.returns_twice, &uses.markers, &uses.points);
         let mut offsets = vec![None; slots];
         let mut unshared = offset;
         for (id, slot) in func.stack_slots() {
-            if used[id.index()] {
+            if used(id.index()) {
                 unshared = unshared.next_multiple_of(slot.align as usize);
                 offsets[id.index()] = Some(unshared);
                 unshared += slot.size as usize;
@@ -93,13 +145,13 @@ impl SlotOffsets {
             offsets.fill(None);
             // Unmarked slots first, in declaration order, as without sharing.
             for (id, slot) in func.stack_slots() {
-                if used[id.index()] && !shareable[id.index()] {
+                if used(id.index()) && !shareable[id.index()] {
                     offset = offset.next_multiple_of(slot.align as usize);
                     offsets[id.index()] = Some(offset);
                     offset += slot.size as usize;
                 }
             }
-            offset = pack(func, &shareable, &markers, &points, offset, &mut offsets);
+            offset = pack(func, &shareable, markers, points, offset, &mut offsets);
         } else {
             offset = unshared;
         }

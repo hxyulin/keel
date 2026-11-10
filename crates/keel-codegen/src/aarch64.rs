@@ -1078,8 +1078,9 @@ impl<'a> FunctionCompiler<'a> {
         // Slot offsets are aligned, so an `sp` aligned to the largest slot
         // alignment gives aligned addresses. `sp` is 16-byte aligned; the
         // prologue rounds it down further for slots aligned above that.
-        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout(
+        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout_with(
             func,
+            &facts.slots,
             spills.end,
             !module.files.is_empty(),
             separate_slots,

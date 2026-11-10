@@ -1102,8 +1102,9 @@ impl<'a> FunctionCompiler<'a> {
             .unwrap_or(0);
         let inline_asm_home = (asm_bytes != 0).then_some(system.end.next_multiple_of(8));
         let offset = inline_asm_home.map_or(system.end, |home| home + asm_bytes);
-        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout(
+        let (stack_slot_offsets, offset) = crate::stack_frame::SlotOffsets::layout_with(
             func,
+            &facts.slots,
             offset,
             !module.files.is_empty(),
             separate_slots,
