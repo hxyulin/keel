@@ -851,16 +851,16 @@ impl<'a> Scanner<'a> {
                 space = true;
                 continue;
             }
-            let prefix =
-                if b.get(i..i + 2) == Some(b"u8") && matches!(b.get(i + 2), Some(b'"' | b'\'')) {
-                    2
-                } else if matches!(b[i], b'L' | b'u' | b'U')
-                    && matches!(b.get(i + 1), Some(b'"' | b'\''))
+            let prefix = match b[i] {
+                b'u' if b.get(i + 1) == Some(&b'8')
+                    && matches!(b.get(i + 2), Some(b'"' | b'\'')) =>
                 {
-                    1
-                } else {
-                    0
-                };
+                    2
+                }
+                b'L' | b'u' | b'U' if matches!(b.get(i + 1), Some(b'"' | b'\'')) => 1,
+                _ => 0,
+            };
+            let mut normalized = None;
             if matches!(b.get(i + prefix), Some(b'"' | b'\'')) {
                 i += prefix;
                 let q = b[i];
@@ -899,19 +899,19 @@ impl<'a> Scanner<'a> {
                 }
             } else {
                 i += punctuation_len(&b[i..]);
+                normalized = match &b[start..i] {
+                    b"%:%:" => Some("##"),
+                    b"%:" => Some("#"),
+                    b"<:" => Some("["),
+                    b":>" => Some("]"),
+                    b"<%" => Some("{"),
+                    b"%>" => Some("}"),
+                    _ => None,
+                };
             }
             let raw = text
                 .get(start..i)
                 .ok_or_else(|| token("", false).error("invalid UTF-8 token"))?;
-            let normalized = match raw {
-                "%:%:" => Some("##"),
-                "%:" => Some("#"),
-                "<:" => Some("["),
-                ":>" => Some("]"),
-                "<%" => Some("{"),
-                "%>" => Some("}"),
-                _ => None,
-            };
             let mut t = token(normalized.unwrap_or(raw), space);
             t.raw_spelling = normalized.map(|_| raw);
             out.push(t);
