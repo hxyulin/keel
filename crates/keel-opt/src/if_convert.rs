@@ -22,9 +22,13 @@ pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
         let Some(&term) = f.block_insts(head).last() else {
             continue;
         };
-        let D::Brif { cond, dests } = f.inst_data(term).clone() else {
+        let D::Brif { cond, dests } = f.inst_data(term) else {
             continue;
         };
+        let (cond, targets) = (*cond, [dests[0].block, dests[1].block]);
+        if dests.iter().any(|d| !d.args.is_empty()) {
+            continue;
+        }
         let mut source = f.resolve(cond);
         let mut nonzero = 0;
         if let ValueDef::Result(test, 0) = f.value_def(source)
@@ -37,10 +41,9 @@ pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
             source = f.resolve(a);
             nonzero = usize::from(cc == IntCC::Eq);
         }
-        let arms = [dests[nonzero].block, dests[1 - nonzero].block];
+        let arms = [targets[nonzero], targets[1 - nonzero]];
         if arms[0] == arms[1]
             || arms.contains(&head)
-            || dests.iter().any(|d| !d.args.is_empty())
             || arms
                 .iter()
                 .any(|&b| !f.block_params(b).is_empty() || f.block_insts(b).len() != 2)
@@ -68,11 +71,8 @@ pub(crate) fn fold_count_guards(f: &mut Function) -> bool {
         {
             continue;
         }
-        let jumps: Vec<_> = arms
-            .iter()
-            .map(|&b| f.inst_data(f.block_insts(b)[1]))
-            .collect();
-        let (D::Jump { dest: yes }, D::Jump { dest: no }) = (jumps[0], jumps[1]) else {
+        let jumps = arms.map(|b| f.inst_data(f.block_insts(b)[1]));
+        let [D::Jump { dest: yes }, D::Jump { dest: no }] = jumps else {
             continue;
         };
         if yes.block == head
