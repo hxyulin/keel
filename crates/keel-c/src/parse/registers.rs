@@ -6,10 +6,10 @@ impl<'a> Parser<'a> {
     pub(super) fn local_register_declaration(
         &self,
         spec: &DeclSpec<'a>,
-        d: &Declarator<'a>,
+        loc: Loc,
+        ty: &Ty<'a>,
         label: &str,
     ) -> R<keel_ir::PhysReg> {
-        let loc = d.name.expect("register declarator has a name").1;
         if !spec.register_storage || self.target != Target::X86_64LinuxGnu {
             return Err(Error::new(
                 loc,
@@ -33,7 +33,7 @@ impl<'a> Parser<'a> {
         {
             return Err(invalid());
         }
-        if !matches!(d.ty, Ty::Int(kind) if kind.size() <= 8) && !d.ty.is_ptr() {
+        if !matches!(ty, Ty::Int(kind) if kind.size() <= 8) && !ty.is_ptr() {
             return Err(Error::new(
                 loc,
                 "named register variable requires an integer of at most 64 bits or a pointer",

@@ -1577,7 +1577,6 @@ impl<'a> Parser<'a> {
             attrs.merge(d.attrs);
             let label = self.asm_label_and_attrs(&mut attrs)?;
             d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
-            d.attrs = attrs.clone();
             let Some((name, name_loc)) = d.name else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
@@ -1677,6 +1676,7 @@ impl<'a> Parser<'a> {
                 d.is_const || (spec.is_const && base) || d.sugar.is_const(&self.typedefs);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if file_scope && spec.register_storage {
+                d.attrs = attrs;
                 self.stack_pointer_declaration(spec, &d, label)?;
             } else if spec.storage == Storage::Typedef {
                 if attrs.nonstring {
@@ -1777,7 +1777,7 @@ impl<'a> Parser<'a> {
                 }
             } else if !file_scope && spec.storage == Storage::None {
                 let asm_register = label
-                    .map(|label| self.local_register_declaration(spec, &d, label))
+                    .map(|label| self.local_register_declaration(spec, name_loc, &d.ty, label))
                     .transpose()?;
                 let cleanup = attrs.cleanup.take();
                 if let Some((_, loc)) = cleanup
@@ -1893,6 +1893,7 @@ impl<'a> Parser<'a> {
                     None => Stmt::Declare(id),
                 });
             } else {
+                d.attrs = attrs;
                 self.object_declaration(spec, d, label, is_const, file_scope, inferred_init)?;
             }
             if spec.infer && self.is(",") {
@@ -3148,9 +3149,7 @@ impl<'a> Parser<'a> {
                 "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
                 "_Complex" => is_complex = true,
                 "__attribute__" | "__attribute" => {
-                    let mut attrs = spec.attrs.clone();
-                    self.attributes(&mut attrs)?;
-                    spec.attrs = attrs;
+                    self.attributes(&mut spec.attrs)?;
                     continue;
                 }
                 "_Alignas" => {
@@ -4180,7 +4179,7 @@ impl<'a> Parser<'a> {
             {
                 return Err(Error::new(loc, "invalid parameter storage class"));
             }
-            let mut attrs = spec.attrs.clone();
+            let mut attrs = spec.attrs;
             attrs.merge(d.attrs);
             self.attributes(&mut attrs)?;
             d.ty = self.apply_type_attrs(d.ty, &mut attrs)?;
