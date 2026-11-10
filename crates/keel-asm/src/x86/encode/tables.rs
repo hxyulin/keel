@@ -392,6 +392,41 @@ fn full_byte_pattern(n: i128, bytes: u16, size: u16) -> bool {
     bytes == 1 && size == 8 && (-256..=255).contains(&n)
 }
 
+const REGISTER: u8 = 1;
+const MEMORY: u8 = 2;
+const IMMEDIATE: u8 = 4;
+/// The operand classes a form operand can take, as [`matches_operand`] and
+/// the compatible spellings in [`match_form`] accept them.
+fn accepts(spec: IsaOperand) -> u8 {
+    match spec.kind {
+        "mem" | "mem_vsibx" | "mem_vsiby" | "agen" | "agen_norel" | "moffs" => MEMORY,
+        "imm" | "abs" | "rel" | "implicit_imm1" => IMMEDIATE,
+        "implicit_reg" => REGISTER,
+        kind if RegisterClass::from_isa_kind(kind).is_some() => REGISTER,
+        _ => REGISTER | MEMORY | IMMEDIATE,
+    }
+}
+fn class(o: &Operand) -> u8 {
+    match o {
+        R(_) => REGISTER,
+        M(_) => MEMORY,
+        I(_) => IMMEDIATE,
+    }
+}
+/// Whether `form` can take operands of these classes in order. [`match_form`]
+/// gives each operand, in order, to a form operand that accepts its class, so
+/// a form failing this cannot match. Mnemonics with many forms, such as
+/// `mov`, reject most of them here.
+fn may_match(form: &IsaForm, classes: &[u8]) -> bool {
+    let mut next = 0;
+    for &spec in form.operands {
+        if classes.get(next).is_some_and(|&c| accepts(spec) & c != 0) {
+            next += 1;
+        }
+    }
+    next == classes.len()
+}
+
 struct Choice<'a> {
     form: &'static IsaForm,
     size: u16,
@@ -1039,7 +1074,15 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
             || i.operands.iter().any(|o|matches!(o,R(r) if matches!(r.class,RegisterClass::Xmm|RegisterClass::Mmx|RegisterClass::Ymm)))){return Err("control requires an unsigned immediate".into());}
     // Validate the name once; form matching compares it many times.
     let name = d.name.as_str();
+    // `int3` matches before its operands, and the blend forms' implicit
+    // XMM0 operand has no form operand, so neither can be filtered.
+    let classes: SmallVec<[u8; 4]> = i.operands.iter().map(class).collect();
+    let filter = !matches!(i.opcode, Core(CoreOpcode::Int))
+        && !matches!(name, "blendvps" | "blendvpd" | "pblendvb");
     for f in mnemonics::forms(i.opcode, name) {
+        if filter && !may_match(f, &classes) {
+            continue;
+        }
         for p66 in [false, true] {
             for w in [false, true] {
                 if p66 && !has16 && f.sizes != 1 {
