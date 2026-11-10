@@ -315,6 +315,11 @@ pub(crate) static GCM: &dyn Pass = &BuiltinPass::new(
     "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
     |f, _| gcm::run(f),
 );
+pub(crate) static GCM_SIZE: &dyn Pass = &BuiltinPass::new(
+    "gcm-size",
+    "global code motion with constant branch arguments placed before adjacent comparisons",
+    |f, _| gcm::run_size(f),
+);
 pub(crate) static INSTCOMBINE: &dyn Pass = &BuiltinPass {
     requires_canonical: true,
     ..BuiltinPass::new(
@@ -434,6 +439,7 @@ pub static PASSES: &[&dyn Pass] = &[
     GVN,
     DCE,
     GCM,
+    GCM_SIZE,
     INSTCOMBINE,
     PHI_SIMPLIFY,
     MEMORY_FORWARD,
@@ -732,7 +738,7 @@ const SIZE_PARTS: &[&[&str]] = &[
     &RELEASE_ROUND_MEMORY,
     // Motion exposes equivalent computations for GVN. Restore local constant
     // and address copies afterward to avoid long-lived values and their spills.
-    &["gcm", "gvn", "gcm", "dce"],
+    &["gcm-size", "gvn", "gcm-size", "dce"],
     &RELEASE_EPILOGUE,
 ];
 

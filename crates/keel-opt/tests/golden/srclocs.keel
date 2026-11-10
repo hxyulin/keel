@@ -1,4 +1,4 @@
-; passes: gcm, const-fold
+; passes: gcm-size, const-fold
 ; Instructions keep their locations as passes move and fold them, and the
 ; copy of `v7` that gcm rematerializes in block2 takes its location along.
 file f0 = "loop.c"
@@ -23,4 +23,36 @@ block1(v3: i64, v4: i64):
 block2:
     v12 = iadd v6, v7 !f0:7:14
     return v12 !f0:7:5
+}
+
+; Copies and single-block moves must not split comparisons from branches.
+; The constants keep their own source lines when placed before the comparison.
+func @branch_arguments(i64, i64, i8) -> i64 {
+block0(v0: i64, v1: i64, v2: i8):
+    v3 = iconst.i64 0 !f0:10:5
+    v4 = iconst.i64 99 !f0:11:5
+    brif v2, block1, block4
+block1:
+    v5 = icmp.ult v0, v1 !f0:15:9
+    brif v5, block2(v3, v4), block3(v0) !f0:15:3
+block2(v6: i64, v7: i64):
+    v8 = iadd v6, v7
+    return v8
+block3(v9: i64):
+    v10 = iadd v9, v3
+    return v10
+block4:
+    return v3
+}
+
+func @float_branch_arguments(f64, f64) -> i64 {
+block0(v0: f64, v1: f64):
+    v2 = iconst.i64 0 !f0:20:5
+    v3 = iconst.i64 99 !f0:21:5
+    jump block1
+block1:
+    v4 = fcmp.lt v0, v1 !f0:25:9
+    brif v4, block2(v2), block2(v3) !f0:25:3
+block2(v5: i64):
+    return v5
 }

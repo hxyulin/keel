@@ -123,7 +123,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `phi-simplify` | Replace uniform block arguments with a dominating value |
 | `gvn` | Scoped hash table over the dominator tree; loads are never merged |
 | `dce` | Mark from pinned instructions; dead block parameters die with their arguments; lifetime markers stay only while another needed instruction addresses their slot |
-| `gcm` | Global code motion, the scheduler for floating instructions |
+| `gcm`, `gcm-size` | Global code motion; Size preserves adjacent compare/branch pairs when rematerializing branch arguments |
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
@@ -318,7 +318,9 @@ exceptions:
 - An instruction that stays in its block keeps its place, so chains of selects
   do not sink past calls and keep their conditions alive.
 - Instructions without operands (constants, addresses) are rematerialized in
-  each block that uses them, undoing GVN's function-wide merging.
+  each block that uses them, undoing GVN's function-wide merging. In
+  `gcm-size`, a copy supplying a branch argument goes before the adjacent
+  comparison so selection can keep the comparison and branch together.
 - A `ptradd` of a constant offset stays at the late placement instead of being
   hoisted out of loops, whatever its base. Selection folds the offset into
   loads and stores, while a hoisted address is one more pointer live across
@@ -332,8 +334,8 @@ exceptions:
   address keep the original, which is computed there anyway.
 
 Repeating GVN and GCM to a fixed point would undo this placement, so GCM runs
-last in each Full round. Size runs `gcm,gvn,gcm,dce` after its last scalar and
-memory round, before the shared release epilogue. The middle GVN merges
+last in each Full round. Size runs `gcm-size,gvn,gcm-size,dce` after its last
+scalar and memory round, before the shared release epilogue. The middle GVN merges
 equivalent computations exposed by motion; the second GCM restores local
 constant and address copies instead of leaving them live across the function.
 

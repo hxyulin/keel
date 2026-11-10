@@ -50,6 +50,14 @@ use keel_ir::{
 const NONE: u32 = u32::MAX;
 
 pub fn run(func: &mut Function) -> bool {
+    run_with_policy(func, false)
+}
+
+pub fn run_size(func: &mut Function) -> bool {
+    run_with_policy(func, true)
+}
+
+fn run_with_policy(func: &mut Function, preserve_branches: bool) -> bool {
     // An actual FLAGS observation cannot use the usual assumption that pure
     // arithmetic may freely cross pinned instructions. This is deliberately
     // function-wide until IR has explicit machine-FLAGS resource dependencies.
@@ -217,7 +225,13 @@ pub fn run(func: &mut Function) -> bool {
             continue;
         }
         if leaf {
-            changed |= rematerialize(func, inst, &inst_users, &mut groups);
+            changed |= rematerialize(
+                func,
+                inst,
+                &inst_users,
+                &mut groups,
+                preserve_branches,
+            );
             continue;
         }
 
@@ -401,7 +415,33 @@ struct Groups {
     members: Vec<(u32, Inst)>,
 }
 
-fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst], groups: &mut Groups) -> bool {
+/// Keep an adjacent comparison and branch together when supplying a constant
+/// edge argument. Operand-free materialization can precede either instruction;
+/// inserting it between them forces selection to materialize the boolean.
+fn rematerialization_point(func: &Function, user: Inst, preserve_branches: bool) -> InsertPoint {
+    if preserve_branches
+        && let InstData::Brif { cond, .. } = *func.inst_data(user)
+        && let ValueDef::Result(compare, _) = func.value_def(func.resolve(cond))
+        && matches!(
+            func.inst_data(compare),
+            InstData::Icmp { .. } | InstData::Fcmp { .. }
+        )
+    {
+        let insts = func.block_insts(func.inst_block(user));
+        if insts.len() >= 2 && insts[insts.len() - 2] == compare {
+            return InsertPoint::Before(compare);
+        }
+    }
+    InsertPoint::Before(user)
+}
+
+fn rematerialize(
+    func: &mut Function,
+    inst: Inst,
+    users: &[Inst],
+    groups: &mut Groups,
+    preserve_branches: bool,
+) -> bool {
     let result = func.first_result(inst);
     let home = func.inst_block(inst);
     let first_block = func.inst_block(users[0]);
@@ -416,7 +456,10 @@ fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst], groups: &mut G
         }
         let first =
             first_user(func, first_block, users.iter().copied()).expect("a user in its block");
-        func.move_inst(inst, InsertPoint::Before(first));
+        func.move_inst(
+            inst,
+            rematerialization_point(func, first, preserve_branches),
+        );
         return true;
     }
     // Group the users by block, blocks in order of first use and users in
@@ -446,7 +489,7 @@ fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst], groups: &mut G
         None => {
             let user =
                 first_user(func, blocks[0], users.iter().copied()).expect("a user in its block");
-            func.move_inst(inst, InsertPoint::Before(user));
+            func.move_inst(inst, rematerialization_point(func, user, preserve_branches));
             0
         }
     };
@@ -460,9 +503,11 @@ fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst], groups: &mut G
         if group == kept {
             continue;
         }
-        let first = first_user(func, block, local.iter().map(|&(_, user)| user))
-            .expect("a user in its block");
-        let copy = func.insert_inst(InsertPoint::Before(first), data.clone());
+        let first = first_user(func, block, local.iter().map(|&(_, user)| user)).expect("a user in its block");
+        let copy = func.insert_inst(
+            rematerialization_point(func, first, preserve_branches),
+            data.clone(),
+        );
         func.set_inst_loc(copy, func.inst_loc(inst));
         let copy = func.first_result(copy);
         for &(_, user) in local {

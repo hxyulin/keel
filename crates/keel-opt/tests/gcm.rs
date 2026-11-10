@@ -72,6 +72,74 @@ block2:
 }
 
 #[test]
+fn rematerialized_branch_arguments_preserve_comparisons_and_locations() {
+    use keel_ir::{InstData, ValueDef};
+    let mut module = keel_ir::parse(include_str!("golden/srclocs.keel")).unwrap();
+    for _ in 0..2 {
+        keel_opt::run_passes(&mut module, &["gcm-size", "const-fold"]).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        for name in ["branch_arguments", "float_branch_arguments"] {
+            let f = module.functions.iter().find(|f| f.name == name).unwrap();
+            for block in f.blocks() {
+                let insts = f.block_insts(block);
+                let branch = *insts.last().unwrap();
+                let InstData::Brif { cond, .. } = *f.inst_data(branch) else {
+                    continue;
+                };
+                let ValueDef::Result(compare, _) = f.value_def(f.resolve(cond)) else {
+                    continue;
+                };
+                assert_eq!(insts[insts.len() - 2], compare, "{f}");
+                assert_eq!(
+                    f.inst_loc(compare).unwrap().line,
+                    f.inst_loc(branch).unwrap().line
+                );
+            }
+            for (_, i) in f.layout_insts() {
+                if let InstData::Iconst { imm, .. } = f.inst_data(i) {
+                    let expected = if name == "branch_arguments" { 10 } else { 20 };
+                    assert_eq!(
+                        f.inst_loc(i).unwrap().line,
+                        expected + u32::from(*imm == 99)
+                    );
+                }
+            }
+        }
+        let f = module
+            .functions
+            .iter()
+            .find(|f| f.name == "branch_arguments")
+            .unwrap();
+        for a in [0, 1, u64::MAX] {
+            for b in [0, 1, u64::MAX] {
+                for gate in [0, 1, 255] {
+                    let expected = if gate == 0 {
+                        0
+                    } else if a < b {
+                        99
+                    } else {
+                        a
+                    };
+                    assert_eq!(execute(f, &[a, b, gate]), expected);
+                }
+            }
+        }
+        let f = module
+            .functions
+            .iter()
+            .find(|f| f.name == "float_branch_arguments")
+            .unwrap();
+        for a in [f64::NEG_INFINITY, -0.0, 1.0, f64::INFINITY, f64::NAN] {
+            for b in [f64::NEG_INFINITY, 0.0, 1.0, f64::INFINITY, f64::NAN] {
+                let args = [keel_ir_interp::Val::f64(a), keel_ir_interp::Val::f64(b)];
+                let result = keel_ir_interp::Interpreter::for_function(f).call(&f.name, &args);
+                assert_eq!(support::first_result(result, f), if a < b { 0 } else { 99 });
+            }
+        }
+    }
+}
+
+#[test]
 fn shared_users_of_both_overflow_results_are_scheduled_once() {
     let source = "func @f(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):
