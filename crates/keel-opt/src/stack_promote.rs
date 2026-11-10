@@ -17,24 +17,32 @@ const BLOCK_LIMIT: usize = 256;
 const INST_LIMIT: usize = 8192;
 
 pub fn run(f: &mut Function) -> bool {
-    let changed = promote_private(f);
+    let changed = promote_private(f, false);
     crate::stack_cache::promote(f) || changed
 }
 
-fn promote_private(f: &mut Function) -> bool {
+/// Prune dead incoming values before admitting larger release functions.
+pub fn run_large(f: &mut Function) -> bool {
+    let changed = promote_private(f, true);
+    crate::stack_cache::promote(f) || changed
+}
+
+fn promote_private(f: &mut Function, large: bool) -> bool {
     if f.stack_slots().next().is_none() {
         return false;
     }
-    let blocks: Vec<_> = f.blocks().take(BLOCK_LIMIT + 1).collect();
-    if blocks.is_empty() || blocks.len() > BLOCK_LIMIT {
+    let block_limit = if large { 8192 } else { BLOCK_LIMIT };
+    let inst_limit = if large { 262144 } else { INST_LIMIT };
+    let blocks: Vec<_> = f.blocks().take(block_limit + 1).collect();
+    if blocks.is_empty() || blocks.len() > block_limit {
         return false;
     }
     let insts: Vec<_> = f
         .layout_insts()
-        .take(INST_LIMIT + 1)
+        .take(inst_limit + 1)
         .map(|(_, i)| i)
         .collect();
-    if insts.len() > INST_LIMIT {
+    if insts.len() > inst_limit {
         return false;
     }
     if insts.iter().any(|&i| match f.inst_data(i) {
@@ -138,7 +146,7 @@ fn promote_private(f: &mut Function) -> bool {
             }
         });
     }
-    if fields.len() > 64 {
+    if !large && fields.len() > 64 {
         return false;
     }
     // A repeated byte has the same representation at every offset on either
@@ -160,7 +168,7 @@ fn promote_private(f: &mut Function) -> bool {
     for (&i, &field) in &accesses {
         by_slot.entry(field.0).or_default().push((i, field));
     }
-    let eligible: Vec<_> = fields
+    let mut eligible: Vec<_> = fields
         .iter()
         .copied()
         .filter(|&(slot, offset, ty)| {
@@ -179,6 +187,16 @@ fn promote_private(f: &mut Function) -> bool {
             })
         })
         .collect();
+    if large && (blocks.len() > BLOCK_LIMIT || insts.len() > INST_LIMIT || fields.len() > 64) {
+        let mut traffic = FxHashMap::<Field, usize>::default();
+        for field in accesses.values() {
+            *traffic.entry(*field).or_default() += 1;
+        }
+        eligible.sort_by_key(|field| std::cmp::Reverse(traffic[field]));
+        // Cap the number of field-by-CFG analyses, after excluding escaped
+        // and overlapping fields. Traffic ties retain instruction order.
+        eligible.truncate(32);
+    }
     let mut changed = false;
     let mut retained_initializers = FxHashSet::default();
     for field in eligible {
@@ -251,9 +269,38 @@ fn promote_private(f: &mut Function) -> bool {
         if !valid {
             continue;
         }
+        let mut live = vec![!large; f.num_blocks()];
+        if large {
+            // A store or lifetime start kills the incoming value. Propagate
+            // a read-before-kill back only through blocks that do not kill it;
+            // unused fields need no block arguments, even across cycles.
+            let mut killed = vec![false; f.num_blocks()];
+            let mut work = Vec::new();
+            for &b in &blocks {
+                for &i in &relevant_insts[b.index()] {
+                    match f.inst_data(i) {
+                        InstData::Load { .. } if !killed[b.index()] => live[b.index()] = true,
+                        InstData::Store { .. } => killed[b.index()] = true,
+                        _ if start(i) => killed[b.index()] = true,
+                        _ => {}
+                    }
+                }
+                if live[b.index()] {
+                    work.push(b);
+                }
+            }
+            while let Some(b) = work.pop() {
+                for &pred in cfg.preds(b) {
+                    if !killed[pred.index()] && !live[pred.index()] {
+                        live[pred.index()] = true;
+                        work.push(pred);
+                    }
+                }
+            }
+        }
         let mut incoming = vec![None; f.num_blocks()];
         for &b in &blocks {
-            if initialized[b.index()] {
+            if initialized[b.index()] && live[b.index()] {
                 incoming[b.index()] = Some(f.append_block_param(b, field.2));
             }
         }

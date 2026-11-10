@@ -385,6 +385,19 @@ pub(crate) static STACK_PROMOTE: &dyn Pass = &BuiltinPass::new(
     "promote initialized disjoint private stack fields to loop SSA",
     |f, _| stack_promote::run(f),
 );
+pub(crate) static STACK_PROMOTE_LARGE: &dyn Pass = &BuiltinPass::new(
+    "stack-promote-large",
+    "promote initialized private fields with pruned SSA and larger CFG budgets",
+    |f, _| stack_promote::run_large(f),
+);
+pub(crate) static STACK_PROMOTE_BALANCED: &dyn Pass = &BuiltinPass::new(
+    "stack-promote-balanced",
+    "use measured native budgets for private stack-field promotion",
+    |f, context| match context.target {
+        VectorTarget::Aarch64Neon => stack_promote::run_large(f),
+        VectorTarget::X86Sse2 | VectorTarget::Portable => stack_promote::run(f),
+    },
+);
 pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
     "if-convert",
     "convert bounded nontrapping scalar diamonds to selects (opt-in)",
@@ -459,6 +472,8 @@ pub static PASSES: &[&dyn Pass] = &[
     STACK_FORWARD,
     CALL_CONTRACTS,
     STACK_PROMOTE,
+    STACK_PROMOTE_LARGE,
+    STACK_PROMOTE_BALANCED,
     IF_CONVERT,
     LOAD_REUSE,
     LOOP_ROTATE,
@@ -681,14 +696,18 @@ const RELEASE_ROUND_SCALAR: [&str; 6] = [
     "simplify-cfg",
     "gvn",
 ];
-const RELEASE_ROUND_MEMORY: [&str; 6] = [
-    "stack-forward",
-    "stack-notrap",
-    "load-reuse",
-    "stack-promote",
-    "phi-simplify",
-    "dce",
-];
+const fn release_round_memory(promote: &'static str) -> [&'static str; 6] {
+    [
+        "stack-forward",
+        "stack-notrap",
+        "load-reuse",
+        promote,
+        "phi-simplify",
+        "dce",
+    ]
+}
+const BALANCED_ROUND_MEMORY: [&str; 6] = release_round_memory("stack-promote-balanced");
+const SIZE_ROUND_MEMORY: [&str; 6] = release_round_memory("stack-promote-large");
 /// Known-bit, call and reachability cleanup closing Balanced and Size.
 const RELEASE_EPILOGUE: [&str; 13] = [
     "constant-args",
@@ -716,13 +735,13 @@ const BALANCED_PARTS: &[&[&str]] = &[
     &["inline-noninterposable"],
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
-    &RELEASE_ROUND_MEMORY,
+    &BALANCED_ROUND_MEMORY,
     &["inline-noninterposable"],
     &RELEASE_ROUND_SCALAR,
-    &RELEASE_ROUND_MEMORY,
+    &BALANCED_ROUND_MEMORY,
     &["inline-noninterposable"],
     &RELEASE_ROUND_SCALAR,
-    &RELEASE_ROUND_MEMORY,
+    &BALANCED_ROUND_MEMORY,
     &RELEASE_EPILOGUE,
     &["terminal-merge"],
 ];
@@ -740,15 +759,15 @@ const SIZE_PARTS: &[&[&str]] = &[
     &["known-bits"],
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
-    &RELEASE_ROUND_MEMORY,
+    &SIZE_ROUND_MEMORY,
     &["inline-size"],
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
-    &RELEASE_ROUND_MEMORY,
+    &SIZE_ROUND_MEMORY,
     &["inline-size"],
     &RELEASE_ROUND_SCALAR,
     &["small-memory"],
-    &RELEASE_ROUND_MEMORY,
+    &SIZE_ROUND_MEMORY,
     // Motion exposes equivalent computations for GVN. Restore local constant
     // and address copies afterward to avoid long-lived values and their spills.
     &["gcm-size", "gvn", "gcm-size", "dce"],

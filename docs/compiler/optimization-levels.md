@@ -36,6 +36,10 @@ reducing register copies. Preferences do not admit reserved registers or bypass
 liveness and call-clobber checks. `-O2` retains its existing copy preferences.
 See the [allocation and scheduling contracts](design.md#register-allocation).
 
+Size and AArch64 Balanced promote private stack fields with pruned SSA: a field
+gets a block parameter only where its incoming value is live. This lets the
+release policy admit larger inlined functions within its field-analysis budget.
+Balanced x86 and Portable retain the smaller promotion bounds.
 Balanced omits GCM, whose placement after stack promotion regressed Lua
 dispatch. The exact pass lists are `OptimizationTier::pipeline`,
 `BALANCED_PIPELINE`, `SIZE_PIPELINE`, `FULL_ROUND` and `FULL_EPILOGUE` in
@@ -43,7 +47,7 @@ dispatch. The exact pass lists are `OptimizationTier::pipeline`,
 each pass's contract. The Basic tier, available through `--opt-tier basic`,
 runs scalar CFG and combining cleanup without inlining. Fast and Basic expand
 constant memory copies and fills of at most 128 bytes into loads and stores;
-Balanced and Full expand at most 32 bytes, and None and Size none.
+Balanced, Size and Full expand at most 32 bytes; None leaves them unchanged.
 
 These are Keel policies, not the GCC or Clang pass lists, and more effort does
 not guarantee a faster executable. Inlining and loop expansion remove call and

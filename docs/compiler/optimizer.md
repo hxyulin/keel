@@ -127,6 +127,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `constant-data` | Fold scalar reads from bounded local immutable initializers |
 | `terminal-merge` | Share equivalent terminal blocks with matching external inputs and nonescaping local definitions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
+| `stack-promote-large` | Promote private fields with pruned SSA and larger release budgets |
+| `stack-promote-balanced` | Select native promotion budgets for Balanced |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
 | `fast-loop-dot` | Full-tier SIMD dot, sum-of-squares and squared-distance accumulation, only in `fast_math` functions |
@@ -661,10 +663,22 @@ A start of the slot uninitializes it, so a load after a start needs a store
 after that start. An end changes nothing.
 Promoted fields become block parameters, and a store is removed only when no
 overlapping read stays in memory. Limits are 256 blocks, 8192 instructions and
-64 fields. Full also admits a suffix after the entry block's last memory
+64 fields. Size uses `stack-promote-large`: up to 8192 laid-out
+blocks and 262144 instructions. Functions outside the smaller limits consider
+at most 32 eligible fields, ordered by access count with ties in instruction
+order. Escaped and overlapping fields do not consume that candidate budget.
+It adds block arguments only where a field is live on entry, propagating needs
+backward through blocks without a defining store or lifetime start. The
+initialization, aliasing and observation proofs are the same in both policies.
+Balanced uses `stack-promote-balanced`: the larger policy on AArch64 and the
+smaller policy on x86 and Portable. Promotion can trade stack traffic for
+register pressure and edge copies; the target choice preserves Balanced's
+runtime gates.
+
+Both policies also admit a suffix after the entry block's last memory
 barrier when later loads derive from incoming pointer parameters: fresh reads
 after the barrier seed the SSA values. Follow the pass with
-`phi-simplify,dce`. Balanced, Size and Full run it.
+`phi-simplify,dce`. Full retains the smaller policy.
 
 `stack-promote` also promotes integer and pointer fields of an object passed
 to an entry-block initializer call. It seeds them from memory after the last

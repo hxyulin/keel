@@ -2,9 +2,12 @@ mod support;
 use keel_ir::{Function, InstData as D, Type};
 
 fn optimize(src: &str) -> keel_ir::Module {
+    optimize_with_pass(src, "stack-promote")
+}
+fn optimize_with_pass(src: &str, pass: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(src).unwrap();
     keel_ir::verify_module(&m).unwrap();
-    keel_opt::run_passes(&mut m, &["stack-promote"]).unwrap();
+    keel_opt::run_passes(&mut m, &[pass]).unwrap();
     keel_ir::verify_module(&keel_ir::parse(&m.to_string()).unwrap()).unwrap();
     m
 }
@@ -567,4 +570,126 @@ fn split_initializer_constants_keep_source_location_and_scope() {
             imm: 0x8080_8080_u32 as i32 as i64
         }
     );
+}
+
+fn large_switch() -> String {
+    let mut source = String::from(
+        "func @f(i64) -> i64 {\nss0 = stack_slot 8, align 8\nblock0(v0:i64):\n v1=stack_addr ss0\n v2=iconst.i64 0\n store v2,v1\n switch v0, block259, [",
+    );
+    for i in 1..=257 {
+        if i > 1 {
+            source.push_str(", ");
+        }
+        source.push_str(&format!("{i}: block{i}"));
+    }
+    source.push_str("]\n");
+    for i in 1..=257 {
+        source.push_str(&format!(
+            "block{i}:\n v{}=iconst.i64 {}\n store v{},v1\n jump block258\n",
+            1000 + i,
+            i * 17,
+            1000 + i,
+        ));
+    }
+    source.push_str("block259:\n jump block258\nblock258:\n v2000=load.i64 v1\n return v2000\n}\n");
+    source
+}
+
+#[test]
+fn large_promotion_prunes_values_killed_on_entry_and_preserves_duplicate_edges() {
+    let source = large_switch().replace("257: block257]", "257: block257, 258: block257]");
+    let bounded = optimize(&source);
+    assert_eq!(memory(&bounded.functions[0]), 259);
+    let promoted = optimize_with_pass(&source, "stack-promote-large");
+    let f = &promoted.functions[0];
+    assert_eq!(memory(f), 0);
+    // Only the common return and the default path need the incoming field.
+    assert_eq!(
+        f.blocks().map(|b| f.block_params(b).len()).sum::<usize>(),
+        3
+    );
+    for n in [0, 1, 42, 257, 258, 259, u64::MAX] {
+        let want = if (1..=258).contains(&n) {
+            n.min(257) * 17
+        } else {
+            0
+        };
+        assert_eq!(support::execute(f, &[n]), want);
+    }
+}
+
+#[test]
+fn large_promotion_retains_initialization_lifetime_and_escape_proofs() {
+    let source = large_switch();
+    for negative in [
+        source.replace(" store v2,v1", ""),
+        source.replace(" store v2,v1", " store volatile v2,v1"),
+        format!(
+            "decl @capture(ptr)\n{}",
+            source.replace(" store v2,v1", " call @capture(v1)\n store v2,v1")
+        ),
+        source.replace("block259:\n", "block259:\n intrinsic lifetime_start(v1)\n"),
+        source.replace("func @f(i64) -> i64 {", "func @f(i64) -> i64 optnone {"),
+    ] {
+        let before = keel_ir::parse(&negative).unwrap();
+        let after = optimize_with_pass(&negative, "stack-promote-large");
+        assert_eq!(before.to_string(), after.to_string());
+    }
+}
+
+#[test]
+fn large_promotion_preserves_values_live_through_conditional_updates() {
+    let mut source = String::from(
+        "func @f(i64,i64) -> i64 {\nss0=stack_slot 8, align 8\nblock0(v0:i64,v1:i64):\n v2=stack_addr ss0\n v3=iconst.i64 0\n store v3,v2\n jump block1\n",
+    );
+    for i in 1..=257 {
+        let n = 1000 + i * 5;
+        source.push_str(&format!(
+            "block{i}:\n v{n}=load.i64 v2\n v{}=iadd v{n},v1\n store v{},v2\n",
+            n + 1,
+            n + 1
+        ));
+        if i == 257 {
+            source.push_str(" jump block258\n");
+        } else {
+            source.push_str(&format!(
+                " v{}=iconst.i64 {i}\n v{}=icmp.ugt v0,v{}\n brif v{},block{},block258\n",
+                n + 2,
+                n + 3,
+                n + 2,
+                n + 3,
+                i + 1
+            ));
+        }
+    }
+    source.push_str("block258:\n v9000=load.i64 v2\n return v9000\n}\n");
+    let promoted = optimize_with_pass(&source, "stack-promote-large");
+    assert_eq!(memory(&promoted.functions[0]), 0);
+    for n in [0u64, 1, 2, 256, 257, 258, u64::MAX] {
+        for seed in [0u64, 1, u64::MAX] {
+            let want = n.clamp(1, 257).wrapping_mul(seed);
+            assert_eq!(support::execute(&promoted.functions[0], &[n, seed]), want);
+        }
+    }
+}
+
+#[test]
+fn balanced_promotion_keeps_target_speed_policies() {
+    for target in [
+        keel_opt::VectorTarget::Portable,
+        keel_opt::VectorTarget::X86Sse2,
+        keel_opt::VectorTarget::Aarch64Neon,
+    ] {
+        let mut module = keel_ir::parse(&large_switch()).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["stack-promote-balanced"], target).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(
+            memory(&module.functions[0]),
+            if target == keel_opt::VectorTarget::Aarch64Neon {
+                0
+            } else {
+                259
+            },
+        );
+    }
 }
