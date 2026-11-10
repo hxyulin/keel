@@ -217,7 +217,7 @@ pub fn run(func: &mut Function) -> bool {
             continue;
         }
         if leaf {
-            changed |= rematerialize(func, inst, &inst_users, &membership, &mut groups);
+            changed |= rematerialize(func, inst, &inst_users, &mut groups);
             continue;
         }
 
@@ -225,14 +225,7 @@ pub fn run(func: &mut Function) -> bool {
         if let Some(offset) = offset
             && fixed_base(func, inst, &early)
         {
-            changed |= split_accesses(
-                func,
-                inst,
-                offset,
-                &mut inst_users,
-                &mut membership,
-                &mut marks,
-            );
+            changed |= split_accesses(func, inst, offset, &mut inst_users, &mut marks);
         }
         let mut late = func.inst_block(inst_users[0]);
         for &user in &inst_users[1..] {
@@ -258,7 +251,7 @@ pub fn run(func: &mut Function) -> bool {
         if best == func.inst_block(inst) {
             continue;
         }
-        let at = match first_user_in(func, best, inst, &membership) {
+        let at = match first_user(func, best, inst_users.iter().copied()) {
             Some(user) => InsertPoint::Before(user),
             None => InsertPoint::Before(*func.block_insts(best).last().unwrap()),
         };
@@ -332,13 +325,12 @@ fn folds_offset(func: &Function, user: Inst, address: Value, k: i64) -> bool {
 /// user of `inst` keeps `inst`: it is computed there anyway, and a copy would
 /// only lengthen the base's life. With no other users, `inst` keeps one access,
 /// in its own block if it has one there. Removes the copied accesses from
-/// `users` and `membership`, and returns whether there were any.
+/// `users`, and returns whether there were any.
 fn split_accesses(
     func: &mut Function,
     inst: Inst,
     offset: Inst,
     users: &mut Scratch<Inst>,
-    membership: &mut [u32],
     marks: &mut [u32],
 ) -> bool {
     let address = func.first_result(inst);
@@ -391,7 +383,6 @@ fn split_accesses(
             InstData::Load { addr, .. } | InstData::Store { addr, .. } => *addr = copy,
             _ => unreachable!("an access"),
         }
-        membership[user.index()] = NONE;
         false
     });
     true
@@ -410,13 +401,7 @@ struct Groups {
     members: Vec<(u32, Inst)>,
 }
 
-fn rematerialize(
-    func: &mut Function,
-    inst: Inst,
-    users: &[Inst],
-    membership: &[u32],
-    groups: &mut Groups,
-) -> bool {
+fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst], groups: &mut Groups) -> bool {
     let result = func.first_result(inst);
     let home = func.inst_block(inst);
     let first_block = func.inst_block(users[0]);
@@ -430,7 +415,7 @@ fn rematerialize(
             return false;
         }
         let first =
-            first_user_in(func, first_block, inst, membership).expect("a user in its block");
+            first_user(func, first_block, users.iter().copied()).expect("a user in its block");
         func.move_inst(inst, InsertPoint::Before(first));
         return true;
     }
@@ -460,7 +445,7 @@ fn rematerialize(
         Some(i) => i,
         None => {
             let user =
-                first_user_in(func, blocks[0], inst, membership).expect("a user in its block");
+                first_user(func, blocks[0], users.iter().copied()).expect("a user in its block");
             func.move_inst(inst, InsertPoint::Before(user));
             0
         }
@@ -475,7 +460,8 @@ fn rematerialize(
         if group == kept {
             continue;
         }
-        let first = first_user_in(func, block, inst, membership).expect("a user in its block");
+        let first = first_user(func, block, local.iter().map(|&(_, user)| user))
+            .expect("a user in its block");
         let copy = func.insert_inst(InsertPoint::Before(first), data.clone());
         func.set_inst_loc(copy, func.inst_loc(inst));
         let copy = func.first_result(copy);
@@ -493,19 +479,18 @@ fn rematerialize(
     changed
 }
 
-/// The first instruction in `block`, in layout order, among `users`.
-fn first_user_in(
+/// The first instruction in `block`, in layout order, among `users`. Asks
+/// for the positions of the few users there rather than scanning the block,
+/// which grows as instructions are hoisted into it.
+fn first_user(
     func: &Function,
     block: Block,
-    producer: Inst,
-    membership: &[u32],
+    users: impl IntoIterator<Item = Inst>,
 ) -> Option<Inst> {
-    func.block_insts(block)
-        .iter()
-        .copied()
-        // Rematerialization creates new instructions after the membership
-        // array was built; they cannot be users of an original instruction.
-        .find(|inst| membership.get(inst.index()) == Some(&(producer.index() as u32)))
+    users
+        .into_iter()
+        .filter(|&user| func.inst_block(user) == block)
+        .min_by_key(|&user| func.inst_index(user))
 }
 
 #[cfg(test)]
