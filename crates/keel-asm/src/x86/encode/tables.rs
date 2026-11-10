@@ -979,8 +979,15 @@ fn emit<'a>(
     }
     // LLVM/GAS canonicalize operand size before F2/F3, and LOCK after the
     // segment/address/operand-size prefixes. Fixup offsets are unchanged.
+    // Only the leading prefix bytes are searched: ModRM, displacement and
+    // immediate bytes can spell the same pair.
+    let prefixes = (e.bytes.iter())
+        .take_while(|&&b| matches!(b, 0x9b | 0xf0 | 0xf2 | 0xf3 | 0x64..=0x67))
+        .count();
     if (prefix == 0xf2 || prefix == 0xf3)
-        && let Some(p) = e.bytes.windows(2).position(|p| p == [prefix, 0x66])
+        && let Some(p) = e.bytes[..prefixes]
+            .windows(2)
+            .position(|p| p == [prefix, 0x66])
     {
         e.bytes.swap(p, p + 1);
     }

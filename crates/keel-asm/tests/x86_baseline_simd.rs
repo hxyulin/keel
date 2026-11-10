@@ -481,6 +481,21 @@ fn pextrw_baseline_and_sse4_form_routing() {
 }
 
 #[test]
+fn mandatory_prefix_order_ignores_operand_bytes() {
+    // F3 66 in ModRM, displacement or immediate bytes is not a prefix pair.
+    let source = ".intel_syntax noprefix\n.text\npshufhw xmm6, xmm3, 0x66\n\
+                  movss xmm0, dword ptr [rax + 0x66f3]\nrep movsw\n";
+    assert_eq!(
+        text(&assemble_object(source).unwrap()),
+        [
+            0xf3, 0x0f, 0x70, 0xf3, 0x66, // pshufhw
+            0xf3, 0x0f, 0x10, 0x80, 0xf3, 0x66, 0x00, 0x00, // movss
+            0x66, 0xf3, 0xa5, // rep movsw
+        ]
+    );
+}
+
+#[test]
 fn xed_negative_typed_operand_shapes() {
     for s in [
         "movq mm0,mm1",
