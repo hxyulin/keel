@@ -1878,6 +1878,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 // Each parameter's expansion, made on its first unpasted use.
                 let mut expanded = Vec::new();
                 let mut body = Vec::new();
+                let mut operators = Vec::new();
                 let mut j = 0;
                 while j < m.body.len() {
                     let b = &m.body[j];
@@ -1886,7 +1887,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             .iter()
                             .position(|p| p == &m.body[j + 1].text)
                             .unwrap();
-                        body.push((b.with_text(self.arena, quote(&spelling(&args[p]))), false));
+                        body.push(b.with_text(self.arena, quote(&spelling(&args[p]))));
                         j += 2;
                         continue;
                     }
@@ -1900,12 +1901,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             .is_some_and(|t| Some(&t.text) == params.last())
                     {
                         if !omitted {
-                            body.push((*b, false));
-                            body.extend(
-                                self.expand(args.last().unwrap().clone(), depth + 1)?
-                                    .into_iter()
-                                    .map(|t| (t, false)),
-                            );
+                            body.push(*b);
+                            body.extend(self.expand(args.last().unwrap().clone(), depth + 1)?);
                         }
                         j += 3;
                         continue;
@@ -1913,8 +1910,14 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     if let Some(p) = params.iter().position(|p| *p == b.text) {
                         let paste = (j > 0 && m.body[j - 1].text == "##")
                             || m.body.get(j + 1).is_some_and(|t| t.text == "##");
-                        let mut value = if paste {
-                            args[p].clone()
+                        // Argument tokens spelling ## are ordinary tokens,
+                        // never operators in this replacement list.
+                        let start = body.len();
+                        if paste {
+                            body.extend_from_slice(&args[p]);
+                            if body.len() == start {
+                                body.push(b.with_text(self.arena, ""));
+                            }
                         } else {
                             if expanded.is_empty() {
                                 expanded.resize_with(params.len(), || None);
@@ -1922,29 +1925,29 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             if expanded[p].is_none() {
                                 expanded[p] = Some(self.expand(args[p].clone(), depth + 1)?);
                             }
-                            expanded[p].clone().unwrap_or_default()
-                        };
-                        if value.is_empty() && paste {
-                            value.push(b.with_text(self.arena, ""));
+                            body.extend_from_slice(expanded[p].as_deref().unwrap_or_default());
                         }
-                        if let Some(first) = value.first_mut() {
+                        if let Some(first) = body.get_mut(start) {
                             first.space = b.space;
                         }
-                        // Argument tokens spelling ## are ordinary tokens,
-                        // never operators in this replacement list.
-                        body.extend(value.into_iter().map(|t| (t, false)));
                     } else {
-                        body.push((*b, b.text == "##"));
+                        if b.text == "##" {
+                            operators.push(body.len());
+                        }
+                        body.push(*b);
                     }
                     j += 1;
                 }
                 let hide = hide_intersection(self.arena, t.hide, input[end - 1].hide);
-                (end, self.paste(body)?, hide)
+                (end, self.paste(body, &operators)?, hide)
             } else {
                 (
                     1,
                     if m.has_paste {
-                        self.paste(m.body.iter().map(|t| (*t, t.text == "##")).collect())?
+                        let operators: Vec<usize> = (m.body.iter().enumerate())
+                            .filter_map(|(i, t)| (t.text == "##").then_some(i))
+                            .collect();
+                        self.paste(m.body.to_vec(), &operators)?
                     } else {
                         m.body.to_vec()
                     },
@@ -1970,15 +1973,28 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         }
         Ok(out)
     }
-    fn paste(&self, body: Vec<(Token<'a>, bool)>) -> Result<Vec<Token<'a>>, Diagnostic> {
-        let mut out: Vec<Token<'a>> = Vec::new();
-        let mut body = body.into_iter();
-        while let Some((t, operator)) = body.next() {
-            if operator {
+    /// Applies the `##` operators at the ascending `operators` indices of
+    /// `body`. Only pasting creates empty placemarker tokens.
+    fn paste(
+        &self,
+        body: Vec<Token<'a>>,
+        operators: &[usize],
+    ) -> Result<Vec<Token<'a>>, Diagnostic> {
+        if operators.is_empty() {
+            debug_assert!(body.iter().all(|t| !t.text.is_empty()));
+            return Ok(body);
+        }
+        let mut out: Vec<Token<'a>> = Vec::with_capacity(body.len());
+        let mut operators = operators.iter().copied().peekable();
+        let mut body = body.into_iter().enumerate();
+        while let Some((i, t)) = body.next() {
+            // An operator consumed as a right operand is an ordinary token.
+            while operators.next_if(|&k| k < i).is_some() {}
+            if operators.next_if_eq(&i).is_some() {
                 let left = out
                     .pop()
                     .ok_or_else(|| t.error("missing left operand to ##"))?;
-                let (right, _) = body
+                let (_, right) = body
                     .next()
                     .ok_or_else(|| t.error("missing right operand to ##"))?;
                 let text = format!(
