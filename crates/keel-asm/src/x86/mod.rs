@@ -807,9 +807,10 @@ struct Items {
     parsed: usize,
     source_validation: bool,
     source_features: Option<x86::Features>,
-    /// Byte ranges in `encoded` of symbol-free instructions already encoded.
-    /// Permissions are checked before lookup; the bytes depend only on the
-    /// instruction value, including its selected encoding form.
+    /// Byte ranges in `encoded` of symbol-free instructions already encoded,
+    /// keyed before EVEX promotion. Every entry passed the feature check; the
+    /// bytes depend only on the instruction value, including its selected
+    /// encoding form.
     encodings: FxHashMap<x86::Instruction, (u32, u32)>,
 }
 impl Items {
@@ -990,8 +991,22 @@ impl Items {
         };
         self.push(entry);
     }
-    fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
-        let promoted = promoted_instruction(i);
+    fn x86_instruction(&mut self, source: &x86::Instruction, line: usize) {
+        // An identical instruction passed the feature check under the same
+        // target features. A scoped source can only narrow them, so only
+        // there does a cached instruction need its promotion and check again.
+        let concrete = self.metrics.is_none() && concrete_operands(source);
+        if concrete
+            && self.source_features.is_none()
+            && self.unsupported.is_none()
+            && let Some(&(start, end)) = self.encodings.get(source)
+        {
+            self.encoded
+                .extend_from_within(start as usize..end as usize);
+            self.extend_run(line);
+            return;
+        }
+        let promoted = promoted_instruction(source);
         let i = promoted.as_ref();
         self.check_features(i, line);
         if let Some(instructions) = &mut self.metrics {
@@ -1003,8 +1018,9 @@ impl Items {
             });
             return;
         }
-        if self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(i)
+        if concrete
+            && self.unsupported.is_none()
+            && let Some(&(start, end)) = self.encodings.get(source)
         {
             self.encoded
                 .extend_from_within(start as usize..end as usize);
@@ -1014,7 +1030,7 @@ impl Items {
         let start = index32(self.encoded.len());
         if self.encode(i, line) {
             let end = index32(self.encoded.len());
-            self.encodings.insert(i.clone(), (start, end));
+            self.encodings.insert(source.clone(), (start, end));
         } else {
             let index = self.symbolic.push(i, &mut self.symbols);
             self.push(Entry::Symbolic {
