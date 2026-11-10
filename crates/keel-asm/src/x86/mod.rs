@@ -1496,7 +1496,10 @@ impl Items {
             }),
         }
     }
-    fn finish(self) -> Result<Self, Error> {
+    fn finish(mut self) -> Result<Self, Error> {
+        // Layout encodes no new symbol-free instruction.
+        self.encodings = FxHashMap::default();
+        self.templates = FxHashMap::default();
         self.locals.finish()?;
         self.features
             .validate()
