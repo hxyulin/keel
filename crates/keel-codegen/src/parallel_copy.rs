@@ -21,8 +21,9 @@
 //! One temporary is enough: a chain made by step 2 always has a ready move,
 //! so step 1 drains it (freeing the temporary) before step 2 runs again.
 
+use keel_ir::fxhash::FxHashMap as HashMap;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::hash::Hash;
 
 /// Copies up to this size check for independence pairwise, which needs no
@@ -65,7 +66,8 @@ pub fn sequentialize<L: Copy + Eq + Hash>(moves: &[(L, L)], temp: L) -> Vec<(L, 
     let pending: Vec<(L, L)> = moves.iter().copied().filter(|(d, s)| d != s).collect();
 
     // Number the locations, and record each one's writer and readers.
-    let mut ids: HashMap<L, usize> = HashMap::with_capacity(2 * pending.len());
+    let mut ids: HashMap<L, usize> =
+        HashMap::with_capacity_and_hasher(2 * pending.len(), Default::default());
     let mut writer: Vec<Option<usize>> = Vec::new();
     let mut readers: Vec<Vec<usize>> = Vec::new();
     let mut id = |loc: L, writer: &mut Vec<Option<usize>>, readers: &mut Vec<Vec<usize>>| {

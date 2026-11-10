@@ -649,8 +649,11 @@ pub(crate) fn validate_vector_width_per_function(
             })
             .collect()
     }
-    let mut references: keel_ir::fxhash::FxHashSet<&str> =
-        module.functions.iter().flat_map(referenced).collect();
+    // Only `alwaysinline` declarations and callees consult the reference sets.
+    let mut references = keel_ir::fxhash::FxHashSet::default();
+    if module.decls.iter().any(|decl| decl.attrs.alwaysinline) {
+        references.extend(module.functions.iter().flat_map(referenced));
+    }
     for data in &module.data {
         if let Some(initializer) = &data.init {
             references.extend(initializer.items.iter().filter_map(|item| match item {
@@ -703,10 +706,17 @@ pub(crate) fn validate_vector_width_per_function(
     for f in &module.functions {
         let caller_maximum = maximum(&f.name, &f.attrs)?;
         check_signature(&f.name, &f.sig, caller_maximum)?;
-        let references = referenced(f);
+        let references = f
+            .callees()
+            .any(|(_, callee)| callee.attrs.alwaysinline)
+            .then(|| referenced(f));
         for (_, callee) in f.callees() {
             let callee_maximum = maximum(&callee.name, &callee.attrs)?;
-            if callee.attrs.alwaysinline && !references.contains(callee.name.as_str()) {
+            if callee.attrs.alwaysinline
+                && references
+                    .as_ref()
+                    .is_some_and(|r| !r.contains(callee.name.as_str()))
+            {
                 continue;
             }
             check_signature(&f.name, &callee.sig, caller_maximum)?;
@@ -715,9 +725,21 @@ pub(crate) fn validate_vector_width_per_function(
         for (_, sig) in f.signatures() {
             check_signature(&f.name, sig, caller_maximum)?;
         }
+        // The value-type check below reports the last unsupported type, with
+        // block parameters visited before instruction values. It shares this
+        // walk, keeping the instructions' last type ahead of the parameters'.
+        let mut bad_value = None;
+        let mut check_value = |value| {
+            let ty = f.value_type(f.resolve(value));
+            if unsupported(ty, caller_maximum) {
+                bad_value = Some(ty);
+            }
+        };
         for (_, i) in f.layout_insts() {
             let mut bad = None;
             let data = f.inst_data(i);
+            data.for_each_operand(&mut check_value);
+            f.inst_results(i).iter().copied().for_each(&mut check_value);
             let sig = match data {
                 InstData::Call { func, .. }
                 | InstData::ReturnCall { func, .. }
@@ -755,11 +777,12 @@ pub(crate) fn validate_vector_width_per_function(
                 });
             }
         }
-        let mut bad = None;
-        for_each_current_value_type(f, |ty| {
-            if unsupported(ty, caller_maximum) {
-                bad = Some(ty);
-            }
+        let bad = bad_value.or_else(|| {
+            f.blocks()
+                .flat_map(|block| f.block_params(block))
+                .map(|&value| f.value_type(f.resolve(value)))
+                .filter(|&ty| unsupported(ty, caller_maximum))
+                .last()
         });
         if let Some(ty) = bad {
             return Err(CodegenError {
