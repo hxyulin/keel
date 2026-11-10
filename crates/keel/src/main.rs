@@ -1406,6 +1406,20 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         } else {
             keel_asm::TargetFeatures::default()
         };
+        if target == Target::X86_64LinuxGnu && threads.get() == 1 {
+            // Serial x86-64 codegen hands each item straight to the assembler.
+            let assembler = keel_asm::x86::ProgramAssembler::new(encoding_features);
+            let assembler = with_codegen_report(opts, target, || {
+                request.assemble_x86(&module, assembler, Box::new(input::binary_input))
+            })?;
+            drop(module);
+            let object = {
+                profiling::scope!("object-finalization");
+                assembler.finish().map_err(|e| e.to_string())?
+            };
+            profiling::scope!("object-write");
+            return std::fs::write(output, object).map_err(|e| format!("{output}: {e}"));
+        }
         let mut assembler =
             keel_asm::ObjectAssembler::with_features(target, aarch64_features, encoding_features)
                 .map_err(|e| e.to_string())?;

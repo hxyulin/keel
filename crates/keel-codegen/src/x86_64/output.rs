@@ -3,12 +3,44 @@ use crate::metadata::Sink;
 use keel_asm_ir::x86::{
     Address, Instruction, Memory, Modifier, Opcode, Operand, Register, RegisterClass,
 };
-use keel_asm_ir::{Directive, Program};
+use keel_asm_ir::{Directive, Item, Program};
 use std::fmt::{self, Write};
 
 pub(crate) enum Output {
     Text(crate::text::Text, Vec<keel_asm_ir::X86Source>),
     Structured(Program),
+    /// Structured items given to an assembler as they are emitted. A
+    /// function's output holds the stream from [`Self::begin_function`] to
+    /// [`Self::end_function`].
+    Stream(Box<Stream>),
+}
+
+/// Reads the `.incbin` inputs of inline assembly, as
+/// [`keel_asm::x86::BinaryInputResolver`].
+pub type BinaryInputs = dyn FnMut(&str) -> Result<Vec<u8>, String> + Send;
+
+/// An x86-64 assembler taking a module's items in order.
+pub(crate) struct Stream {
+    pub assembler: keel_asm::x86::ProgramAssembler,
+    resolver: Box<BinaryInputs>,
+    /// Sources given since the last [`Output::validate_sources`].
+    sources: Vec<keel_asm_ir::X86Source>,
+}
+impl Stream {
+    pub(crate) fn new(
+        assembler: keel_asm::x86::ProgramAssembler,
+        resolver: Box<BinaryInputs>,
+    ) -> Self {
+        Self {
+            assembler,
+            resolver,
+            sources: Vec::new(),
+        }
+    }
+    fn item(&mut self, item: Item) {
+        self.assembler
+            .push_item_with_binary_inputs(item, &mut *self.resolver);
+    }
 }
 impl Output {
     pub(super) fn new(structured: bool) -> Self {
@@ -36,6 +68,7 @@ impl Output {
                 operands: Vec::from(operands),
                 lock,
             }),
+            Self::Stream(s) => s.assembler.push_x86_instruction(opcode, &operands, lock),
         }
     }
     /// Keep the fragment in the enclosing assembly stream for directives,
@@ -59,7 +92,11 @@ impl Output {
                 out.push_str(&source.text);
                 sources.push(source);
             }
-            Self::Structured(out) => out.items.push(keel_asm_ir::Item::X86Source(source)),
+            Self::Structured(out) => out.items.push(Item::X86Source(source)),
+            Self::Stream(out) => {
+                out.sources.push(source.clone());
+                out.item(Item::X86Source(source));
+            }
         }
     }
     pub(super) fn validate_sources(
@@ -69,6 +106,7 @@ impl Output {
     ) -> Result<(), crate::CodegenError> {
         let sources: Vec<_> = match self {
             Self::Text(_, sources) => std::mem::take(sources),
+            Self::Stream(stream) => std::mem::take(&mut stream.sources),
             Self::Structured(program) => {
                 let sources = program.items[*from..]
                     .iter()
@@ -114,6 +152,7 @@ impl Output {
     pub(super) fn checked_region(&mut self, program: Program) {
         match self {
             Self::Structured(out) => out.append(program),
+            Self::Stream(out) => program.items.into_iter().for_each(|item| out.item(item)),
             Self::Text(out, _) => {
                 for item in program.items {
                     match item {
@@ -150,17 +189,25 @@ impl Output {
             _ => false,
         }
     }
-    /// Continue `module`'s text in place instead of building the function in
-    /// its own string and copying it over. Gives where the function begins.
-    /// Structured functions keep their own program until [`Self::end_function`].
+    /// Continue `module`'s text or stream in place instead of building the
+    /// function in its own string or program and copying it over. Gives
+    /// where the function begins. Structured functions keep their own
+    /// program until [`Self::end_function`].
     pub(super) fn begin_function(&mut self, module: &mut Self) -> usize {
-        if let (Self::Text(own, sources), Self::Text(text, module_sources)) = (&mut *self, module) {
-            debug_assert!(own.is_empty());
-            std::mem::swap(own, text);
-            std::mem::swap(sources, module_sources);
-            return own.len();
+        match (&mut *self, &mut *module) {
+            (Self::Text(own, sources), Self::Text(text, module_sources)) => {
+                debug_assert!(own.is_empty());
+                std::mem::swap(own, text);
+                std::mem::swap(sources, module_sources);
+                own.len()
+            }
+            (Self::Structured(own), Self::Stream(_)) => {
+                debug_assert!(own.items.is_empty());
+                std::mem::swap(self, module);
+                0
+            }
+            _ => 0,
         }
-        0
     }
     /// Hands the module's output, now ending with this function, back.
     pub(super) fn end_function(self, module: &mut Self) {
@@ -168,6 +215,10 @@ impl Output {
             (Self::Text(own, sources), Self::Text(text, module_sources)) => {
                 *text = own;
                 *module_sources = sources;
+            }
+            (own @ Self::Stream(_), module) => {
+                debug_assert!(matches!(module, Self::Structured(p) if p.items.is_empty()));
+                *module = own;
             }
             (own, module) => module.append(own),
         }
@@ -179,6 +230,9 @@ impl Output {
                 sources.extend(more);
             }
             (Self::Structured(p), Self::Structured(q)) => p.append(q),
+            (Self::Stream(s), Self::Structured(q)) => {
+                q.items.into_iter().for_each(|item| s.item(item))
+            }
             _ => unreachable!(),
         }
     }
@@ -218,7 +272,7 @@ impl Output {
                 crate::text::write_decimal(s, "_block", block.index() as i128).unwrap();
                 s.push_str("\"\n");
             }
-            Self::Structured(_) => {
+            Self::Structured(_) | Self::Stream(_) => {
                 let label = crate::text::block_label(".L", function, block);
                 self.instruction(opcode, [asm_arg(label)], false);
             }
@@ -235,7 +289,7 @@ impl Output {
                 write_escaped(s, name);
                 s.push_str(if plt { "\"@PLT\n" } else { "\"\n" });
             }
-            Self::Structured(_) => {
+            Self::Structured(_) | Self::Stream(_) => {
                 let modifier = if plt { Modifier::Plt } else { Modifier::None };
                 self.instruction(opcode, [asm_arg(symbol_address(name, modifier))], false);
             }
@@ -254,14 +308,18 @@ impl Write for Output {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         match self {
             Self::Text(t, _) => t.push_str(s),
-            Self::Structured(_) => panic!("compiler-generated x86 text must use typed emission"),
+            Self::Structured(_) | Self::Stream(_) => {
+                panic!("compiler-generated x86 text must use typed emission")
+            }
         };
         Ok(())
     }
     fn write_char(&mut self, c: char) -> fmt::Result {
         match self {
             Self::Text(t, _) => t.push(c),
-            Self::Structured(_) => panic!("compiler-generated x86 text must use typed emission"),
+            Self::Structured(_) | Self::Stream(_) => {
+                panic!("compiler-generated x86 text must use typed emission")
+            }
         };
         Ok(())
     }
@@ -279,6 +337,7 @@ impl Sink for Output {
                 }
             }
             Self::Structured(p) => p.label(name),
+            Self::Stream(s) => s.item(Item::Label(name)),
         }
     }
     fn directive(&mut self, d: Directive) {
@@ -328,6 +387,7 @@ impl Sink for Output {
                 s.push('\n');
             }
             Self::Structured(p) => p.directive(d),
+            Self::Stream(s) => s.item(Item::Directive(d)),
         }
     }
     fn bytes(&mut self, bytes: &[u8]) {
@@ -340,6 +400,7 @@ impl Sink for Output {
                 s.push('\n');
             }
             Self::Structured(p) => p.directive(Directive::Bytes(bytes.to_vec())),
+            Self::Stream(s) => s.item(Item::Directive(Directive::Bytes(bytes.to_vec()))),
         }
     }
 }

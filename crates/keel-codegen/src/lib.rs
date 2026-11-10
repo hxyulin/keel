@@ -493,6 +493,33 @@ impl<'a> Request<'a> {
         }
         Ok(())
     }
+
+    /// Assemble an x86-64 module into `assembler` as [`Self::program_chunks`]
+    /// would with each chunk pushed to it, but give each item to the
+    /// assembler as it is emitted, so no program is built. `resolver` reads
+    /// the `.incbin` inputs of inline assembly.
+    ///
+    /// # Errors
+    /// Returns target, operand or IR validation errors, or an error for a
+    /// target other than x86-64.
+    pub fn assemble_x86(
+        &self,
+        module: &Module,
+        assembler: keel_asm::x86::ProgramAssembler,
+        resolver: Box<x86_64::BinaryInputs>,
+    ) -> Result<keel_asm::x86::ProgramAssembler, CodegenError> {
+        if self.target != Target::X86_64LinuxGnu {
+            return Err(CodegenError {
+                func: "<target>".into(),
+                message: "x86 assembly requires x86_64-unknown-linux-gnu".into(),
+            });
+        }
+        let stream = Box::new(x86_64::Stream::new(assembler, resolver));
+        match emission::compile(module, self, true, emission::Sink::X86Assembler(stream))? {
+            emission::Output::X86Assembler(assembler) => Ok(assembler),
+            _ => unreachable!("x86 assembly requested"),
+        }
+    }
 }
 
 pub fn compile_with_pipeline(

@@ -133,6 +133,28 @@ fn compare_policy(
             );
         }
     }
+    if target == Target::X86_64LinuxGnu {
+        let streamed = keel_codegen::Request::new(target, pipeline)
+            .emission(emission)
+            .assemble_x86(
+                module,
+                keel_asm::x86::ProgramAssembler::new(Default::default()),
+                Box::new(|name: &str| {
+                    Err(format!(
+                        ".incbin `{name}` requires an explicit binary-input resolver"
+                    ))
+                }),
+            );
+        match (&result, streamed) {
+            (Ok(()), Ok(assembler)) => assert_eq!(
+                assembler.finish(),
+                keel_asm::assemble_program_for(target, &reference_program),
+                "streamed object output"
+            ),
+            (Err(error), Err(streamed)) => assert_eq!(&streamed, error, "streamed error"),
+            (result, streamed) => panic!("streamed {:?}, chunked {result:?}", streamed.err()),
+        }
+    }
     let mut reference_text = Vec::new();
     let text_result = keel_codegen::Request::new(target, pipeline)
         .emission(emission)

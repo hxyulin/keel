@@ -189,8 +189,9 @@ mod packed_sign;
 mod raw_fma;
 mod strings;
 mod vector;
-pub(crate) use output::Output;
+pub use output::BinaryInputs;
 use output::*;
+pub(crate) use output::{Output, Stream};
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -291,7 +292,7 @@ pub(crate) fn compile_output<'module>(
     pipeline: &crate::CodegenPipeline<'_>,
     emission: crate::EmissionOptions,
     output: crate::emission::OutputOptions<'_, 'module>,
-    mut sink: crate::emission::Sink<'_>,
+    sink: crate::emission::Sink<'_>,
 ) -> Result<Output, CodegenError> {
     let crate::emission::OutputOptions {
         structured,
@@ -351,7 +352,12 @@ pub(crate) fn compile_output<'module>(
             && subset(pools.float_callee_saved, REGISTERS.float_callee_saved),
         "register pools must be subsets of REGISTERS"
     );
-    let mut out = Output::new(structured);
+    let (mut out, mut sink) = match sink {
+        crate::emission::Sink::X86Assembler(stream) => {
+            (Output::Stream(stream), crate::emission::Sink::None)
+        }
+        sink => (Output::new(structured), sink),
+    };
     if !structured {
         out.write_str("\t.intel_syntax noprefix\n").unwrap();
     }

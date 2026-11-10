@@ -80,6 +80,8 @@ pub(crate) fn elf_text_section(attrs: &keel_ir::FunctionAttrs, name: &str, own: 
 pub(crate) enum Output {
     Text(String),
     Program(keel_asm_ir::Program),
+    /// The assembler of a [`Sink::X86Assembler`], holding the module.
+    X86Assembler(keel_asm::x86::ProgramAssembler),
 }
 
 /// Where a backend hands each finished function's output. Whatever has not
@@ -89,6 +91,9 @@ pub(crate) enum Sink<'a> {
     None,
     Program(&'a mut dyn FnMut(keel_asm_ir::Program)),
     Text(&'a mut dyn FnMut(&str)),
+    /// Give each x86-64 item to this assembler as it is emitted, without
+    /// building programs. Structured emission only.
+    X86Assembler(Box<x86_64::Stream>),
 }
 
 pub(crate) struct OutputOptions<'exec, 'a> {
@@ -143,6 +148,7 @@ pub(crate) fn compile_with_executor<'module>(
             )? {
                 x86_64::Output::Text(text, _) => Ok(Output::Text(text.into_string())),
                 x86_64::Output::Structured(program) => Ok(Output::Program(program)),
+                x86_64::Output::Stream(stream) => Ok(Output::X86Assembler(stream.assembler)),
             }
         }
         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
