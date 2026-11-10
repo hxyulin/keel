@@ -4611,7 +4611,9 @@ impl<'a> FunctionCompiler<'a> {
         // AVX forms can require AVX2 depending on the borrowed operands.
         if self.feature_error.is_none() {
             let required = keel_asm_ir::x86::required_features(opcode, &operands);
-            if !self.features.contains(required) {
+            // Most instructions require nothing. Comparing with NONE costs
+            // far less than `contains`, which packs both sets into bits.
+            if required != keel_asm_ir::x86::Features::NONE && !self.features.contains(required) {
                 self.feature_error = Some(format!(
                     "instruction {opcode:?} requires target features: {}",
                     required.names().collect::<Vec<_>>().join(", ")
