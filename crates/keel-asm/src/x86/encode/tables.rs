@@ -18,6 +18,10 @@ struct Dialect {
     repeat: u8,
     segment: Option<u8>,
     group: Option<u8>,
+    /// Whether the instruction needs APX (REX2) whatever the form.
+    apx: bool,
+    /// Whether the instruction selects a VEX form.
+    vex: bool,
 }
 
 fn dialect(i: &Instruction) -> Dialect {
@@ -38,6 +42,8 @@ fn dialect(i: &Instruction) -> Dialect {
         repeat: 0,
         segment: None,
         group: None,
+        apx: false,
+        vex: false,
     };
     if let Core(op) = i.opcode {
         match op {
@@ -222,6 +228,24 @@ fn dialect(i: &Instruction) -> Dialect {
         }
     }
     d.original = raw;
+    d.apx = i.required_features().apx_f;
+    d.vex = i.opcode.required_features().amx_tile
+        || d.name.starts_with('v') && !matches!(d.name.as_str(), "verr" | "verw")
+        || matches!(
+            i.opcode,
+            Andn | Bextr
+                | Blsi
+                | Blsmsk
+                | Blsr
+                | Shlx
+                | Shrx
+                | Sarx
+                | Rorx
+                | Bzhi
+                | Pext
+                | Pdep
+                | Mulx
+        );
     d
 }
 
@@ -354,7 +378,7 @@ fn match_form<'a>(
         w,
         address,
     } = context;
-    let rex2 = form.rex2 == 1 || i.required_features().apx_f;
+    let rex2 = form.rex2 == 1 || d.apx;
     if rex2 && (form.rex2 == -1 || form.vex || form.map > 1) {
         return None;
     }
@@ -396,24 +420,7 @@ fn match_form<'a>(
     if matches!(i.opcode, Core(CoreOpcode::Ud0 | CoreOpcode::Ud1)) && i.operands.len() != 2 {
         return None;
     }
-    let vex = i.opcode.required_features().amx_tile
-        || d.name.starts_with('v') && !matches!(d.name.as_str(), "verr" | "verw")
-        || matches!(
-            i.opcode,
-            Andn | Bextr
-                | Blsi
-                | Blsmsk
-                | Blsr
-                | Shlx
-                | Shrx
-                | Sarx
-                | Rorx
-                | Bzhi
-                | Pext
-                | Pdep
-                | Mulx
-        );
-    if form.vex != vex {
+    if form.vex != d.vex {
         return None;
     }
     if matches!(d.name.as_str(), "fnstenv" | "fldenv" | "fnsave" | "frstor") {
@@ -810,7 +817,7 @@ fn emit<'a>(
             LegacyPrefix {
                 mandatory: prefix,
                 bits,
-                rex2: f.rex2 == 1 || i.required_features().apx_f,
+                rex2: f.rex2 == 1 || d.apx,
             },
             &code[..n],
             field,
@@ -834,7 +841,7 @@ fn emit<'a>(
             .zip(&choice.operands)
             .any(|(_, o)| matches!(o,Some(R(r)) if r.width==8&&r.number>=4&&!r.high_byte));
         let rex = 0x40 | if choice.w { 8 } else { 0 } | (r & 1);
-        if f.rex2 == 1 || i.required_features().apx_f {
+        if f.rex2 == 1 || d.apx {
             e.bytes
                 .extend([0xd5, (f.map << 7) | ((r >> 1) << 4) | (rex & 15)]);
             e.bytes.extend_from_slice(&code[usize::from(f.map == 1)..n]);
