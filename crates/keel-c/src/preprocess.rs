@@ -1715,21 +1715,24 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 continue;
             }
             let macro_definition = self.macros.get(name).copied();
-            let special = (self.in_condition && name == "defined")
-                || matches!(
-                    name,
-                    "__LINE__"
-                        | "__FILE__"
-                        | "__BASE_FILE__"
-                        | "__FILE_NAME__"
-                        | "__INCLUDE_LEVEL__"
-                        | "__COUNTER__"
-                        | "__has_include"
-                        | "__has_include_next"
-                        | "_Pragma"
-                )
-                || query_builtin(name);
-            if !special && macro_definition.is_none() {
+            // Every builtin name except `defined` starts with '_'.
+            let special = || {
+                (self.in_condition && name == "defined")
+                    || (first == b'_'
+                        && (matches!(
+                            name,
+                            "__LINE__"
+                                | "__FILE__"
+                                | "__BASE_FILE__"
+                                | "__FILE_NAME__"
+                                | "__INCLUDE_LEVEL__"
+                                | "__COUNTER__"
+                                | "__has_include"
+                                | "__has_include_next"
+                                | "_Pragma"
+                        ) || query_builtin(name)))
+            };
+            if macro_definition.is_none() && !special() {
                 out.push(input.pop().unwrap());
                 continue;
             }
