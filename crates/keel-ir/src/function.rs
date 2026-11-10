@@ -512,9 +512,41 @@ const NO_BLOCK: u32 = u32::MAX;
 
 static NEXT_CFG_STAMP: AtomicU64 = AtomicU64::new(1);
 
-/// A stamp no function state has had before; see [`Function::cfg_stamp`].
-fn fresh_cfg_stamp() -> u64 {
-    NEXT_CFG_STAMP.fetch_add(1, Ordering::Relaxed)
+/// A function's [`Function::cfg_stamp`]. A change stores 0, and the next
+/// read replaces it with a stamp no function state has had before, so
+/// building or editing a function takes no stamps until someone asks.
+#[derive(Default)]
+struct CfgStamp(AtomicU64);
+
+impl Clone for CfgStamp {
+    fn clone(&self) -> Self {
+        Self(AtomicU64::new(self.0.load(Ordering::Relaxed)))
+    }
+}
+
+impl CfgStamp {
+    #[inline]
+    fn changed(&mut self) {
+        *self.0.get_mut() = 0;
+    }
+
+    #[inline]
+    fn get(&self) -> u64 {
+        let stamp = self.0.load(Ordering::Relaxed);
+        if stamp != 0 {
+            return stamp;
+        }
+        // Readers on other threads may race to stamp a shared function;
+        // the first stamp installed is the one everyone returns.
+        let fresh = NEXT_CFG_STAMP.fetch_add(1, Ordering::Relaxed);
+        match self
+            .0
+            .compare_exchange(0, fresh, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => fresh,
+            Err(stamp) => stamp,
+        }
+    }
 }
 
 /// Append-only pool offsets, checked on creation so that they fit `u32`.
@@ -606,7 +638,7 @@ pub struct Function {
     /// Number of instructions in the layout's blocks.
     layout_len: usize,
     /// Renewed whenever the CFG may change; see [`Function::cfg_stamp`].
-    cfg_stamp: u64,
+    cfg_stamp: CfgStamp,
     /// The function that interprets this function's landing pads while
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
@@ -726,7 +758,7 @@ impl Function {
             sig_index: KeyIndex::default(),
             layout: Vec::new(),
             layout_len: 0,
-            cfg_stamp: fresh_cfg_stamp(),
+            cfg_stamp: CfgStamp::default(),
             personality: None,
             local: false,
             weak_odr: false,
@@ -939,7 +971,7 @@ impl Function {
             ..BlockData::default()
         });
         self.layout.push(block);
-        self.cfg_stamp = fresh_cfg_stamp();
+        self.cfg_stamp.changed();
         block
     }
 
@@ -1131,7 +1163,7 @@ impl Function {
             InsertPoint::End(block) => {
                 // Cached CFGs read the last instruction, including an
                 // appended terminator in an already existing block.
-                self.cfg_stamp = fresh_cfg_stamp();
+                self.cfg_stamp.changed();
                 let data = &mut self.blocks[block];
                 let index = data.insts.len() as u32;
                 self.block_insts.push(&mut data.insts, inst);
@@ -1152,7 +1184,7 @@ impl Function {
         };
         let data = &mut self.blocks[block];
         if index == data.insts.len() {
-            self.cfg_stamp = fresh_cfg_stamp();
+            self.cfg_stamp.changed();
         }
         self.block_insts.insert(&mut data.insts, index, inst);
         // The instructions after `index` moved up one.
@@ -1230,7 +1262,7 @@ impl Function {
         let index = self.position(inst);
         let data = &mut self.blocks[block];
         if index + 1 == data.insts.len() {
-            self.cfg_stamp = fresh_cfg_stamp();
+            self.cfg_stamp.changed();
         }
         self.block_insts.remove(&mut data.insts, index);
         // The instructions after `index` moved down one.
@@ -1263,7 +1295,7 @@ impl Function {
             "removed instructions must follow block order"
         );
         if self.block_insts(block).last() == removed.last() {
-            self.cfg_stamp = fresh_cfg_stamp();
+            self.cfg_stamp.changed();
         }
         for &inst in removed {
             self.call_contracts.remove(&inst);
@@ -1326,7 +1358,7 @@ impl Function {
         self.layout_len -= if from.in_layout { moved } else { 0 };
         self.layout_len += if self.blocks[to].in_layout { moved } else { 0 };
         // The last instruction of `from` moved.
-        self.cfg_stamp = fresh_cfg_stamp();
+        self.cfg_stamp.changed();
         self.compact_insts_if_wasteful();
     }
 
@@ -1348,7 +1380,7 @@ impl Function {
         self.inst_facts.remove(&inst);
         let block = self.insts[inst].block;
         if block != NO_BLOCK && self.block_insts(Block::new(block as usize)).last() == Some(&inst) {
-            self.cfg_stamp = fresh_cfg_stamp();
+            self.cfg_stamp.changed();
         }
         &mut self.insts[inst].data
     }
@@ -1500,7 +1532,7 @@ impl Function {
             let index = self.layout.iter().position(|&b| b == block);
             self.layout.remove(index.expect("a block in the layout"));
         }
-        self.cfg_stamp = fresh_cfg_stamp();
+        self.cfg_stamp.changed();
     }
 
     /// [`Function::remove_block`] for each of `blocks`, with one pass over
@@ -1530,17 +1562,17 @@ impl Function {
         }
         let blocks = &self.blocks;
         self.layout.retain(|&b| blocks[b].in_layout);
-        self.cfg_stamp = fresh_cfg_stamp();
+        self.cfg_stamp.changed();
     }
 
     /// Identifies the inputs of the control-flow graph: the block count, the
-    /// layout, and each block's last instruction. Every change to them gives
-    /// the function a stamp no function has had before, so functions with
-    /// equal stamps (a function and its unchanged clones) have equal CFGs.
-    /// Mutable access to a block's last instruction counts as a change.
+    /// layout, and each block's last instruction. The first read after a
+    /// change to them takes a stamp no function has had before, so functions
+    /// with equal stamps (a function and its unchanged clones) have equal
+    /// CFGs. Mutable access to a block's last instruction counts as a change.
     #[inline]
     pub fn cfg_stamp(&self) -> u64 {
-        self.cfg_stamp
+        self.cfg_stamp.get()
     }
 
     /// Hashes the state a pass can observably change: the signature, linkage,
@@ -2855,6 +2887,29 @@ mod tests {
             }
         }
         assert!(func.layout_insts().count() > 0);
+    }
+
+    #[test]
+    fn cfg_stamps_are_taken_on_read() {
+        let mut func = build_sum();
+        // Building took no stamp.
+        assert_eq!(*func.cfg_stamp.0.get_mut(), 0);
+        let stamp = func.cfg_stamp();
+        assert_ne!(stamp, 0);
+        assert_eq!(func.cfg_stamp(), stamp);
+        let clone = func.clone();
+        assert_eq!(clone.cfg_stamp(), stamp);
+        let exit = func.blocks().last().unwrap();
+        func.create_block();
+        assert_eq!(*func.cfg_stamp.0.get_mut(), 0);
+        let renewed = func.cfg_stamp();
+        assert!(renewed != stamp && renewed != 0);
+        assert_eq!(clone.cfg_stamp(), stamp);
+        // Unread changed clones still get distinct stamps.
+        let (mut a, mut b) = (func.clone(), func.clone());
+        a.remove_inst(*a.block_insts(exit).last().unwrap());
+        b.remove_inst(*b.block_insts(exit).last().unwrap());
+        assert_ne!(a.cfg_stamp(), b.cfg_stamp());
     }
 
     #[test]
