@@ -2297,7 +2297,11 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             let hide = hide_insert(self.arena, hide, name);
             let arena = self.arena;
             let relocate = |r: &Token<'a>| Token {
-                hide: hide_union(arena, r.hide, hide),
+                hide: if r.hide.is_empty() {
+                    hide
+                } else {
+                    hide_union(arena, r.hide, hide)
+                },
                 file: t.file,
                 line: t.line,
                 col: t.col,
