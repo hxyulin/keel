@@ -6,10 +6,11 @@
 //! Removing an instruction or block takes it out of the layout but leaves
 //! its arena entry (handles stay valid, and nothing is renumbered). Values
 //! it defined still exist; using one is an error the verifier reports.
-//! Blocks store their instructions as an array (in one pool shared by all
-//! blocks), so inserting or removing in the middle of a block is linear in
-//! its size; fine for now, and the methods hide the representation if it
-//! needs to change.
+//! [`Function::compact`] later drops removed instructions and renumbers the
+//! rest, keeping their printed names. Blocks store their instructions as an
+//! array (in one pool shared by all blocks), so inserting or removing in the
+//! middle of a block shifts the rest of it; each instruction remembers its
+//! position, so finding it there is usually immediate.
 
 use crate::entity::{KeyIndex, ListPool, ListRange};
 use crate::inst::{BlockCall, Clause, InstData, Symbol};
@@ -575,6 +576,20 @@ impl ResultRange {
     }
 }
 
+/// The numbers a compacted function's instructions print as, in local
+/// labels of generated code: the numbers they had before compaction.
+#[derive(Clone, Default)]
+struct InstNames {
+    /// By instruction index, for each instruction compaction kept.
+    kept: Vec<u32>,
+    /// The number of the first instruction created after compaction; later
+    /// ones follow it.
+    next: u32,
+    /// The removed instruction that values defined by removed instructions
+    /// name as their definition, if any.
+    placeholder: Option<Inst>,
+}
+
 impl InstNode {
     #[inline]
     fn block(&self) -> Option<Block> {
@@ -641,6 +656,9 @@ pub struct Function {
     layout_len: usize,
     /// Renewed whenever the CFG may change; see [`Function::cfg_stamp`].
     cfg_stamp: CfgStamp,
+    /// The numbers instructions print as, once compacted; see
+    /// [`Function::compact`].
+    inst_names: Option<Box<InstNames>>,
     /// The function that interprets this function's landing pads while
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
@@ -761,6 +779,7 @@ impl Function {
             layout: Vec::new(),
             layout_len: 0,
             cfg_stamp: CfgStamp::default(),
+            inst_names: None,
             personality: None,
             local: false,
             weak_odr: false,
@@ -1362,6 +1381,169 @@ impl Function {
         // The last instruction of `from` moved.
         self.cfg_stamp.changed();
         self.compact_insts_if_wasteful();
+    }
+
+    /// The number `inst` prints as in local labels of generated code: its
+    /// index, unless the function was [compacted](Function::compact).
+    #[inline]
+    pub fn inst_number(&self, inst: Inst) -> u32 {
+        let index = inst.index();
+        let Some(names) = &self.inst_names else {
+            return index as u32;
+        };
+        match names.kept.get(index) {
+            Some(&number) => number,
+            None => {
+                let number = names.next as usize + (index - names.kept.len());
+                u32::try_from(number).expect("entity index overflow")
+            }
+        }
+    }
+
+    /// `inst`'s printed name, `inst<n>` with [`Function::inst_number`]. Only
+    /// for printing: it is not a handle into this function.
+    #[inline]
+    pub fn inst_name(&self, inst: Inst) -> Inst {
+        Inst::new(self.inst_number(inst) as usize)
+    }
+
+    /// Drops removed instructions, in place, and frees the room they and
+    /// the result and instruction-list pools leave. Values and blocks keep
+    /// their handles, dead ones included: code generation reads every
+    /// value's type, so dropping values could change its output. A value
+    /// defined by a removed instruction is redirected to one removed
+    /// placeholder instruction without results, so it still reads as
+    /// defined by a removed instruction.
+    ///
+    /// Live instructions are renumbered in their old order, so comparing two
+    /// of them gives the same answer before and after, and instructions
+    /// created later still compare greater. They keep the numbers they print
+    /// as ([`Function::inst_number`]). Instruction handles from before are
+    /// invalid afterwards, and the CFG stamp changes. Returns whether
+    /// anything was dropped.
+    pub fn compact(&mut self) -> bool {
+        const DEAD: u32 = u32::MAX;
+        let placeholder = self.inst_names.as_ref().and_then(|names| names.placeholder);
+        if self.insts.len() == self.layout_len + usize::from(placeholder.is_some()) {
+            return false;
+        }
+        // New indices by old one, and the print numbers of the survivors.
+        let number = |check_blocks: bool| {
+            let mut inst_map = vec![DEAD; self.insts.len()];
+            let mut kept = Vec::with_capacity(self.layout_len + 1);
+            for (inst, node) in self.insts.iter() {
+                let live = node.block != NO_BLOCK
+                    && (!check_blocks || self.blocks[Block::new(node.block as usize)].in_layout);
+                if live || Some(inst) == placeholder {
+                    inst_map[inst.index()] = kept.len() as u32;
+                    kept.push(self.inst_number(inst));
+                }
+            }
+            (inst_map, kept)
+        };
+        // Removing a block takes its instructions out with it, so a placed
+        // instruction is normally in the layout; check the blocks only when
+        // the count says one is not.
+        let (mut inst_map, mut kept) = number(false);
+        if kept.len() != self.layout_len + usize::from(placeholder.is_some()) {
+            (inst_map, kept) = number(true);
+        }
+        let live = kept.len();
+        if live == self.insts.len() {
+            return false;
+        }
+        let next = self.inst_number(Inst::new(self.insts.len()));
+        let new = |old: Inst| Inst::new(inst_map[old.index()] as usize);
+
+        // The old placeholder, renumbered, or else a new one after the rest
+        // if a value needs it.
+        let placeholder = placeholder.map(new);
+        let added = Inst::new(live);
+        let mut needs_added = false;
+        for data in self.values.values_mut() {
+            if let ValueDef::Result(inst, n) = data.def {
+                let inst = match inst_map[inst.index()] {
+                    DEAD => placeholder.unwrap_or_else(|| {
+                        needs_added = true;
+                        added
+                    }),
+                    new => Inst::new(new as usize),
+                };
+                data.def = ValueDef::Result(inst, n);
+            }
+        }
+
+        // Instructions and their results keep their order, so both close
+        // up in place.
+        let result_pool = &mut self.result_pool;
+        let mut results_len = 0;
+        self.insts.retain(|old, node| {
+            if inst_map[old.index()] == DEAD {
+                return false;
+            }
+            let results = node.results.as_range();
+            node.results = ResultRange::new(results_len, results.len());
+            // Mostly one result: a loop beats a call to `memmove`.
+            for from in results {
+                result_pool[results_len] = result_pool[from];
+                results_len += 1;
+            }
+            true
+        });
+        result_pool.truncate(results_len);
+        result_pool.shrink_to_fit();
+        if needs_added {
+            self.insts.push(InstNode {
+                data: InstData::Trap,
+                results: ResultRange::new(results_len, 0),
+                block: NO_BLOCK,
+                loc: 0,
+                pos: 0,
+            });
+            // Never printed; later instructions keep the next numbers.
+            kept.push(u32::MAX);
+        }
+        self.insts.shrink_to_fit();
+        self.inst_names = Some(Box::new(InstNames {
+            kept,
+            next,
+            placeholder: placeholder.or(needs_added.then_some(added)),
+        }));
+
+        for data in self.blocks.values_mut() {
+            if !data.in_layout {
+                // Anything still listed here was dropped with the block.
+                self.block_insts.free(&mut data.insts);
+                data.valid = 0;
+            }
+        }
+        // SAFETY: block data holds every instruction list.
+        unsafe {
+            self.block_insts.compact(
+                self.layout_len,
+                self.blocks.values_mut().map(|b| &mut b.insts),
+            )
+        };
+        for &block in &self.layout {
+            let data = &mut self.blocks[block];
+            for (pos, inst) in self.block_insts.get_mut(data.insts).iter_mut().enumerate() {
+                *inst = new(*inst);
+                self.insts[*inst].pos = pos as u32;
+            }
+            data.valid = data.insts.len() as u32;
+        }
+        self.call_contracts = std::mem::take(&mut self.call_contracts)
+            .into_iter()
+            .filter(|(i, _)| inst_map[i.index()] != DEAD)
+            .map(|(i, contract)| (new(i), contract))
+            .collect();
+        self.inst_facts = std::mem::take(&mut self.inst_facts)
+            .into_iter()
+            .filter(|(i, _)| inst_map[i.index()] != DEAD)
+            .map(|(i, facts)| (new(i), facts))
+            .collect();
+        self.cfg_stamp.changed();
+        true
     }
 
     /// Whether `inst` has been removed from the layout.
@@ -2889,6 +3071,105 @@ mod tests {
             }
         }
         assert!(func.layout_insts().count() > 0);
+    }
+
+    #[test]
+    fn compaction_drops_removed_instructions_and_keeps_names() {
+        let source = "decl @callee(ptr) -> ptr
+func @f(ptr, i64) -> i64 {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 1
+    v3 = iadd v1, v2
+    v4 = iadd v1, v2
+    v5 = iconst.i64 7
+    v6 = call @callee(v0) contract(nosync)
+    v7 = load.i64 v6 facts(range(0x0, 0x10))
+    brif v3, block1(v4, v7), block2
+block1(v8: i64, v9: i64):
+    v10 = iadd v8, v9
+    return v10
+block2:
+    return v1
+block3:
+    v11 = iconst.i64 3
+    return v11
+}
+";
+        let mut module = crate::parse(source).unwrap();
+        let mut func = module.functions.remove(0);
+        let value = |n| Value::new(n);
+        // An alias chain from a live operand, a dead result and a dead block.
+        let duplicate = def_inst(&func, value(4));
+        func.replace_all_uses(value(4), value(3));
+        func.remove_inst(duplicate);
+        func.remove_inst(def_inst(&func, value(5)));
+        func.remove_block(Block::new(3));
+        // An instruction left in a block outside the layout is dead too.
+        let stray = func.append_inst(
+            Block::new(3),
+            InstData::Iconst {
+                ty: Type::I64,
+                imm: 5,
+            },
+        );
+        verify(&func).unwrap();
+        let live: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
+        let text = func.to_string();
+
+        let mut compacted = func.clone();
+        assert!(compacted.compact());
+        verify(&compacted).unwrap();
+        assert_eq!(compacted.to_string(), text);
+        // The live instructions, renumbered in order, and one placeholder
+        // for the dead results.
+        assert_eq!(compacted.num_insts(), live.len() + 1);
+        let renumbered: Vec<Inst> = compacted.layout_insts().map(|(_, i)| i).collect();
+        assert_eq!(
+            renumbered,
+            (0..live.len()).map(Inst::new).collect::<Vec<_>>()
+        );
+        for (&old, &new) in live.iter().zip(&renumbered) {
+            assert_eq!(compacted.inst_number(new), old.index() as u32);
+            assert_eq!(compacted.inst_name(new), old);
+            assert_eq!(compacted.inst_data(new), func.inst_data(old));
+            assert_eq!(compacted.inst_results(new), func.inst_results(old));
+            assert_eq!(compacted.call_contract(new), func.call_contract(old));
+            assert_eq!(compacted.inst_facts(new), func.inst_facts(old));
+            let index = compacted.inst_index(new);
+            assert_eq!(compacted.block_insts(compacted.inst_block(new))[index], new);
+        }
+        assert!(live.iter().any(|&i| func.call_contract(i).is_some()));
+        assert!(live.iter().any(|&i| func.inst_facts(i).is_some()));
+        // Values keep their handles. Dead ones read as defined by a removed
+        // instruction.
+        assert_eq!(compacted.num_values(), func.num_values());
+        assert_eq!(compacted.resolve(value(4)), value(3));
+        for dead in [value(5), value(11), func.first_result(stray)] {
+            assert!(!compacted.is_value_defined(dead));
+            let ValueDef::Result(placeholder, 0) = compacted.value_def(dead) else {
+                panic!("{dead} is {:?}", compacted.value_def(dead));
+            };
+            assert!(compacted.is_removed(placeholder));
+        }
+        // New instructions continue the old numbering.
+        let block = func.entry_block().unwrap();
+        let before = *func.block_insts(block).last().unwrap();
+        let at = *compacted.block_insts(block).last().unwrap();
+        let added = func.insert_inst(InsertPoint::Before(before), func.inst_data(live[0]).clone());
+        let renamed =
+            compacted.insert_inst(InsertPoint::Before(at), func.inst_data(live[0]).clone());
+        assert_eq!(compacted.inst_name(renamed), added);
+        assert_eq!(compacted.to_string(), func.to_string());
+        assert!(!compacted.compact());
+        // Compacting again keeps the old numbers and a single placeholder.
+        compacted.remove_inst(renamed);
+        assert!(compacted.compact());
+        assert_eq!(compacted.num_insts(), live.len() + 1);
+        assert_eq!(
+            compacted.inst_name(*compacted.block_insts(block).last().unwrap()),
+            before
+        );
+        verify(&compacted).unwrap();
     }
 
     #[test]

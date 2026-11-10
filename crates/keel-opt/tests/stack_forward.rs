@@ -551,7 +551,14 @@ block3:
     keel_ir::verify_module(&m).unwrap();
     assert_eq!(call_trace(&m), expected);
     assert_eq!(m.functions[0].blocks().count(), 1);
-    assert_eq!(m.functions[0].inst_loc(call), Some(loc));
+    // The pipeline compacts the function; the call keeps its printed name.
+    let f = &m.functions[0];
+    let call = f
+        .layout_insts()
+        .find(|&(_, i)| f.inst_name(i) == call)
+        .unwrap()
+        .1;
+    assert_eq!(f.inst_loc(call), Some(loc));
     let before = m.to_string();
     assert!(
         !keel_opt::find_pass("stack-forward")

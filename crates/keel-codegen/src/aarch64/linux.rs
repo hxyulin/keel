@@ -374,7 +374,13 @@ impl FunctionCompiler<'_> {
             self.move_gp(3, 1, true);
             self.move_gp(4, 2, true);
         }
-        let label = |what: &str| format!(".L{}_{inst}_{what}", func.name);
+        let label = |what: &str| {
+            format!(
+                ".L{}_{inst_name}_{what}",
+                func.name,
+                inst_name = func.inst_name(inst)
+            )
+        };
         let (retry, fail, done) = (label("retry"), label("fail"), label("done"));
         self.out.label(retry.clone());
         // A store reads into scratch registers it then discards.

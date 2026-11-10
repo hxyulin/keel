@@ -981,7 +981,10 @@ impl<'a> Pipeline<'a> {
     }
 
     /// Runs the passes in order, restoring declared canonical entry
-    /// requirements and honoring function optimization attributes.
+    /// requirements and honoring function optimization attributes. Then
+    /// [compacts](Function::compact) every function, so instruction handles
+    /// from before the run are invalid afterwards; instructions keep their
+    /// printed names ([`Function::inst_name`]).
     pub fn run(mut self, module: &mut Module) -> Result<(), OptError> {
         if module.special_entry_contract().is_some() {
             return Ok(());
@@ -1019,16 +1022,23 @@ impl<'a> Pipeline<'a> {
             invocations: 0,
             inline_allowance: self.inline_allowance,
         };
-        if let Some(result) = function_policy::run(
+        let result = match function_policy::run(
             module,
             &self.passes,
             self.context,
             self.report.as_deref_mut(),
             &mut trace,
         ) {
-            return result;
+            Some(result) => result,
+            None => execute_pipeline(module, &self.passes, self.context, self.report, &mut trace),
+        };
+        result?;
+        // Passes leave removed instructions behind; drop them before code
+        // generation reads the functions.
+        for function in &mut module.functions {
+            function.compact();
         }
-        execute_pipeline(module, &self.passes, self.context, self.report, &mut trace)
+        Ok(())
     }
 }
 

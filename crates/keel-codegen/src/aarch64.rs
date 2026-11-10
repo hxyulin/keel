@@ -2502,7 +2502,11 @@ impl<'a> FunctionCompiler<'a> {
             self.move_gp(2, 6, true);
             self.move_gp(3, 7, true);
         }
-        let retry = format!("L{}_{inst}_retry", self.func.name);
+        let retry = format!(
+            "L{}_{inst_name}_retry",
+            self.func.name,
+            inst_name = self.func.inst_name(inst)
+        );
         self.out.label(retry.clone());
         self.move_gp(S0, 0, true);
         self.move_gp(S1, 1, true);
@@ -2653,7 +2657,11 @@ impl<'a> FunctionCompiler<'a> {
                 if op == BinaryOp::Sdiv {
                     // MIN / -1: the divisor's halves are both all ones and
                     // the dividend is 2^127.
-                    let ok = format!("L{}_{inst}_divok", self.func.name);
+                    let ok = format!(
+                        "L{}_{inst_name}_divok",
+                        self.func.name,
+                        inst_name = self.func.inst_name(inst)
+                    );
                     self.mach(
                         "and",
                         [(Reg::x(S0)).into(), (Reg::x(2)).into(), (Reg::x(3)).into()],
@@ -4113,7 +4121,14 @@ impl<'a> FunctionCompiler<'a> {
     ) {
         // Allocation identity remains `inst`; only assembly identities vary.
         let allocation_inst = inst;
-        let inst = site.map_or_else(|| inst.to_string(), |site| format!("{inst}_tail{site}"));
+        let inst = match site {
+            None => self.func.inst_name(inst).to_string(),
+            Some(site) => format!(
+                "{}_tail{}",
+                self.func.inst_name(inst),
+                self.func.inst_name(site)
+            ),
+        };
         let ty = self.ty(arg);
         let is64 = ty == Type::I64;
         // Compare the zero-extended bits with the cases as unsigned bits.

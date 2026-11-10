@@ -234,9 +234,16 @@ block0:
     };
     f.set_inst_loc(inst, Some(loc));
     keel_opt::optimize_with_tier(&mut module, OptimizationTier::Fast).unwrap();
-    assert_eq!(module.functions[0].inst_loc(inst), Some(loc));
+    // The pipeline compacts the function; the instruction keeps its name.
+    let f = &module.functions[0];
+    let inst = f
+        .layout_insts()
+        .find(|&(_, i)| f.inst_name(i) == inst)
+        .unwrap()
+        .1;
+    assert_eq!(f.inst_loc(inst), Some(loc));
     assert!(matches!(
-        module.functions[0].inst_data(inst),
+        f.inst_data(inst),
         InstData::Iconst { imm: 42, .. }
     ));
     keel_ir::verify_module(&module).unwrap();

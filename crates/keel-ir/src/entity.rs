@@ -73,8 +73,11 @@ pub fn write_handle(f: &mut fmt::Formatter<'_>, prefix: &str, index: u32) -> fmt
     f.write_str(std::str::from_utf8(&buf[..end]).expect("ASCII"))
 }
 
-/// Append-only storage addressed by `K`. Entities are never removed;
-/// dead ones are simply unreachable and dropped when the function is rebuilt.
+/// Append-only storage addressed by `K`. Entities are never removed one by
+/// one: dead ones stay unreachable. [`Function::compact`] drops a function's
+/// dead instructions at once; its dead values and blocks stay.
+///
+/// [`Function::compact`]: crate::Function::compact
 pub struct Arena<K, V> {
     items: Vec<V>,
     _key: PhantomData<K>,
@@ -140,6 +143,21 @@ impl<K: EntityRef, V> Arena<K, V> {
     #[inline]
     pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
         self.items.iter_mut()
+    }
+
+    /// Keeps the entries `keep` accepts, in order, renumbering them. `keep`
+    /// sees each entry with its old key.
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(K, &mut V) -> bool) {
+        let mut index = 0;
+        self.items.retain_mut(|item| {
+            index += 1;
+            keep(K::new(index - 1), item)
+        });
+    }
+
+    /// Frees the room beyond the entities there are.
+    pub(crate) fn shrink_to_fit(&mut self) {
+        self.items.shrink_to_fit();
     }
 }
 
@@ -388,6 +406,13 @@ impl<T> Default for ListPool<T> {
 }
 
 impl<T: EntityRef> ListPool<T> {
+    /// The items of `list`, mutably.
+    #[inline]
+    pub(crate) fn get_mut(&mut self, list: ListRange<T>) -> &mut [T] {
+        let start = list.start as usize;
+        &mut self.items[start..start + list.len as usize]
+    }
+
     /// The items of `list`, which must be one of this pool's (an empty
     /// default one is everyone's).
     #[inline]

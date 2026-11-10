@@ -82,7 +82,11 @@ impl FunctionCompiler<'_> {
             mov(this, S0, asm_arg(sized(memory(r64(S3), 0), 64)));
             mov(this, S2, asm_arg(sized(memory(r64(S3), 8), 64)));
         };
-        let retry = format!(".L{}_{inst}_retry", self.func.name);
+        let retry = format!(
+            ".L{}_{inst_name}_retry",
+            self.func.name,
+            inst_name = self.func.inst_name(inst)
+        );
         let mut flag = None;
         match *data {
             // Comparing with zero and storing zero back leaves memory as it

@@ -255,7 +255,11 @@ impl FunctionCompiler<'_> {
                 self.test_value(args[0]);
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);
-                let skip = format!("L{}_{inst}_vselect", func.name);
+                let skip = format!(
+                    "L{}_{inst_name}_vselect",
+                    func.name,
+                    inst_name = func.inst_name(inst)
+                );
                 self.move_vector(FS0, b);
                 self.conditional("eq", Name::Text(&skip));
                 self.move_vector(FS0, a);

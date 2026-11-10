@@ -551,7 +551,12 @@ fn split_initializer_constants_keep_source_location_and_scope() {
     let old: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
     keel_opt::run_passes(&mut m, &["stack-promote"]).unwrap();
     let f = &m.functions[0];
-    let new: Vec<_> = f.layout_insts().filter(|(_, i)| !old.contains(i)).collect();
+    // The pipeline compacts the function; old instructions keep their
+    // printed names.
+    let new: Vec<_> = f
+        .layout_insts()
+        .filter(|&(_, i)| !old.contains(&f.inst_name(i)))
+        .collect();
     assert_eq!(new.len(), 1);
     assert_eq!(f.inst_loc(new[0].1), Some(loc));
     // Four 0x80 bytes, sign-extended from i32.

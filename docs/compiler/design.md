@@ -77,11 +77,11 @@ it without depending on the IR.
 - **Editing.** Instructions are inserted at an `InsertPoint` (end of a block
   or before an instruction), moved and removed; blocks and block parameters
   can be removed. Removed entities keep their handles and nothing is
-  renumbered; the verifier reports any use of a value whose definition was
-  removed. `InstBuilder` (`func.ins(at).iadd(a, b)`) builds typed
-  instructions. Passes also call `insert_inst` with an `InstData`, rewrite in
-  place through `inst_data_mut` (keeping the result count and types), and
-  redirect values with `replace_all_uses`.
+  renumbered while passes run; the verifier reports any use of a value whose
+  definition was removed. `InstBuilder` (`func.ins(at).iadd(a, b)`) builds
+  typed instructions. Passes also call `insert_inst` with an `InstData`,
+  rewrite in place through `inst_data_mut` (keeping the result count and
+  types), and redirect values with `replace_all_uses`.
 
 **Decisions.** Instruction storage keeps contiguous per-block slices; there
 is no linked list. Each instruction records its index in its block, exact
@@ -91,9 +91,13 @@ rest of the block. `Function::remove_insts` removes an ordered subsequence
 with one block compaction; DCE and noreturn cleanup use it. A function takes
 a CFG stamp only when one is read. `InstData` is 48 bytes: `brif`
 destinations, `switch` case values and call ABI descriptors are boxed, and
-indirect-call arguments and `invoke` stay inline. Functions are not
-compacted to drop removed entities unless a workload shows the waste
-matters.
+indirect-call arguments and `invoke` stay inline.
+
+When an optimizer pipeline finishes, `Function::compact` drops the removed
+instructions of every function and renumbers the rest in their old order.
+Instructions keep the numbers they print as, so local labels in generated
+code do not change. Values and blocks keep their handles, dead ones included,
+because code generation reads every value's type.
 
 ## Types
 

@@ -173,7 +173,11 @@ impl FunctionCompiler<'_> {
                 if self.ty(args[1]).is_float() || self.ty(args[1]).is_vector() =>
             {
                 let d = self.def_freg(result);
-                let skip = format!(".L{}_{inst}_select", func.name);
+                let skip = format!(
+                    ".L{}_{inst_name}_select",
+                    func.name,
+                    inst_name = func.inst_name(inst)
+                );
                 self.test_value(args[0]);
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);

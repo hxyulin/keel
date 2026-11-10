@@ -1807,8 +1807,16 @@ impl<'a> FunctionCompiler<'a> {
             (0, 48, 8)
         };
         let (stack, load) = (
-            format!(".L{}_{inst}_stack", self.func.name),
-            format!(".L{}_{inst}_load", self.func.name),
+            format!(
+                ".L{}_{inst_name}_stack",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            ),
+            format!(
+                ".L{}_{inst_name}_load",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            ),
         );
         self.emit(
             Opcode::Mov,
@@ -2123,7 +2131,13 @@ impl<'a> FunctionCompiler<'a> {
             };
             [count, asm_arg(0i128)]
         };
-        let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
+        let label = |what: &str| {
+            format!(
+                ".L{}_{inst_name}_{what}",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            )
+        };
         let pair = |this: &mut Self, lo: Opcode, hi: Opcode| {
             this.emit(Opcode::Mov, [asm_arg(r64(0)), asm_arg(&a0)]);
             this.emit(lo, [asm_arg(r64(0)), asm_arg(&b0)]);
@@ -2262,7 +2276,13 @@ impl<'a> FunctionCompiler<'a> {
     /// `op` on an `i128` into rdx:rax.
     fn unary_i128(&mut self, inst: Inst, op: UnaryOp, arg: Value) {
         let [a0, a1] = self.halves(arg);
-        let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
+        let label = |what: &str| {
+            format!(
+                ".L{}_{inst_name}_{what}",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            )
+        };
         match op {
             // -x = ~x + 1: `neg` the low half sets the carry unless it was
             // zero, which the high half then absorbs.
@@ -3063,12 +3083,18 @@ impl<'a> FunctionCompiler<'a> {
         self.emit(Opcode::Test, [asm_arg(rb), asm_arg(rb)]);
         self.emit(Opcode::Jcc(4), [asm_arg(&trap)]);
         let name = &self.func.name;
-        let done = format!(".L{name}_{inst}_div");
+        let done = format!(
+            ".L{name}_{inst_name}_div",
+            inst_name = self.func.inst_name(inst)
+        );
         if signed {
             // MIN / -1 overflows, which faults too. The IR traps on the
             // quotient and gives 0 for the remainder.
             self.emit(Opcode::Cmp, [asm_arg(rb), asm_arg(-1i128)]);
-            let go = format!(".L{name}_{inst}_divide");
+            let go = format!(
+                ".L{name}_{inst_name}_divide",
+                inst_name = self.func.inst_name(inst)
+            );
             self.emit(Opcode::Jcc(5), [asm_arg(&go)]);
             if op == BinaryOp::Sdiv {
                 let min = min_value(ty);
@@ -3303,7 +3329,13 @@ impl<'a> FunctionCompiler<'a> {
             (52, 1023, 63, Opcode::Movq)
         };
         let bits_reg = |n| if ty == Type::F32 { r32(n) } else { r64(n) };
-        let label = |suffix: &str| format!(".L{}_{inst}_round_{suffix}", self.func.name);
+        let label = |suffix: &str| {
+            format!(
+                ".L{}_{inst_name}_round_{suffix}",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            )
+        };
         let (small, truncate, increment, sign_result, done, nan) = (
             label("small"),
             label("truncate"),
@@ -3531,9 +3563,18 @@ impl<'a> FunctionCompiler<'a> {
                 let min = op == BinaryOp::Fmin;
                 let name = &self.func.name;
                 let (nan, ne, done) = (
-                    format!(".L{name}_{inst}_nan"),
-                    format!(".L{name}_{inst}_ne"),
-                    format!(".L{name}_{inst}_done"),
+                    format!(
+                        ".L{name}_{inst_name}_nan",
+                        inst_name = self.func.inst_name(inst)
+                    ),
+                    format!(
+                        ".L{name}_{inst_name}_ne",
+                        inst_name = self.func.inst_name(inst)
+                    ),
+                    format!(
+                        ".L{name}_{inst_name}_done",
+                        inst_name = self.func.inst_name(inst)
+                    ),
                 );
 
                 self.emit(scalar(Opcode::Ucomisd, ty), [asm_arg(xd), asm_arg(xb)]);
@@ -3583,7 +3624,12 @@ impl<'a> FunctionCompiler<'a> {
     ) {
         let from = self.ty(arg);
         let name = self.func.name.clone();
-        let label = |what: &str| format!(".L{name}_{inst}_{what}");
+        let label = |what: &str| {
+            format!(
+                ".L{name}_{inst_name}_{what}",
+                inst_name = self.func.inst_name(inst)
+            )
+        };
         match op {
             ConvertOp::Fpext | ConvertOp::Fptrunc => {
                 let d = self.def_freg(result);
@@ -3855,7 +3901,11 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             _ => {
-                let retry = format!(".L{}_{inst}_retry", self.func.name);
+                let retry = format!(
+                    ".L{}_{inst_name}_retry",
+                    self.func.name,
+                    inst_name = self.func.inst_name(inst)
+                );
                 match ty {
                     Type::I8 | Type::I16 => {
                         self.emit(Opcode::Movzx, [asm_arg(r32(0)), asm_arg(&at)])
@@ -3912,7 +3962,11 @@ impl<'a> FunctionCompiler<'a> {
             .enumerate()
             .map(|(i, d)| match self.block_args_noop(d, i) {
                 true => self.label(d.block),
-                false => format!(".L{}_{inst}_edge{i}", self.func.name),
+                false => format!(
+                    ".L{}_{inst_name}_edge{i}",
+                    self.func.name,
+                    inst_name = self.func.inst_name(inst)
+                ),
             })
             .collect();
         let (min, span) = (plan.min, plan.span);
@@ -3942,7 +3996,11 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(Opcode::Cmp, [asm_arg(rax), asm_arg(span)]);
                 self.emit(Opcode::Jcc(7), [asm_arg(&targets[0])]);
             }
-            let table = format!(".L{}_{inst}_table", self.func.name);
+            let table = format!(
+                ".L{}_{inst_name}_table",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            );
             // Offsets from the table to each target, so the table needs no
             // relocations: position independent.
             self.emit(

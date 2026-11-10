@@ -32,7 +32,11 @@ impl FunctionCompiler<'_> {
             } => {
                 let decl = func.callee(callee);
                 let sret = self.move_args(args, &decl.sig.params);
-                let site = format!("L{}_{inst}", func.name);
+                let site = format!(
+                    "L{}_{inst_name}",
+                    func.name,
+                    inst_name = func.inst_name(inst)
+                );
                 self.out.label(format!("{site}_begin"));
                 self.out.branch_name(
                     true,
@@ -189,7 +193,11 @@ impl FunctionCompiler<'_> {
                     self.block_args(then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
-                    let pad = format!("L{}_{inst}_else", func.name);
+                    let pad = format!(
+                        "L{}_{inst_name}_else",
+                        func.name,
+                        inst_name = func.inst_name(inst)
+                    );
                     self.brif_false(&test, Name::Text(&pad));
                     self.block_args(then_dest, 0);
                     self.out

@@ -89,7 +89,11 @@ impl FunctionCompiler<'_> {
                     self.block_args(then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
-                    let pad = format!(".L{}_{inst}_else", func.name);
+                    let pad = format!(
+                        ".L{}_{inst_name}_else",
+                        func.name,
+                        inst_name = func.inst_name(inst)
+                    );
                     self.emit(Opcode::Jcc(condition(not)), [asm_arg(&pad)]);
                     self.block_args(then_dest, 0);
                     self.jump_to_block(Opcode::Jmp, then_dest.block);

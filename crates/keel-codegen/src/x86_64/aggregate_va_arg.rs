@@ -16,8 +16,16 @@ impl FunctionCompiler<'_> {
         // exact short chunk copies through the ordinary RAX/RDX scratch pair.
         let list_reg = self.use_reg(list, S2);
         self.emit(Opcode::Mov, [asm_arg(r64(R10)), asm_arg(r64(list_reg))]);
-        let overflow = format!(".L{}_{inst}_aggregate_overflow", self.func.name);
-        let done = format!(".L{}_{inst}_aggregate_done", self.func.name);
+        let overflow = format!(
+            ".L{}_{inst_name}_aggregate_overflow",
+            self.func.name,
+            inst_name = self.func.inst_name(inst)
+        );
+        let done = format!(
+            ".L{}_{inst_name}_aggregate_done",
+            self.func.name,
+            inst_name = self.func.inst_name(inst)
+        );
         let policy = sysv::aggregate_policy(layout, producer);
         let wrapper = match &policy {
             sysv::ProducerAggregate::Vector(ty) => Some(*ty),
