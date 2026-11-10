@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 // The two constants are also used for controlled profiling ablations.
 const CACHE_HEADERS: bool = true;
-/// The main file is scanned and processed in chunks of at least this many
-/// tokens, each ending with a newline, so its tokens are never all live.
+/// Files are scanned and processed in chunks of at least this many tokens,
+/// each ending with a newline, so a file's tokens are never all live.
 const STREAM_CHUNK_TOKENS: usize = 4096;
 
 #[derive(Clone, Debug, Default)]
@@ -196,6 +196,7 @@ pub struct PreprocessStats {
     pub file_opens: usize,
     pub mapped_files: usize,
     pub source_cache_hits: usize,
+    /// Inclusions that processed tokens kept from an earlier inclusion.
     pub token_cache_hits: usize,
     pub scanned_files: usize,
     pub guard_skips: usize,
@@ -251,7 +252,8 @@ fn preprocess_inner<const TRACK: bool>(
         canonical_dirs: HashMap::default(),
         header_cache: HashMap::default(),
         file_sources: HashMap::default(),
-        scanned: HashMap::default(),
+        included: HashMap::default(),
+        chunks: Vec::new(),
         counter: 0,
         output: String::new(),
         output_next: None,
@@ -319,7 +321,10 @@ struct Preprocessor<'a, const TRACK: bool> {
     canonical_dirs: HashMap<PathBuf, PathBuf>,
     header_cache: HashMap<HeaderContext<'a>, HashMap<String, Option<Include>>>,
     file_sources: HashMap<(PathBuf, bool), &'a str>,
-    scanned: HashMap<(PathBuf, bool), CachedTokens<'a>>,
+    /// Each header processed to its end.
+    included: HashMap<(PathBuf, bool), Included<'a>>,
+    /// Token buffers for the chunks of files being processed.
+    chunks: Vec<Vec<Token<'a>>>,
     counter: u64,
     output: String,
     /// The source file and line that the next `output` line continues, if
@@ -333,73 +338,151 @@ enum FileSource {
     Shared(Arc<str>),
     Mapped(memmap2::Mmap),
 }
-/// A header's tokens and include guard. The tokens are `None` once released
-/// because a defined guard or `#pragma once` skips every later inclusion.
-struct CachedTokens<'a> {
-    tokens: Option<Tokens<'a>>,
+/// What later inclusions of a header reuse from its first inclusion.
+#[derive(Clone)]
+struct Included<'a> {
+    /// The macro of the #ifndef / #define / #endif group that starts the
+    /// header, if any. Its current state is checked on every inclusion: once
+    /// defined, the group's lines are all inactive and need no processing.
     guard: Option<&'a str>,
+    /// Whether the guard group is the whole header.
+    whole: bool,
+    /// The tokens after the guard group, or all of them without a guard;
+    /// `None` for a whole guard group, or if they were not kept.
+    rest: Option<Rc<Vec<Token<'a>>>>,
 }
-/// A header's tokens, shared by the cache and each inclusion processing
-/// them. The box keeps the scanner's allocation; `Rc<[Token]>` would copy it.
-type Tokens<'a> = Rc<Box<[Token<'a>]>>;
 
-// Recognize only a complete outer #ifndef / #define / #endif guard.
-// An outer #else/#elif or any tokens after #endif disable this shortcut.
-// The guard's current macro state is checked again on every inclusion.
-fn header_guard<'a>(tokens: &[Token<'a>]) -> Option<&'a str> {
-    let mut lines = tokens
-        .split(|t| t.text == "\n")
-        .filter(|line| !line.is_empty());
-    let first = lines.next()?;
-    if first.len() != 3
-        || first[0].text != "#"
-        || first[1].text != "ifndef"
-        || !ident(first[2].text)
-    {
-        return None;
+/// Recognizes the guard group that starts a header from the header's
+/// non-empty physical lines. An outer #else/#elif rules it out.
+struct GuardScan<'a> {
+    state: GuardState<'a>,
+    depth: usize,
+    // Malformed nested conditionals rule out the guard, so skipping a group
+    // never hides a diagnostic. Nesting deeper than 32 also rules it out.
+    otherwise: [bool; 32],
+}
+#[derive(Clone, Copy)]
+enum GuardState<'a> {
+    /// Before the `#ifndef NAME` line.
+    Start,
+    /// After `#ifndef NAME`, before `#define NAME`.
+    Ifndef(&'a str),
+    /// Inside the guard group.
+    Open(&'a str),
+    /// After the group's `#endif`.
+    Closed(&'a str),
+    /// After a non-empty line following the group.
+    Leading(&'a str),
+    /// No guard group starts the header.
+    Unguarded,
+    /// The guard group's conditionals are malformed.
+    Malformed,
+}
+impl<'a> GuardScan<'a> {
+    fn new() -> Self {
+        Self {
+            state: GuardState::Start,
+            depth: 0,
+            otherwise: [false; 32],
+        }
     }
-    let guard = first[2].text;
-    let define = lines.next()?;
-    if define.len() < 3
-        || define[0].text != "#"
-        || define[1].text != "define"
-        || define[2].text != guard
-    {
-        return None;
+    /// Takes the next non-empty physical line. Returns whether it closes the
+    /// guard group.
+    fn line(&mut self, line: &[Token<'a>]) -> bool {
+        self.state = match self.state {
+            GuardState::Start
+                if line.len() == 3
+                    && line[0].text == "#"
+                    && line[1].text == "ifndef"
+                    && ident(line[2].text) =>
+            {
+                GuardState::Ifndef(line[2].text)
+            }
+            GuardState::Ifndef(guard)
+                if line.len() >= 3
+                    && line[0].text == "#"
+                    && line[1].text == "define"
+                    && line[2].text == guard =>
+            {
+                self.depth = 1;
+                GuardState::Open(guard)
+            }
+            GuardState::Start | GuardState::Ifndef(_) => GuardState::Unguarded,
+            GuardState::Open(guard) => self.nested(line, guard),
+            GuardState::Closed(guard) => GuardState::Leading(guard),
+            state => state,
+        };
+        matches!(self.state, GuardState::Closed(_))
     }
-    // Keep diagnostics for malformed nested conditionals even if the guard
-    // is already defined on the first include. Deep headers use the regular
-    // conditional parser rather than growing a separate optimization stack.
-    let mut otherwise = [false; 32];
-    let mut depth = 1usize;
-    while let Some(line) = lines.next() {
-        if line.first()?.text != "#" {
-            continue;
+    fn nested(&mut self, line: &[Token<'a>], guard: &'a str) -> GuardState<'a> {
+        if line[0].text != "#" {
+            return GuardState::Open(guard);
         }
         match line.get(1).map(|t| t.text) {
             Some("if" | "ifdef" | "ifndef") => {
-                if depth == otherwise.len() {
-                    return None;
+                if self.depth == self.otherwise.len() {
+                    return GuardState::Malformed;
                 }
-                otherwise[depth] = false;
-                depth += 1;
+                self.otherwise[self.depth] = false;
+                self.depth += 1;
             }
             Some(directive @ ("else" | "elif")) => {
-                if depth == 1 || otherwise[depth - 1] {
-                    return None;
+                if self.depth == 1 || self.otherwise[self.depth - 1] {
+                    return GuardState::Malformed;
                 }
-                otherwise[depth - 1] = directive == "else";
+                self.otherwise[self.depth - 1] = directive == "else";
             }
             Some("endif") => {
-                depth -= 1;
-                if depth == 0 {
-                    return (lines.next().is_none()).then_some(guard);
+                self.depth -= 1;
+                if self.depth == 0 {
+                    return GuardState::Closed(guard);
                 }
             }
             _ => {}
         }
+        GuardState::Open(guard)
     }
-    None
+    /// Updates `kept`, the tokens a later inclusion processes, with the
+    /// lines of `chunk`. The guard group closed at `closed_at` in `chunk`, if
+    /// it did there, and the lines are `was` before it.
+    fn keep(
+        &self,
+        was: GuardState<'a>,
+        chunk: &[Token<'a>],
+        closed_at: Option<usize>,
+        kept: &mut Option<Vec<Token<'a>>>,
+    ) {
+        let Some(tokens) = kept else {
+            return;
+        };
+        match self.state {
+            GuardState::Start | GuardState::Ifndef(_) | GuardState::Unguarded => {
+                tokens.extend_from_slice(chunk);
+            }
+            GuardState::Open(_) | GuardState::Closed(_) => tokens.clear(),
+            GuardState::Leading(_) if matches!(was, GuardState::Leading(_)) => {
+                tokens.extend_from_slice(chunk);
+            }
+            GuardState::Leading(_) => {
+                tokens.clear();
+                tokens.extend_from_slice(&chunk[closed_at.unwrap_or(0)..]);
+            }
+            GuardState::Malformed => *kept = None,
+        }
+    }
+    /// What later inclusions reuse, given the tokens kept by [`Self::keep`].
+    fn included(&self, kept: Option<Vec<Token<'a>>>) -> Included<'a> {
+        let (guard, whole) = match self.state {
+            GuardState::Closed(guard) => (Some(guard), true),
+            GuardState::Leading(guard) => (Some(guard), false),
+            _ => (None, false),
+        };
+        Included {
+            guard,
+            whole,
+            rest: kept.filter(|_| !whole).map(Rc::new),
+        }
+    }
 }
 impl FileSource {
     fn open(path: &Path) -> std::io::Result<Self> {
@@ -1037,120 +1120,108 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return Ok(());
         }
         // The caller-provided top-level text may differ from the on-disk file.
-        // Only disk/embedded includes participate in the lexical file cache.
-        if depth == 0 || !CACHE_HEADERS {
+        // Only disk/embedded includes participate in the header caches.
+        let key = (depth > 0 && CACHE_HEADERS).then(|| (canonical.clone(), embedded));
+        let known = key.as_ref().and_then(|key| self.included.get(key).cloned());
+        let mut tokens = None;
+        if let Some(known) = &known {
+            match known.guard {
+                Some(guard) if !self.macros.contains_key(guard) => {}
+                Some(_) if known.whole => {
+                    if TRACK {
+                        self.stats.guard_skips += 1;
+                    }
+                    return Ok(());
+                }
+                _ => {
+                    tokens = known.rest.clone();
+                    if TRACK && tokens.is_some() {
+                        self.stats.token_cache_hits += 1;
+                    }
+                }
+            }
+        }
+        self.include_stack.push((path, origin));
+        let mut state = FileState::new(path, canonical, depth);
+        if key.is_some() && known.is_none() {
+            state.guard = Some(GuardScan::new());
+        }
+        if tokens.is_none()
+            && let Some(key) = &key
+        {
+            tokens = self.restore(key, src, path).map(|t| Rc::new(t.into_vec()));
+        }
+        let mut kept = None;
+        if let Some(tokens) = tokens {
+            if TRACK {
+                self.stats.token_bytes += std::mem::size_of_val(tokens.as_slice());
+            }
+            self.lines(&tokens, &mut state)?;
+        } else {
             if TRACK {
                 self.stats.scanned_files += 1;
             }
-            self.include_stack.push((path, origin));
-            let mut state = FileState::new(path, canonical, depth);
             let mut scanner = Scanner::new(src, path, self.arena);
-            let mut chunk = Vec::new();
-            self.stream(&mut scanner, &mut chunk, &mut state)?;
+            let mut chunk = self.chunks.pop().unwrap_or_default();
+            // The batch cache keeps every token of a header; otherwise only
+            // those that its later inclusions process.
+            let batch = self.batch_cache.is_some();
+            kept = state.guard.is_some().then(Vec::new);
+            self.stream(&mut scanner, &mut chunk, &mut state, &mut kept, batch)?;
             if TRACK {
                 self.stats.token_bytes += chunk.capacity() * std::mem::size_of::<Token>();
             }
-            return self.finish_file(state);
+            chunk.clear();
+            self.chunks.push(chunk);
+            if batch
+                && let (Some(tokens), Some(key), Some(cache)) =
+                    (kept.take(), &key, &mut self.batch_cache)
+            {
+                cache
+                    .headers
+                    .insert(key.clone(), CachedHeader::new(src, &tokens));
+            }
         }
-        let key = (canonical.clone(), embedded);
-        let (tokens, guard) = if let Some(cached) = self.scanned.get(&key) {
-            if TRACK {
-                self.stats.token_cache_hits += 1;
-            }
-            let guard = cached.guard;
-            if guard.is_some_and(|name| self.macros.contains_key(name)) {
-                if TRACK {
-                    self.stats.guard_skips += 1;
-                }
-                return Ok(());
-            }
-            let tokens = match &cached.tokens {
-                Some(tokens) => Rc::clone(tokens),
-                None => {
-                    // Released after an earlier inclusion; the guard macro
-                    // has since been undefined.
-                    if TRACK {
-                        self.stats.scanned_files += 1;
-                    }
-                    let tokens = self.scan_file(src, path)?;
-                    self.scanned.get_mut(&key).unwrap().tokens = Some(Rc::clone(&tokens));
-                    tokens
-                }
-            };
-            (tokens, guard)
-        } else {
-            let restored = self.batch_cache.as_mut().and_then(|cache| {
-                let header = cache.headers.get(&key)?;
-                if header.source.as_ref() != src {
-                    return None;
-                }
-                let tokens = header.restore(self.arena, path);
-                cache.lexical_hits += 1;
-                Some(tokens)
-            });
-            let tokens = if let Some(tokens) = restored {
-                Rc::new(tokens)
-            } else {
-                if TRACK {
-                    self.stats.scanned_files += 1;
-                }
-                let tokens = self.scan_file(src, path)?;
-                if let Some(cache) = self.batch_cache.as_mut() {
-                    cache
-                        .headers
-                        .insert(key.clone(), CachedHeader::new(src, &tokens));
-                }
-                tokens
-            };
-            let guard = header_guard(&tokens);
-            let skip = guard.is_some_and(|name| self.macros.contains_key(name));
-            self.scanned.insert(
-                key.clone(),
-                CachedTokens {
-                    tokens: (!skip).then(|| Rc::clone(&tokens)),
-                    guard,
-                },
-            );
-            if skip {
-                if TRACK {
-                    self.stats.guard_skips += 1;
-                }
-                return Ok(());
-            }
-            (tokens, guard)
-        };
-        self.include_stack.push((path, origin));
-        let mut state = FileState::new(path, canonical, depth);
-        for physical in tokens.split(|t| t.text == "\n") {
-            self.physical_line(physical, &mut state)?;
-        }
+        let included = state.guard.as_ref().map(|scan| scan.included(kept));
         self.finish_file(state)?;
-        // Release the tokens once a defined guard or `#pragma once` skips
-        // every later inclusion. An inclusion still being processed holds
-        // its own reference. Including the file after `#undef` of its guard
-        // scans it again.
-        if (guard.is_some_and(|name| self.macros.contains_key(name)) || self.once.contains(&key.0))
-            && let Some(cached) = self.scanned.get_mut(&key)
-        {
-            cached.tokens = None;
+        if let (Some(key), Some(included)) = (key, included) {
+            self.included.insert(key, included);
         }
         Ok(())
     }
 
-    /// Processes `scanner`'s tokens in line-aligned chunks of `chunk`.
+    /// A header's tokens from the batch cache, if it holds this source.
+    fn restore(
+        &mut self,
+        key: &(PathBuf, bool),
+        src: &str,
+        path: &'a str,
+    ) -> Option<Box<[Token<'a>]>> {
+        let cache = self.batch_cache.as_mut()?;
+        let header = cache.headers.get(key)?;
+        if header.source.as_ref() != src {
+            return None;
+        }
+        cache.lexical_hits += 1;
+        Some(header.restore(self.arena, path))
+    }
+
+    /// Processes `scanner`'s tokens in line-aligned chunks of `chunk`. While
+    /// a header's guard is scanned, `kept` collects the tokens later
+    /// inclusions process, or all of them if `keep_all`.
     fn stream(
         &mut self,
         scanner: &mut Scanner<'a>,
         chunk: &mut Vec<Token<'a>>,
         state: &mut FileState<'a>,
+        kept: &mut Option<Vec<Token<'a>>>,
+        keep_all: bool,
     ) -> Result<(), Diagnostic> {
         loop {
             chunk.clear();
             let done = scanner.fill(chunk, self.stream_chunk)?;
-            let processed = chunk
-                .split(|t| t.text == "\n")
-                .try_for_each(|physical| self.physical_line(physical, state));
-            if let Err(error) = processed {
+            let was = state.guard.as_ref().map(|scan| scan.state);
+            if let Err(error) = self.lines(chunk, state) {
                 // Report a lexical error anywhere in the file before any
                 // directive error, as when the whole file was scanned first.
                 loop {
@@ -1160,10 +1231,39 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     }
                 }
             }
+            if keep_all {
+                if let Some(tokens) = kept {
+                    tokens.extend_from_slice(chunk);
+                }
+            } else if let (Some(scan), Some(was)) = (&state.guard, was) {
+                scan.keep(was, chunk, state.guard_closed_at, kept);
+            }
+            state.guard_closed_at = None;
             if done {
                 return Ok(());
             }
         }
+    }
+
+    /// Processes the physical lines of `tokens`, each ending with a newline
+    /// token except perhaps the last.
+    fn lines(&mut self, tokens: &[Token<'a>], state: &mut FileState<'a>) -> Result<(), Diagnostic> {
+        let mut end = 0;
+        for line in tokens.split_inclusive(|t| t.text == "\n") {
+            end += line.len();
+            let line = match line.split_last() {
+                Some((last, line)) if last.text == "\n" => line,
+                _ => line,
+            };
+            if let Some(scan) = &mut state.guard
+                && !line.is_empty()
+                && scan.line(line)
+            {
+                state.guard_closed_at = Some(end);
+            }
+            self.physical_line(line, state)?;
+        }
+        Ok(())
     }
 
     fn finish_file(&mut self, mut state: FileState<'a>) -> Result<(), Diagnostic> {
@@ -1328,16 +1428,6 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
         }
         Ok(())
-    }
-    fn scan_file(&mut self, src: &'a str, path: &'a str) -> Result<Tokens<'a>, Diagnostic> {
-        // Large lexical buffers have exact-size owners, so they can be freed
-        // before TU teardown. Growing them inside the bump arena would also
-        // retain discarded capacities.
-        let tokens = Rc::new(scan(src, path, self.arena)?.into_boxed_slice());
-        if TRACK {
-            self.stats.token_bytes += std::mem::size_of_val(tokens.as_ref());
-        }
-        Ok(tokens)
     }
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
         if let Some(canonical) = self.canonical_paths.get(path) {
@@ -1556,6 +1646,10 @@ struct FileState<'a> {
     line_delta: i64,
     canonical: PathBuf,
     depth: usize,
+    /// Present while a header's include guard is unknown.
+    guard: Option<GuardScan<'a>>,
+    /// The end of the guard group's `#endif` line in the current chunk.
+    guard_closed_at: Option<usize>,
 }
 impl<'a> FileState<'a> {
     fn new(path: &'a str, canonical: PathBuf, depth: usize) -> Self {
@@ -1566,6 +1660,8 @@ impl<'a> FileState<'a> {
             line_delta: 0,
             canonical,
             depth,
+            guard: None,
+            guard_closed_at: None,
         }
     }
 }
@@ -2482,6 +2578,46 @@ mod scanner_tests {
             chunked("#error stop\nok\n/* unterminated", 1),
             "error chunk.c:3:1: unterminated comment"
         );
+    }
+
+    /// Later inclusions skip a defined guard group and process the kept
+    /// tokens after it, wherever chunk boundaries fall.
+    #[test]
+    fn reinclusions_process_the_tokens_after_a_defined_guard_group() {
+        let dir = std::env::temp_dir().join(format!("keel-pp-reinclude-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, text) in [
+            (
+                "lead.h",
+                "#ifndef LEAD_H\n#define LEAD_H\nhead\n#endif\n\n// c\ntail MODE __LINE__\n",
+            ),
+            ("plain.h", "#if 1\nplain MODE\n#endif\n"),
+            ("else.h", "#ifndef E\n#define E\na\n#else\nb\n#endif\n"),
+            ("whole.h", "#ifndef W\n#define W\nw MODE\n#endif\n"),
+        ] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        let src = "#define MODE 1\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef MODE\n#define MODE 2\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef LEAD_H\n#undef W\n#include \"lead.h\"\n#include \"whole.h\"\n";
+        let path = dir.join("main.c");
+        let run = |chunk| {
+            let opts = PreprocessOptions::default();
+            let (text, _) =
+                preprocess_inner::<false>(src, path.to_str().unwrap(), &opts, None, chunk).unwrap();
+            text.lines()
+                .filter(|line| !line.starts_with('#'))
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let whole = run(usize::MAX);
+        assert_eq!(
+            whole,
+            "head tail 1 7 plain 1 a w 1 tail 2 7 plain 2 b head tail 2 7 w 2"
+        );
+        for chunk in [1, 2, 3, 5] {
+            assert_eq!(run(chunk), whole, "chunks of {chunk}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

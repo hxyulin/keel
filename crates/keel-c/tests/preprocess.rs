@@ -501,8 +501,11 @@ fn cached_guard_detection_respects_undef_else_and_trailing_tokens() {
         .unwrap();
         assert_eq!(stats.file_opens, 3);
         assert_eq!(stats.guard_skips, 1);
-        // guard.h released its tokens and is scanned again after #undef.
-        assert_eq!(stats.scanned_files, 5);
+        // guard.h is scanned again after #undef. The outer #else rules out a
+        // guard in else.h, which is scanned on both inclusions. tail.h's
+        // second inclusion processes the kept line after its guard group.
+        assert_eq!(stats.scanned_files, 6);
+        assert_eq!(stats.token_cache_hits, 1);
     }
 }
 
@@ -544,8 +547,9 @@ fn released_header_tokens_are_scanned_again_after_guard_undef() {
     {
         let (profiled, stats) = keel_c::preprocess_with_stats(source, path, &opts).unwrap();
         assert_eq!(profiled, got);
-        // The root, three headers, and guard.h and nested.h again.
-        assert_eq!(stats.scanned_files, 6);
+        // The root, three headers, guard.h again, and the inner inclusion of
+        // nested.h, which happens before its first inclusion ends, twice.
+        assert_eq!(stats.scanned_files, 8);
         assert_eq!(stats.guard_skips, 2);
         assert_eq!(stats.once_skips, 1);
     }
@@ -607,7 +611,8 @@ fn cached_include_next_keeps_each_search_origin() {
             keel_c::preprocess_with_stats(source, dir.join("main.c").to_str().unwrap(), &opts)
                 .unwrap();
         assert_eq!(stats.file_opens, 2);
-        assert_eq!(stats.token_cache_hits, 1);
+        // The alias is scanned again: the first inclusion has not ended.
+        assert_eq!(stats.scanned_files, 4);
     }
 }
 
