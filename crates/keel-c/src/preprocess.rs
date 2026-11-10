@@ -240,7 +240,8 @@ fn preprocess_inner<const TRACK: bool>(
         options,
         stream_chunk,
         in_condition: false,
-        macros: HashMap::default(),
+        // A TU that includes C library headers typically defines 1500 macros.
+        macros: HashMap::with_capacity_and_hasher(2048, Default::default()),
         buffers: Vec::new(),
         undefined: HashSet::default(),
         search_dirs: Vec::new(),
