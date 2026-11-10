@@ -280,13 +280,22 @@ fn clang_pic_tls_objects_link_on_both_targets() {
         if arm {
             resolver[18..20].copy_from_slice(&183u16.to_le_bytes());
         }
-        let exe = link_with("clang-tls.o", &[input, resolver], options(arm)).unwrap();
+        let inputs = if arm {
+            vec![input, resolver]
+        } else {
+            vec![input]
+        };
+        let exe = link_with("clang-tls.o", &inputs, options(arm)).unwrap();
         let f = object::File::parse(exe.bytes.as_slice()).unwrap();
         assert_eq!(
             f.symbol_by_name("tls").unwrap().kind(),
             object::SymbolKind::Tls
         );
-        assert!(f.section_by_name(".got.tls").unwrap().size() >= 16);
+        if arm {
+            assert!(f.section_by_name(".got.tls").unwrap().size() >= 16);
+        } else {
+            assert!(f.symbols().all(|s| s.name().unwrap() != "__tls_get_addr"));
+        }
     }
 }
 
@@ -617,5 +626,154 @@ fn canonical_general_dynamic_relaxes_without_a_resolver() {
         } else {
             assert_eq!(i32::from_le_bytes(code[12..16].try_into().unwrap()), -8);
         }
+    }
+}
+
+#[test]
+fn canonical_local_dynamic_relaxes_without_a_resolver() {
+    let mut input = object(
+        ".text\n.globl _start\n_start:\n.byte 0x48,0x8d,0x3d\n.long tls-4\n.byte 0xe8\n.long __tls_get_addr-4\n.byte 0x48,0x8d,0x80\n.long tls\nret\n.section .tdata,\"awT\",@progbits\n.globl tls\n.type tls,@tls_object\ntls: .quad 73\n",
+    );
+    let f = object::File::parse(input.as_slice()).unwrap();
+    let at = f
+        .section_by_name(".rela.text")
+        .unwrap()
+        .file_range()
+        .unwrap()
+        .0 as usize;
+    let text = f.section_by_name(".text").unwrap().file_range().unwrap().0 as usize;
+    for (i, kind) in [20u32, 4, 21].into_iter().enumerate() {
+        input[at + i * 24 + 8..at + i * 24 + 12].copy_from_slice(&kind.to_le_bytes());
+    }
+    let mut malformed = input.clone();
+    malformed[text] = 0x90;
+    assert!(link(&[malformed]).unwrap_err().contains("__tls_get_addr"));
+    let exe = link(&[input]).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let code = f.section_by_name(".text").unwrap().data().unwrap();
+    assert_eq!(
+        &code[..12],
+        &[0x66, 0x66, 0x90, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0]
+    );
+    assert_eq!(i32::from_le_bytes(code[15..19].try_into().unwrap()), -8);
+    assert!(f.symbols().all(|s| s.name().unwrap() != "__tls_get_addr"));
+}
+
+#[test]
+fn local_dynamic_multiple_calls_offsets_and_fallback() {
+    let sequence = ".byte 0x48,0x8d,0x3d\n.long tls-4\n.byte 0xe8\n.long __tls_get_addr-4\n.byte 0x48,0x8d,0x80\n.long tls+3\n";
+    let mut input = object(&format!(
+        ".text\n.globl _start\n_start:\n{sequence}{sequence}ret\n.data\n.quad tls+5\n.section .tdata,\"awT\",@progbits\n.balign 32\n.globl tls\n.type tls,@tls_object\ntls: .quad 73\n.section .tbss,\"awT\",@nobits\n.balign 64\n.zero 65\n"
+    ));
+    let f = object::File::parse(input.as_slice()).unwrap();
+    let text = f.section_by_name(".text").unwrap().file_range().unwrap().0 as usize;
+    let rela = f
+        .section_by_name(".rela.text")
+        .unwrap()
+        .file_range()
+        .unwrap()
+        .0 as usize;
+    let data_rela = f
+        .section_by_name(".rela.data")
+        .unwrap()
+        .file_range()
+        .unwrap()
+        .0 as usize;
+    for (i, kind) in [20u32, 4, 21, 20, 4, 21].into_iter().enumerate() {
+        input[rela + i * 24 + 8..rela + i * 24 + 12].copy_from_slice(&kind.to_le_bytes());
+    }
+    input[data_rela + 8..data_rela + 12].copy_from_slice(&17u32.to_le_bytes());
+    // An eight-byte field really does overlap the following LD sequence.
+    let mut overlapping = input.clone();
+    overlapping[rela + 2 * 24 + 8..rela + 2 * 24 + 12].copy_from_slice(&17u32.to_le_bytes());
+    assert!(link(&[overlapping]).unwrap_err().contains("__tls_get_addr"));
+    let mut malformed = input.clone();
+    malformed[text + 19] = 0x90;
+    assert!(
+        link(&[malformed.clone()])
+            .unwrap_err()
+            .contains("__tls_get_addr")
+    );
+    let resolver = object(".text\n.globl __tls_get_addr\n__tls_get_addr: ret\n");
+    let fallback = link(&[malformed, resolver]).unwrap();
+    let f = object::File::parse(fallback.bytes.as_slice()).unwrap();
+    assert_eq!(
+        &f.section_by_name(".text").unwrap().data().unwrap()[..3],
+        &[0x48, 0x8d, 0x3d]
+    );
+    assert_eq!(
+        word(
+            &fallback.bytes,
+            f.section_by_name(".data").unwrap().address()
+        ),
+        5
+    );
+    let retained = object(".data\n.quad __tls_get_addr\n");
+    assert!(
+        link(&[input.clone(), retained])
+            .unwrap_err()
+            .contains("__tls_get_addr")
+    );
+    let exe = link(&[input]).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let code = f.section_by_name(".text").unwrap().data().unwrap();
+    for start in [0, 19] {
+        assert_eq!(
+            &code[start..start + 12],
+            &[0x66, 0x66, 0x90, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            i32::from_le_bytes(code[start + 15..start + 19].try_into().unwrap()),
+            -189
+        );
+    }
+    assert_eq!(
+        word(&exe.bytes, f.section_by_name(".data").unwrap().address()) as i64,
+        -187
+    );
+}
+
+#[test]
+fn clang_local_dynamic_objects_need_no_resolver() {
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::record_skip("keel-link", "elf_tls", keel_test_support::NO_CLANG);
+        return;
+    };
+    let dir = keel_test_support::TempDir::new("elf-tls-local-dynamic");
+    let source = dir.join("tls.c");
+    std::fs::write(&source, "static __thread volatile int tls = 73; static __thread volatile int zero; int read_tls(void) { return tls + ++zero; } void _start(void) {}\n").unwrap();
+    for optimization in ["-O0", "-O2"] {
+        let path = dir.join("tls.o");
+        let output = clang
+            .command()
+            .args([
+                "-target",
+                "x86_64-linux-gnu",
+                "-fPIC",
+                "-ftls-model=local-dynamic",
+                optimization,
+                "-c",
+            ])
+            .arg(&source)
+            .arg("-o")
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let input = std::fs::read(path).unwrap();
+        let f = object::File::parse(input.as_slice()).unwrap();
+        assert!(
+            f.sections()
+                .flat_map(|s| s.relocations())
+                .any(|(_, r)| matches!(r.flags(), object::RelocationFlags::Elf { r_type: 20 })),
+            "{optimization} must exercise TLSLD"
+        );
+        let exe = link(&[input]).unwrap();
+        let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+        assert!(f.symbols().all(|s| s.name().unwrap() != "__tls_get_addr"));
     }
 }

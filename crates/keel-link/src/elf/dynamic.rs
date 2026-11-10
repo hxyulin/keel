@@ -653,11 +653,26 @@ impl Dynamic {
             .find(|h| h.index == index)
             .map(|h| (h.kind, h.link, h.info, h.entsize))
     }
+    pub(super) fn extended_sections(
+        &self,
+        definitions: &BTreeMap<&str, (u64, u32)>,
+    ) -> (usize, Vec<u32>) {
+        let mut indexes = vec![0; self.imports.len() + 1];
+        indexes.extend(self.definitions.iter().map(|d| {
+            let index = definitions[d.name.as_str()].1;
+            if index >= 0xff00 && index != u32::MAX {
+                index
+            } else {
+                0
+            }
+        }));
+        (self.dynsym + 1, indexes)
+    }
     pub fn emit(
         &mut self,
         bytes: &mut [u8],
         sections: &[Section],
-        definitions: &BTreeMap<&str, (u64, u16)>,
+        definitions: &BTreeMap<&str, (u64, u32)>,
     ) -> Result<()> {
         let at = |i: usize| sections[i].offset as usize;
         let symbol_count = self.imports.len() + self.definitions.len() + 1;
@@ -690,7 +705,17 @@ impl Dynamic {
             put32(&mut dynsym, i * 24, self.symbol_names[&d.name]);
             dynsym[i * 24 + 4] = d.info;
             dynsym[i * 24 + 5] = d.other;
-            put16(&mut dynsym, i * 24 + 6, *section);
+            put16(
+                &mut dynsym,
+                i * 24 + 6,
+                if *section >= 0xff00 && *section != u32::MAX {
+                    object::elf::SHN_XINDEX
+                } else if *section == u32::MAX {
+                    object::elf::SHN_ABS
+                } else {
+                    *section as u16
+                },
+            );
             put64(&mut dynsym, i * 24 + 8, *value);
             put64(&mut dynsym, i * 24 + 16, d.size);
             put16(&mut versym, i * 2, 1);

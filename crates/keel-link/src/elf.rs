@@ -394,6 +394,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     let bounds = bounds::symbols(&sections, &units, &globals)?;
     if !arm {
         relax::tls_general(&mut sections, &mut units, &globals)?;
+        relax::tls_local(&mut sections, &mut units)?;
     }
     let imports = plan_imports(&units, &globals, &bounds, libraries, arm)?;
     if options.relax_got {
@@ -1991,7 +1992,7 @@ impl<'a> Placed<'a> {
     }
 
     /// Section index and address of every exported global, for `.dynsym`.
-    fn dynamic_exports(&self) -> Result<BTreeMap<&'a str, (u64, u16)>> {
+    fn dynamic_exports(&self) -> Result<BTreeMap<&'a str, (u64, u32)>> {
         let Self {
             units,
             ordered,
@@ -2002,7 +2003,7 @@ impl<'a> Placed<'a> {
         for &(name, (ui, si)) in *ordered {
             let s = &units[ui].symbols[&si];
             let index = match s.section {
-                SymbolSection::Absolute => 0xfff1,
+                SymbolSection::Absolute => u32::MAX as usize,
                 SymbolSection::Common => {
                     common_locations.get(name).map(|(i, _)| i + 1).unwrap_or(0)
                 }
@@ -2014,10 +2015,13 @@ impl<'a> Placed<'a> {
             if index == 0 {
                 continue;
             }
-            if index >= 0xff00 && index != 0xfff1 {
-                return Err("too many output sections".into());
-            }
-            definitions.insert(name, (self.definition_address(ui, s)?, index as u16));
+            definitions.insert(
+                name,
+                (
+                    self.definition_address(ui, s)?,
+                    u32::try_from(index).map_err(|_| "section index exceeds ELF32 range")?,
+                ),
+            );
         }
         Ok(definitions)
     }
@@ -2060,8 +2064,31 @@ impl<'a> Placed<'a> {
                 entsize,
             ));
         }
+        if let Some(d) = dynamic {
+            let (symtab, indexes) = d.extended_sections(&self.dynamic_exports()?);
+            if indexes.iter().any(|&i| i != 0) {
+                let offset = align(bytes.len() as u64, 4)?;
+                bytes.resize(offset as usize, 0);
+                for index in &indexes {
+                    bytes.extend_from_slice(&index.to_le_bytes());
+                }
+                headers.push(shdr(
+                    string(&mut names, ".dynsym_shndx"),
+                    object::elf::SHT_SYMTAB_SHNDX,
+                    0,
+                    0,
+                    offset,
+                    (indexes.len() * 4) as u64,
+                    symtab as u32,
+                    0,
+                    4,
+                    4,
+                ));
+            }
+        }
         let mut strings = vec![0];
         let mut symbols = vec![0; 24];
+        let mut extended = vec![0u32];
         // Keep local names for debugger function bounds and prologue unwinding.
         // ELF requires all local records to precede the first nonlocal record.
         for (ui, unit) in units.iter().enumerate() {
@@ -2079,14 +2106,11 @@ impl<'a> Placed<'a> {
                 if index == 0 {
                     continue;
                 }
-                if index >= 0xff00 && index != 0xfff1 {
-                    return Err("too many output sections".into());
-                }
                 symbols.extend_from_slice(&symbol_record(
                     string(&mut strings, s.name),
                     s.info,
                     s.other,
-                    index as u16,
+                    symbol_section(index, s.section == SymbolSection::Absolute, &mut extended)?,
                     self.definition_address(ui, s)?,
                     s.size,
                 ));
@@ -2110,14 +2134,11 @@ impl<'a> Placed<'a> {
             if index == 0 {
                 continue;
             }
-            if index >= 0xff00 && index != 0xfff1 {
-                return Err("too many output sections".into());
-            }
             symbols.extend_from_slice(&symbol_record(
                 string(&mut strings, name),
                 s.info,
                 s.other,
-                index as u16,
+                symbol_section(index, s.section == SymbolSection::Absolute, &mut extended)?,
                 self.definition_address(ui, s)?,
                 common_sizes.get(name).copied().unwrap_or(s.size),
             ));
@@ -2130,15 +2151,12 @@ impl<'a> Placed<'a> {
             }) {
                 continue;
             }
-            if index + 1 >= 0xff00 {
-                return Err("too many output sections".into());
-            }
             // GLOBAL, hidden and absent from .dynsym.
             symbols.extend_from_slice(&symbol_record(
                 string(&mut strings, name),
                 if linker_owned(name) { 0x11 } else { 0x10 },
                 2,
-                (index + 1) as u16,
+                symbol_section(index + 1, false, &mut extended)?,
                 BASE + sections[index].offset + if stop { sections[index].size } else { 0 },
                 0,
             ));
@@ -2150,6 +2168,7 @@ impl<'a> Placed<'a> {
             &symbols,
             &strings,
             first_global,
+            &extended,
         )?;
         Ok((shoff, headers.len()))
     }
@@ -2239,8 +2258,24 @@ fn write_headers(
     put16(bytes, 54, 56);
     put16(bytes, 56, phdrs.len() as u16);
     put16(bytes, 58, 64);
-    put16(bytes, 60, section_headers as u16);
-    put16(bytes, 62, (section_headers - 1) as u16);
+    put16(
+        bytes,
+        60,
+        if section_headers >= 0xff00 {
+            0
+        } else {
+            section_headers as u16
+        },
+    );
+    put16(
+        bytes,
+        62,
+        if section_headers > 0xff00 {
+            0xffff
+        } else {
+            (section_headers - 1) as u16
+        },
+    );
     for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {
         let at = 64 + i * 56;
         put32(bytes, at, *kind);
@@ -2279,11 +2314,13 @@ fn symbol_and_section_tables(
     symbols: &[u8],
     strings: &[u8],
     locals: u32,
+    extended: &[u32],
 ) -> Result<u64> {
     let sym_offset = align(bytes.len() as u64, 8)?;
     bytes.resize(sym_offset as usize, 0);
     bytes.extend_from_slice(symbols);
-    let str_index = headers.len() + 1;
+    let sym_index = headers.len();
+    let str_index = sym_index + 1;
     headers.push(shdr(
         string(&mut names, ".symtab"),
         object::elf::SHT_SYMTAB,
@@ -2310,6 +2347,25 @@ fn symbol_and_section_tables(
         1,
         0,
     ));
+    if extended.iter().any(|&index| index != 0) {
+        let offset = align(bytes.len() as u64, 4)?;
+        bytes.resize(offset as usize, 0);
+        for index in extended {
+            bytes.extend_from_slice(&index.to_le_bytes());
+        }
+        headers.push(shdr(
+            string(&mut names, ".symtab_shndx"),
+            object::elf::SHT_SYMTAB_SHNDX,
+            0,
+            0,
+            offset,
+            (extended.len() * 4) as u64,
+            sym_index as u32,
+            0,
+            4,
+            4,
+        ));
+    }
     let names_name = string(&mut names, ".shstrtab");
     let names_offset = bytes.len() as u64;
     bytes.extend_from_slice(&names);
@@ -2326,7 +2382,12 @@ fn symbol_and_section_tables(
         0,
     ));
     if headers.len() >= 0xff00 {
-        return Err("too many output sections".into());
+        let count = headers.len() as u64;
+        put64(&mut headers[0], 32, count);
+    }
+    if headers.len() > 0xff00 {
+        let strings = (headers.len() - 1) as u32;
+        put32(&mut headers[0], 40, strings);
     }
     let shoff = align(bytes.len() as u64, 8)?;
     bytes.resize(shoff as usize, 0);
@@ -2386,6 +2447,21 @@ fn put32(b: &mut [u8], at: usize, v: u32) {
 }
 fn put64(b: &mut [u8], at: usize, v: u64) {
     b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+}
+
+/// Encode a symbol section while keeping reserved absolute indexes distinct.
+fn symbol_section(index: usize, absolute: bool, extended: &mut Vec<u32>) -> Result<u16> {
+    let large = !absolute && index >= 0xff00;
+    extended.push(if large {
+        u32::try_from(index).map_err(|_| "section index exceeds ELF32 range")?
+    } else {
+        0
+    });
+    Ok(if large {
+        object::elf::SHN_XINDEX
+    } else {
+        index as u16
+    })
 }
 
 #[cfg(test)]

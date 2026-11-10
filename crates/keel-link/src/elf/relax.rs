@@ -133,7 +133,10 @@ pub(super) fn tls_general(
                     && i != ci
                     && other.section == r.section
                     && other.offset < start + 16
-                    && other.offset.saturating_add(8) > start
+                    && other
+                        .offset
+                        .saturating_add(super::reloc::x86_64::width(other.kind).unwrap_or(8))
+                        > start
             }) {
                 continue;
             }
@@ -192,6 +195,93 @@ pub(super) fn tls_general(
             index += 1;
             keep
         });
+    }
+    Ok(())
+}
+
+/// Relax complete local-dynamic units so DTPOFF users keep a consistent base.
+pub(super) fn tls_local(sections: &mut [Section], units: &mut [Unit]) -> Result<()> {
+    for unit in units {
+        let mut edits = Vec::new();
+        let mut valid = true;
+        for (ri, r) in unit.relocs.iter().enumerate() {
+            if r.kind != elf::R_X86_64_TLSLD {
+                continue;
+            }
+            let Some(start) = r.offset.checked_sub(3) else {
+                valid = false;
+                break;
+            };
+            let section = &sections[r.section];
+            let Some(code) = section.data.get(start as usize..start as usize + 12) else {
+                valid = false;
+                break;
+            };
+            let call = unit.relocs.iter().enumerate().find(|(_, c)| {
+                c.section == r.section
+                    && c.offset == start + 8
+                    && c.addend == -4
+                    && matches!(c.kind, elf::R_X86_64_PLT32 | elf::R_X86_64_PC32)
+                    && unit.symbols.get(&c.symbol).is_some_and(|s| {
+                        s.global()
+                            && s.name == "__tls_get_addr"
+                            && s.section == SymbolSection::Undefined
+                    })
+            });
+            let Some((ci, call)) = call else {
+                valid = false;
+                break;
+            };
+            if r.addend != -4
+                || section.flags & u64::from(elf::SHF_EXECINSTR) == 0
+                || code[..3] != [0x48, 0x8d, 0x3d]
+                || code[7] != 0xe8
+                || unit.relocs.iter().enumerate().any(|(i, o)| {
+                    i != ri
+                        && i != ci
+                        && o.section == r.section
+                        && o.offset < start + 12
+                        && o.offset
+                            .saturating_add(super::reloc::x86_64::width(o.kind).unwrap_or(8))
+                            > start
+                })
+            {
+                valid = false;
+                break;
+            }
+            edits.push((ri, ci, call.symbol, r.section, start as usize));
+        }
+        if !valid || edits.is_empty() {
+            continue;
+        }
+        let mut consumed = BTreeSet::new();
+        let mut resolvers = BTreeSet::new();
+        for (ri, ci, resolver, section, start) in edits {
+            // Padding followed by mov %fs:0,%rax leaves the thread pointer as
+            // the base for the converted TPOFF relocations.
+            sections[section].data.to_mut()[start..start + 12]
+                .copy_from_slice(&[0x66, 0x66, 0x90, 0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0]);
+            consumed.extend([ri, ci]);
+            resolvers.insert(resolver);
+        }
+        let mut i = 0;
+        unit.relocs.retain(|_| {
+            let keep = !consumed.contains(&i);
+            i += 1;
+            keep
+        });
+        for r in &mut unit.relocs {
+            r.kind = match r.kind {
+                elf::R_X86_64_DTPOFF32 => elf::R_X86_64_TPOFF32,
+                elf::R_X86_64_DTPOFF64 => elf::R_X86_64_TPOFF64,
+                other => other,
+            };
+        }
+        for resolver in resolvers {
+            if !unit.relocs.iter().any(|r| r.symbol == resolver) {
+                unit.symbols.remove(&resolver);
+            }
+        }
     }
     Ok(())
 }

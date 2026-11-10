@@ -8,6 +8,11 @@ cross-link from macOS. AArch64 uses the same dynamic metadata and TLS models;
 its instruction relocation coverage is documented in
 [ARM Linux](../targets/aarch64/README.md).
 
+The default executable layout writes extended ELF section counts and
+`SHT_SYMTAB_SHNDX` companion tables for symbol section indexes at or above
+`SHN_LORESERVE`, including dynamic exports. Script layouts retain their
+existing section-count limit.
+
 ## Usage
 
 Linux is the default link target on an x86-64 Linux host; select it explicitly
@@ -541,8 +546,10 @@ Executable TLS definitions use module ID 1 and link-time offsets. Their
 TLSDESC records call a generated resolver that returns the static TP offset.
 On x86-64, canonical padded GD LEA/call sequences relax to local-exec for
 executable definitions and initial-exec for imports. The rewrite preserves
-instruction sizes and removes the resolver call. Other sequences, including LD
-and AArch64 accesses, retain their original model and resolver requirements.
+instruction sizes and removes the resolver call. Canonical x86-64 LD LEA/call
+sequences relax to a thread-pointer load, with DTPOFF32/64 users converted to
+TPOFF32/64. This conversion requires every LD sequence in the object to match.
+Other sequences and AArch64 accesses retain their resolver requirements.
 
 x86-64 accepts TPOFF32/64, DTPOFF32/64, GOTTPOFF, TLSGD, TLSLD,
 GOTPC32_TLSDESC and TLSDESC_CALL. AArch64 accepts TLS GD/LD/IE GOT-address

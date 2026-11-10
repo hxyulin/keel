@@ -1113,8 +1113,15 @@ fn emit(
     for (name, value) in script_values {
         record(name, *value, 0, 0x10, 0)?;
     }
-    let shoff =
-        symbol_and_section_tables(&mut bytes, &mut headers, names, &symbols, &strings, locals)?;
+    let shoff = symbol_and_section_tables(
+        &mut bytes,
+        &mut headers,
+        names,
+        &symbols,
+        &strings,
+        locals,
+        &[],
+    )?;
     end(0, bytes.len() as u64)?;
     bytes[..16].copy_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     put16(&mut bytes, 16, 2);

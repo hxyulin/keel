@@ -715,3 +715,52 @@ fn absent_weak_direct_addresses_bind_zero_without_losing_dynamic_lookups() {
             .any(|s| s.name().unwrap() == "absent" && s.is_weak())
     );
 }
+
+#[test]
+fn extended_output_section_indexes_round_trip() {
+    use std::fmt::Write;
+    let mut source = String::from(".text\n.globl _start\n_start: ret\n");
+    for i in 0..256_000 {
+        writeln!(source, ".section .data.large{i},\"aw\",@progbits\n.byte 1").unwrap();
+        if matches!(i, 0xfefe | 0xfeff | 0xffef | 0xfff0 | 0xffff | 0x10000) {
+            writeln!(
+                source,
+                ".globl boundary_{i}\nboundary_{i}: .quad 7\nlocal_{i}: .byte 1"
+            )
+            .unwrap();
+        }
+    }
+    source.push_str(".section .dynamic,\"aw\",@progbits\n.quad 0,0\n.section .data.last,\"aw\",@progbits\n.globl last_section\nlast_section: .quad 7\n.globl absolute\n.set absolute, 65521\n");
+    let exe = link(&[object(&source), shared_interface()]).unwrap();
+    let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let symbol = f
+        .symbols()
+        .find(|s| s.name().unwrap() == "last_section")
+        .unwrap();
+    assert!(symbol.section_index().unwrap().0 >= 0xff00);
+    for symbol in f.symbols().filter(|s| {
+        s.name().unwrap().starts_with("boundary_") || s.name().unwrap().starts_with("local_")
+    }) {
+        let index = symbol.section_index().unwrap();
+        let section = f.section_by_index(index).unwrap();
+        assert!(section.name().unwrap().starts_with(".data.large"));
+        assert!(symbol.address() >= section.address());
+        assert!(symbol.address() < section.address() + section.size());
+    }
+    assert!(f.section_by_name(".symtab_shndx").is_some());
+    assert!(f.section_by_name(".dynsym_shndx").is_some());
+    assert_eq!(
+        f.dynamic_symbols()
+            .find(|s| s.name().unwrap() == "last_section")
+            .unwrap()
+            .section_index(),
+        symbol.section_index()
+    );
+    assert_eq!(
+        f.symbols()
+            .find(|s| s.name().unwrap() == "absolute")
+            .unwrap()
+            .section(),
+        object::SymbolSection::Absolute
+    );
+}
