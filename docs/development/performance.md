@@ -69,10 +69,23 @@ Each run gives one of three verdicts:
 A runtime change lands when at least one host accepts it and no host rejects
 it. A neutral result is not a runtime gain: a neutral change needs another
 reason, such as simpler code or smaller output, stated in the commit.
-Size or simplicity changes may land when every host is neutral. Record the
-measured size or maintenance benefit and run the same slowdown checks; smaller
-output does not excuse a rejected runtime result. Compiler-time gains still
-require the separate instruction-count and RSS measurements above.
+Simplicity changes may land when every host is neutral. Record their measured
+maintenance benefit.
+
+### Size preset
+
+`-Os` prioritizes smaller generated code, with Clang `-Os` as the comparison
+target. Measure native text bytes across the application corpus and run the
+same correctness checks and placement-based runtime protocol. A measured code
+size reduction may land despite a runtime rejection under the rule above;
+there is no fixed slowdown veto for this preset.
+
+Report the code size change, cycles geomean and worst workload with its
+placement range. Preserve the tool's original runtime verdict and trailers;
+state in the commit body that the change is retained for Size and describe
+its runtime cost. Do not present a size-policy decision as a runtime speedup.
+Other presets, including `-O2`, retain the runtime acceptance rule above.
+Compiler-time gains still require instruction-count and RSS measurements.
 
 `cargo suite ab-report <report.json>` re-evaluates a saved report with the
 current rule and prints its original verdict and a current verdict/trailer.
