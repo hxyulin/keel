@@ -382,7 +382,12 @@ fn concrete_operands(instruction: &x86::Instruction) -> bool {
 /// A symbol-free instruction as an encoding-cache key: its opcode, lock
 /// flag and operands packed into words. Hashing and comparing a few words
 /// costs far less than walking the instruction's operand structs.
-#[derive(PartialEq, Eq)]
+///
+/// A [classified](Self::classified) key holds each constant's
+/// [`constant_class`] instead: instructions that differ only in constants of
+/// one class select the same form and hold each constant in the same bytes,
+/// so one encoding serves them all with those bytes patched.
+#[derive(Clone, PartialEq, Eq)]
 struct Concrete {
     opcode: x86::Opcode,
     lock: bool,
@@ -398,16 +403,80 @@ impl Hash for Concrete {
         }
     }
 }
+/// Value boundaries of the encoder's choices: `int3`, the implicit 1 of
+/// shifts, zero and 8-bit displacements, signed and unsigned immediate
+/// widths, full byte patterns, 64-bit words read as signed (from 2^63) and
+/// 32-bit addresses read as signed (from 2^31).
+const CLASS_BOUNDS: [i128; 25] = [
+    -(1 << 63),
+    -(1 << 31),
+    -(1 << 15),
+    -256,
+    -128,
+    0,
+    1,
+    2,
+    3,
+    4,
+    128,
+    256,
+    1 << 15,
+    1 << 16,
+    1 << 31,
+    (1 << 32) - 128,
+    1 << 32,
+    1 << 63,
+    (1 << 64) - (1 << 31),
+    (1 << 64) - (1 << 15),
+    (1 << 64) - 256,
+    (1 << 64) - 128,
+    1 << 64,
+    (1 << 64) + 1,
+    i128::MAX,
+];
+/// The range of [`CLASS_BOUNDS`] holding `c`. Within one range the encoder
+/// selects the same form and writes `c` as its low bytes, or not at all.
+fn constant_class(c: i128) -> usize {
+    // Most constants are small.
+    match c {
+        -128..=-1 => 5,
+        0..=3 => 6 + c as usize,
+        4..=127 => 10,
+        _ => CLASS_BOUNDS.partition_point(|&bound| bound <= c),
+    }
+}
+/// Whether [`constant_class`] `class` holds a single value.
+fn single_value_class(class: usize) -> bool {
+    (1..CLASS_BOUNDS.len()).contains(&class) && CLASS_BOUNDS[class] - CLASS_BOUNDS[class - 1] == 1
+}
 impl Concrete {
     /// `None` when an operand names a symbol, or the operands need more
     /// words than a key holds. Each operand's first word gives its kind and
     /// how many words follow, so equal words mean equal operands.
     fn of(i: &x86::Instruction) -> Option<Self> {
+        Self::key::<false>(i)
+    }
+    /// The classified key, as [`Self::of`]. Also `None` for EVEX forms,
+    /// which scale displacements by the operand size, and instructions with
+    /// more operands than a [`Field`] names.
+    fn classified(i: &x86::Instruction) -> Option<Self> {
+        if matches!(i.opcode, x86::Opcode::Evex(_)) || i.operands.len() > 8 {
+            return None;
+        }
+        Self::key::<true>(i)
+    }
+    #[inline(always)]
+    fn key<const CLASSIFIED: bool>(i: &x86::Instruction) -> Option<Self> {
         fn register(r: x86::Register) -> u64 {
             // Twelve classes fit below the high-byte bit.
             u64::from(r.class as u8 | u8::from(r.high_byte) << 7)
                 | u64::from(r.number) << 8
                 | u64::from(r.width) << 16
+        }
+        /// As [`x86::evex::promote`] reads operands.
+        fn wide(r: x86::Register) -> bool {
+            use x86::RegisterClass::{Mask, Xmm, Ymm, Zmm};
+            matches!(r.class, Zmm | Mask) || matches!(r.class, Xmm | Ymm) && r.number >= 16
         }
         let mut key = Self {
             opcode: i.opcode,
@@ -417,17 +486,27 @@ impl Concrete {
         };
         for o in &i.operands {
             let (header, address) = match o {
-                x86::Operand::Register(r) => (register(*r) << 8, None),
+                x86::Operand::Register(r) => {
+                    if CLASSIFIED && wide(*r) {
+                        return None;
+                    }
+                    (register(*r) << 8, None)
+                }
                 x86::Operand::Immediate(a) => (1, Some(a)),
-                x86::Operand::Memory(m) => (
-                    2 | u64::from(m.base.is_some()) << 12
-                        | u64::from(m.index.is_some()) << 13
-                        | u64::from(m.segment.is_some()) << 14
-                        | u64::from(m.scale) << 16
-                        | u64::from(m.segment.unwrap_or(0)) << 24
-                        | u64::from(m.width) << 32,
-                    Some(&m.displacement),
-                ),
+                x86::Operand::Memory(m) => {
+                    if CLASSIFIED && (m.width == 512 || m.index.is_some_and(wide)) {
+                        return None;
+                    }
+                    (
+                        2 | u64::from(m.base.is_some()) << 12
+                            | u64::from(m.index.is_some()) << 13
+                            | u64::from(m.segment.is_some()) << 14
+                            | u64::from(m.scale) << 16
+                            | u64::from(m.segment.unwrap_or(0)) << 24
+                            | u64::from(m.width) << 32,
+                        Some(&m.displacement),
+                    )
+                }
             };
             let Some(a) = address else {
                 key.push(header)?;
@@ -437,14 +516,21 @@ impl Concrete {
                 return None;
             }
             let c = a.expression.constant;
-            let wide = i64::try_from(c).is_err();
-            key.push(header | (a.modifier as u64 | u64::from(wide) << 3) << 8)?;
+            let header = header | (a.modifier as u64) << 8;
+            let wide = !CLASSIFIED && i64::try_from(c).is_err();
+            key.push(if CLASSIFIED {
+                header | (constant_class(c) as u64) << 48
+            } else {
+                header | u64::from(wide) << 11
+            })?;
             if let x86::Operand::Memory(m) = o {
                 key.push(m.base.map_or(0, register) | m.index.map_or(0, register) << 32)?;
             }
-            key.push(c as u64)?;
-            if wide {
-                key.push((c >> 64) as u64)?;
+            if !CLASSIFIED {
+                key.push(c as u64)?;
+                if wide {
+                    key.push((c >> 64) as u64)?;
+                }
             }
         }
         Some(key)
@@ -453,6 +539,60 @@ impl Concrete {
         *self.words.get_mut(usize::from(self.len))? = word;
         self.len += 1;
         Some(())
+    }
+}
+
+/// The encoding `encoded[start..end]` of a classified key, and the bytes
+/// of up to three operand constants to patch in.
+#[derive(Clone, Copy)]
+struct Template {
+    start: u32,
+    end: u32,
+    fields: [Field; 3],
+}
+/// `width` bytes at `offset` hold the constant of operand `operand`. A zero
+/// width ends the list.
+#[derive(Clone, Copy, Default)]
+struct Field {
+    operand: u8,
+    offset: u8,
+    width: u8,
+}
+impl Template {
+    /// The template of `e`, encoded from `i` into `encoded[start..end]`.
+    /// `None` when other constants of the same classes would not encode as
+    /// patched: a constant the encoding does not hold, unless it is its
+    /// class's only value.
+    fn new(i: &x86::Instruction, e: &encode::Encoding<'_>, start: u32, end: u32) -> Option<Self> {
+        let mut fields = [Field::default(); 3];
+        if e.constants.len() > fields.len() {
+            return None;
+        }
+        let mut held = 0u8;
+        for (field, constant) in fields.iter_mut().zip(&e.constants) {
+            let operand = i.operands.iter().position(|o| match o {
+                x86::Operand::Immediate(a) => std::ptr::eq(a, constant.address),
+                x86::Operand::Memory(m) => std::ptr::eq(&m.displacement, constant.address),
+                x86::Operand::Register(_) => false,
+            })?;
+            held |= 1 << operand;
+            *field = Field {
+                operand: operand as u8,
+                offset: constant.offset,
+                width: constant.width,
+            };
+        }
+        for (n, o) in i.operands.iter().enumerate() {
+            let a = match o {
+                x86::Operand::Immediate(a) => a,
+                x86::Operand::Memory(m) => &m.displacement,
+                x86::Operand::Register(_) => continue,
+            };
+            if held & 1 << n == 0 && !single_value_class(constant_class(a.expression.constant)) {
+                return None;
+            }
+        }
+        Some(Self { start, end, fields })
     }
 }
 
@@ -894,6 +1034,9 @@ struct Items {
     /// bytes depend only on the instruction value, including its selected
     /// encoding form.
     encodings: FxHashMap<Concrete, (u32, u32)>,
+    /// The same encodings by classified key. The feature check reads no
+    /// constants outside EVEX forms, which have no classified key.
+    templates: FxHashMap<Concrete, Template>,
 }
 impl Items {
     fn new(features: x86::Features) -> Self {
@@ -919,6 +1062,7 @@ impl Items {
             source_validation: false,
             source_features: None,
             encodings: FxHashMap::default(),
+            templates: FxHashMap::default(),
         }
     }
     fn scoped_source(
@@ -1074,21 +1218,15 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, source: &x86::Instruction, line: usize) {
-        // An identical instruction passed the feature check under the same
-        // target features. A scoped source can only narrow them, so only
+        // An instruction of the same key passed the feature check under the
+        // same target features. A scoped source can only narrow them, so only
         // there does a cached instruction need its promotion and check again.
         let concrete = match self.metrics {
             None => Concrete::of(source),
             Some(_) => None,
         };
-        if let Some(key) = &concrete
-            && self.source_features.is_none()
-            && self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(key)
-        {
-            self.encoded
-                .extend_from_within(start as usize..end as usize);
-            self.extend_run(line);
+        let scoped = self.source_features.is_some();
+        if !scoped && self.cached(concrete.as_ref(), source, line) {
             return;
         }
         let promoted = promoted_instruction(source);
@@ -1103,28 +1241,72 @@ impl Items {
             });
             return;
         }
-        if let Some(key) = &concrete
-            && self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(key)
-        {
-            self.encoded
-                .extend_from_within(start as usize..end as usize);
-            self.extend_run(line);
+        if scoped && self.cached(concrete.as_ref(), source, line) {
             return;
         }
         let start = index32(self.encoded.len());
-        if self.encode(i, line) {
-            let end = index32(self.encoded.len());
-            if let Some(key) = concrete {
-                self.encodings.insert(key, (start, end));
+        match self.encode(i, line) {
+            Some(template) => {
+                let end = index32(self.encoded.len());
+                if let Some(key) = concrete {
+                    self.encodings.insert(key, (start, end));
+                    if let (Some(key), Some(template)) = (Concrete::classified(source), template) {
+                        self.templates.insert(key, template);
+                    }
+                }
             }
-        } else {
-            let index = self.symbolic.push(i, &mut self.symbols);
-            self.push(Entry::Symbolic {
-                index,
-                line: line32(line),
-            });
+            None => {
+                let index = self.symbolic.push(i, &mut self.symbols);
+                self.push(Entry::Symbolic {
+                    index,
+                    line: line32(line),
+                });
+            }
         }
+    }
+    /// Append the cached encoding of `source`, if there is one, from its key
+    /// or else its classified key with its constants patched in.
+    fn cached(&mut self, key: Option<&Concrete>, source: &x86::Instruction, line: usize) -> bool {
+        let Some(key) = key else {
+            return false;
+        };
+        if self.unsupported.is_some() {
+            return false;
+        }
+        if let Some(&(start, end)) = self.encodings.get(key) {
+            self.encoded
+                .extend_from_within(start as usize..end as usize);
+            self.extend_run(line);
+            return true;
+        }
+        let Some(&t) = Concrete::classified(source).and_then(|key| self.templates.get(&key)) else {
+            return false;
+        };
+        let at = self.encoded.len();
+        self.encoded
+            .extend_from_within(t.start as usize..t.end as usize);
+        for f in t.fields.iter().take_while(|f| f.width != 0) {
+            let constant = match &source.operands[usize::from(f.operand)] {
+                x86::Operand::Immediate(a) => a.expression.constant,
+                x86::Operand::Memory(m) => m.displacement.expression.constant,
+                x86::Operand::Register(_) => unreachable!("a field holds an address constant"),
+            };
+            let (offset, width) = (at + usize::from(f.offset), usize::from(f.width));
+            self.encoded[offset..offset + width].copy_from_slice(&constant.to_le_bytes()[..width]);
+        }
+        if cfg!(debug_assertions) {
+            let i = promoted_instruction(source);
+            let encoding = encode::encode(&i, false).map(|e| e.bytes.into_vec());
+            assert_eq!(
+                encoding.as_deref(),
+                Ok(&self.encoded[at..]),
+                "patched encoding of {source:?}"
+            );
+        }
+        let end = index32(self.encoded.len());
+        self.encodings.insert(key.clone(), (index32(at), end));
+        self.extend_run(line);
+        true
     }
     fn check_features(&mut self, i: &x86::Instruction, line: usize) {
         if let Err(message) = check_instruction_features(i, self.features, self.source_features) {
@@ -1132,23 +1314,24 @@ impl Items {
                 .get_or_insert_with(|| Error::new(line, message));
         }
     }
-    /// Encode a symbol-free instruction into the current run, if possible.
-    /// Otherwise the caller retains it for per-pass layout.
-    fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
+    /// Encode a symbol-free instruction into the current run, if possible,
+    /// and give its [`Template`] if it has one. Otherwise the caller retains
+    /// it for per-pass layout.
+    fn encode(&mut self, i: &x86::Instruction, line: usize) -> Option<Option<Template>> {
         if self.unsupported.is_some() || !concrete_operands(i) {
-            return false;
+            return None;
         }
         // Without a symbol nothing folds and no branch is short, so layout
         // would reencode exactly this. Failures are left for layout to report.
-        let Ok(e) = encode::encode(i, false) else {
-            return false;
-        };
+        let e = encode::encode(i, false).ok()?;
         if !e.fixups.is_empty() {
-            return false;
+            return None;
         }
+        let start = index32(self.encoded.len());
         self.encoded.extend_from_slice(&e.bytes);
         self.extend_run(line);
-        true
+        let end = index32(self.encoded.len());
+        Some(Template::new(i, &e, start, end))
     }
     /// Close the run of encoded bytes over the instruction just appended.
     fn extend_run(&mut self, line: usize) {

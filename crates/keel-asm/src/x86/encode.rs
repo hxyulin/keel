@@ -19,12 +19,21 @@ pub(super) struct Fixup<'a> {
     pub adjust: i128,
     pub kind: RelocKind,
 }
+/// Bytes holding the constant of the operand address it borrows, truncated
+/// to `width` bytes. Scaled EVEX displacements are not recorded.
+#[derive(Debug)]
+pub(super) struct Constant<'a> {
+    pub offset: u8,
+    pub width: u8,
+    pub address: &'a Address,
+}
 #[derive(Default)]
 pub(super) struct Encoding<'a> {
     // x86 instructions are at most 15 bytes: never allocate.
     pub bytes: smallvec::SmallVec<[u8; 16]>,
     // Rarely more than one symbolic operand.
     pub fixups: smallvec::SmallVec<[Fixup<'a>; 1]>,
+    pub constants: smallvec::SmallVec<[Constant<'a>; 2]>,
 }
 fn width(o: &Operand) -> u16 {
     match o {
@@ -78,6 +87,16 @@ impl<'a> Encoding<'a> {
         self.bytes
             .extend_from_slice(&n.to_le_bytes()[..usize::from(bytes)]);
     }
+    /// [`Self::number`] for `a`'s constant, whose low bytes `n` keeps.
+    fn operand_constant(&mut self, a: &'a Address, n: i128, bytes: u8) {
+        self.constants.push(Constant {
+            // Within one instruction.
+            offset: self.bytes.len() as u8,
+            width: bytes,
+            address: a,
+        });
+        self.number(n, bytes);
+    }
     fn imm(&mut self, a: &'a Address, bytes: u8, signed: bool) -> Result<(), String> {
         if let Some(n) = constant(a) {
             let n = if signed { signed_word64(n) } else { n };
@@ -89,7 +108,7 @@ impl<'a> Encoding<'a> {
                     if signed { " signed" } else { "" }
                 ));
             }
-            self.number(n, bytes);
+            self.operand_constant(a, n, bytes);
         } else {
             let kind = match (a.modifier, bytes, signed) {
                 (Modifier::None, 8, _) => RelocKind::Abs64,
@@ -284,7 +303,9 @@ impl<'a> Encoding<'a> {
                     | base.unwrap_or(5),
             );
         }
-        if mode == 1 {
+        if mode == 1 && scale == 1 {
+            self.operand_constant(a, d, 1)
+        } else if mode == 1 {
             self.number(d / i128::from(scale), 1)
         } else if mode == 2 || base.is_none() {
             self.imm(a, 4, !address32)?

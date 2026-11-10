@@ -947,7 +947,7 @@ fn emit<'a>(
                 if let Some(n) = constant(a)
                     && full_byte_pattern(n, spec.bytes(choice.size), choice.size)
                 {
-                    e.number(n, 1);
+                    e.operand_constant(a, n, 1);
                 } else {
                     e.imm(
                         a,
