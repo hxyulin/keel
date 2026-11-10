@@ -244,3 +244,103 @@ fn square_and_distance_reductions_keep_seed_tails_and_stream_order() {
         }
     }
 }
+
+fn sum_source(ty: &str, absolute: bool) -> String {
+    let src = source(ty).replace(
+        &format!(" v12 = ptradd v1,v9\n v13 = load.{ty} trap_ub v12\n"),
+        "",
+    );
+    if absolute {
+        src.replace("fmul v11,v13", "fabs v11")
+    } else {
+        src.replace(" v14 = fmul v11,v13\n", "")
+            .replace("fadd v6,v14", "fadd v6,v11")
+    }
+}
+
+fn batch(src: &str, target: VectorTarget) -> Module {
+    let mut m = keel_ir::parse(src).unwrap();
+    keel_opt::run_passes_for_target(&mut m, &["loop-batch"], target).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    m
+}
+
+#[test]
+fn ordered_batches_preserve_sums_absolute_values_and_tails() {
+    for ty in ["f32", "f64"] {
+        for absolute in [false, true] {
+            let src = sum_source(ty, absolute);
+            let original = keel_ir::parse(&src).unwrap();
+            for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+                let m = batch(&src, target);
+                assert!(m.to_string().contains(&format!("load.{ty}x")), "{m}");
+                assert!(!m.to_string().contains("vfadd"), "ordered additions: {m}");
+                let large = if ty == "f32" {
+                    16777216.0
+                } else {
+                    9007199254740992.0
+                };
+                let input = [
+                    large, 1.0, -large, 1.0, -0.0, 0.0, 3.0, -2.0, 5.0, 7.0, -9.0, 1.0, 2.0, 3.0,
+                    4.0, 5.0, 6.0,
+                ];
+                for n in [0, 1, 7, 8, 9, 15, 16, 17] {
+                    for seed in [-0.0, 0.0, 3.5] {
+                        assert_eq!(
+                            execute(&m, &input[..n], &input[..n], seed),
+                            execute(&original, &input[..n], &input[..n], seed),
+                            "{ty} absolute={absolute} n={n} {target:?}"
+                        );
+                    }
+                }
+                for special in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+                    let mut values = [1.0; 9];
+                    values[2] = special;
+                    assert_eq!(
+                        execute(&m, &values, &values, -0.0),
+                        execute(&original, &values, &values, -0.0)
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ordered_batching_rejects_observable_or_unmatched_work() {
+    let src = sum_source("f64", true);
+    for variant in [
+        src.replace("trap_ub ", ""),
+        src.replace("trap_ub ", "volatile "),
+        src.replace("v4 = iconst.i64 0", "v4 = iconst.i64 1"),
+        src.replace("icmp.ult", "icmp.slt"),
+        src.replace("fabs v11", "fneg v11"),
+        src.replace("fadd v6,v14", "fadd v14,v6"),
+    ] {
+        assert_eq!(
+            batch(&variant, VectorTarget::Aarch64Neon).to_string(),
+            keel_ir::parse(&variant).unwrap().to_string()
+        );
+    }
+    assert_eq!(
+        batch(&src, VectorTarget::Portable).to_string(),
+        keel_ir::parse(&src).unwrap().to_string()
+    );
+    for (base, n) in [(u64::MAX - 7, 8), (0, 1u64 << 61)] {
+        let m = batch(&src, VectorTarget::Aarch64Neon);
+        let original = keel_ir::parse(&src).unwrap();
+        let args = [Val::Ptr(base), Val::Ptr(0), Val::I64(n), Val::f64(0.0)];
+        assert_eq!(
+            Interpreter::for_function(&m.functions[0]).call("dot", &args),
+            Interpreter::for_function(&original.functions[0]).call("dot", &args)
+        );
+    }
+}
+
+#[test]
+fn batching_retains_order_even_with_fast_math_permission() {
+    let src = sum_source("f64", true).replacen(" {\n", " fast_math {\n", 1);
+    let m = batch(&src, VectorTarget::Aarch64Neon);
+    assert!(m.to_string().contains("load.f64x2"));
+    assert!(!m.to_string().contains("vfadd"));
+}

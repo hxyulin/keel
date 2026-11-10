@@ -405,6 +405,7 @@ pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
 );
 pub(crate) static LOAD_REUSE: &dyn Pass = &load_reuse::LoadReuse;
 pub(crate) static FAST_LOOP_DOT: &dyn Pass = &loop_dot::FastLoopDot;
+pub(crate) static LOOP_BATCH: &dyn Pass = &loop_dot::LoopBatch;
 pub(crate) static LOOP_DOT: &dyn Pass = &loop_dot::LoopDot;
 pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
 pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
@@ -481,6 +482,7 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_UNROLL,
     LOOP_UNROLL_EXACT,
     LOOP_DOT,
+    LOOP_BATCH,
     FAST_LOOP_DOT,
     LOOP_VECTORIZE,
     LOOP_REDUCE,

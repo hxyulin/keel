@@ -23,7 +23,13 @@ fn render(src: &str) -> String {
         .collect();
     let mut module = keel_ir::parse(src).unwrap_or_else(|e| panic!("input does not parse: {e}"));
     keel_ir::verify_module(&module).unwrap_or_else(|e| panic!("input does not verify: {e:?}"));
-    if let Err(e) = keel_opt::run_passes(&mut module, &passes) {
+    let target = match src.lines().find_map(|l| l.strip_prefix("; vector-target:")) {
+        None | Some(" portable") => keel_opt::VectorTarget::Portable,
+        Some(" aarch64-neon") => keel_opt::VectorTarget::Aarch64Neon,
+        Some(" x86-sse2") => keel_opt::VectorTarget::X86Sse2,
+        Some(other) => panic!("unknown vector target: {other}"),
+    };
+    if let Err(e) = keel_opt::run_passes_for_target(&mut module, &passes, target) {
         return format!("error: {e}\n");
     }
     let printed = module.to_string();

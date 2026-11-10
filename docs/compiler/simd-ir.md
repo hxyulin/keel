@@ -200,6 +200,16 @@ checks. Simple expressions use four independent accumulators, larger expressions
 or stream sets use two. Fixed-offset loads share a pointer advanced once per group;
 a countdown controls the vector loop. The original scalar tail handles the remainder.
 
+The opt-in `loop-batch` pass batches read-only f32/f64 sums and sums of
+absolute values on native 128-bit targets. It uses the same eight-element
+range guards and scalar tails as `loop-dot` below. Packed loads and absolute
+values precede scalar additions in input order; additions are never
+reassociated, even in `fast_math` functions. Input and accumulator types must
+match. Integer-to-float and f32-to-f64 reductions are not admitted. Calls,
+stores, observable loads, other recurrences and debugger metadata stay scalar.
+No default tier schedules this pass. Select it before strength reduction and
+loop rotation, after stack promotion and scalar cleanup.
+
 The opt-in `loop-dot` pass handles read-only floating dot products on the native
 128-bit targets. It accepts zero-based unsigned i64 counted loops with f32 or
 f64 products from two contiguous streams and one scalar accumulator. Batches of

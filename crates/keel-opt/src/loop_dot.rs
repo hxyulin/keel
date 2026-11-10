@@ -1,7 +1,8 @@
-//! Floating dot products: ordered scalar folds or explicitly relaxed SIMD sums.
+//! Floating stream batches: ordered scalar folds or explicitly relaxed dot sums.
 //!
 //! Read-only, zero-based unsigned i64 loops over contiguous streams qualify.
-//! Fast math also admits a single squared stream and squared differences.
+//! Ordered batching admits sums and absolute values; dot products also admit
+//! squared streams and, with fast math, squared differences.
 //! Reordered loads must be nonvolatile and either notrap or trap_ub. Strict
 //! batches retain scalar addition order; relaxed batches use four independent
 //! vector accumulators. Original loops handle short ranges, wrap and tails.
@@ -10,7 +11,7 @@ use crate::ir_match::{def, int_const};
 use keel_ir::fxhash::FxHashSet;
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, Inst, InstData as D, IntCC, MemoryFlags,
-    Type, Value, VectorBinaryOp, VectorType,
+    Type, UnaryOp, Value, VectorBinaryOp, VectorType,
 };
 
 pub(crate) struct FastLoopDot;
@@ -46,31 +47,57 @@ impl crate::Pass for LoopDot {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        if context.layout != Some(keel_ir::DataLayout::NATIVE64)
-            || context.target == crate::VectorTarget::Portable
-            || f.debug_return.is_some()
-            || f.debug_loc.is_some()
-            || !f.debug_vars.is_empty()
-            || !f.debug_scopes.is_empty()
-        {
-            return false;
-        }
-        let mut changed = false;
-        for header in f.blocks().collect::<Vec<_>>() {
-            if let Some(c) = analyze(f, header) {
-                transform(f, c);
-                changed = true;
-            }
-        }
-        changed
+        run(f, context, false)
     }
 }
+
+pub(crate) struct LoopBatch;
+impl crate::Pass for LoopBatch {
+    fn name(&self) -> &'static str {
+        "loop-batch"
+    }
+    fn description(&self) -> &'static str {
+        "batch floating sums and absolute values in scalar addition order"
+    }
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
+    }
+    fn deterministic(&self) -> bool {
+        true
+    }
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        run(f, context, true)
+    }
+}
+
+fn run(f: &mut Function, context: &crate::OptimizationContext, batching: bool) -> bool {
+    if context.layout != Some(keel_ir::DataLayout::NATIVE64)
+        || context.target == crate::VectorTarget::Portable
+        || f.debug_return.is_some()
+        || f.debug_loc.is_some()
+        || !f.debug_vars.is_empty()
+        || !f.debug_scopes.is_empty()
+    {
+        return false;
+    }
+    let mut changed = false;
+    for header in f.blocks().collect::<Vec<_>>() {
+        if let Some(c) = analyze(f, header, batching) {
+            transform(f, c);
+            changed = true;
+        }
+    }
+    changed
+}
+
 struct Stream {
     base: Value,
     flags: MemoryFlags,
 }
 #[derive(Clone, Copy)]
 enum Product {
+    Sum,
+    Absolute,
     Multiply,
     Square,
     SquaredDifference,
@@ -85,7 +112,7 @@ struct Candidate {
     streams: Vec<Stream>,
     product: Product,
 }
-fn analyze(f: &Function, header: Block) -> Option<Candidate> {
+fn analyze(f: &Function, header: Block, batching: bool) -> Option<Candidate> {
     let &[iv, sum] = f.block_params(header) else {
         return None;
     };
@@ -131,34 +158,50 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     if f.resolve(acc) != sum || f.inst_block(update) != shape_loop.body {
         return None;
     }
-    let product = def(f, contribution)?;
-    let D::Binary {
-        op: B::Fmul,
-        args: factors,
-    } = *f.inst_data(product)
-    else {
-        return None;
-    };
-    if f.inst_block(product) != shape_loop.body {
-        return None;
-    }
-    let mut allowed = FxHashSet::from_iter([update, product, counted.step, shape_loop.back]);
-    let (product_kind, factors) = if f.resolve(factors[0]) == f.resolve(factors[1]) {
-        let square = f.resolve(factors[0]);
-        let difference = def(f, square)?;
-        if f.attrs.fast_math
-            && let D::Binary { op: B::Fsub, args } = *f.inst_data(difference)
-        {
-            if f.inst_block(difference) != shape_loop.body {
-                return None;
+    let mut allowed = FxHashSet::from_iter([update, counted.step, shape_loop.back]);
+    let (product_kind, factors) = if batching {
+        let producer = def(f, contribution)?;
+        match *f.inst_data(producer) {
+            D::Unary {
+                op: UnaryOp::Fabs,
+                arg,
+            } if f.inst_block(producer) == shape_loop.body => {
+                allowed.insert(producer);
+                (Product::Absolute, vec![arg])
             }
-            allowed.insert(difference);
-            (Product::SquaredDifference, args.to_vec())
-        } else {
-            (Product::Square, vec![square])
+            D::Load { .. } => (Product::Sum, vec![contribution]),
+            _ => return None,
         }
     } else {
-        (Product::Multiply, factors.to_vec())
+        let product = def(f, contribution)?;
+        let D::Binary {
+            op: B::Fmul,
+            args: factors,
+        } = *f.inst_data(product)
+        else {
+            return None;
+        };
+        if f.inst_block(product) != shape_loop.body {
+            return None;
+        }
+        allowed.insert(product);
+        if f.resolve(factors[0]) == f.resolve(factors[1]) {
+            let square = f.resolve(factors[0]);
+            let difference = def(f, square)?;
+            if f.attrs.fast_math
+                && let D::Binary { op: B::Fsub, args } = *f.inst_data(difference)
+            {
+                if f.inst_block(difference) != shape_loop.body {
+                    return None;
+                }
+                allowed.insert(difference);
+                (Product::SquaredDifference, args.to_vec())
+            } else {
+                (Product::Square, vec![square])
+            }
+        } else {
+            (Product::Multiply, factors.to_vec())
+        }
     };
     let bytes = shape.lane_type().bytes()?;
     let mut streams = Vec::new();
@@ -268,7 +311,7 @@ fn cmp(f: &mut Function, block: Block, cond: IntCC, a: Value, b: Value) -> Value
     emit(f, block, D::Icmp { cond, args: [a, b] })
 }
 fn transform(f: &mut Function, c: Candidate) {
-    let relaxed = f.attrs.fast_math;
+    let relaxed = f.attrs.fast_math && !matches!(c.product, Product::Sum | Product::Absolute);
     // Four independent recurrences amortize loop control without exhausting
     // the baseline register banks. Strict left folds retain eight elements.
     let group_size: i64 = if relaxed {
@@ -400,7 +443,23 @@ fn transform(f: &mut Function, c: Candidate) {
                 },
             ));
         }
+        if matches!(c.product, Product::Sum | Product::Absolute) {
+            products.push(if matches!(c.product, Product::Absolute) {
+                emit(
+                    f,
+                    body,
+                    D::VectorUnary {
+                        op: UnaryOp::Fabs,
+                        arg: inputs[0],
+                    },
+                )
+            } else {
+                inputs[0]
+            });
+            continue;
+        }
         let factors = match c.product {
+            Product::Sum | Product::Absolute => unreachable!("single stream handled above"),
             Product::Multiply => [inputs[0], inputs[1]],
             Product::Square => [inputs[0], inputs[0]],
             Product::SquaredDifference => {
