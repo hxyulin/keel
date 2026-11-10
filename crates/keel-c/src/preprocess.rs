@@ -730,7 +730,7 @@ fn punctuation_len(bytes: &[u8]) -> usize {
 fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a>>, Diagnostic> {
     let mut scanner = Scanner::new(src, file, arena);
     let mut out = Vec::new();
-    scanner.fill(&mut out, usize::MAX)?;
+    scanner.fill(&mut out, usize::MAX, false)?;
     Ok(out)
 }
 
@@ -771,13 +771,21 @@ impl<'a> Scanner<'a> {
     }
 
     /// Appends tokens to `out`, stopping after a physical newline once `out`
-    /// holds at least `min` tokens. Returns whether the input has ended.
-    fn fill(&mut self, out: &mut Vec<Token<'a>>, min: usize) -> Result<bool, Diagnostic> {
+    /// holds at least `min` tokens, or with `split_conditionals`, after a
+    /// line that starts with a directive that can begin an inactive group.
+    /// Returns whether the input has ended.
+    fn fill(
+        &mut self,
+        out: &mut Vec<Token<'a>>,
+        min: usize,
+        split_conditionals: bool,
+    ) -> Result<bool, Diagnostic> {
         let (text, file) = (self.text, self.file);
         let b = text.as_bytes();
         // Locals keep the cursor in registers; an error ends the scan.
         let mut locations = std::mem::take(&mut self.locations);
         let (mut i, mut space) = (self.i, self.space);
+        let mut line_start = out.len();
         while i < b.len() {
             // Whitespace needs no token location. Advance the cursor once for the
             // entire span; physical newlines remain explicit preprocessing tokens.
@@ -804,12 +812,13 @@ impl<'a> Scanner<'a> {
                 out.push(token("\n", true));
                 i += 1;
                 space = true;
-                if out.len() >= min {
+                if out.len() >= min || (split_conditionals && conditional(&out[line_start..])) {
                     self.locations = locations;
                     self.i = i;
                     self.space = space;
                     return Ok(false);
                 }
+                line_start = out.len();
                 continue;
             }
             if b.get(i..i + 2) == Some(b"//") {
@@ -907,6 +916,158 @@ impl<'a> Scanner<'a> {
         self.space = space;
         Ok(true)
     }
+
+    /// Skips the lines of an inactive group up to the `#elif`, `#else` or
+    /// `#endif` line that may end it, which it scans with `fill` and stops
+    /// after. Processing ignores the skipped lines, but their literals and
+    /// comments are scanned as `fill` scans them, and the conditional
+    /// directive lines of nested groups are scanned and kept. A line that
+    /// might hold a lexical error is scanned with `fill` instead, which
+    /// reports it, and so is the line after a directive with a comment that
+    /// spans lines.
+    fn skip(&mut self, out: &mut Vec<Token<'a>>) -> Result<bool, Diagnostic> {
+        let b = self.text.as_bytes();
+        let mut i = self.i;
+        let mut depth = 0usize;
+        'lines: while i < b.len() {
+            let line = i;
+            // Find the line's first token. A comment that spans lines ends
+            // this line, and its end starts the next one.
+            loop {
+                let directive = match b.get(i) {
+                    None => break 'lines,
+                    Some(b'\n') => {
+                        i += 1;
+                        continue 'lines;
+                    }
+                    Some(b'#') => b.get(i + 1) != Some(&b'#'),
+                    Some(b'%') => b[i..].starts_with(b"%:") && !b[i..].starts_with(b"%:%:"),
+                    _ => false,
+                };
+                if directive {
+                    let mut j = i + if b[i] == b'#' { 1 } else { 2 };
+                    while j < b.len() && b[j] != b'\n' && b[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    let name = j;
+                    while j < b.len() && BYTE_CLASS[b[j] as usize] & IDENT_CONTINUE != 0 {
+                        j += 1;
+                    }
+                    // Other directives have no effect in an inactive group.
+                    if name < j
+                        && BYTE_CLASS[b[name] as usize] & IDENT_START != 0
+                        && !matches!(
+                            &b[name..j],
+                            b"if" | b"ifdef" | b"ifndef" | b"elif" | b"else" | b"endif"
+                        )
+                    {
+                        i = j;
+                        break;
+                    }
+                    let start = out.len();
+                    let done = self.fill_line(line, out)?;
+                    let tokens = &out[start..];
+                    let ends = tokens.last().is_some_and(|t| t.text == "\n");
+                    let lines = tokens.iter().filter(|t| t.text == "\n").count();
+                    if lines > usize::from(ends) {
+                        return Ok(done);
+                    }
+                    match tokens.get(1).map(|t| t.text) {
+                        Some("if" | "ifdef" | "ifndef") => depth += 1,
+                        Some("elif" | "else" | "endif") if depth == 0 => return Ok(done),
+                        Some("endif") => depth -= 1,
+                        Some("elif" | "else") => {}
+                        _ => out.truncate(start),
+                    }
+                    if done {
+                        return Ok(true);
+                    }
+                    i = self.i;
+                    continue 'lines;
+                }
+                match b.get(i) {
+                    None => break 'lines,
+                    Some(b'/') if b.get(i + 1) == Some(&b'/') => {
+                        i += find_byte(b'\n', &b[i..]).unwrap_or(b.len() - i);
+                    }
+                    Some(b'/') if b.get(i + 1) == Some(&b'*') => {
+                        let Some(end) = find_comment_end(&b[i + 2..]) else {
+                            return self.fill_line(line, out);
+                        };
+                        let spans = find_byte(b'\n', &b[i + 2..i + 2 + end]).is_some();
+                        i += end + 4;
+                        if spans {
+                            continue 'lines;
+                        }
+                    }
+                    Some(c) if c.is_ascii_whitespace() => i += 1,
+                    Some(_) => break,
+                }
+            }
+            // Skip the rest of the line.
+            loop {
+                let rest = &b[i..];
+                let stop = memchr::memchr3(b'\n', b'"', b'\'', rest).unwrap_or(rest.len());
+                i += find_byte(b'/', &rest[..stop]).unwrap_or(stop);
+                match b.get(i) {
+                    None => break 'lines,
+                    Some(b'\n') => {
+                        i += 1;
+                        continue 'lines;
+                    }
+                    Some(b'/') if b.get(i + 1) == Some(&b'/') => {
+                        i += find_byte(b'\n', &b[i..]).unwrap_or(b.len() - i);
+                    }
+                    Some(b'/') if b.get(i + 1) == Some(&b'*') => {
+                        let Some(end) = find_comment_end(&b[i + 2..]) else {
+                            return self.fill_line(line, out);
+                        };
+                        let spans = find_byte(b'\n', &b[i + 2..i + 2 + end]).is_some();
+                        i += end + 4;
+                        if spans {
+                            continue 'lines;
+                        }
+                    }
+                    Some(b'/') => i += 1,
+                    Some(&q) => {
+                        // The literal loop of `fill`.
+                        i += 1;
+                        loop {
+                            i += find_literal_end(q, &b[i.min(b.len())..])
+                                .unwrap_or(b.len() - i.min(b.len()));
+                            match b.get(i) {
+                                Some(c) if *c == q => break,
+                                Some(b'\\') => i += 2,
+                                _ => return self.fill_line(line, out),
+                            }
+                            if i > b.len() {
+                                return self.fill_line(line, out);
+                            }
+                        }
+                        i += 1;
+                    }
+                }
+            }
+        }
+        self.i = b.len();
+        self.space = true;
+        Ok(true)
+    }
+
+    /// Scans from `line`, the start of a line, with `fill` until a newline.
+    fn fill_line(&mut self, line: usize, out: &mut Vec<Token<'a>>) -> Result<bool, Diagnostic> {
+        self.i = line;
+        self.space = true;
+        self.fill(out, out.len() + 1, false)
+    }
+}
+
+/// Whether `line` starts with a directive that can begin an inactive group.
+fn conditional(line: &[Token<'_>]) -> bool {
+    line.first().is_some_and(|t| t.text == "#")
+        && line
+            .get(1)
+            .is_some_and(|t| matches!(t.text, "if" | "ifdef" | "ifndef" | "elif" | "else"))
 }
 
 impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
@@ -1165,7 +1326,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             let mut chunk = self.chunks.pop().unwrap_or_default();
             // The batch cache keeps every token of a header; otherwise only
             // those that its later inclusions process.
-            let batch = self.batch_cache.is_some();
+            let batch = key.is_some() && self.batch_cache.is_some();
             kept = state.guard.is_some().then(Vec::new);
             self.stream(&mut scanner, &mut chunk, &mut state, &mut kept, batch)?;
             if TRACK {
@@ -1219,14 +1380,29 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     ) -> Result<(), Diagnostic> {
         loop {
             chunk.clear();
-            let done = scanner.fill(chunk, self.stream_chunk)?;
+            // Inactive lines can be skipped unless their tokens are kept.
+            // Before a guard group opens, scan line by line so that skipping
+            // can start inside it.
+            let (skippable, min) = match state.guard.as_ref().map(|scan| scan.state) {
+                _ if keep_all => (false, self.stream_chunk),
+                None | Some(GuardState::Open(_) | GuardState::Malformed) => {
+                    (true, self.stream_chunk)
+                }
+                Some(GuardState::Start | GuardState::Ifndef(_)) => (false, 1),
+                Some(_) => (false, self.stream_chunk),
+            };
+            let done = if skippable && state.stack.last().is_some_and(|c| !c.active) {
+                scanner.skip(chunk)?
+            } else {
+                scanner.fill(chunk, min, skippable)?
+            };
             let was = state.guard.as_ref().map(|scan| scan.state);
             if let Err(error) = self.lines(chunk, state) {
                 // Report a lexical error anywhere in the file before any
                 // directive error, as when the whole file was scanned first.
                 loop {
                     chunk.clear();
-                    if scanner.fill(chunk, self.stream_chunk)? {
+                    if scanner.fill(chunk, self.stream_chunk, false)? {
                         return Err(error);
                     }
                 }

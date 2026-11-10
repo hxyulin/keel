@@ -753,6 +753,47 @@ fn directory_canonicalization_preserves_symlink_dotdot_and_spelling() {
     }
 }
 
+// Plain preprocessing skips inactive header lines without tokens; the batch
+// cache keeps every header token, so it scans them all.
+#[test]
+fn skipped_inactive_lines_match_scanned_ones() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-skip-inactive");
+    std::fs::create_dir_all(&dir).unwrap();
+    let valid = "#ifndef SKIP_H\n#define SKIP_H\n#if 0\nit's /* don't */ \"a 'b\" 'c' // e's\nx /* spans\n#endif inside a comment */ still skipped\n#define BAD /* spans\n*/ #if 1\nnested\n# else\n#endif\ny /* one */ # define Z\n## not a directive\n%:%: nor this\n#define S \"#endif\"\n#  include <missing.h>\n#\n# 7 \"line.c\"\n#elif 1\n%:if 0\ntaken_not\n%:else\ntaken __LINE__\n%:endif\n#endif\n#ifdef UNDEFINED\n#if 1\n#else\n#endif\na /*\n*/ #else\nb __LINE__\n#endif\nafter __LINE__\n#endif\n";
+    let errors = [
+        "#ifndef E\n#define E\n#if 0\nit's\n#endif\n#endif\n",
+        "#ifndef E\n#define E\n#if 0\nx \"open\n#endif\n#endif\n",
+        "#ifndef E\n#define E\n#if 0\n/* never closed\n#endif\n#endif\n",
+        "#ifndef E\n#define E\n#if 0\n#if 1\n#else\n#else\n#endif\n#endif\n#endif\n",
+        "#ifndef E\n#define E\n#ifdef E\n#if 0\n#endif\n",
+    ];
+    let opts = PreprocessOptions::default();
+    for (n, text) in std::iter::once(valid).chain(errors).enumerate() {
+        let header = dir.join(format!("skip{n}.h"));
+        std::fs::write(&header, text).unwrap();
+        let src = format!("#include \"skip{n}.h\"\n");
+        let path = dir.join(format!("skip{n}.c"));
+        let path = path.to_str().unwrap();
+        let skipped = preprocess(&src, path, &opts).map_err(|e| e.to_string());
+        let scanned = keel_c::PreprocessCache::new()
+            .preprocess(&src, path, &opts)
+            .map_err(|e| e.to_string());
+        assert_eq!(skipped, scanned, "{text:?}");
+        assert_eq!(skipped.is_ok(), n == 0, "{skipped:?}");
+    }
+    let got = preprocess(
+        "#include \"skip0.h\"\n",
+        dir.join("main.c").to_str().unwrap(),
+        &opts,
+    )
+    .unwrap();
+    let got: Vec<_> = (got.lines())
+        .filter(|line| !line.starts_with('#'))
+        .flat_map(str::split_whitespace)
+        .collect();
+    assert_eq!(got, ["taken", "23", "b", "32", "after", "34"]);
+}
+
 #[test]
 fn batch_cache_rebinds_alias_locations_and_does_not_retain_once_or_macros() {
     let root = std::env::temp_dir().join(format!("keel-pp-cache-{}", std::process::id()));
