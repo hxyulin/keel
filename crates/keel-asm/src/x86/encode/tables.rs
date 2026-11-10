@@ -6,9 +6,47 @@ use keel_asm_ir::x86::{
 };
 use smallvec::SmallVec;
 
+/// A mnemonic, built in place: every instruction encoded needs one.
+#[derive(Clone, Debug, Default)]
+struct Name(SmallVec<[u8; 24]>);
+impl Name {
+    fn new(parts: &[&str]) -> Self {
+        let mut name = Self::default();
+        for part in parts {
+            name.0.extend_from_slice(part.as_bytes());
+        }
+        name
+    }
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.0).expect("mnemonics are built from whole strings")
+    }
+    /// Keep the first `len` bytes. Mnemonics are ASCII.
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+}
+impl std::ops::Deref for Name {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl PartialEq<&str> for Name {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.as_slice() == other.as_bytes()
+    }
+}
+impl std::fmt::Write for Name {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+}
+
 struct Dialect {
-    name: String,
-    original: String,
+    name: Name,
+    /// `movabs`: a 64-bit immediate or absolute address form.
+    movabs: bool,
     byte: Option<u8>,
     direction: Option<usize>,
     size: Option<u16>,
@@ -25,14 +63,18 @@ struct Dialect {
 }
 
 fn dialect(i: &Instruction) -> Dialect {
-    let raw = if let Core(op) = i.opcode {
-        op.mnemonic().to_owned()
+    let source = if let Core(op) = i.opcode {
+        Name::new(&[op.mnemonic()])
     } else {
-        i.opcode.to_string()
+        let mut name = Name::default();
+        std::fmt::Write::write_fmt(&mut name, format_args!("{}", i.opcode))
+            .expect("writing a mnemonic cannot fail");
+        name
     };
+    let raw = source.as_str();
     let mut d = Dialect {
-        name: raw.clone(),
-        original: String::new(),
+        name: source.clone(),
+        movabs: false,
         byte: None,
         direction: None,
         size: None,
@@ -53,7 +95,7 @@ fn dialect(i: &Instruction) -> Dialect {
                 segment,
                 ..
             } => {
-                d.name = op.mnemonic().into();
+                d.name = Name::new(&[op.mnemonic()]);
                 d.address32 = address32;
                 d.segment = segment;
                 d.repeat = match repeat {
@@ -69,7 +111,7 @@ fn dialect(i: &Instruction) -> Dialect {
             }
             CoreOpcode::Enter { operand16 } => d.size = Some(if operand16 { 16 } else { 64 }),
             CoreOpcode::RetFar { width } => {
-                d.name = "ret".into();
+                d.name = Name::new(&["ret"]);
                 d.size = Some(width);
             }
             CoreOpcode::CallFar | CoreOpcode::JmpFar => {
@@ -88,7 +130,7 @@ fn dialect(i: &Instruction) -> Dialect {
             }
             CoreOpcode::Int => {
                 if matches!(i.operands.as_slice(),[I(a)] if constant(a)==Some(3)) {
-                    d.name = "int3".into()
+                    d.name = Name::new(&["int3"]);
                 }
             }
             _ => {}
@@ -96,12 +138,12 @@ fn dialect(i: &Instruction) -> Dialect {
     }
     if let Fixed(op) = i.opcode {
         let (name, size, wait) = op.source();
-        d.name = name.into();
+        d.name = Name::new(&[name]);
         d.size = size;
         d.wait = wait;
     }
     if let Some((base, suffix)) = raw.split_once('.') {
-        d.name = base.into();
+        d.name = Name::new(&[base]);
         match suffix {
             "load" => d.direction = Some(0),
             "store" => d.direction = Some(1),
@@ -129,7 +171,7 @@ fn dialect(i: &Instruction) -> Dialect {
         }
     }
     if raw == "movabs" || raw == "movabs32" {
-        d.name = "mov".into();
+        d.name = Name::new(&["mov"]);
         d.address32 = raw == "movabs32";
     }
     if matches!(i.opcode, Movq6e | Movq7e) {
@@ -156,13 +198,13 @@ fn dialect(i: &Instruction) -> Dialect {
     }
     if raw.starts_with('f')
         && !raw.starts_with("fn")
-        && matches!(raw.as_str(), "fstcw" | "fstsw" | "fstenv" | "fsave")
+        && matches!(raw, "fstcw" | "fstsw" | "fstenv" | "fsave")
     {
-        d.name = format!("fn{}", &raw[1..]);
+        d.name = Name::new(&["fn", &raw[1..]]);
         d.wait = true;
     }
     if matches!(
-        raw.as_str(),
+        raw,
         "cmpeqps"
             | "cmpltps"
             | "cmpleps"
@@ -197,7 +239,7 @@ fn dialect(i: &Instruction) -> Dialect {
             | "cmpordsd"
     ) {
         let tag = &raw[raw.len() - 2..];
-        d.name = format!("cmp{tag}");
+        d.name = Name::new(&["cmp", tag]);
         d.control = Some(match &raw[3..raw.len() - 2] {
             "eq" => 0,
             "lt" => 1,
@@ -209,25 +251,26 @@ fn dialect(i: &Instruction) -> Dialect {
             _ => 7,
         });
     }
-    d.name = match d.name.as_str() {
-        "callf" => "call",
-        "jmpf" => "jmp",
-        "fwait" => "fwait",
-        "xlatb" => "xlat",
-        "sal" => "shl",
-        other => other,
+    let alias = match d.name.as_str() {
+        "callf" => Some("call"),
+        "jmpf" => Some("jmp"),
+        "xlatb" => Some("xlat"),
+        "sal" => Some("shl"),
+        _ => None,
+    };
+    if let Some(alias) = alias {
+        d.name = Name::new(&[alias]);
     }
-    .into();
     for stem in ["cmov", "set", "j"] {
         if let Some(cc) = d.name.strip_prefix(stem) {
             let canonical = keel_asm_ir::x86::isa::parse_condition_code(cc)
                 .and_then(keel_asm_ir::x86::isa::isa_condition_code_name)
                 .unwrap_or(cc);
-            d.name = format!("{stem}{canonical}");
+            d.name = Name::new(&[stem, canonical]);
             break;
         }
     }
-    d.original = raw;
+    d.movabs = raw == "movabs" || raw == "movabs32";
     d.apx = i.required_features().apx_f;
     d.vex = i.opcode.required_features().amx_tile
         || d.name.starts_with('v') && !matches!(d.name.as_str(), "verr" | "verw")
@@ -369,6 +412,7 @@ fn match_form<'a>(
     form: &'static IsaForm,
     i: &'a Instruction,
     d: &Dialect,
+    name: &str,
     context: FormContext,
 ) -> Option<Choice<'a>> {
     let FormContext {
@@ -423,7 +467,7 @@ fn match_form<'a>(
     if form.vex != d.vex {
         return None;
     }
-    if matches!(d.name.as_str(), "fnstenv" | "fldenv" | "fnsave" | "frstor") {
+    if matches!(name, "fnstenv" | "fldenv" | "fnsave" | "frstor") {
         let wanted = if matches!(i.operands.first(),Some(M(m)) if m.width==16) {
             16
         } else {
@@ -469,8 +513,7 @@ fn match_form<'a>(
             return None;
         }
     }
-    let raw = d.original.as_str();
-    if raw == "movabs" || raw == "movabs32" {
+    if d.movabs {
         if i.operands.iter().any(|o| matches!(o, M(_))) {
             if !form.operands.iter().any(|s| s.kind == "moffs") {
                 return None;
@@ -508,7 +551,7 @@ fn match_form<'a>(
     {
         return None;
     }
-    if matches!(i.opcode, Core(CoreOpcode::Int)) && d.name == "int3" {
+    if matches!(i.opcode, Core(CoreOpcode::Int)) && name == "int3" {
         return Some(Choice {
             form,
             size,
@@ -583,33 +626,32 @@ fn match_form<'a>(
             return None;
         }
         let zero_extend = matches!(
-            d.name.as_str(),
+            name,
             "pmovmskb" | "movmskps" | "movmskpd" | "pextrw" | "pinsrw"
         );
         let compatible = zero_extend
             && matches!(spec.kind, "gpr32" | "gpr32_32_64")
             && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr&&r.width==64);
-        let address_only =
-            matches!(d.name.as_str(), "clflush" | "invlpg") || d.name.starts_with("prefetch");
+        let address_only = matches!(name, "clflush" | "invlpg") || name.starts_with("prefetch");
         let compatible = compatible
             || address_only
                 && spec.kind == "mem"
                 && matches!(i.operands.get(used),Some(M(m)) if matches!(m.width,0|8));
         let compatible = compatible
-            || matches!(d.name.as_str(), "fnstenv" | "fldenv" | "fnsave" | "frstor")
+            || matches!(name, "fnstenv" | "fldenv" | "fnsave" | "frstor")
                 && spec.kind == "mem"
                 && matches!(i.operands.get(used),Some(M(m)) if matches!(m.width,0|16|32));
         // Pinned Zydis/XED describe the decoded register view (GPRv for
         // LAR, GPRz for LSL). GNU/Clang also accept a 16-bit selector
         // spelling; only the destination selects the encoded operand size.
         let compatible = compatible
-            || matches!(d.name.as_str(), "lar" | "lsl")
+            || matches!(name, "lar" | "lsl")
                 && index == 1
                 && spec.encoding == "modrm_rm"
                 && matches!(spec.kind, "gpr16_32_64" | "gpr16_32_32")
                 && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr && (r.width==16 || r.width==size));
         let compatible = compatible
-            || d.name == "mov"
+            || name == "mov"
                 && form.byte == 0x8e
                 && spec.kind == "gpr16"
                 && matches!(i.operands.get(used),Some(R(r)) if r.class==RegisterClass::Gpr && r.width==32);
@@ -636,7 +678,7 @@ fn match_form<'a>(
             || (spec.kind == "fpr"
                 && i.operands.is_empty()
                 && matches!(
-                    d.name.as_str(),
+                    name,
                     "fxch"
                         | "fucomi"
                         | "fucomip"
@@ -657,7 +699,7 @@ fn match_form<'a>(
             return None;
         }
     }
-    if matches!(d.name.as_str(), "blendvps" | "blendvpd" | "pblendvb") {
+    if matches!(name, "blendvps" | "blendvpd" | "pblendvb") {
         if used + 1 == i.operands.len()
             && matches!(i.operands.last(),Some(R(r)) if r.class==RegisterClass::Xmm&&r.number==0)
         {
@@ -995,7 +1037,9 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
     if i.operands.iter().any(|o|matches!(o,I(a) if constant(a).is_some_and(|n|n<0)))
         && (i.opcode.required_features().avx||i.opcode.required_features().bmi2||matches!(i.opcode,V2(_)|Core(CoreOpcode::RetFar{..}|CoreOpcode::Rcl|CoreOpcode::Rcr|CoreOpcode::RclImm|CoreOpcode::RcrImm|CoreOpcode::Enter{..}|CoreOpcode::Int|CoreOpcode::IntImm|CoreOpcode::In|CoreOpcode::Out))
             || i.operands.iter().any(|o|matches!(o,R(r) if matches!(r.class,RegisterClass::Xmm|RegisterClass::Mmx|RegisterClass::Ymm)))){return Err("control requires an unsigned immediate".into());}
-    for f in mnemonics::forms(i.opcode, &d.name) {
+    // Validate the name once; form matching compares it many times.
+    let name = d.name.as_str();
+    for f in mnemonics::forms(i.opcode, name) {
         for p66 in [false, true] {
             for w in [false, true] {
                 if p66 && !has16 && f.sizes != 1 {
@@ -1009,6 +1053,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
                     f,
                     i,
                     &d,
+                    name,
                     FormContext {
                         short,
                         size,
@@ -1054,7 +1099,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, Strin
 
 pub(super) fn vector_or_state(i: &Instruction) -> bool {
     let d = dialect(i);
-    mnemonics::forms(i.opcode, &d.name).iter().any(|f| {
+    mnemonics::forms(i.opcode, d.name.as_str()).iter().any(|f| {
         f.operands
             .iter()
             .any(|o| matches!(o.kind, "xmm" | "ymm" | "mmx"))
