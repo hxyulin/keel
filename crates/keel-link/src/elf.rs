@@ -486,15 +486,38 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
 /// Parse and validate every input object. Output section indices are assigned
 /// in input order.
 fn parse_units<'a>(inputs: &'a [input::Named<'_>], arm: bool) -> Result<Parsed<'a>> {
-    let mut parsed = Parsed {
-        sections: Vec::new(),
-        units: Vec::new(),
-        unwind_sections: BTreeMap::new(),
-        sframe_section: None,
-        warnings: Vec::new(),
-        note_plan: notes::Plan::default(),
-        object_properties: Vec::new(),
-    };
+    // An object's parse is independent of the others except for its output
+    // section numbers and two whole-link checks: one SFrame producer and one
+    // ABI note. Parse each object alone, in parallel for large links, then
+    // renumber and check while absorbing them in input order.
+    const BYTES_PER_WORKER: usize = 1 << 20;
+    let alone = crate::parallel::map(
+        inputs.iter().collect(),
+        |input| input.bytes.len(),
+        BYTES_PER_WORKER,
+        |input| {
+            let mut parsed = Parsed::empty();
+            let mut properties = notes::Properties::new();
+            let unit = parsed.parse_unit(input, arm, &mut properties).ok()?;
+            Some((parsed, unit, properties))
+        },
+    );
+    let mut parsed = Parsed::empty();
+    for object in alone {
+        let Some((alone, unit, properties)) = object else {
+            return parse_units_serially(inputs, arm);
+        };
+        if !parsed.absorb(alone, unit, properties) {
+            return parse_units_serially(inputs, arm);
+        }
+    }
+    Ok(parsed)
+}
+
+/// Parse in input order, failing at the first error. Every failed link takes
+/// this path, so it reports the same error that a serial parse always did.
+fn parse_units_serially<'a>(inputs: &'a [input::Named<'_>], arm: bool) -> Result<Parsed<'a>> {
+    let mut parsed = Parsed::empty();
     for input in inputs {
         let mut properties = notes::Properties::new();
         let unit = parsed
@@ -507,6 +530,55 @@ fn parse_units<'a>(inputs: &'a [input::Named<'_>], arm: bool) -> Result<Parsed<'
 }
 
 impl<'a> Parsed<'a> {
+    fn empty() -> Self {
+        Self {
+            sections: Vec::new(),
+            units: Vec::new(),
+            unwind_sections: BTreeMap::new(),
+            sframe_section: None,
+            warnings: Vec::new(),
+            note_plan: notes::Plan::default(),
+            object_properties: Vec::new(),
+        }
+    }
+
+    /// Append one object parsed alone, renumbering its output sections after
+    /// the ones already present. Returns false when the object adds a second
+    /// SFrame producer or ABI note, which the serial parse diagnoses.
+    fn absorb(
+        &mut self,
+        mut alone: Parsed<'a>,
+        mut unit: Unit<'a>,
+        properties: notes::Properties,
+    ) -> bool {
+        let base = self.sections.len();
+        if alone.sframe_section.is_some() && self.sframe_section.is_some()
+            || alone.note_plan.abi.is_some() && self.note_plan.abi.is_some()
+        {
+            return false;
+        }
+        if let Some((section, table)) = alone.sframe_section {
+            self.sframe_section = Some((section + base, table));
+        }
+        if let Some(section) = alone.note_plan.abi {
+            self.note_plan.abi = Some(section + base);
+        }
+        for (section, frames) in alone.unwind_sections {
+            self.unwind_sections.insert(section + base, frames);
+        }
+        for section in unit.sections.values_mut() {
+            *section += base;
+        }
+        for reloc in &mut unit.relocs {
+            reloc.section += base;
+        }
+        self.sections.append(&mut alone.sections);
+        self.warnings.append(&mut alone.warnings);
+        self.units.push(unit);
+        self.object_properties.push(properties);
+        true
+    }
+
     /// Validate one relocatable object, append its allocated sections, and
     /// return its symbols and relocations. GNU property notes go to `properties`.
     fn parse_unit(
