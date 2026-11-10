@@ -110,35 +110,36 @@ impl fmt::Display for AbiParam {
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct CallArgs {
     values: Vec<Value>,
-    abi: Vec<Option<AbiParam>>,
+    /// Descriptors by operand position, or `None` when no operand has one,
+    /// so that ordinary calls allocate nothing for them. Boxing the vector
+    /// keeps the pointer thin and `CallArgs` at 32 bytes.
+    #[allow(clippy::box_collection)]
+    abi: Option<Box<Vec<Option<AbiParam>>>>,
 }
 
 impl CallArgs {
     pub fn with_abi(args: impl IntoIterator<Item = (Value, AbiParam)>) -> Self {
-        let (values, abi) = args.into_iter().map(|(v, p)| (v, Some(p))).unzip();
-        Self { values, abi }
+        Self::from_optional(args.into_iter().map(|(v, p)| (v, Some(p))))
     }
 
     pub fn from_optional(args: impl IntoIterator<Item = (Value, Option<AbiParam>)>) -> Self {
-        let (values, abi) = args.into_iter().unzip();
+        let (values, abi): (Vec<Value>, Vec<Option<AbiParam>>) = args.into_iter().unzip();
+        let abi = abi.iter().any(Option::is_some).then(|| Box::new(abi));
         Self { values, abi }
     }
 
     pub fn abi(&self, index: usize) -> Option<&AbiParam> {
-        self.abi.get(index).and_then(Option::as_ref)
+        self.abi.as_ref()?.get(index)?.as_ref()
     }
 
     pub fn has_explicit_abi(&self) -> bool {
-        self.abi.iter().any(Option::is_some)
+        self.abi.is_some()
     }
 }
 
 impl From<Vec<Value>> for CallArgs {
     fn from(values: Vec<Value>) -> Self {
-        Self {
-            abi: vec![None; values.len()],
-            values,
-        }
+        Self { values, abi: None }
     }
 }
 
@@ -2815,6 +2816,36 @@ block3(v14: i64):
             .collect();
         // jump, brif, load, jump, return
         assert_eq!(pinned, ["inst1", "inst3", "inst7", "inst12", "inst13"]);
+    }
+
+    #[test]
+    fn call_args_store_descriptors_only_when_given() {
+        let values = [Value::new(0), Value::new(1)];
+        let plain = CallArgs::from(values.to_vec());
+        let none = CallArgs::from_optional(values.iter().map(|&v| (v, None)));
+        let byval = AbiParam {
+            purpose: Purpose::ByVal(Layout::Struct(vec![Layout::Scalar(Type::I64); 2])),
+            ..AbiParam::new(Type::Ptr)
+        };
+        let some = CallArgs::from_optional([(values[0], None), (values[1], Some(byval.clone()))]);
+        let all = CallArgs::with_abi(values.iter().map(|&v| (v, AbiParam::new(Type::Ptr))));
+        for args in [&plain, &none] {
+            assert!(!args.has_explicit_abi());
+            assert_eq!((args.abi(0), args.abi(1), args.abi(2)), (None, None, None));
+            assert_eq!(**args, values);
+        }
+        assert_eq!(plain, none);
+        assert_eq!(CallArgs::default(), CallArgs::from(Vec::new()));
+        assert_eq!(CallArgs::with_abi([]), CallArgs::default());
+        assert!(some.has_explicit_abi() && all.has_explicit_abi());
+        assert_eq!(
+            (some.abi(0), some.abi(1), some.abi(2)),
+            (None, Some(&byval), None)
+        );
+        assert_eq!(all.abi(1), Some(&AbiParam::new(Type::Ptr)));
+        assert_ne!(some, plain);
+        assert_ne!(some, all);
+        assert_eq!(*some, values);
     }
 }
 
