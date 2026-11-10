@@ -1456,31 +1456,35 @@ fn preprocess_c_cached(
 }
 
 /// Preprocesses one C file unless it is a `.i` file, compiles it to IR and
-/// verifies the result. The source is released before it returns.
+/// verifies the result. The source and preprocessed text are released before
+/// verification; a raw source as soon as it is preprocessed.
 fn c_module(
     opts: &Options,
     input: &str,
     cache: Option<&mut keel_c::PreprocessCache>,
 ) -> Result<Module, String> {
-    let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
-    let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-    let preprocessed = if input.ends_with(".i") {
-        None
-    } else {
-        Some(preprocess_c_cached(opts, input, text, cache)?)
-    };
-    let c_opts = keel_c::Options {
-        fast_math: opts.fast_math,
-        debug_info: opts.ir_lines,
-        target: opts.target()?,
-        // Code generation rejects the same calls without a C location.
-        x86_features: (!opts.optimizes()).then_some(opts.x86_features),
-        x86_baseline: Some(opts.x86_features),
-    };
     let module = {
+        let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
+        let preprocessed;
+        let text = if input.ends_with(".i") {
+            src.text().map_err(|e| format!("{input}: {e}"))?
+        } else {
+            let text = src.text().map_err(|e| format!("{input}: {e}"))?;
+            preprocessed = preprocess_c_cached(opts, input, text, cache)?;
+            drop(src);
+            &preprocessed
+        };
+        let c_opts = keel_c::Options {
+            fast_math: opts.fast_math,
+            debug_info: opts.ir_lines,
+            target: opts.target()?,
+            // Code generation rejects the same calls without a C location.
+            x86_features: (!opts.optimizes()).then_some(opts.x86_features),
+            x86_baseline: Some(opts.x86_features),
+        };
         profiling::scope!("c-frontend");
         keel_c::compile_with_policies(
-            preprocessed.as_deref().unwrap_or(text),
+            text,
             input,
             c_opts,
             opts.c_function_binding(),
@@ -1488,7 +1492,6 @@ fn c_module(
         )
         .map_err(|e| e.to_string())?
     };
-    drop(src);
     if let Err(errors) = keel_ir::verify_module(&module) {
         let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
         return Err(format!(

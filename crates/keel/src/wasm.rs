@@ -124,14 +124,16 @@ pub(super) fn compile_ir(opts: &DriverOptions) -> Result<(), String> {
 
 pub(super) fn compile_c(opts: &DriverOptions) -> Result<(), String> {
     let path = opts.input.as_deref().ok_or(super::USAGE)?;
-    let source = input::Source::open(path).map_err(|e| format!("{path}: {e}"))?;
-    let text = source.text().map_err(|e| format!("{path}: {e}"))?;
-    let preprocessed = if path.ends_with(".i") {
-        None
-    } else {
-        Some(
-            keel_c::preprocess(
-                text,
+    // The source and preprocessed text are released before emission; a raw
+    // source as soon as it is preprocessed.
+    let module = {
+        let source = input::Source::open(path).map_err(|e| format!("{path}: {e}"))?;
+        let preprocessed;
+        let text = if path.ends_with(".i") {
+            source.text().map_err(|e| format!("{path}: {e}"))?
+        } else {
+            preprocessed = keel_c::preprocess(
+                source.text().map_err(|e| format!("{path}: {e}"))?,
                 path,
                 &keel_c::PreprocessOptions {
                     target: Target::Wasm32UnknownUnknown,
@@ -141,20 +143,21 @@ pub(super) fn compile_c(opts: &DriverOptions) -> Result<(), String> {
                     ..Default::default()
                 },
             )
-            .map_err(|e| e.to_string())?,
+            .map_err(|e| e.to_string())?;
+            drop(source);
+            &preprocessed
+        };
+        keel_c::compile(
+            text,
+            path,
+            keel_c::Options {
+                target: Target::Wasm32UnknownUnknown,
+                debug_info: false,
+                ..Default::default()
+            },
         )
+        .map_err(|e| e.to_string())?
     };
-    let module = keel_c::compile(
-        preprocessed.as_deref().unwrap_or(text),
-        path,
-        keel_c::Options {
-            target: Target::Wasm32UnknownUnknown,
-            debug_info: false,
-            ..Default::default()
-        },
-    )
-    .map_err(|e| e.to_string())?;
-    drop(source);
     emit(opts, &module)
 }
 
