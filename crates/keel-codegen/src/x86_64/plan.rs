@@ -612,17 +612,8 @@ impl SystemSlots {
         let intrinsic = |want: fn(&InstData) -> bool| {
             present.intrinsic && func.layout_insts().any(|(_, i)| want(func.inst_data(i)))
         };
-        let mxcsr_save = (!features.sse41
-            && func.layout_insts().any(|(_, i)| {
-                matches!(
-                    func.inst_data(i),
-                    InstData::Unary {
-                        op: UnaryOp::Fnearest | UnaryOp::Ffloor | UnaryOp::Fceil | UnaryOp::Ftrunc,
-                        ..
-                    }
-                )
-            }))
-        .then_some(offset);
+        // Without SSE4.1, rounding reads MXCSR through this slot.
+        let mxcsr_save = (!features.sse41 && present.rounding).then_some(offset);
         let offset = offset + if mxcsr_save.is_some() { 4 } else { 0 };
         let mxcsr_access = intrinsic(|data| {
             matches!(
@@ -650,9 +641,8 @@ impl SystemSlots {
         })
         .then_some(offset.next_multiple_of(2));
         let offset = x87_state.map_or(offset, |slot| slot + 4);
-        let cx16_save = func
-            .layout_insts()
-            .any(|(_, i)| {
+        let cx16_save = ((present.intrinsic || present.atomic)
+            && func.layout_insts().any(|(_, i)| {
                 matches!(
                     func.inst_data(i),
                     InstData::Intrinsic {
@@ -662,8 +652,8 @@ impl SystemSlots {
                         ..
                     }
                 ) || crate::lowering::wide_atomic(func, func.inst_data(i))
-            })
-            .then_some(offset.next_multiple_of(8));
+            }))
+        .then_some(offset.next_multiple_of(8));
         let offset = cx16_save.map_or(offset, |slot| slot + 8);
         let string_io_home = intrinsic(|data| {
             matches!(data, InstData::Intrinsic { id, .. } if id.x86_string_port_io().is_some())

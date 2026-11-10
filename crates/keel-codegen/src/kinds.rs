@@ -4,7 +4,7 @@
 use std::cell::OnceCell;
 
 use keel_ir::fxhash::FxHashSet;
-use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp, Value};
+use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp, UnaryOp, Value};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct InstKinds {
@@ -24,6 +24,10 @@ pub(crate) struct InstKinds {
     pub compare: bool,
     pub brif: bool,
     pub atomic_cas: bool,
+    /// Any atomic load, store, read-modify-write or compare-and-swap.
+    pub atomic: bool,
+    /// `fnearest`, `ffloor`, `fceil` or `ftrunc`.
+    pub rounding: bool,
     pub vector_splat: bool,
     pub vector_icmp: bool,
     pub vector_select: bool,
@@ -74,7 +78,17 @@ impl InstKinds {
                 InstData::Select { .. } => kinds.select = true,
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => kinds.compare = true,
                 InstData::Brif { .. } => kinds.brif = true,
-                InstData::AtomicCas { .. } => kinds.atomic_cas = true,
+                InstData::AtomicCas { .. } => {
+                    kinds.atomic_cas = true;
+                    kinds.atomic = true;
+                }
+                InstData::AtomicLoad { .. }
+                | InstData::AtomicStore { .. }
+                | InstData::AtomicRmw { .. } => kinds.atomic = true,
+                InstData::Unary {
+                    op: UnaryOp::Fnearest | UnaryOp::Ffloor | UnaryOp::Fceil | UnaryOp::Ftrunc,
+                    ..
+                } => kinds.rounding = true,
                 InstData::VectorSplat { .. } => kinds.vector_splat = true,
                 InstData::VectorIcmp { .. } => kinds.vector_icmp = true,
                 InstData::VectorSelect { .. } => kinds.vector_select = true,
