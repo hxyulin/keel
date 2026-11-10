@@ -1,16 +1,43 @@
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, parallel, regalloc::AllocationTier};
 use std::num::NonZeroUsize;
 
-struct Threads;
-impl Threads {
-    fn execute(&self, jobs: Vec<parallel::Job<'_>>) {
-        std::thread::scope(|scope| {
-            // Reverse scheduling deliberately differs from consumer order.
-            for job in jobs.into_iter().rev() {
-                scope.spawn(move || job.run());
-            }
-        });
+fn options<'a>(
+    target: Target,
+    selector: &'a (dyn keel_codegen::InstructionSelector + Sync),
+    allocator: &'a AllocationTier,
+    emission: keel_codegen::EmissionOptions,
+    workers: usize,
+    budget: usize,
+) -> parallel::Options<'a> {
+    parallel::Options {
+        target,
+        pipeline: parallel::Pipeline {
+            selector,
+            allocator,
+        },
+        emission,
+        pools: None,
+        workers: NonZeroUsize::new(workers).unwrap(),
+        budget: NonZeroUsize::new(budget).unwrap(),
     }
+}
+
+/// [`parallel::program_chunks`] with each job on its own scoped thread.
+fn threaded(
+    module: &keel_ir::Module,
+    options: parallel::Options<'_>,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), keel_codegen::CodegenError> {
+    std::thread::scope(|scope| {
+        parallel::program_chunks(
+            module,
+            options,
+            &|job| {
+                scope.spawn(move || job.run());
+            },
+            sink,
+        )
+    })
 }
 
 #[test]
@@ -33,25 +60,25 @@ fn ordered_chunks_match_serial_for_both_backends_and_tiers() {
             keel_codegen::Request::new(target, pipeline)
                 .program_chunks(&module, &mut |p| reference.push(format!("{p:?}")))
                 .unwrap();
-            for budget in [1, 8] {
+            for (workers, budget) in [(1, 1), (3, 1), (3, 8)] {
                 let mut actual = Vec::new();
-                parallel::program_chunks(
+                threaded(
                     &module,
-                    parallel::Options {
+                    options(
                         target,
-                        pipeline: parallel::Pipeline {
-                            selector: &selector,
-                            allocator: &AllocationTier::Full,
-                        },
-                        emission: Default::default(),
-                        pools: None,
-                        budget: NonZeroUsize::new(budget).unwrap(),
-                    },
-                    &|jobs| Threads.execute(jobs),
+                        &selector,
+                        &AllocationTier::Full,
+                        Default::default(),
+                        workers,
+                        budget,
+                    ),
                     &mut |p| actual.push(format!("{p:?}")),
                 )
                 .unwrap();
-                assert_eq!(actual, reference, "target {target:?}, budget {budget}");
+                assert_eq!(
+                    actual, reference,
+                    "target {target:?}, {workers} workers, budget {budget}"
+                );
             }
         }
     }
@@ -85,22 +112,12 @@ fn compare_policy(
             reference.push(format!("{p:?}"));
             reference_program.append(p);
         });
-    for budget in [1, 8] {
+    for (workers, budget) in [(1, 1), (4, 2), (4, 8)] {
         let mut actual = Vec::new();
         let mut program = keel_asm_ir::Program::new();
-        let got = parallel::program_chunks(
+        let got = threaded(
             module,
-            parallel::Options {
-                target,
-                pipeline: parallel::Pipeline {
-                    selector: &selector,
-                    allocator: &allocator,
-                },
-                emission,
-                pools: None,
-                budget: NonZeroUsize::new(budget).unwrap(),
-            },
-            &|jobs| Threads.execute(jobs),
+            options(target, &selector, &allocator, emission, workers, budget),
             &mut |p| {
                 actual.push(format!("{p:?}"));
                 program.append(p);
@@ -136,13 +153,7 @@ fn snapshot_corpus_preserves_chunks_errors_and_objects() {
 }
 
 #[test]
-fn profile_capture_uses_serial_executor_fallback() {
-    struct MustNotRun;
-    impl MustNotRun {
-        fn execute(&self, _: Vec<parallel::Job<'_>>) {
-            panic!("profile capture must remain serial");
-        }
-    }
+fn profile_capture_uses_serial_route() {
     let module = keel_ir::parse(include_str!(
         "../../../suite/ir/llvm_import_fast_fixtures/fast.keel"
     ))
@@ -150,17 +161,15 @@ fn profile_capture_uses_serial_executor_fallback() {
     let (result, report) = keel_codegen::backend_profile::capture(|| {
         parallel::program_chunks(
             &module,
-            parallel::Options {
-                target: Target::X86_64LinuxGnu,
-                pipeline: parallel::Pipeline {
-                    selector: &SelectionTier::Full,
-                    allocator: &AllocationTier::Full,
-                },
-                emission: Default::default(),
-                pools: None,
-                budget: NonZeroUsize::new(8).unwrap(),
-            },
-            &|jobs| MustNotRun.execute(jobs),
+            options(
+                Target::X86_64LinuxGnu,
+                &SelectionTier::Full,
+                &AllocationTier::Full,
+                Default::default(),
+                4,
+                8,
+            ),
+            &|_| panic!("profile capture must remain serial"),
             &mut |_| {},
         )
     });
@@ -208,35 +217,17 @@ fn debug_lifecycle_weak_and_odr_remain_coordinator_owned() {
 }
 
 #[test]
-fn caller_can_reuse_safe_scoped_workers_across_windows() {
+fn caller_owned_pool_can_run_the_workers() {
     use std::sync::{Arc, Mutex, mpsc};
-    type Job<'job> = parallel::Job<'job>;
-    struct Pool<'job>(mpsc::Sender<Job<'job>>);
-    impl<'job> Pool<'job> {
-        fn execute(&self, jobs: Vec<parallel::Job<'job>>) {
-            let count = jobs.len();
-            let (done, completed) = mpsc::channel();
-            for job in jobs {
-                let done = done.clone();
-                self.0
-                    .send(parallel::Job::new(move || {
-                        job.run();
-                        done.send(()).unwrap();
-                    }))
-                    .unwrap();
-            }
-            for _ in 0..count {
-                completed.recv().unwrap();
-            }
-        }
-    }
     let module = keel_ir::parse(include_str!(
         "../../../suite/ir/llvm_import_fast_fixtures/fast.keel"
     ))
     .unwrap();
     std::thread::scope(|scope| {
-        let (sender, receiver) = mpsc::channel::<Job<'_>>();
+        let (sender, receiver) = mpsc::channel::<parallel::Job<'_>>();
         let receiver = Arc::new(Mutex::new(receiver));
+        // Fewer pool threads than workers: a queued worker starts late and
+        // finds nothing left to compile.
         for _ in 0..2 {
             let receiver = Arc::clone(&receiver);
             scope.spawn(move || {
@@ -249,29 +240,23 @@ fn caller_can_reuse_safe_scoped_workers_across_windows() {
                 }
             });
         }
-        let pool = Pool(sender);
         let mut chunks = 0;
         parallel::program_chunks(
             &module,
-            parallel::Options {
-                target: Target::Aarch64AppleDarwin,
-                pipeline: parallel::Pipeline {
-                    selector: &SelectionTier::Full,
-                    allocator: &AllocationTier::Full,
-                },
-                emission: Default::default(),
-                pools: None,
-                budget: NonZeroUsize::new(2).unwrap(),
-            },
-            &|jobs| pool.execute(jobs),
+            options(
+                Target::Aarch64AppleDarwin,
+                &SelectionTier::Full,
+                &AllocationTier::Full,
+                Default::default(),
+                3,
+                2,
+            ),
+            &|job| sender.send(job).unwrap(),
             &mut |_| chunks += 1,
         )
         .unwrap();
-        assert!(
-            chunks > 2,
-            "multiple windows must reuse the same two workers"
-        );
-        drop(pool);
+        assert!(chunks > 2);
+        drop(sender);
     });
 }
 
@@ -301,16 +286,14 @@ fn unused_signature_is_validated_before_dispatch_or_output() {
     for target in [Target::X86_64LinuxGnu, Target::Aarch64AppleDarwin] {
         let error = parallel::program_chunks(
             &module,
-            parallel::Options {
+            options(
                 target,
-                pipeline: parallel::Pipeline {
-                    selector: &SelectionTier::Full,
-                    allocator: &AllocationTier::Full,
-                },
-                emission: Default::default(),
-                pools: None,
-                budget: NonZeroUsize::new(8).unwrap(),
-            },
+                &SelectionTier::Full,
+                &AllocationTier::Full,
+                Default::default(),
+                4,
+                8,
+            ),
             &|_| panic!("invalid unused signatures must fail before dispatch"),
             &mut |_| panic!("invalid unused signatures must fail before output"),
         )
@@ -319,59 +302,107 @@ fn unused_signature_is_validated_before_dispatch_or_output() {
     }
 }
 
-#[test]
-fn executor_windows_are_bounded_and_sinks_stay_on_the_caller() {
-    use std::{
-        cell::RefCell,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+/// Records which functions selection has started, and panics on one name.
+struct Watch {
+    started: std::sync::Mutex<std::collections::HashSet<String>>,
+    panic_on: Option<&'static str>,
+}
+impl Watch {
+    fn new(panic_on: Option<&'static str>) -> Self {
+        Self {
+            started: Default::default(),
+            panic_on,
+        }
+    }
+    fn start(&self, function: &keel_ir::Function) {
+        assert_ne!(
+            Some(function.name.as_str()),
+            self.panic_on,
+            "selector panic"
+        );
+        self.started.lock().unwrap().insert(function.name.clone());
+    }
+    fn count(&self) -> usize {
+        self.started.lock().unwrap().len()
+    }
+}
+impl std::fmt::Debug for Watch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Watch")
+    }
+}
+impl keel_codegen::InstructionSelector for Watch {
+    fn name(&self) -> &'static str {
+        "watch"
+    }
+    fn select(
+        &self,
+        function: &keel_ir::Function,
+        target: keel_codegen::select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+    ) -> keel_codegen::select::Selection {
+        self.start(function);
+        keel_codegen::InstructionSelector::select(&SelectionTier::Full, function, target, folds)
+    }
+    fn select_with_uses(
+        &self,
+        function: &keel_ir::Function,
+        target: keel_codegen::select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+        uses: &[u8],
+    ) -> keel_codegen::select::Selection {
+        self.start(function);
+        keel_codegen::InstructionSelector::select_with_uses(
+            &SelectionTier::Full,
+            function,
+            target,
+            folds,
+            uses,
+        )
+    }
+}
 
+#[test]
+fn workers_stay_within_the_budget_and_sinks_stay_on_the_caller() {
     let source: String = (0..17)
         .map(|i| format!("func @f{i}() {{\nentry:\n return\n}}\n"))
         .collect();
     let module = keel_ir::parse(&source).unwrap();
     let caller = std::thread::current().id();
-    let windows = RefCell::new(Vec::new());
-    let completed = AtomicUsize::new(0);
+    let watch = Watch::new(None);
+    let spawned = std::cell::Cell::new(0);
     let mut chunks = 0;
-    parallel::program_chunks(
-        &module,
-        parallel::Options {
-            target: Target::X86_64LinuxGnu,
-            pipeline: parallel::Pipeline {
-                selector: &SelectionTier::Full,
-                allocator: &AllocationTier::Full,
+    std::thread::scope(|scope| {
+        parallel::program_chunks(
+            &module,
+            options(
+                Target::X86_64LinuxGnu,
+                &watch,
+                &AllocationTier::Full,
+                Default::default(),
+                4,
+                3,
+            ),
+            &|job| {
+                assert_eq!(std::thread::current().id(), caller);
+                spawned.set(spawned.get() + 1);
+                scope.spawn(move || job.run());
             },
-            emission: Default::default(),
-            pools: None,
-            budget: NonZeroUsize::new(3).unwrap(),
-        },
-        &|jobs| {
-            assert_eq!(std::thread::current().id(), caller);
-            windows.borrow_mut().push(jobs.len());
-            assert!(!jobs.is_empty() && jobs.len() <= 3);
-            std::thread::scope(|scope| {
-                for job in jobs.into_iter().rev() {
-                    let completed = &completed;
-                    scope.spawn(move || {
-                        job.run();
-                        completed.fetch_add(1, Ordering::SeqCst);
-                    });
-                }
-            });
-        },
-        &mut |_| {
-            assert_eq!(std::thread::current().id(), caller);
-            assert_eq!(
-                completed.load(Ordering::SeqCst),
-                windows.borrow().iter().sum::<usize>(),
-                "the executor must finish the whole window before a sink runs"
-            );
-            chunks += 1;
-        },
-    )
-    .unwrap();
-    assert_eq!(*windows.borrow(), [3, 3, 3, 3, 3, 2]);
+            &mut |_| {
+                assert_eq!(std::thread::current().id(), caller);
+                chunks += 1;
+                // The sink's own function and up to 3 more have started.
+                assert!(
+                    watch.count() <= (chunks + 3).min(17),
+                    "{} started after {chunks} chunks",
+                    watch.count()
+                );
+            },
+        )
+        .unwrap();
+    });
+    assert_eq!(spawned.get(), 4);
+    assert_eq!(watch.count(), 17);
     assert_eq!(
         chunks, 18,
         "one chunk per function and final module metadata"
@@ -379,35 +410,44 @@ fn executor_windows_are_bounded_and_sinks_stay_on_the_caller() {
 }
 
 #[test]
-fn omitted_jobs_and_executor_panics_do_not_emit_partial_windows() {
+fn dropped_jobs_and_worker_panics_propagate() {
     let module = keel_ir::parse("func @f() {\nentry:\n return\n}\n").unwrap();
-    for omit in [false, true] {
+    for drop_jobs in [false, true] {
+        let watch = Watch::new(Some("f"));
         let mut chunks = 0;
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            parallel::program_chunks(
-                &module,
-                parallel::Options {
-                    target: Target::X86_64LinuxGnu,
-                    pipeline: parallel::Pipeline {
-                        selector: &SelectionTier::Full,
-                        allocator: &AllocationTier::Full,
+            std::thread::scope(|scope| {
+                parallel::program_chunks(
+                    &module,
+                    options(
+                        Target::X86_64LinuxGnu,
+                        &watch,
+                        &AllocationTier::Full,
+                        Default::default(),
+                        2,
+                        3,
+                    ),
+                    &|job| {
+                        if !drop_jobs {
+                            scope.spawn(move || job.run());
+                        }
                     },
-                    emission: Default::default(),
-                    pools: None,
-                    budget: NonZeroUsize::new(3).unwrap(),
-                },
-                &|jobs| {
-                    if omit {
-                        drop(jobs);
-                    } else {
-                        Threads.execute(jobs);
-                        panic!("executor failure after joining workers");
-                    }
-                },
-                &mut |_| chunks += 1,
-            )
-        }));
-        assert!(panic.is_err(), "executor contract failure must propagate");
-        assert_eq!(chunks, 0, "a failed first window must not reach the sink");
+                    &mut |_| chunks += 1,
+                )
+            })
+        }))
+        .unwrap_err();
+        let message = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        let expected = if drop_jobs {
+            "every codegen job must run"
+        } else {
+            "selector panic"
+        };
+        assert!(message.contains(expected), "{message}");
+        assert_eq!(chunks, 0, "nothing reaches the sink before the failure");
     }
 }

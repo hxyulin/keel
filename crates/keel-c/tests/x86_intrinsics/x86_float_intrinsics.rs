@@ -41,7 +41,7 @@ fn features() -> Features {
     Features::parse("sse3,sse41,fma,f16c").unwrap()
 }
 fn pipeline<'a>(
-    selector: &'a FeatureSelector<'a>,
+    selector: &'a FeatureSelector<'a, SelectionTier>,
     allocator: &'a AllocationTier,
 ) -> CodegenPipeline<'a> {
     CodegenPipeline {

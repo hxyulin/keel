@@ -50,6 +50,7 @@ const USAGE: &str = "usage:
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
   keel compile|cc [--codegen-report <new-report.json>] <input> [-o <output>]
+  keel compile|cc [--codegen-threads <n>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or AArch64/x86-64 ELF)
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>
   keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>
@@ -130,6 +131,8 @@ struct Options {
     opt_report: Option<String>,
     codegen_report: Option<String>,
     reuse_header_lexing: bool,
+    /// `--codegen-threads`: native code generation threads, 1 for serial.
+    codegen_threads: Option<std::num::NonZeroUsize>,
     fast_math: bool,
     math_errno: Option<bool>,
     optimization_defaults: Vec<keel_ir::OptimizationOption>,
@@ -718,6 +721,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 opts.function_binding = Some(keel_c::FunctionBinding::NoSemanticInterposition)
             }
             "--emit-object" => opts.emit_object = true,
+            "--codegen-threads" => {
+                let n = args.next().ok_or("`--codegen-threads` needs a count")?;
+                opts.codegen_threads = Some(n.parse().map_err(|_| {
+                    format!("`--codegen-threads` needs a positive count, not `{n}`")
+                })?);
+            }
             "--isel" => {
                 explicit_selection = true;
                 let passes = args.next().ok_or(ISEL_PASSES)?;
@@ -1022,6 +1031,7 @@ const COMPILE_FLAGS: &[&str] = &[
     "--isel",
     "--opt-report",
     "--codegen-report",
+    "--codegen-threads",
     "--verify-each",
     "--no-verify-each",
     "--opt-disable",
@@ -1101,6 +1111,7 @@ const CC_FLAGS: &[&str] = &[
     "--isel",
     "--opt-report",
     "--codegen-report",
+    "--codegen-threads",
     "--verify-each",
     "--no-verify-each",
     "--opt-disable",
@@ -1348,15 +1359,32 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         stack_addresses: opts.remat & 2 != 0,
         null_pointers: opts.remat & 8 != 0,
     };
-    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator = &opts.allocation;
+    let allocator: &(dyn keel_codegen::regalloc::RegisterAllocator + Sync) = &opts.allocation;
     #[cfg(feature = "experimental-regalloc")]
-    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator =
+    let allocator: &(dyn keel_codegen::regalloc::RegisterAllocator + Sync) =
         if opts.remat != 0 { &remat } else { allocator };
     let pipeline = keel_codegen::CodegenPipeline {
         selector: &feature_selector,
         allocator,
     };
     let request = keel_codegen::Request::new(target, pipeline).emission(opts.emission_options());
+    let threads = codegen_threads(opts, &module);
+    let parallel = keel_codegen::parallel::Options {
+        target,
+        pipeline: keel_codegen::parallel::Pipeline {
+            selector: &feature_selector,
+            allocator,
+        },
+        emission: opts.emission_options(),
+        pools: None,
+        workers: threads,
+        // A large function at the head of the queue holds back the output;
+        // the other workers keep compiling up to this many functions ahead.
+        // On sqlite3.c at -O, object codegen took 20% longer with 64 than
+        // with 256, and 9% less with 512, but 512 doubled the live heap that
+        // codegen adds over one thread, to 15 MB.
+        budget: std::num::NonZeroUsize::new(256).expect("nonzero"),
+    };
     if opts.emit_object {
         let output = opts
             .output
@@ -1384,7 +1412,19 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             profiling::scope!("integrated-assembly");
             assembler.push_with_binary_inputs(program, &mut input::binary_input)
         };
-        with_codegen_report(opts, target, || request.program_chunks(&module, &mut sink))?;
+        with_codegen_report(opts, target, || {
+            if threads.get() == 1 {
+                return request.program_chunks(&module, &mut sink);
+            }
+            std::thread::scope(|scope| {
+                keel_codegen::parallel::program_chunks(
+                    &module,
+                    parallel,
+                    &|job| spawn_worker(scope, job),
+                    &mut sink,
+                )
+            })
+        })?;
         drop(module);
         let object = {
             profiling::scope!("object-finalization");
@@ -1444,6 +1484,32 @@ fn stream_output(
         Some(path) => format!("{path}: {e}"),
         None => format!("stdout: {e}"),
     })
+}
+
+/// Starts a code generation worker with the 8 MiB stack of the main thread,
+/// where code generation ran before it had workers.
+fn spawn_worker<'scope>(
+    scope: &'scope std::thread::Scope<'scope, '_>,
+    job: keel_codegen::parallel::Job<'scope>,
+) {
+    std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn_scoped(scope, move || job.run())
+        .expect("start a code generation thread");
+}
+
+/// Code generation threads: `--codegen-threads`, otherwise one per available
+/// core but at most one per 250 IR instructions. On the suite, modules under
+/// about 300 instructions compile no faster on a second thread.
+fn codegen_threads(opts: &Options, module: &Module) -> std::num::NonZeroUsize {
+    if let Some(threads) = opts.codegen_threads {
+        return threads;
+    }
+    const GRAIN: usize = 250;
+    let instructions: usize = module.functions.iter().map(|f| f.num_insts()).sum();
+    let available = std::thread::available_parallelism().map_or(1, |n| n.get());
+    std::num::NonZeroUsize::new((instructions / GRAIN).min(available))
+        .unwrap_or(std::num::NonZeroUsize::MIN)
 }
 
 /// Runs code generation, collecting and writing the backend counters when

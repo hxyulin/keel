@@ -70,11 +70,13 @@ pub(crate) fn validate_target_features(
     Ok(())
 }
 
-pub struct FeatureSelector<'a> {
-    pub inner: &'a dyn InstructionSelector,
+/// `inner` with an explicit x86 feature set. A concrete `S` keeps the
+/// selector [`Sync`] for [`crate::parallel::Pipeline`].
+pub struct FeatureSelector<'a, S: InstructionSelector + ?Sized = dyn InstructionSelector + 'a> {
+    pub inner: &'a S,
     pub features: Features,
 }
-impl std::fmt::Debug for FeatureSelector<'_> {
+impl<S: InstructionSelector + ?Sized> std::fmt::Debug for FeatureSelector<'_, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FeatureSelector")
             .field("inner", &self.inner.name())
@@ -82,7 +84,7 @@ impl std::fmt::Debug for FeatureSelector<'_> {
             .finish()
     }
 }
-impl InstructionSelector for FeatureSelector<'_> {
+impl<S: InstructionSelector + ?Sized> InstructionSelector for FeatureSelector<'_, S> {
     fn name(&self) -> &'static str {
         self.inner.name()
     }

@@ -1,4 +1,6 @@
 //! Public presets must preserve behavior across native targets and stage overrides.
+#[path = "optimization_levels/codegen_threads.rs"]
+mod codegen_threads;
 #[path = "optimization_levels/compatible_flags.rs"]
 mod compatible_flags;
 #[path = "optimization_levels/fast_math.rs"]

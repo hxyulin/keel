@@ -363,60 +363,57 @@ pub(crate) fn compile_output<'module>(
             prepared_leaves.keys().copied().collect();
         let symbols = std::sync::Arc::clone(&symbols);
         let leaf_summaries = std::sync::Arc::new(leaf_summaries);
-        let compile = std::sync::Arc::new(
-            move |index: usize, worker_pipeline: crate::CodegenPipeline<'_>| {
-                if prepared_indices.contains(&index) {
-                    return Ok(None);
-                }
-                let mut out = if linux && !structured {
-                    Output::ElfText(Default::default())
-                } else {
-                    Output::new(structured)
-                };
-                let original = &module.functions[index];
-                let selector = crate::emission::FunctionSelector(worker_pipeline.selector);
-                let pipeline = &crate::CodegenPipeline {
-                    selector: &selector,
-                    allocator: worker_pipeline.allocator,
-                };
-                let _function_profile = crate::backend_profile::function(&original.name);
-                let lowered = vector::lower(original);
-                let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
-                let request = crate::Request::new(target, *pipeline)
-                    .pools(pools)
-                    .emission(emission);
-                let mut compiler = FunctionCompiler::new_for_target(
-                    &func,
-                    &symbols,
-                    &request,
-                    structured,
-                    &leaf_summaries,
-                )?;
-                compiler.debug = debug;
-                compiler.unwind_tables = emission.unwind_tables;
-                compiler.function_sections = emission.function_sections;
-                let (frame_register, slots) = if debug {
-                    compiler.slot_frame_offsets()
-                } else {
-                    (None, Vec::new())
-                };
-                let scope_marks = compiler.compile(&mut out);
-                Ok(Some((
-                    out,
-                    FrameDebug {
-                        slots,
-                        scope_marks,
-                        frame_register,
-                    },
-                )))
-            },
-        );
-        let width = parallel.budget.get();
-        for start in (0..module.functions.len()).step_by(width) {
-            let end = start.saturating_add(width).min(module.functions.len());
-            let results =
-                crate::parallel::run(parallel, start..end, std::sync::Arc::clone(&compile));
-            for (index, result) in (start..end).zip(results) {
+        let compile = move |index: usize, worker_pipeline: crate::CodegenPipeline<'_>| {
+            if prepared_indices.contains(&index) {
+                return Ok(None);
+            }
+            let mut out = if linux && !structured {
+                Output::ElfText(Default::default())
+            } else {
+                Output::new(structured)
+            };
+            let original = &module.functions[index];
+            let selector = crate::emission::FunctionSelector(worker_pipeline.selector);
+            let pipeline = &crate::CodegenPipeline {
+                selector: &selector,
+                allocator: worker_pipeline.allocator,
+            };
+            let _function_profile = crate::backend_profile::function(&original.name);
+            let lowered = vector::lower(original);
+            let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+            let request = crate::Request::new(target, *pipeline)
+                .pools(pools)
+                .emission(emission);
+            let mut compiler = FunctionCompiler::new_for_target(
+                &func,
+                &symbols,
+                &request,
+                structured,
+                &leaf_summaries,
+            )?;
+            compiler.debug = debug;
+            compiler.unwind_tables = emission.unwind_tables;
+            compiler.function_sections = emission.function_sections;
+            let (frame_register, slots) = if debug {
+                compiler.slot_frame_offsets()
+            } else {
+                (None, Vec::new())
+            };
+            let scope_marks = compiler.compile(&mut out);
+            Ok(Some((
+                out,
+                FrameDebug {
+                    slots,
+                    scope_marks,
+                    frame_register,
+                },
+            )))
+        };
+        crate::parallel::ordered(
+            parallel,
+            module.functions.len(),
+            compile,
+            |index, result| {
                 let (body, frame) = match result? {
                     Some(result) => result,
                     None => {
@@ -436,8 +433,9 @@ pub(crate) fn compile_output<'module>(
                 out.append(body);
                 frames.push(frame);
                 out.flush(&mut sink);
-            }
-        }
+                Ok(())
+            },
+        )?;
     }
     for f in &module.functions {
         if linux {

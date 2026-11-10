@@ -423,79 +423,72 @@ pub(crate) fn compile_output<'module>(
         }
     } else if let Some(parallel) = parallel {
         let symbols = std::sync::Arc::new(symbols);
-        let compile = std::sync::Arc::new(
-            move |index: usize, worker_pipeline: crate::CodegenPipeline<'_>| {
-                let mut out = Output::new(structured);
-                let original = &module.functions[index];
-                let selector = crate::emission::FunctionSelector(worker_pipeline.selector);
-                let pipeline = &crate::CodegenPipeline {
-                    selector: &selector,
-                    allocator: worker_pipeline.allocator,
-                };
-                let _function_profile = crate::backend_profile::function(&original.name);
-                let features = crate::x86_features::function_features(
-                    &original.name,
-                    &original.attrs,
-                    pipeline.selector.x86_features(),
-                )?;
-                let selector = crate::x86_features::FeatureSelector {
-                    inner: pipeline.selector,
-                    features,
-                };
-                let local_pipeline = crate::CodegenPipeline {
-                    selector: &selector,
-                    allocator: pipeline.allocator,
-                };
-                let boundary = (!debug)
-                    .then(|| aggregate_boundary::lower(original))
-                    .flatten();
-                let lowered = vector::lower(boundary.as_ref().unwrap_or(original), features);
-                let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
-                let mut compiler = FunctionCompiler::new(
-                    &func,
-                    &symbols,
-                    pools,
-                    &local_pipeline,
-                    structured,
-                    crate::emission::function_goal(&func.attrs, emission.goal),
-                    emission.separate_slots,
-                )?;
-                compiler.debug = debug;
-                compiler.code_model = code_model;
-                compiler.unwind_tables = emission.unwind_tables;
-                compiler.function_sections = emission.function_sections;
-                let slots = if debug {
-                    compiler.slot_frame_offsets()
-                } else {
-                    Vec::new()
-                };
-                let frame_register = compiler.frame_register;
-                let scope_marks = compiler.compile(&mut out)?;
-                Ok((
-                    out,
-                    FrameDebug {
-                        slots,
-                        scope_marks,
-                        frame_register,
-                    },
-                ))
-            },
-        );
-        let width = parallel.budget.get();
-        for start in (0..module.functions.len()).step_by(width) {
-            let end = start.saturating_add(width).min(module.functions.len());
-            let results =
-                crate::parallel::run(parallel, start..end, std::sync::Arc::clone(&compile));
-            for result in results {
-                let (body, frame) = result?;
-                out.append(body);
-                out.validate_sources(&mut source_validator, &mut validated_items)?;
-                frames.push(frame);
-                if out.flush(&mut sink) {
-                    validated_items = 0;
-                }
+        let compile = move |index: usize, worker_pipeline: crate::CodegenPipeline<'_>| {
+            let mut out = Output::new(structured);
+            let original = &module.functions[index];
+            let selector = crate::emission::FunctionSelector(worker_pipeline.selector);
+            let pipeline = &crate::CodegenPipeline {
+                selector: &selector,
+                allocator: worker_pipeline.allocator,
+            };
+            let _function_profile = crate::backend_profile::function(&original.name);
+            let features = crate::x86_features::function_features(
+                &original.name,
+                &original.attrs,
+                pipeline.selector.x86_features(),
+            )?;
+            let selector = crate::x86_features::FeatureSelector {
+                inner: pipeline.selector,
+                features,
+            };
+            let local_pipeline = crate::CodegenPipeline {
+                selector: &selector,
+                allocator: pipeline.allocator,
+            };
+            let boundary = (!debug)
+                .then(|| aggregate_boundary::lower(original))
+                .flatten();
+            let lowered = vector::lower(boundary.as_ref().unwrap_or(original), features);
+            let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
+            let mut compiler = FunctionCompiler::new(
+                &func,
+                &symbols,
+                pools,
+                &local_pipeline,
+                structured,
+                crate::emission::function_goal(&func.attrs, emission.goal),
+                emission.separate_slots,
+            )?;
+            compiler.debug = debug;
+            compiler.code_model = code_model;
+            compiler.unwind_tables = emission.unwind_tables;
+            compiler.function_sections = emission.function_sections;
+            let slots = if debug {
+                compiler.slot_frame_offsets()
+            } else {
+                Vec::new()
+            };
+            let frame_register = compiler.frame_register;
+            let scope_marks = compiler.compile(&mut out)?;
+            Ok((
+                out,
+                FrameDebug {
+                    slots,
+                    scope_marks,
+                    frame_register,
+                },
+            ))
+        };
+        crate::parallel::ordered(parallel, module.functions.len(), compile, |_, result| {
+            let (body, frame) = result?;
+            out.append(body);
+            out.validate_sources(&mut source_validator, &mut validated_items)?;
+            frames.push(frame);
+            if out.flush(&mut sink) {
+                validated_items = 0;
             }
-        }
+            Ok(())
+        })?;
     }
     for f in &module.functions {
         for (enabled, section) in [

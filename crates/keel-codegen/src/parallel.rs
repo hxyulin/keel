@@ -1,29 +1,25 @@
-//! Caller-budgeted native function codegen with ordered coordinator callbacks.
+//! Native function codegen on caller-started worker threads, with output
+//! handed to the caller in module order.
 use crate::{
     CodegenError, CodegenPipeline, InstructionSelector, Request as SerialRequest,
     regalloc::RegisterAllocator,
 };
 use std::{
-    cell::RefCell,
+    collections::VecDeque,
     num::NonZeroUsize,
-    ops::Range,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex, MutexGuard},
 };
 
-/// One function job borrowing the prepared module for its compilation lifetime.
-pub struct Job<'job>(Box<dyn FnMut() + Send + 'job>);
+/// One worker, borrowing the prepared module while it compiles functions.
+pub struct Job<'job>(Box<dyn FnOnce() + Send + 'job>);
 
 impl<'job> Job<'job> {
-    /// Create one job, for a caller-owned executor or its tests.
-    pub fn new(work: impl FnOnce() + Send + 'job) -> Self {
-        let mut work = Some(work);
-        Self(Box::new(move || {
-            work.take().expect("job runs exactly once")();
-        }))
+    fn new(work: impl FnOnce() + Send + 'job) -> Self {
+        Self(Box::new(work))
     }
 
-    /// Run this job exactly once, propagating any panic.
-    pub fn run(mut self) {
+    /// Run this worker until no functions are left.
+    pub fn run(self) {
         (self.0)();
     }
 }
@@ -47,8 +43,8 @@ impl std::fmt::Debug for Pipeline<'_> {
         self.serial().fmt(f)
     }
 }
-impl Pipeline<'_> {
-    fn serial(&self) -> CodegenPipeline<'_> {
+impl<'a> Pipeline<'a> {
+    fn serial(self) -> CodegenPipeline<'a> {
         CodegenPipeline {
             selector: self.selector,
             allocator: self.allocator,
@@ -58,12 +54,12 @@ impl Pipeline<'_> {
 
 pub(crate) struct Execution<'exec, 'a> {
     pipeline: Pipeline<'a>,
-    executor: &'exec dyn Fn(),
-    jobs: &'exec RefCell<Vec<Job<'a>>>,
-    pub budget: NonZeroUsize,
+    spawn: &'exec dyn Fn(Job<'a>),
+    workers: NonZeroUsize,
+    budget: NonZeroUsize,
 }
 
-/// Immutable policies and explicit native worker budget for a whole module.
+/// Immutable policies and the worker count and budget for a whole module.
 #[derive(Clone, Copy, Debug)]
 pub struct Options<'a> {
     /// Native target to validate before any job runs.
@@ -74,75 +70,59 @@ pub struct Options<'a> {
     pub emission: crate::EmissionOptions,
     /// Optional target register subsets, as in the serial request.
     pub pools: Option<&'a crate::Pools<'a>>,
-    /// Maximum simultaneous function jobs and buffered results.
+    /// Worker jobs to start, at most one per function.
+    pub workers: NonZeroUsize,
+    /// Maximum functions compiled ahead of the sink, including those being
+    /// compiled.
     pub budget: NonZeroUsize,
 }
 
-/// Compile one whole module using a caller-owned executor and explicit budget.
+/// Compile one whole module on worker jobs that run beside the calling thread.
 ///
 /// Validation, symbols and Darwin private-call proofs are prepared once. Only
 /// function selection, allocation and emission run on workers. No modules are
 /// cloned and private calling conventions and linkage are unchanged. The sink
-/// runs on the calling thread in module order. At most `budget` function results
-/// are buffered; one very large function can still require unbounded memory.
-/// Data, debug metadata, lifecycle records and x86 source validation stay on the
-/// coordinator. The first error in source order wins; later results are dropped.
-/// Worker work may run speculatively past that error. Custom stages must have no
+/// runs on the calling thread in module order while the workers compile later
+/// functions, so a slow function holds back only the sink, not the workers.
+/// At most `budget` functions are compiled ahead of the sink; one very large
+/// function can still require unbounded memory. Data, debug metadata,
+/// lifecycle records and x86 source validation stay on the calling thread.
+/// The first error in source order wins; later results are dropped. Workers
+/// may compile past that error, up to the budget. Custom stages must have no
 /// externally visible effects whose order matters.
 ///
-/// The caller-owned executor callback must run every job exactly once and join
-/// every job before returning. Each call contains at most `budget` jobs. Panics
-/// must propagate. Jobs must not recursively invoke the executor. Keel creates
-/// no threads or worker pool. A callback can borrow a pool for less time than
-/// the jobs borrow the module.
+/// `spawn` receives `workers` jobs, or one per function if that is fewer. It
+/// must start each job without waiting for it, and the caller must join every
+/// started job after this returns, before the module is dropped: for example,
+/// `spawn` calls [`std::thread::Scope::spawn`] in a scope around this call.
+/// Each job compiles functions until none are left or codegen has stopped.
+/// Keel creates no threads.
 ///
 /// Active backend-profile capture uses the serial route so TLS observations
-/// remain complete. Disabled capture introduces no clocks. Optimizer schedules
-/// are unaffected; this API consumes an already optimized, immutable module.
+/// remain complete, and starts no jobs. Optimizer schedules are unaffected;
+/// this API consumes an already optimized, immutable module.
 ///
 /// # Errors
 /// Returns the same target, operand and IR validation errors as serial codegen.
 /// # Panics
-/// Propagates executor and worker panics, including an executor omitting a job.
+/// Propagates worker panics. Panics if every job is dropped unrun while
+/// functions remain.
 pub fn program_chunks<'module>(
     module: &'module keel_ir::Module,
     options: Options<'module>,
-    executor: &impl Fn(Vec<Job<'module>>),
+    spawn: &dyn Fn(Job<'module>),
     sink: &mut dyn FnMut(keel_asm_ir::Program),
 ) -> Result<(), CodegenError> {
-    let Options {
-        target,
-        pipeline,
-        emission,
-        pools,
-        budget,
-    } = options;
-    let mut request = SerialRequest::new(
-        target,
-        CodegenPipeline {
-            selector: pipeline.selector,
-            allocator: pipeline.allocator,
-        },
-    )
-    .emission(emission);
-    request.pools = pools;
+    let request = request(options);
     if crate::backend_profile::is_active() {
         return request.program_chunks(module, sink);
     }
-    let jobs = RefCell::new(Vec::new());
-    let dispatch = || executor(jobs.take());
-    let execution = Execution {
-        pipeline,
-        executor: &dispatch,
-        jobs: &jobs,
-        budget,
-    };
     match crate::emission::compile_with_executor(
         module,
         &request,
         true,
         crate::emission::Sink::Program(sink),
-        Some(&execution),
+        Some(&execution(options, spawn)),
     )? {
         crate::emission::Output::Program(program) => sink(program),
         _ => unreachable!("structured emission requested"),
@@ -150,35 +130,167 @@ pub fn program_chunks<'module>(
     Ok(())
 }
 
-pub(crate) fn run<'job, T: Send + 'job>(
+fn request(options: Options<'_>) -> SerialRequest<'_> {
+    let mut request =
+        SerialRequest::new(options.target, options.pipeline.serial()).emission(options.emission);
+    request.pools = options.pools;
+    request
+}
+
+fn execution<'exec, 'a>(
+    options: Options<'a>,
+    spawn: &'exec dyn Fn(Job<'a>),
+) -> Execution<'exec, 'a> {
+    Execution {
+        pipeline: options.pipeline,
+        spawn,
+        workers: options.workers,
+        budget: options.budget,
+    }
+}
+
+/// Compiles functions `0..count` with `compile` on the workers and hands
+/// each result to `consume` on the calling thread, in order. Stops at the
+/// first error `consume` returns.
+pub(crate) fn ordered<'job, T: Send + 'job>(
     execution: &Execution<'_, 'job>,
-    indices: Range<usize>,
-    compile: Arc<impl Fn(usize, CodegenPipeline<'_>) -> T + Sync + Send + 'job>,
-) -> Vec<T> {
-    let mut slots = Vec::with_capacity(indices.len());
-    for _ in indices.clone() {
-        slots.push(Arc::new(Mutex::new(None)));
-    }
+    count: usize,
+    compile: impl Fn(usize, CodegenPipeline<'_>) -> T + Sync + Send + 'job,
+    mut consume: impl FnMut(usize, T) -> Result<(), CodegenError>,
+) -> Result<(), CodegenError> {
+    let workers = execution.workers.get().min(count);
+    let budget = execution.budget.get();
+    let window = Arc::new(Window {
+        state: Mutex::new(WindowState {
+            next: 0,
+            base: 0,
+            results: VecDeque::new(),
+            workers,
+            stop: false,
+        }),
+        ready: Condvar::new(),
+        room: Condvar::new(),
+    });
+    // Stops the workers however the consumer leaves, including by a panic.
+    let _stop = Stop(&window);
+    let compile = Arc::new(compile);
     let pipeline = execution.pipeline;
-    let mut jobs = Vec::with_capacity(slots.len());
-    for (i, slot) in indices.zip(slots.iter().cloned()) {
+    for _ in 0..workers {
+        let window = Arc::clone(&window);
         let compile = Arc::clone(&compile);
-        let job = Job::new(move || {
-            let result = compile(i, pipeline.serial());
-            *slot.lock().expect("function result lock poisoned") = Some(result);
-        });
-        jobs.push(job);
+        // Dropped with the job, run or not, so the consumer never waits
+        // for a worker that will not start.
+        let alive = Alive(Arc::clone(&window));
+        (execution.spawn)(Job::new(move || {
+            let _alive = alive;
+            while let Some(index) = window.claim(count, budget) {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    compile(index, pipeline.serial())
+                }));
+                window.finish(index, result);
+            }
+        }));
     }
-    *execution.jobs.borrow_mut() = jobs;
-    (execution.executor)();
-    let mut results = Vec::with_capacity(slots.len());
-    for slot in slots {
-        results.push(
-            slot.lock()
-                .expect("function result lock poisoned")
-                .take()
-                .expect("executor must run every function job"),
-        );
+    for index in 0..count {
+        let result = match window.take() {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        };
+        consume(index, result)?;
     }
-    results
+    Ok(())
+}
+
+/// The functions claimed but not yet consumed.
+struct Window<T> {
+    state: Mutex<WindowState<T>>,
+    /// The consumer waits here for the next result.
+    ready: Condvar,
+    /// Workers wait here for room in the budget.
+    room: Condvar,
+}
+
+struct WindowState<T> {
+    /// The next function to claim.
+    next: usize,
+    /// The next function to consume; `results[0]` is its result.
+    base: usize,
+    results: VecDeque<Option<std::thread::Result<T>>>,
+    /// Worker jobs not yet dropped.
+    workers: usize,
+    stop: bool,
+}
+
+impl<T> Window<T> {
+    fn lock(&self) -> MutexGuard<'_, WindowState<T>> {
+        // Workers catch compile panics, so nothing panics holding the lock.
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The next function to compile, once it is within `budget` of the
+    /// consumer, or `None` when none are left.
+    fn claim(&self, count: usize, budget: usize) -> Option<usize> {
+        let mut state = self.lock();
+        loop {
+            if state.stop || state.next >= count {
+                return None;
+            }
+            if state.next - state.base < budget {
+                break;
+            }
+            state = self.room.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+        let index = state.next;
+        state.next += 1;
+        state.results.push_back(None);
+        Some(index)
+    }
+
+    fn finish(&self, index: usize, result: std::thread::Result<T>) {
+        let mut state = self.lock();
+        let slot = index - state.base;
+        state.results[slot] = Some(result);
+        if slot == 0 {
+            self.ready.notify_one();
+        }
+    }
+
+    /// The next result in order, once it is ready.
+    fn take(&self) -> std::thread::Result<T> {
+        let mut state = self.lock();
+        loop {
+            match state.results.front() {
+                Some(Some(_)) => break,
+                // A claimed function is always finished.
+                Some(None) => {}
+                None => assert!(state.workers > 0, "every codegen job must run"),
+            }
+            state = self.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+        let result = state
+            .results
+            .pop_front()
+            .flatten()
+            .expect("result is ready");
+        state.base += 1;
+        self.room.notify_one();
+        result
+    }
+}
+
+struct Alive<T>(Arc<Window<T>>);
+impl<T> Drop for Alive<T> {
+    fn drop(&mut self) {
+        let mut state = self.0.lock();
+        state.workers -= 1;
+        self.0.ready.notify_one();
+    }
+}
+
+struct Stop<'w, T>(&'w Window<T>);
+impl<T> Drop for Stop<'_, T> {
+    fn drop(&mut self) {
+        self.0.lock().stop = true;
+        self.0.room.notify_all();
+    }
 }
