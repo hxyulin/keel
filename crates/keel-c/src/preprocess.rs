@@ -4,8 +4,8 @@ use crate::Diagnostic;
 use crate::ast::{BinOp, UnOp};
 use crate::int_const::{self, IntConst, IntTy, Policy, Ub};
 use bumpalo::{Bump, collections::Vec as BumpVec};
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -239,18 +239,18 @@ fn preprocess_inner<const TRACK: bool>(
         options,
         stream_chunk,
         in_condition: false,
-        macros: HashMap::new(),
+        macros: HashMap::default(),
         expansion_scratch: Vec::new(),
-        undefined: HashSet::new(),
+        undefined: HashSet::default(),
         search_dirs: Vec::new(),
         framework_dirs: Vec::new(),
         include_stack: Vec::new(),
-        once: HashSet::new(),
-        canonical_paths: HashMap::new(),
-        canonical_dirs: HashMap::new(),
-        header_cache: HashMap::new(),
-        file_sources: HashMap::new(),
-        scanned: HashMap::new(),
+        once: HashSet::default(),
+        canonical_paths: HashMap::default(),
+        canonical_dirs: HashMap::default(),
+        header_cache: HashMap::default(),
+        file_sources: HashMap::default(),
+        scanned: HashMap::default(),
         counter: 0,
         output: String::new(),
         output_next: None,
@@ -1869,7 +1869,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     }
                     args.push(rest);
                 }
-                let mut expanded = HashMap::new();
+                // Each parameter's expansion, made on its first unpasted use.
+                let mut expanded = Vec::new();
                 let mut body = Vec::new();
                 let mut j = 0;
                 while j < m.body.len() {
@@ -1909,12 +1910,13 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         let mut value = if paste {
                             args[p].clone()
                         } else {
-                            if let std::collections::hash_map::Entry::Vacant(entry) =
-                                expanded.entry(p)
-                            {
-                                entry.insert(self.expand(args[p].clone(), depth + 1)?);
+                            if expanded.is_empty() {
+                                expanded.resize_with(params.len(), || None);
                             }
-                            expanded[&p].clone()
+                            if expanded[p].is_none() {
+                                expanded[p] = Some(self.expand(args[p].clone(), depth + 1)?);
+                            }
+                            expanded[p].clone().unwrap_or_default()
                         };
                         if value.is_empty() && paste {
                             value.push(b.with_text(self.arena, ""));
