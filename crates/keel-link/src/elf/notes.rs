@@ -255,7 +255,7 @@ impl Plan {
             align: 8,
             size: data.len() as u64,
             bss: false,
-            data,
+            data: data.into(),
             offset: 0,
         });
         Ok(())
@@ -375,7 +375,7 @@ mod tests {
         assert!(validate(".note.gnu.property", 7, 2, 4, 0, 0, 0).is_err());
     }
 
-    fn linux_section(data: &[u8], offset: u64) -> Section {
+    fn linux_section(data: &[u8], offset: u64) -> Section<'static> {
         Section {
             merge: None,
             name: ".note.Linux".into(),
@@ -384,7 +384,7 @@ mod tests {
             align: 4,
             size: data.len() as u64,
             bss: false,
-            data: data.to_vec(),
+            data: data.to_vec().into(),
             offset,
         }
     }
@@ -407,7 +407,7 @@ mod tests {
             plan.headers(&sections),
             vec![(4, 4, 0x1000, 48, 48, 4), (4, 4, 0x1030, 24, 24, 4)]
         );
-        sections[0].data.pop();
+        sections[0].data.to_mut().pop();
         assert!(plan.prepare(&mut sections, &[], false).is_err());
     }
 

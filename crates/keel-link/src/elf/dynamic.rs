@@ -499,7 +499,7 @@ impl Dynamic {
                 align: alignment,
                 size: data.len() as u64,
                 bss: false,
-                data,
+                data: data.into(),
                 offset: 0,
             });
             headers.push(Header {

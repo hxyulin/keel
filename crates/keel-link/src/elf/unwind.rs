@@ -277,9 +277,10 @@ pub(super) fn merge(
         align: 4,
         size: 0,
         bss: false,
-        data: Vec::new(),
+        data: Vec::new().into(),
         offset: 0,
     };
+    let mut data = Vec::new();
     let mut bases = vec![0; sections.len()];
     let mut last = None;
     for (&index, records) in frames.iter() {
@@ -287,31 +288,30 @@ pub(super) fn merge(
         // Leading empty/terminator-only contributions need a record whose CFI
         // can absorb their zero bytes. Keep their symbols/addressable offsets.
         if last.is_none() && records.last_record.is_none() {
-            merged
-                .data
-                .extend_from_slice(&[12, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0x78, 16, 0, 0, 0]);
+            data.extend_from_slice(&[12, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0x78, 16, 0, 0, 0]);
             last = Some(0);
         }
         // Even an empty contribution becomes the end of the preceding record.
         // Its input alignment may be 1 or 2, but every rewritten record length
         // must still span a multiple of four bytes.
-        let base = align(merged.data.len() as u64, section.align.max(4))?;
-        merged.data.resize(base as usize, 0);
+        let base = align(data.len() as u64, section.align.max(4))?;
+        data.resize(base as usize, 0);
         if let Some(record) = last {
             let length = u32::try_from(base as usize - record - 4)
                 .map_err(|_| "merged unwind record length overflow")?;
-            put32(&mut merged.data, record, length);
+            put32(&mut data, record, length);
         }
         bases[index] = base;
         end(base, section.size)?;
-        merged.data.extend_from_slice(&section.data);
+        data.extend_from_slice(&section.data);
         if let Some(record) = records.last_record {
             last = Some(base as usize + record);
         }
         merged.align = merged.align.max(section.align);
     }
-    merged.size = merged.data.len() as u64;
-    let records = Frames::parse(&merged.data)?;
+    merged.size = data.len() as u64;
+    let records = Frames::parse(&data)?;
+    merged.data = data.into();
     let first = *frames.first_key_value().unwrap().0;
     let mut output = Vec::with_capacity(sections.len() - frames.len() + 1);
     let mut merged = Some(merged);
@@ -371,7 +371,7 @@ pub(super) fn prepare(
         align: 4,
         size,
         bss: false,
-        data: vec![0; size as usize],
+        data: vec![0; size as usize].into(),
         offset: 0,
     });
     Ok(Some(header))
@@ -635,7 +635,7 @@ impl Frames {
 mod tests {
     use super::*;
 
-    fn section(offset: u64, size: u64, flags: u64) -> Section {
+    fn section(offset: u64, size: u64, flags: u64) -> Section<'static> {
         Section {
             merge: None,
             name: String::new(),
@@ -644,7 +644,7 @@ mod tests {
             align: 1,
             size,
             bss: false,
-            data: Vec::new(),
+            data: Vec::new().into(),
             offset,
         }
     }

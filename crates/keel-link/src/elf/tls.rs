@@ -91,7 +91,7 @@ impl Plan {
             align: 8,
             size,
             bss: false,
-            data: vec![0; size as usize],
+            data: vec![0; size as usize].into(),
             offset: 0,
         });
         let mut needs_resolver = false;
@@ -113,9 +113,9 @@ impl Plan {
                 size: if arm { 8 } else { 5 },
                 bss: false,
                 data: if arm {
-                    vec![0x00, 0x04, 0x40, 0xf9, 0xc0, 0x03, 0x5f, 0xd6]
+                    vec![0x00, 0x04, 0x40, 0xf9, 0xc0, 0x03, 0x5f, 0xd6].into()
                 } else {
-                    vec![0x48, 0x8b, 0x40, 8, 0xc3]
+                    vec![0x48, 0x8b, 0x40, 8, 0xc3].into()
                 },
                 offset: 0,
             });

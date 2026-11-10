@@ -506,7 +506,7 @@ pub(super) fn collect(
                 } else { false }
             });
         }
-        sections[section].data = filtered.data;
+        sections[section].data = filtered.data.into();
         sections[section].size = sections[section].data.len() as u64;
         if sections[section].size > 0 {
             live.insert(section);
@@ -623,7 +623,7 @@ mod tests {
             align: 1,
             size: 1,
             bss: false,
-            data: vec![0xc3],
+            data: vec![0xc3].into(),
             offset: 0,
         };
         let symbol = |name: &'static str, input, info| Symbol {
@@ -815,7 +815,7 @@ mod tests {
             align: 8,
             size: data.len() as u64,
             bss: false,
-            data,
+            data: data.into(),
             offset: 0,
         };
         let mut frames = BTreeMap::from([(2, unwind::Frames::parse(&data).unwrap())]);

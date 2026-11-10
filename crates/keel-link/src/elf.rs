@@ -25,6 +25,7 @@ use object::{
     SymbolFlags, SymbolSection,
 };
 use slots::Slots;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 const BASE: u64 = 0x400000;
@@ -133,7 +134,8 @@ pub struct Executable {
     pub bytes: Vec<u8>,
     pub warnings: Vec<String>,
 }
-struct Section {
+/// An output section. Input sections borrow their bytes until a phase rewrites them.
+struct Section<'a> {
     merge: Option<(u64, bool)>,
     name: String,
     flags: u64,
@@ -141,10 +143,10 @@ struct Section {
     align: u64,
     size: u64,
     bss: bool,
-    data: Vec<u8>,
+    data: Cow<'a, [u8]>,
     offset: u64,
 }
-impl Section {
+impl Section<'_> {
     fn permissions(&self) -> u32 {
         4 | if self.flags & 1 != 0 {
             2
@@ -320,7 +322,7 @@ type CommonLocations<'a> = BTreeMap<&'a str, (usize, u64)>;
 /// indices in `sections`, `unwind_sections`, `sframe_section`, `note_plan` and
 /// each `Unit::sections` agree until a phase renumbers them.
 struct Parsed<'a> {
-    sections: Vec<Section>,
+    sections: Vec<Section<'a>>,
     units: Vec<Unit<'a>>,
     unwind_sections: BTreeMap<usize, unwind::Frames>,
     sframe_section: Option<(usize, sframe::Table)>,
@@ -483,7 +485,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
 
 /// Parse and validate every input object. Output section indices are assigned
 /// in input order.
-fn parse_units<'a>(inputs: &[input::Named<'a>], arm: bool) -> Result<Parsed<'a>> {
+fn parse_units<'a>(inputs: &'a [input::Named<'_>], arm: bool) -> Result<Parsed<'a>> {
     let mut parsed = Parsed {
         sections: Vec::new(),
         units: Vec::new(),
@@ -509,7 +511,7 @@ impl<'a> Parsed<'a> {
     /// return its symbols and relocations. GNU property notes go to `properties`.
     fn parse_unit(
         &mut self,
-        input: &input::Named<'a>,
+        input: &'a input::Named<'_>,
         arm: bool,
         properties: &mut notes::Properties,
     ) -> Result<Unit<'a>> {
@@ -775,9 +777,9 @@ impl<'a> Parsed<'a> {
                 size,
                 bss,
                 data: if sframe {
-                    sframe_section.as_ref().unwrap().1.rebuild()?
+                    Cow::Owned(sframe_section.as_ref().unwrap().1.rebuild()?)
                 } else {
-                    data.to_vec()
+                    Cow::Borrowed(data)
                 },
                 offset: 0,
             });
@@ -1128,7 +1130,7 @@ fn allocate_commons<'a>(
         align: 1,
         size: 0,
         bss: true,
-        data: Vec::new(),
+        data: Vec::new().into(),
         offset: 0,
     };
     for (name, (size, alignment)) in commons {
@@ -1334,7 +1336,7 @@ fn plan_got(
         align: 8,
         size: got_size,
         bss: false,
-        data: vec![0; got_size as usize],
+        data: vec![0; got_size as usize].into(),
         offset: 0,
     });
     Ok(Got {
@@ -1514,7 +1516,7 @@ fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
 
 /// Read-only view of the laid-out link, shared by the phases that write bytes.
 struct Placed<'a> {
-    sections: &'a [Section],
+    sections: &'a [Section<'a>],
     units: &'a [Unit<'a>],
     globals: &'a Globals<'a>,
     ordered: &'a OrderedGlobals<'a>,

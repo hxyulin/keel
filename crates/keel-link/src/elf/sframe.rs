@@ -601,7 +601,7 @@ impl Table {
         self.header.rows = word(&encoded.bytes, 12);
         self.header.fre_len = word(&encoded.bytes, 16);
         sections[section].size = encoded.bytes.len() as u64;
-        sections[section].data = encoded.bytes;
+        sections[section].data = encoded.bytes.into();
         Ok(())
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
             align: 1,
             size: 100,
             bss: false,
-            data: vec![0; 100],
+            data: vec![0; 100].into(),
             offset: 0,
         };
         let sections = vec![section("original"), section("winner")];

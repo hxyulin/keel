@@ -76,7 +76,7 @@ pub(super) fn got_loads(
         }
     }
     for (ui, ri, section, opcode) in edits {
-        sections[section].data[opcode] = 0x8d;
+        sections[section].data.to_mut()[opcode] = 0x8d;
         units[ui].relocs[ri].kind = elf::R_X86_64_PC32;
     }
     Ok(())
@@ -151,7 +151,7 @@ pub(super) fn tls_general(
     let mut consumed = vec![BTreeSet::new(); units.len()];
     for (ui, ri, ci, resolver, section, start, local) in edits {
         // mov %fs:0,%rax; lea tpoff(%rax),%rax (or add a TP-offset GOT load).
-        sections[section].data[start..start + 12].copy_from_slice(&[
+        sections[section].data.to_mut()[start..start + 12].copy_from_slice(&[
             0x64,
             0x48,
             0x8b,

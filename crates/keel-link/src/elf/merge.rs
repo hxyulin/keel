@@ -222,7 +222,7 @@ pub(super) fn constants(sections: &mut [Section], units: &mut [Unit], globals: &
     }
     for (index, map) in maps.iter().enumerate() {
         if map.is_some() {
-            sections[index].data = data.remove(&index).unwrap_or_default();
+            sections[index].data = data.remove(&index).unwrap_or_default().into();
             sections[index].size = sections[index].data.len() as u64;
         }
     }

@@ -73,7 +73,7 @@ struct OutputSection {
     holes: Vec<(u64, u64)>,
 }
 struct Layout<'a> {
-    inputs: &'a [Section],
+    inputs: &'a [Section<'a>],
     units: &'a [Unit<'a>],
     globals: &'a crate::elf::Globals<'a>,
     placements: Vec<Option<Placement>>,
@@ -607,7 +607,7 @@ pub(in crate::elf) fn link(
         align: 1,
         size: 0,
         bss: true,
-        data: Vec::new(),
+        data: Vec::new().into(),
         offset: 0,
     };
     let mut common_offsets = BTreeMap::new();
