@@ -72,6 +72,10 @@ impl Program {
     pub fn instruction(&mut self, instruction: Instruction) {
         self.items.push(Item::Instruction(instruction));
     }
+    /// Inlined: through a call, the caller stores the instruction field by
+    /// field and the callee reloads it with wider loads, which stalls store
+    /// forwarding.
+    #[inline]
     pub fn x86_instruction(&mut self, instruction: x86::Instruction) {
         self.items.push(Item::X86Instruction(instruction));
     }
