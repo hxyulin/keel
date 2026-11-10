@@ -767,7 +767,7 @@ impl SpillArea {
     }
 }
 
-/// A private leaf that neither needs nor observes a stack frame.
+/// A leaf that neither needs nor observes a stack frame.
 /// `incoming` is the bytes of stack parameters.
 pub(super) fn frameless(
     func: &Function,
@@ -776,8 +776,14 @@ pub(super) fn frameless(
     frame_size: usize,
     incoming: u32,
     alloc: &Allocation,
+    goal: crate::CodegenGoal,
 ) -> bool {
-    func.sig.cc == CallConv::Fast
+    (func.sig.cc == CallConv::Fast
+        || (goal == crate::CodegenGoal::Size
+            && !func.attrs.optnone
+            && !func.attrs.naked
+            && !func.attrs.interrupt
+            && !func.sig.returns_twice))
         && !has_tls_getter
         && module.files.is_empty()
         && func.personality.is_none()

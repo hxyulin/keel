@@ -436,8 +436,10 @@ module with module assembly keep the C convention.
 ## Tail calls
 
 Balanced, Size and Full run `tail-calls` after private calling-convention
-selection. It needs matching nonvariadic signatures with at most six
-single-register scalar arguments and one result. The whole direct-call closure
+selection. Both nonvariadic signatures must fit at most six single-register
+scalar arguments and one result. Argument lists may differ; return types and
+extension metadata must match. C and Fast v1 use the same scalar result
+locations. The whole direct-call closure
 must contain only scalar arithmetic, control flow and calls to strong local
 bodies with the same property. Unknown callees, frame and stack intrinsics,
 pointers, memory accesses, assembly and implicit FMA helpers block it, so no

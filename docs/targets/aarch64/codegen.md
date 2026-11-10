@@ -92,6 +92,14 @@ calls behind ordinary successors before assigning instruction positions.
 
 ## Frame
 
+At the size goal, C leaves may omit the frame record when allocation needs no
+stack storage or callee saves and no parameters arrive on the stack. Direct
+register-only Fast tail calls also qualify. Debug files, TLS getters, frame
+intrinsics, assembly, exception handling, `optnone`, special entries and
+returns-twice keep their frames. The incoming x29 and x30 remain untouched.
+This follows [Apple's leaf and tail-call frame exception](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms).
+The speed goal retains the existing private Fast leaf policy.
+
 From `sp` up:
 
 ```text

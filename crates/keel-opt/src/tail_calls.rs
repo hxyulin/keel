@@ -159,7 +159,10 @@ fn run(module: &mut Module) -> bool {
             if f.inst_results(*call)
                 .iter()
                 .all(|v| uses.get(v) == Some(&1))
-                && f.callee(*func).sig == f.sig
+                // Both signatures already fit scalar argument registers. C
+                // and Fast v1 share result locations; exact return metadata
+                // also preserves narrow extension obligations across them.
+                && f.callee(*func).sig.returns == f.sig.returns
                 && f.call_contract(*call).is_none()
                 && results.len() == f.inst_results(*call).len()
                 && results

@@ -1236,20 +1236,21 @@ recur:
  v7=call @sum(v5,v6)
  return v7
 }
-func @automatic_tail(i64,i64)->i64 {
-entry(v0:i64,v1:i64):
+func @automatic_tail(i64)->i64 {
+entry(v0:i64):
+ v1=iconst.i64 0
  v2=call @sum(v0,v1)
  return v2
 }",
     )
     .unwrap();
-    keel_opt::run_passes(&mut module, &["tail-calls"]).unwrap();
+    keel_opt::run_passes(&mut module, &["internal-fast-calls", "tail-calls"]).unwrap();
     keel_ir::verify_module(&module).unwrap();
     assert_eq!(module.to_string().matches("return_call").count(), 2);
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-tail-calls");
     std::fs::create_dir_all(&dir).unwrap();
     let driver = dir.join("driver.c");
-    std::fs::write(&driver, "extern unsigned long long automatic_tail(unsigned long long,unsigned long long);\nint main(void) { return automatic_tail(10000000,0) != 50000005000000ULL; }\n").unwrap();
+    std::fs::write(&driver, "extern unsigned long long automatic_tail(unsigned long long);\nint main(void) { return automatic_tail(10000000) != 50000005000000ULL; }\n").unwrap();
     // Keep the x86 source beside the native fixture for the Linux ABI oracle.
     std::fs::write(
         dir.join("x86.s"),

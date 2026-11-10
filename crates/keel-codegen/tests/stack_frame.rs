@@ -1,4 +1,6 @@
 //! Frame storage is independent of declared slot identity and allocation tier.
+#[path = "stack_frame/leaf.rs"]
+mod leaf;
 #[path = "stack_frame/lifetime.rs"]
 mod lifetime;
 #[path = "stack_frame/returns.rs"]

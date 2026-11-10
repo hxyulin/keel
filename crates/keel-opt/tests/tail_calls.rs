@@ -189,3 +189,48 @@ block0(v0:i8,v1:f32,v2:i32,v3:f64,v4:i64,v5:i16):
 }";
     assert!(optimize(source).contains("return_call @leaf"));
 }
+
+#[test]
+fn recognizes_different_scalar_argument_lists_and_private_fast_transport() {
+    let source = "func @mix(i64,i64) -> i64 noinline local {
+block0(v0:i64,v1:i64):
+ v2=xor v0,v1
+ return v2
+}
+func @entry(i64) -> i64 {
+block0(v0:i64):
+ v1=iconst.i64 7
+ v2=call @mix(v0,v1)
+ return v2
+}";
+    assert!(optimize(source).contains("return_call @mix(v0, v1)"));
+    let mut module = parse(source).unwrap();
+    keel_opt::run_passes(&mut module, &["internal-fast-calls", "tail-calls"]).unwrap();
+    verify_module(&module).unwrap();
+    assert_eq!(module.functions[0].sig.cc, keel_ir::CallConv::Fast);
+    assert_eq!(module.functions[1].sig.cc, keel_ir::CallConv::C);
+    assert!(module.functions[1].to_string().contains("return_call @mix"));
+    let original = parse(source).unwrap();
+    for x in [0, 1, 7, i64::MAX as u64, i64::MIN as u64, u64::MAX] {
+        let args = [keel_ir_interp::Val::int(keel_ir::Type::I64, x as i128)];
+        assert_eq!(
+            keel_ir_interp::Interpreter::new(&original).call("entry", &args),
+            keel_ir_interp::Interpreter::new(&module).call("entry", &args)
+        );
+    }
+}
+
+#[test]
+fn changed_argument_lists_still_require_matching_result_extensions() {
+    let source = "func @leaf(i64,i8) -> i8 sext noinline local {
+block0(v0:i64,v1:i8):
+ return v1
+}
+func @entry(i8) -> i8 {
+block0(v0:i8):
+ v1=iconst.i64 7
+ v2=call @leaf(v1,v0)
+ return v2
+}";
+    assert!(!optimize(source).contains("return_call"));
+}
