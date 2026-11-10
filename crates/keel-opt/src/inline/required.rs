@@ -132,30 +132,37 @@ fn discard_unused(module: &mut Module) {
             }
         }
     }
-    loop {
-        let before = live.len();
-        for f in &module.functions {
-            if !live.contains(&f.name) {
-                continue;
-            }
-            for (_, i) in f.layout_insts() {
-                match f.inst_data(i) {
-                    InstData::Call { func, .. }
-                    | InstData::ReturnCall { func, .. }
-                    | InstData::Invoke { func, .. } => {
-                        live.insert(f.callee(*func).name.clone());
-                    }
-                    InstData::SymbolAddr {
-                        symbol: Symbol::Func(r),
-                    } => {
-                        live.insert(f.callee(*r).name.clone());
-                    }
-                    _ => {}
+    // Scan each live body once; a name that becomes live queues its bodies.
+    let mut bodies: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+    for (index, f) in module.functions.iter().enumerate() {
+        bodies.entry(f.name.as_str()).or_default().push(index);
+    }
+    let mut work: Vec<usize> = module
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| live.contains(&f.name))
+        .map(|(index, _)| index)
+        .collect();
+    while let Some(index) = work.pop() {
+        let f = &module.functions[index];
+        for (_, i) in f.layout_insts() {
+            let reference = match f.inst_data(i) {
+                InstData::Call { func, .. }
+                | InstData::ReturnCall { func, .. }
+                | InstData::Invoke { func, .. }
+                | InstData::SymbolAddr {
+                    symbol: Symbol::Func(func),
+                } => *func,
+                _ => continue,
+            };
+            let name = &f.callee(reference).name;
+            if !live.contains(name) {
+                live.insert(name.clone());
+                if let Some(found) = bodies.get(name.as_str()) {
+                    work.extend(found);
                 }
             }
-        }
-        if live.len() == before {
-            break;
         }
     }
     for f in &module.functions {
@@ -294,26 +301,30 @@ fn expand_required_with_fallback(
     recursive: &FxHashSet<String>,
     limit: usize,
 ) -> Result<(), String> {
-    // Inlining mutates only function bodies and their local imports. Keep the
-    // original templates and budget accounting for an eager retry: deferred
-    // cleanup can leave an invalid call in code that eager cleanup removes.
-    let original = module.functions.clone();
+    // Inlining mutates only caller bodies and their local imports. Keep each
+    // caller's original body for an eager retry: deferred cleanup can leave
+    // an invalid call in code that eager cleanup removes.
+    let mut originals = Vec::new();
     if expand_required_calls(
         module,
         definitions,
         recursive,
         limit,
         RequiredCleanup::PerCaller,
+        Some(&mut originals),
     )
     .is_err()
     {
-        module.functions = original;
+        for (index, original) in originals {
+            module.functions[index] = original;
+        }
         return expand_required_calls(
             module,
             definitions,
             recursive,
             limit,
             RequiredCleanup::PerCall,
+            None,
         );
     }
     Ok(())
@@ -325,6 +336,7 @@ fn expand_required_calls(
     recursive: &FxHashSet<String>,
     limit: usize,
     cleanup: RequiredCleanup,
+    mut originals: Option<&mut Vec<(usize, Function)>>,
 ) -> Result<(), String> {
     let mut expanded = 0usize;
     // Expansion edits only the caller, so definitions keep their indices and
@@ -437,6 +449,11 @@ fn expand_required_calls(
                 }
                 break;
             };
+            if let Some(originals) = originals.as_deref_mut()
+                && originals.last().is_none_or(|&(index, _)| index != first)
+            {
+                originals.push((first, module.functions[first].clone()));
+            }
             let (caller, callee) = two_functions(&mut module.functions, first, target);
             inline_call(caller, call, callee);
             match cleanup {
@@ -481,7 +498,8 @@ mod policy_tests {
                 &[],
                 &recursive,
                 1_000_000,
-                RequiredCleanup::PerCaller
+                RequiredCleanup::PerCaller,
+                None
             )
             .is_err(),
             "the deferred scan still sees the dead missing definition"
@@ -492,6 +510,7 @@ mod policy_tests {
             &recursive,
             1_000_000,
             RequiredCleanup::PerCall,
+            None,
         )
         .unwrap();
         expand_required_with_fallback(&mut module, &[], &recursive, 1_000_000).unwrap();
@@ -516,6 +535,7 @@ mod policy_tests {
             &recursive,
             1_000_000,
             RequiredCleanup::PerCall,
+            None,
         )
         .unwrap();
         expand_required_with_fallback(&mut module, &[], &recursive, 1_000_000).unwrap();
@@ -536,19 +556,35 @@ mod policy_tests {
                 &[],
                 &recursive,
                 2,
-                RequiredCleanup::PerCaller
+                RequiredCleanup::PerCaller,
+                None
             )
             .is_err()
         );
-        expand_required_calls(&mut eager, &[], &recursive, 2, RequiredCleanup::PerCall).unwrap();
+        expand_required_calls(
+            &mut eager,
+            &[],
+            &recursive,
+            2,
+            RequiredCleanup::PerCall,
+            None,
+        )
+        .unwrap();
         expand_required_with_fallback(&mut module, &[], &recursive, 2).unwrap();
         keel_ir::verify_module(&module).unwrap();
         assert_eq!(module.to_string(), eager.to_string());
 
         let mut eager = gated_call("heavy");
         let mut retried = eager.clone();
-        let error = expand_required_calls(&mut eager, &[], &recursive, 1, RequiredCleanup::PerCall)
-            .unwrap_err();
+        let error = expand_required_calls(
+            &mut eager,
+            &[],
+            &recursive,
+            1,
+            RequiredCleanup::PerCall,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(
             expand_required_with_fallback(&mut retried, &[], &recursive, 1).unwrap_err(),
             error
@@ -569,6 +605,7 @@ mod policy_tests {
             &FxHashSet::default(),
             1_000_000,
             RequiredCleanup::PerCaller,
+            None,
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
