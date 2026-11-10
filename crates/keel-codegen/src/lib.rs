@@ -516,7 +516,7 @@ impl<'a> Request<'a> {
         }
         let stream = Box::new(x86_64::Stream::new(assembler, resolver));
         match emission::compile(module, self, true, emission::Sink::X86Assembler(stream))? {
-            emission::Output::X86Assembler(assembler) => Ok(assembler),
+            emission::Output::X86Assembler(assembler) => Ok(*assembler),
             _ => unreachable!("x86 assembly requested"),
         }
     }

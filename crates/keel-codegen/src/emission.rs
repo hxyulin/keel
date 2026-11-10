@@ -81,7 +81,7 @@ pub(crate) enum Output {
     Text(String),
     Program(keel_asm_ir::Program),
     /// The assembler of a [`Sink::X86Assembler`], holding the module.
-    X86Assembler(keel_asm::x86::ProgramAssembler),
+    X86Assembler(Box<keel_asm::x86::ProgramAssembler>),
 }
 
 /// Where a backend hands each finished function's output. Whatever has not
@@ -148,7 +148,9 @@ pub(crate) fn compile_with_executor<'module>(
             )? {
                 x86_64::Output::Text(text, _) => Ok(Output::Text(text.into_string())),
                 x86_64::Output::Structured(program) => Ok(Output::Program(program)),
-                x86_64::Output::Stream(stream) => Ok(Output::X86Assembler(stream.assembler)),
+                x86_64::Output::Stream(stream) => {
+                    Ok(Output::X86Assembler(Box::new(stream.assembler)))
+                }
             }
         }
         Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => {
