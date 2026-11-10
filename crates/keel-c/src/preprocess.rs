@@ -38,20 +38,30 @@ pub struct PreprocessOptions {
     pub dump_macros: bool,
 }
 
+/// A file name. The tokens of one file share it through a thin pointer.
+type FileName<'a> = &'a &'a str;
+/// The macro names whose expansion produced a token, which it must not
+/// expand again, behind a thin pointer.
+type HideSet<'a> = &'a &'a [&'a str];
+static NO_HIDE: &[&str] = &[];
+
 #[derive(Clone, Copy, Debug)]
 struct Token<'a> {
+    /// The spelling, with a digraph replaced by the token it stands for.
     text: &'a str,
-    space: bool,
-    raw_spelling: Option<&'a str>,
-    file: &'a str,
+    file: FileName<'a>,
+    hide: HideSet<'a>,
     line: u32,
     col: u32,
-    hide: &'a [&'a str],
+    space: bool,
+    /// Whether the source spelled the token as a digraph.
+    digraph: bool,
 }
+const _: () = assert!(std::mem::size_of::<Token<'static>>() == 48);
 impl<'a> Token<'a> {
     fn error(&self, message: impl Into<String>) -> Diagnostic {
         Diagnostic {
-            file: self.file.to_string(),
+            file: (*self.file).to_string(),
             line: self.line,
             col: self.col,
             message: message.into(),
@@ -60,8 +70,22 @@ impl<'a> Token<'a> {
     fn with_text(&self, arena: &'a Bump, text: impl AsRef<str>) -> Self {
         let mut t = *self;
         t.text = arena.alloc_str(text.as_ref());
-        t.raw_spelling = None;
+        t.digraph = false;
         t
+    }
+    /// The source spelling.
+    fn spelling(&self) -> &'a str {
+        if !self.digraph {
+            return self.text;
+        }
+        match self.text {
+            "##" => "%:%:",
+            "#" => "%:",
+            "[" => "<:",
+            "]" => ":>",
+            "{" => "<%",
+            _ => "%>",
+        }
     }
 }
 
@@ -94,7 +118,7 @@ struct CachedHeader {
 #[derive(Debug)]
 struct LexicalToken {
     text: Range<usize>,
-    raw_spelling: Option<Range<usize>>,
+    digraph: bool,
     space: bool,
     line: u32,
     col: u32,
@@ -144,7 +168,7 @@ impl CachedHeader {
             .iter()
             .map(|t| LexicalToken {
                 text: save(t.text),
-                raw_spelling: t.raw_spelling.map(&mut save),
+                digraph: t.digraph,
                 space: t.space,
                 line: t.line,
                 col: t.col,
@@ -157,18 +181,18 @@ impl CachedHeader {
         }
     }
 
-    fn restore<'a>(&self, arena: &'a Bump, path: &'a str) -> Box<[Token<'a>]> {
+    fn restore<'a>(&self, arena: &'a Bump, path: FileName<'a>) -> Box<[Token<'a>]> {
         let text = arena.alloc_str(&self.spellings);
         self.tokens
             .iter()
             .map(|t| Token {
                 text: &text[t.text.clone()],
-                raw_spelling: t.raw_spelling.as_ref().map(|r| &text[r.clone()]),
+                digraph: t.digraph,
                 space: t.space,
                 file: path,
                 line: t.line,
                 col: t.col,
-                hide: &[],
+                hide: &NO_HIDE,
             })
             .collect()
     }
@@ -269,7 +293,7 @@ fn preprocess_inner<const TRACK: bool>(
     for line in predefined.lines() {
         pp.define(&scan(
             line.strip_prefix("#define ").unwrap(),
-            "<built-in>",
+            &"<built-in>",
             &arena,
         )?)?;
     }
@@ -277,7 +301,7 @@ fn preprocess_inner<const TRACK: bool>(
     for (name, value) in &options.defines {
         if let Some(value) = value {
             let definition = arena.alloc_str(&format!("{name} {value}"));
-            pp.define(&scan(definition, "<command line>", &arena)?)?;
+            pp.define(&scan(definition, &"<command line>", &arena)?)?;
         } else {
             if !ident(name) {
                 return Err(pp.error("expected macro name after -U"));
@@ -327,7 +351,7 @@ struct Preprocessor<'a, const TRACK: bool> {
     output: String,
     /// The source file and line that the next `output` line continues, if
     /// known, so short forward gaps need newlines rather than a line marker.
-    output_next: Option<(&'a str, u32)>,
+    output_next: Option<(FileName<'a>, u32)>,
 }
 
 enum FileSource {
@@ -516,16 +540,16 @@ impl FileSource {
     }
 }
 
-fn hide_insert<'a>(arena: &'a Bump, hide: &'a [&'a str], name: &'a str) -> &'a [&'a str] {
+fn hide_insert<'a>(arena: &'a Bump, hide: HideSet<'a>, name: &'a str) -> HideSet<'a> {
     if hide.contains(&name) {
         return hide;
     }
     let mut out = BumpVec::with_capacity_in(hide.len() + 1, arena);
     out.extend_from_slice(hide);
     out.push(name);
-    out.into_bump_slice()
+    arena.alloc(out.into_bump_slice())
 }
-fn hide_union<'a>(arena: &'a Bump, left: &'a [&'a str], right: &'a [&'a str]) -> &'a [&'a str] {
+fn hide_union<'a>(arena: &'a Bump, left: HideSet<'a>, right: HideSet<'a>) -> HideSet<'a> {
     if left.is_empty() {
         return right;
     }
@@ -537,37 +561,33 @@ fn hide_union<'a>(arena: &'a Bump, left: &'a [&'a str], right: &'a [&'a str]) ->
     }
     let mut out = BumpVec::with_capacity_in(left.len() + right.len(), arena);
     out.extend_from_slice(left);
-    for &name in right {
+    for &name in right.iter() {
         if !left.contains(&name) {
             out.push(name);
         }
     }
-    out.into_bump_slice()
+    arena.alloc(out.into_bump_slice())
 }
-fn hide_intersection<'a>(
-    arena: &'a Bump,
-    left: &'a [&'a str],
-    right: &'a [&'a str],
-) -> &'a [&'a str] {
+fn hide_intersection<'a>(arena: &'a Bump, left: HideSet<'a>, right: HideSet<'a>) -> HideSet<'a> {
     if left.is_empty() || right.is_empty() {
-        return &[];
+        return &NO_HIDE;
     }
     if left.iter().all(|s| right.contains(s)) {
         return left;
     }
     let mut out = BumpVec::with_capacity_in(left.len().min(right.len()), arena);
-    for &name in left {
+    for &name in left.iter() {
         if right.contains(&name) {
             out.push(name);
         }
     }
-    out.into_bump_slice()
+    arena.alloc(out.into_bump_slice())
 }
 
-/// Whether two file names are equal, testing first whether they share
-/// storage, as tokens of one file do.
-fn same_file(a: &str, b: &str) -> bool {
-    (a.as_ptr() == b.as_ptr() && a.len() == b.len()) || a == b
+/// Whether two file names are equal, testing first whether they are the
+/// same pointer, as for the tokens of one file.
+fn same_file(a: FileName<'_>, b: FileName<'_>) -> bool {
+    std::ptr::eq(a, b) || a == b
 }
 
 fn quote(s: &str) -> String {
@@ -731,7 +751,11 @@ fn punctuation_len(bytes: &[u8]) -> usize {
 }
 
 /// Phase 2 splicing precedes phase 3 comments and preprocessing tokens.
-fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a>>, Diagnostic> {
+fn scan<'a>(
+    src: &'a str,
+    file: FileName<'a>,
+    arena: &'a Bump,
+) -> Result<Vec<Token<'a>>, Diagnostic> {
     let mut scanner = Scanner::new(src, file, arena);
     let mut out = Vec::new();
     scanner.fill(&mut out, usize::MAX, false)?;
@@ -742,14 +766,14 @@ fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a
 /// stopped, so a file's tokens can be processed in line-aligned chunks.
 struct Scanner<'a> {
     text: &'a str,
-    file: &'a str,
+    file: FileName<'a>,
     locations: Locations<'a>,
     i: usize,
     space: bool,
 }
 
 impl<'a> Scanner<'a> {
-    fn new(src: &'a str, file: &'a str, arena: &'a Bump) -> Self {
+    fn new(src: &'a str, file: FileName<'a>, arena: &'a Bump) -> Self {
         let input = splice(src.as_bytes());
         // Phase 2 removes only complete ASCII sequences, preserving UTF-8.
         // Validate the spliced buffer once rather than validating every token.
@@ -806,11 +830,11 @@ impl<'a> Scanner<'a> {
             let token = |text: &'a str, space| Token {
                 text,
                 space,
-                raw_spelling: None,
+                digraph: false,
                 file,
                 line,
                 col,
-                hide: &[],
+                hide: &NO_HIDE,
             };
             if b[i] == b'\n' {
                 out.push(token("\n", true));
@@ -911,7 +935,7 @@ impl<'a> Scanner<'a> {
                 .get(start..i)
                 .ok_or_else(|| token("", false).error("invalid UTF-8 token"))?;
             let mut t = token(normalized.unwrap_or(raw), space);
-            t.raw_spelling = normalized.map(|_| raw);
+            t.digraph = normalized.is_some();
             out.push(t);
             space = false;
         }
@@ -1215,7 +1239,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     }
 
     fn emit(&mut self, ts: &[Token<'a>]) {
-        let mut prev: Option<(&'a str, u32)> = None;
+        let mut prev: Option<(FileName<'a>, u32)> = None;
         for t in ts {
             if t.text.is_empty() {
                 continue;
@@ -1316,14 +1340,15 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
         }
         self.include_stack.push((path, origin));
-        let mut state = FileState::new(path, canonical, depth);
+        let name: FileName<'a> = self.arena.alloc(path);
+        let mut state = FileState::new(name, canonical, depth);
         if key.is_some() && known.is_none() {
             state.guard = Some(GuardScan::new());
         }
         if tokens.is_none()
             && let Some(key) = &key
         {
-            tokens = self.restore(key, src, path).map(|t| Rc::new(t.into_vec()));
+            tokens = self.restore(key, src, name).map(|t| Rc::new(t.into_vec()));
         }
         let mut kept = None;
         if let Some(tokens) = tokens {
@@ -1335,7 +1360,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             if TRACK {
                 self.stats.scanned_files += 1;
             }
-            let mut scanner = Scanner::new(src, path, self.arena);
+            let mut scanner = Scanner::new(src, name, self.arena);
             let mut chunk = self.chunks.pop().unwrap_or_default();
             // The batch cache keeps every token of a header; otherwise only
             // those that its later inclusions process.
@@ -1369,7 +1394,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         &mut self,
         key: &(PathBuf, bool),
         src: &str,
-        path: &'a str,
+        path: FileName<'a>,
     ) -> Option<Box<[Token<'a>]>> {
         let cache = self.batch_cache.as_mut()?;
         let header = cache.headers.get(key)?;
@@ -1604,9 +1629,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 // The directive's physical line, before any previous #line adjustment.
                 state.line_delta = n as i64 - physical_line as i64 - 1;
                 if let Some(t) = expanded.get(1) {
-                    state.logical_file = self.arena.alloc_str(
-                        &unquote(t.text).ok_or_else(|| t.error("expected #line file name"))?,
-                    );
+                    let file =
+                        unquote(t.text).ok_or_else(|| t.error("expected #line file name"))?;
+                    state.logical_file = self.arena.alloc(&*self.arena.alloc_str(&file));
                 }
             }
             "error" => return Err(directive.error(spelling(args))),
@@ -1833,7 +1858,7 @@ struct Include {
 struct FileState<'a> {
     pending: Vec<Token<'a>>,
     stack: Vec<Conditional<'a>>,
-    logical_file: &'a str,
+    logical_file: FileName<'a>,
     line_delta: i64,
     canonical: PathBuf,
     depth: usize,
@@ -1843,7 +1868,7 @@ struct FileState<'a> {
     guard_closed_at: Option<usize>,
 }
 impl<'a> FileState<'a> {
-    fn new(path: &'a str, canonical: PathBuf, depth: usize) -> Self {
+    fn new(path: FileName<'a>, canonical: PathBuf, depth: usize) -> Self {
         Self {
             pending: Vec::new(),
             stack: Vec::new(),
@@ -1869,7 +1894,7 @@ fn spelling<'t, 'a: 't>(ts: impl IntoIterator<Item = &'t Token<'a>>) -> String {
         if t.space && !s.is_empty() {
             s.push(' ');
         }
-        s.push_str(t.raw_spelling.unwrap_or(t.text));
+        s.push_str(t.spelling());
     }
     s
 }
@@ -2368,21 +2393,17 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 let (_, right) = body
                     .next()
                     .ok_or_else(|| t.error("missing right operand to ##"))?;
-                let text = format!(
-                    "{}{}",
-                    left.raw_spelling.unwrap_or(left.text),
-                    right.raw_spelling.unwrap_or(right.text)
-                );
+                let text = format!("{}{}", left.spelling(), right.spelling());
                 let mut result = left.with_text(self.arena, &text);
                 if !text.is_empty() {
                     let check = scan(self.arena.alloc_str(&text), t.file, self.arena)?;
-                    if check.len() != 1 || check[0].raw_spelling.unwrap_or(check[0].text) != text {
+                    if check.len() != 1 || check[0].spelling() != text {
                         return Err(t.error(format!(
                             "token paste does not form one preprocessing token: {text}"
                         )));
                     }
                     result.text = check[0].text;
-                    result.raw_spelling = check[0].raw_spelling;
+                    result.digraph = check[0].digraph;
                 }
                 result.hide = hide_intersection(self.arena, left.hide, right.hide);
                 out.push(result);
@@ -2643,7 +2664,7 @@ mod scanner_tests {
     fn validated_token_slices_preserve_unicode_across_splices() {
         for src in ["λ中 u8\"héλ\" 42", "λ\\\n中 u8\"hé\\\r\nλ\" 42"] {
             let arena = Bump::new();
-            let tokens = scan(src, "unicode.c", &arena).unwrap();
+            let tokens = scan(src, &"unicode.c", &arena).unwrap();
             assert_eq!(
                 tokens.iter().map(|t| t.text).collect::<Vec<_>>(),
                 ["λ中", "u8\"héλ\"", "42"]
@@ -2709,11 +2730,8 @@ mod scanner_tests {
     fn punctuation_uses_longest_match_and_preserves_digraph_spelling() {
         let source = "%:%: <<= >>= ... ## -> ++ -- << >> <= >= == != && || *= /= %= += -= &= ^= |= <: :> <% %> %: < > . % : #";
         let arena = Bump::new();
-        let tokens = scan(source, "punct.c", &arena).unwrap();
-        let spelling: Vec<_> = tokens
-            .iter()
-            .map(|t| t.raw_spelling.unwrap_or(t.text))
-            .collect();
+        let tokens = scan(source, &"punct.c", &arena).unwrap();
+        let spelling: Vec<_> = tokens.iter().map(|t| t.spelling()).collect();
         assert_eq!(spelling, source.split_whitespace().collect::<Vec<_>>());
         assert_eq!(tokens[0].text, "##");
         assert_eq!(
@@ -2722,12 +2740,9 @@ mod scanner_tests {
         );
         for source in ["%", "%:", "%:%", ".", "..", "<", "<<", "<<="] {
             let arena = Bump::new();
-            let tokens = scan(source, "tail.c", &arena).unwrap();
+            let tokens = scan(source, &"tail.c", &arena).unwrap();
             assert_eq!(
-                tokens
-                    .iter()
-                    .map(|t| t.raw_spelling.unwrap_or(t.text))
-                    .collect::<String>(),
+                tokens.iter().map(|t| t.spelling()).collect::<String>(),
                 source
             );
         }
@@ -2829,7 +2844,7 @@ mod scanner_tests {
         let arena = Bump::new();
         let tokens = scan(
             "ab\\\ncd /* comment\nnext */ ef\\\r\ngh\n__LINE__",
-            "physical.c",
+            &"physical.c",
             &arena,
         )
         .unwrap();
