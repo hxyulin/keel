@@ -501,7 +501,53 @@ fn cached_guard_detection_respects_undef_else_and_trailing_tokens() {
         .unwrap();
         assert_eq!(stats.file_opens, 3);
         assert_eq!(stats.guard_skips, 1);
-        assert_eq!(stats.scanned_files, 4);
+        // guard.h released its tokens and is scanned again after #undef.
+        assert_eq!(stats.scanned_files, 5);
+    }
+}
+
+#[test]
+fn released_header_tokens_are_scanned_again_after_guard_undef() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-released-headers");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, source) in [
+        (
+            "guard.h",
+            "#ifndef GUARD_H\n#define GUARD_H\nguard VALUE __LINE__\n#endif\n",
+        ),
+        ("once.h", "#pragma once\nonce VALUE __LINE__\n"),
+        // The inner inclusion releases the tokens while the outer one is
+        // still processing them.
+        (
+            "nested.h",
+            "#ifndef NESTED_H\n#define NESTED_H\n#ifndef INNER\n#define INNER\nbefore __LINE__\n#undef NESTED_H\n#include \"nested.h\"\nafter __LINE__ __FILE__\n#else\ninner __INCLUDE_LEVEL__\n#endif\n#endif\n",
+        ),
+    ] {
+        std::fs::write(dir.join(name), source).unwrap();
+    }
+    let source = "#define VALUE 1\n#define HDR \"guard.h\"\n#include HDR\n#if 1\n#include \"guard.h\"\n#endif\n#undef GUARD_H\n#undef VALUE\n#define VALUE 2\n#if 1\n#include HDR\n#endif\n#include \"once.h\"\n#include \"./once.h\"\n#include \"nested.h\"\n#include \"nested.h\"\n#undef NESTED_H\n#undef INNER\n#include \"./nested.h\"\n__LINE__\n";
+    let path = dir.join("main.c");
+    let path = path.to_str().unwrap();
+    let opts = PreprocessOptions::default();
+    let got = preprocess(source, path, &opts).unwrap();
+    let expected = format!(
+        "guard 1 3 guard 2 3 once 2 2 before 5 inner 2 after 8 {:?} before 5 inner 2 after 8 {:?} 20",
+        dir.join("nested.h").to_str().unwrap(),
+        dir.join("./nested.h").to_str().unwrap()
+    );
+    assert_eq!(tokens(&got), tokens(&expected));
+    let mut cache = keel_c::PreprocessCache::new();
+    for _ in 0..2 {
+        assert_eq!(cache.preprocess(source, path, &opts).unwrap(), got);
+    }
+    #[cfg(feature = "profile")]
+    {
+        let (profiled, stats) = keel_c::preprocess_with_stats(source, path, &opts).unwrap();
+        assert_eq!(profiled, got);
+        // The root, three headers, and guard.h and nested.h again.
+        assert_eq!(stats.scanned_files, 6);
+        assert_eq!(stats.guard_skips, 2);
+        assert_eq!(stats.once_skips, 1);
     }
 }
 

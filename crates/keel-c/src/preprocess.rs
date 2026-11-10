@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 // The two constants are also used for controlled profiling ablations.
@@ -230,11 +231,9 @@ fn preprocess_inner<const TRACK: bool>(
     }
     let arena = Bump::new();
     let sources = typed_arena::Arena::new();
-    let token_buffers = typed_arena::Arena::new();
     let mut pp = Preprocessor::<TRACK> {
         arena: &arena,
         sources: &sources,
-        token_buffers: &token_buffers,
         stats: PreprocessStats::default(),
         batch_cache,
         options,
@@ -301,7 +300,6 @@ struct Preprocessor<'a, const TRACK: bool> {
     stats: PreprocessStats,
     arena: &'a Bump,
     sources: &'a typed_arena::Arena<FileSource>,
-    token_buffers: &'a typed_arena::Arena<Box<[Token<'a>]>>,
     options: &'a PreprocessOptions,
     /// [`STREAM_CHUNK_TOKENS`], or less in tests.
     stream_chunk: usize,
@@ -331,11 +329,15 @@ enum FileSource {
     Shared(Arc<str>),
     Mapped(memmap2::Mmap),
 }
-#[derive(Clone, Copy)]
+/// A header's tokens and include guard. The tokens are `None` once released
+/// because a defined guard or `#pragma once` skips every later inclusion.
 struct CachedTokens<'a> {
-    tokens: &'a [Token<'a>],
+    tokens: Option<Tokens<'a>>,
     guard: Option<&'a str>,
 }
+/// A header's tokens, shared by the cache and each inclusion processing
+/// them. The box keeps the scanner's allocation; `Rc<[Token]>` would copy it.
+type Tokens<'a> = Rc<Box<[Token<'a>]>>;
 
 // Recognize only a complete outer #ifndef / #define / #endif guard.
 // An outer #else/#elif or any tokens after #endif disable this shortcut.
@@ -1040,11 +1042,31 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return self.finish_file(state);
         }
         let key = (canonical.clone(), embedded);
-        let cached = if let Some(&cached) = self.scanned.get(&key) {
+        let (tokens, guard) = if let Some(cached) = self.scanned.get(&key) {
             if TRACK {
                 self.stats.token_cache_hits += 1;
             }
-            cached
+            let guard = cached.guard;
+            if guard.is_some_and(|name| self.macros.contains_key(name)) {
+                if TRACK {
+                    self.stats.guard_skips += 1;
+                }
+                return Ok(());
+            }
+            let tokens = match &cached.tokens {
+                Some(tokens) => Rc::clone(tokens),
+                None => {
+                    // Released after an earlier inclusion; the guard macro
+                    // has since been undefined.
+                    if TRACK {
+                        self.stats.scanned_files += 1;
+                    }
+                    let tokens = self.scan_file(src, path)?;
+                    self.scanned.get_mut(&key).unwrap().tokens = Some(Rc::clone(&tokens));
+                    tokens
+                }
+            };
+            (tokens, guard)
         } else {
             let restored = self.batch_cache.as_mut().and_then(|cache| {
                 let header = cache.headers.get(&key)?;
@@ -1056,8 +1078,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 Some(tokens)
             });
             let tokens = if let Some(tokens) = restored {
-                let owned: &'a [Token<'a>] = self.token_buffers.alloc(tokens);
-                owned
+                Rc::new(tokens)
             } else {
                 if TRACK {
                     self.stats.scanned_files += 1;
@@ -1066,32 +1087,43 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if let Some(cache) = self.batch_cache.as_mut() {
                     cache
                         .headers
-                        .insert(key.clone(), CachedHeader::new(src, tokens));
+                        .insert(key.clone(), CachedHeader::new(src, &tokens));
                 }
                 tokens
             };
-            let cached = CachedTokens {
-                tokens,
-                guard: header_guard(tokens),
-            };
-            self.scanned.insert(key, cached);
-            cached
-        };
-        if cached
-            .guard
-            .is_some_and(|name| self.macros.contains_key(name))
-        {
-            if TRACK {
-                self.stats.guard_skips += 1;
+            let guard = header_guard(&tokens);
+            let skip = guard.is_some_and(|name| self.macros.contains_key(name));
+            self.scanned.insert(
+                key.clone(),
+                CachedTokens {
+                    tokens: (!skip).then(|| Rc::clone(&tokens)),
+                    guard,
+                },
+            );
+            if skip {
+                if TRACK {
+                    self.stats.guard_skips += 1;
+                }
+                return Ok(());
             }
-            return Ok(());
-        }
+            (tokens, guard)
+        };
         self.include_stack.push((path, origin));
         let mut state = FileState::new(path, canonical, depth);
-        for physical in cached.tokens.split(|t| t.text == "\n") {
+        for physical in tokens.split(|t| t.text == "\n") {
             self.physical_line(physical, &mut state)?;
         }
-        self.finish_file(state)
+        self.finish_file(state)?;
+        // Release the tokens once a defined guard or `#pragma once` skips
+        // every later inclusion. An inclusion still being processed holds
+        // its own reference. Including the file after `#undef` of its guard
+        // scans it again.
+        if (guard.is_some_and(|name| self.macros.contains_key(name)) || self.once.contains(&key.0))
+            && let Some(cached) = self.scanned.get_mut(&key)
+        {
+            cached.tokens = None;
+        }
+        Ok(())
     }
 
     /// Processes `scanner`'s tokens in line-aligned chunks of `chunk`.
@@ -1286,15 +1318,15 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         }
         Ok(())
     }
-    fn scan_file(&mut self, src: &'a str, path: &'a str) -> Result<&'a [Token<'a>], Diagnostic> {
-        // Large lexical buffers have exact-size owners. Growing them inside
-        // the bump arena would retain discarded capacities until TU teardown.
-        let tokens = scan(src, path, self.arena)?.into_boxed_slice();
+    fn scan_file(&mut self, src: &'a str, path: &'a str) -> Result<Tokens<'a>, Diagnostic> {
+        // Large lexical buffers have exact-size owners, so they can be freed
+        // before TU teardown. Growing them inside the bump arena would also
+        // retain discarded capacities.
+        let tokens = Rc::new(scan(src, path, self.arena)?.into_boxed_slice());
         if TRACK {
             self.stats.token_bytes += std::mem::size_of_val(tokens.as_ref());
         }
-        let owned: &'a [Token<'a>] = self.token_buffers.alloc(tokens);
-        Ok(owned)
+        Ok(tokens)
     }
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
         if let Some(canonical) = self.canonical_paths.get(path) {
