@@ -91,6 +91,7 @@ fn repair_inner(
     let mut slot = 0u32;
     let mut region = Vec::new();
     let mut temp = None;
+    let mut live = None;
     for block in alloc.order.clone() {
         // Existing local edits own this entire block, including boundary copies.
         // Local caching flushes dirty homes at edges, so untouched blocks start
@@ -128,22 +129,63 @@ fn repair_inner(
                         | InstData::VaArg { .. }
                 );
             if barrier || region.len() == MAX_REGION_INSTRUCTIONS {
-                apply(input, &mut alloc, intervals, &region, &mut temp, allow_free);
+                apply(
+                    input, &mut alloc, intervals, &mut live, &region, &mut temp, allow_free,
+                );
                 region.clear();
             }
             if !barrier {
                 region.push((inst, read));
             }
         }
-        apply(input, &mut alloc, intervals, &region, &mut temp, allow_free);
+        apply(
+            input, &mut alloc, intervals, &mut live, &region, &mut temp, allow_free,
+        );
         region.clear();
     }
     alloc
 }
-fn apply(
+
+/// The intervals that can meet a window of program points, for windows
+/// visited in increasing order: those starting by the window's end and
+/// ending no earlier than its start. An interval that ends before one
+/// window cannot meet a later one.
+struct Live<'a> {
+    by_start: Vec<&'a Interval>,
+    next: usize,
+    active: Vec<&'a Interval>,
+}
+
+impl<'a> Live<'a> {
+    fn new(intervals: &'a [Interval]) -> Self {
+        let mut by_start: Vec<_> = intervals.iter().collect();
+        by_start.sort_by_key(|iv| iv.start());
+        Self {
+            by_start,
+            next: 0,
+            active: Vec::new(),
+        }
+    }
+
+    /// Every interval with a point in `[from, to]`, and possibly others.
+    /// Neither bound may be less than in the previous call.
+    fn window(&mut self, from: u32, to: u32) -> &[&'a Interval] {
+        while let Some(&iv) = self.by_start.get(self.next)
+            && iv.start() <= to
+        {
+            self.active.push(iv);
+            self.next += 1;
+        }
+        self.active.retain(|iv| iv.end() >= from);
+        &self.active
+    }
+}
+
+fn apply<'a>(
     input: &AllocationInput<'_>,
     alloc: &mut Allocation,
-    intervals: &[Interval],
+    intervals: &'a [Interval],
+    live: &mut Option<Live<'a>>,
     region: &[(Inst, u32)],
     temp: &mut Option<u32>,
     allow_free: bool,
@@ -210,6 +252,10 @@ fn apply(
     }
     let from = region[0].1;
     let to = region.last().expect("candidate window is nonempty").1 + 1;
+    // Both checks below only consider intervals with a point in [from, to].
+    let intervals = live
+        .get_or_insert_with(|| Live::new(intervals))
+        .window(from, to);
     let owner = intervals
         .iter()
         .filter(|iv| {
