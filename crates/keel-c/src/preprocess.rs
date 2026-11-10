@@ -241,8 +241,7 @@ fn preprocess_inner<const TRACK: bool>(
         stream_chunk,
         in_condition: false,
         macros: HashMap::default(),
-        expansion_scratch: Vec::new(),
-        expansion_stack: Vec::new(),
+        buffers: Vec::new(),
         undefined: HashSet::default(),
         search_dirs: Vec::new(),
         framework_dirs: Vec::new(),
@@ -308,10 +307,8 @@ struct Preprocessor<'a, const TRACK: bool> {
     stream_chunk: usize,
     in_condition: bool,
     macros: HashMap<&'a str, &'a Macro<'a>>,
-    /// The output buffer of the next expansion.
-    expansion_scratch: Vec<Token<'a>>,
-    /// The replacement stack of the next expansion.
-    expansion_stack: Vec<Token<'a>>,
+    /// Empty token buffers that expansions reuse.
+    buffers: Vec<Vec<Token<'a>>>,
     undefined: HashSet<&'a str>,
     search_dirs: Vec<PathBuf>,
     framework_dirs: Vec<PathBuf>,
@@ -1260,15 +1257,22 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if pending.is_empty() {
             return Ok(());
         }
-        let mut expanded = self.expand(pending, 0)?;
+        let expanded = self.expand(pending, 0)?;
         self.emit(&expanded);
         pending.clear();
-        // The next expansion reuses a small output buffer.
-        if expanded.capacity() <= 4096 {
-            expanded.clear();
-            self.expansion_scratch = expanded;
-        }
+        self.recycle(expanded);
         Ok(())
+    }
+    fn buffer(&mut self) -> Vec<Token<'a>> {
+        self.buffers.pop().unwrap_or_default()
+    }
+    /// Keeps a small buffer for reuse. Retaining large buffers would raise
+    /// per-TU peak memory.
+    fn recycle(&mut self, mut buffer: Vec<Token<'a>>) {
+        if buffer.capacity() <= 4096 && self.buffers.len() < 16 {
+            buffer.clear();
+            self.buffers.push(buffer);
+        }
     }
     fn file(
         &mut self,
@@ -2056,10 +2060,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return Err(self.error("macro argument nesting exceeds 200"));
         }
         let mut input = ExpansionInput {
-            stack: std::mem::take(&mut self.expansion_stack),
+            stack: self.buffer(),
             rest: ts,
         };
-        let mut out = std::mem::take(&mut self.expansion_scratch);
+        let mut out = self.buffer();
         out.reserve(input.len());
         // Bound macro invocations and the tokens they add, not the input:
         // a large array initializer has many tokens and no macros.
@@ -2235,7 +2239,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
                 // Each parameter's expansion, made on its first unpasted use.
                 let mut expanded = Vec::new();
-                let mut body = Vec::new();
+                let mut body = self.buffer();
                 let mut operators = Vec::new();
                 let mut j = 0;
                 while j < m.body.len() {
@@ -2262,7 +2266,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         if !omitted {
                             body.push(*b);
                             let arg = input.slice(args.last().unwrap().clone());
-                            body.extend(self.expand(&arg, depth + 1)?);
+                            let expanded = self.expand(&arg, depth + 1)?;
+                            body.extend_from_slice(&expanded);
+                            self.recycle(expanded);
                         }
                         j += 3;
                         continue;
@@ -2299,6 +2305,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     }
                     j += 1;
                 }
+                for buffer in expanded.into_iter().flatten() {
+                    self.recycle(buffer);
+                }
                 let hide = hide_intersection(self.arena, t.hide, input[end - 1].hide);
                 (end, Some(self.paste(body, &operators)?), hide)
             } else if m.has_paste {
@@ -2322,18 +2331,16 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 col: t.col,
                 ..*r
             };
-            let replacement = replacement.as_deref().unwrap_or(m.body);
-            input.replace(end, replacement.iter().map(relocate));
-            if !replacement.is_empty() {
+            let tokens = replacement.as_deref().unwrap_or(m.body);
+            input.replace(end, tokens.iter().map(relocate));
+            if !tokens.is_empty() {
                 input.stack.last_mut().unwrap().space = t.space;
             }
+            if let Some(buffer) = replacement {
+                self.recycle(buffer);
+            }
         }
-        // Recycle a small drained stack across conditions/arguments. Retaining
-        // a large buffer here would raise per-TU peak memory.
-        let stack = input.stack;
-        if stack.capacity() <= 4096 && stack.capacity() >= self.expansion_stack.capacity() {
-            self.expansion_stack = stack;
-        }
+        self.recycle(input.stack);
         Ok(out)
     }
     /// Applies the `##` operators at the ascending `operators` indices of
@@ -2409,6 +2416,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if expr.pos != tokens.len() {
             return Err(tokens[expr.pos].error("unexpected token in #if expression"));
         }
+        self.recycle(tokens);
         Ok(!value.is_zero())
     }
 }
