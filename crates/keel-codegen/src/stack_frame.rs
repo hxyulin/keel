@@ -321,8 +321,10 @@ fn segments(
 /// Each slot's neighbours: the slots with a segment that overlaps one of
 /// its own. `None` when there are more than `budget` pairs.
 fn interference(segments: &[Segment], slots: usize, budget: usize) -> Option<Vec<Vec<u32>>> {
+    // The sweep finds every overlapping pair whatever the order of equal
+    // starts, so sorting by start alone gives the same neighbours.
     let mut order: Vec<_> = segments.to_vec();
-    order.sort_unstable_by_key(|s| (s.start, s.end, s.slot));
+    order.sort_unstable_by_key(|s| s.start);
     let mut neighbours = vec![Vec::new(); slots];
     let mut pairs = keel_ir::fxhash::FxHashSet::default();
     let mut active: Vec<Segment> = Vec::new();
