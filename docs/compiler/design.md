@@ -97,7 +97,13 @@ When an optimizer pipeline finishes, `Function::compact` drops the removed
 instructions of every function and renumbers the rest in their old order.
 Instructions keep the numbers they print as, so local labels in generated
 code do not change. Values and blocks keep their handles, dead ones included,
-because code generation reads every value's type.
+because code generation reads every value's type. `Function::shrink_to_fit`
+then frees the spare capacity that vector growth and moved block lists leave.
+On SQLite at `-O`, the functions hold 44 MB instead of 94 MB when code
+generation starts, within 5% of exact capacities, and the two steps add
+about 0.5% to the compile's instructions. Shrinking before the optimizer as
+well saves nothing by code generation; a per-function bump arena would add
+lifetimes to `Function` for the 2 MB that remains.
 
 ## Types
 

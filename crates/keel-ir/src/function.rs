@@ -1383,6 +1383,37 @@ impl Function {
         self.compact_insts_if_wasteful();
     }
 
+    /// Frees the spare room in the function's arenas and lists: growth
+    /// leaves vectors up to half empty, and lists that moved leave their
+    /// old room behind. For a function that has stopped growing, such as
+    /// one about to be compiled; handles stay valid.
+    pub fn shrink_to_fit(&mut self) {
+        self.blocks.shrink_to_fit();
+        self.insts.shrink_to_fit();
+        self.values.shrink_to_fit();
+        self.stack_slots.shrink_to_fit();
+        self.callees.shrink_to_fit();
+        self.data_symbols.shrink_to_fit();
+        self.signatures.shrink_to_fit();
+        self.result_pool.shrink_to_fit();
+        self.locs.shrink_to_fit();
+        self.layout.shrink_to_fit();
+        self.result_tys = Vec::new();
+        self.restrict_params.shrink_to_fit();
+        self.debug_scopes.shrink_to_fit();
+        self.debug_vars.shrink_to_fit();
+        let (params, insts) = self.blocks.iter().fold((0, 0), |(p, i), (_, b)| {
+            (p + b.params.len(), i + b.insts.len())
+        });
+        // SAFETY: block data holds every parameter and instruction list.
+        unsafe {
+            self.block_values
+                .compact(params, self.blocks.values_mut().map(|b| &mut b.params));
+            self.block_insts
+                .compact(insts, self.blocks.values_mut().map(|b| &mut b.insts));
+        }
+    }
+
     /// The number `inst` prints as in local labels of generated code: its
     /// index, unless the function was [compacted](Function::compact).
     #[inline]
@@ -3170,6 +3201,54 @@ block3:
             before
         );
         verify(&compacted).unwrap();
+    }
+
+    #[test]
+    fn shrinking_keeps_lists_and_room_to_grow() {
+        let mut func = build_sum();
+        let blocks: Vec<Block> = func.blocks().collect();
+        // Leave abandoned room in both pools.
+        let extra = func.append_block_param(blocks[0], Type::I64);
+        func.remove_block_param(blocks[0], 2);
+        func.append_inst(
+            blocks[0],
+            InstData::Iconst {
+                ty: Type::I64,
+                imm: 1,
+            },
+        );
+        func.remove_inst(*func.block_insts(blocks[0]).last().unwrap());
+        let text = func.to_string();
+        let lists: Vec<_> = blocks
+            .iter()
+            .map(|&b| (func.block_params(b).to_vec(), func.block_insts(b).to_vec()))
+            .collect();
+        func.shrink_to_fit();
+        assert_eq!(func.to_string(), text);
+        verify(&func).unwrap();
+        for (&b, (params, insts)) in blocks.iter().zip(&lists) {
+            assert_eq!(func.block_params(b), &params[..]);
+            assert_eq!(func.block_insts(b), &insts[..]);
+        }
+        // No abandoned or spare room is left.
+        let params: usize = blocks.iter().map(|&b| func.block_params(b).len()).sum();
+        assert_eq!(func.block_values.buffer_len(), params);
+        assert_eq!(func.block_insts.buffer_len(), func.layout_len);
+        // Every list can still grow, the first one too.
+        let param = func.append_block_param(blocks[1], Type::I64);
+        assert_eq!(func.block_params(blocks[1]).last(), Some(&param));
+        assert_ne!(param, extra);
+        let first = func.block_insts(blocks[0])[0];
+        let inst = func.insert_inst(
+            InsertPoint::Before(first),
+            InstData::Iconst {
+                ty: Type::I64,
+                imm: 2,
+            },
+        );
+        assert_eq!(func.inst_index(inst), 0);
+        assert_eq!(func.inst_index(first), 1);
+        assert_eq!(func.block_params(blocks[0]), &lists[0].0[..]);
     }
 
     #[test]

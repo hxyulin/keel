@@ -1033,10 +1033,11 @@ impl<'a> Pipeline<'a> {
             None => execute_pipeline(module, &self.passes, self.context, self.report, &mut trace),
         };
         result?;
-        // Passes leave removed instructions behind; drop them before code
-        // generation reads the functions.
+        // Passes leave removed instructions and spare room behind; drop
+        // them before code generation reads the functions.
         for function in &mut module.functions {
             function.compact();
+            function.shrink_to_fit();
         }
         Ok(())
     }
