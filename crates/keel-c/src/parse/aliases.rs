@@ -4,10 +4,10 @@ use super::*;
 
 impl Parser<'_> {
     pub(super) fn function_alias(&mut self, g: usize, attrs: Attrs, file_scope: bool) -> R<()> {
-        if let Some(loc) = attrs.alias_conflict {
+        if let Some(loc) = attrs.symbol.alias_conflict {
             return Err(Error::new(loc, "duplicate alias attribute"));
         }
-        let Some((target, loc)) = attrs.alias else {
+        let Some((target, loc)) = attrs.symbol.alias else {
             return Ok(());
         };
         if self.target != Target::X86_64LinuxGnu {

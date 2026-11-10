@@ -93,8 +93,6 @@ pub enum TypeMode {
 #[derive(Default, Clone, PartialEq)]
 pub struct Attrs {
     pub nonstring: bool,
-    pub alias: Option<(usize, Loc)>,
-    pub alias_conflict: Option<Loc>,
     pub mode: Option<(TypeMode, Loc)>,
     pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
@@ -105,8 +103,63 @@ pub struct Attrs {
     pub gnu_inline: bool,
     pub returns_twice: bool,
     pub noreturn: bool,
-    pub function_attrs: DeclFunctionAttrs,
+    pub function_attrs: Sparse<keel_ir::FunctionAttrs>,
     pub function_policy: Option<Loc>,
+    pub symbol: Sparse<SymbolAttrs>,
+}
+
+/// A set of attributes for which merging with the default set leaves the
+/// other operand unchanged.
+pub trait SparseAttrs: Default + PartialEq + 'static {
+    /// The default set, read in place of an absent one.
+    fn empty() -> &'static Self;
+    fn merge(&mut self, other: Self);
+}
+
+/// Attributes that most declarators do not write. The set is allocated by
+/// the first write; an absent set equals the default.
+#[derive(Default, Clone)]
+pub struct Sparse<T>(Option<Box<T>>);
+
+impl<T: SparseAttrs> Sparse<T> {
+    fn merge(&mut self, other: Self) {
+        match (&mut self.0, other.0) {
+            (_, None) => {}
+            (None, other) => self.0 = other,
+            (Some(attrs), Some(other)) => attrs.merge(*other),
+        }
+    }
+
+    /// The set, if it has been written, without allocating it.
+    fn written(&mut self) -> Option<&mut T> {
+        self.0.as_deref_mut()
+    }
+}
+
+impl<T: SparseAttrs> std::ops::Deref for Sparse<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.0.as_deref().unwrap_or(T::empty())
+    }
+}
+
+impl<T: SparseAttrs> std::ops::DerefMut for Sparse<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.0.get_or_insert_default()
+    }
+}
+
+impl<T: SparseAttrs> PartialEq for Sparse<T> {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+/// Linkage, placement and cleanup attributes of the declared symbol.
+#[derive(Default, Clone, PartialEq)]
+pub struct SymbolAttrs {
+    pub alias: Option<(usize, Loc)>,
+    pub alias_conflict: Option<Loc>,
     /// `visibility(..)` and where it was written; see `Global::visibility`.
     pub visibility: Option<(Visibility, Loc)>,
     /// Where a different visibility than `visibility` was written.
@@ -122,45 +175,38 @@ pub struct Attrs {
     pub cleanup_conflict: Option<Loc>,
 }
 
-/// Function promises written in attributes. Most declarators write none, so
-/// the set is allocated by the first write; an absent set equals the default.
-#[derive(Default, Clone)]
-pub struct DeclFunctionAttrs(Option<Box<keel_ir::FunctionAttrs>>);
+impl SymbolAttrs {
+    const EMPTY: Self = Self {
+        alias: None,
+        alias_conflict: None,
+        visibility: None,
+        visibility_conflict: None,
+        weak: None,
+        lifecycle: None,
+        used: None,
+        retain: None,
+        section: None,
+        section_conflict: None,
+        cleanup: None,
+        cleanup_conflict: None,
+    };
 
-impl DeclFunctionAttrs {
-    /// The same result as `FunctionAttrs::merge`: attribute parsing builds
-    /// sorted contract lists, so merging with the default leaves them unchanged.
-    fn merge(&mut self, other: Self) {
-        match (&mut self.0, other.0) {
-            (_, None) => {}
-            (None, other) => self.0 = other,
-            (Some(attrs), Some(other)) => attrs.merge(*other),
+    fn set_visibility(&mut self, visibility: Visibility, loc: Loc) {
+        match self.visibility {
+            None => self.visibility = Some((visibility, loc)),
+            Some((v, _)) if v != visibility => {
+                self.visibility_conflict.get_or_insert(loc);
+            }
+            Some(_) => {}
         }
     }
 }
 
-impl std::ops::Deref for DeclFunctionAttrs {
-    type Target = keel_ir::FunctionAttrs;
-    fn deref(&self) -> &keel_ir::FunctionAttrs {
-        static DEFAULT: std::sync::LazyLock<keel_ir::FunctionAttrs> =
-            std::sync::LazyLock::new(keel_ir::FunctionAttrs::default);
-        self.0.as_deref().unwrap_or(&DEFAULT)
+impl SparseAttrs for SymbolAttrs {
+    fn empty() -> &'static Self {
+        &Self::EMPTY
     }
-}
 
-impl std::ops::DerefMut for DeclFunctionAttrs {
-    fn deref_mut(&mut self) -> &mut keel_ir::FunctionAttrs {
-        self.0.get_or_insert_default()
-    }
-}
-
-impl PartialEq for DeclFunctionAttrs {
-    fn eq(&self, other: &Self) -> bool {
-        **self == **other
-    }
-}
-
-impl Attrs {
     fn merge(&mut self, other: Self) {
         if let Some((visibility, loc)) = other.visibility {
             self.set_visibility(visibility, loc);
@@ -189,6 +235,26 @@ impl Attrs {
         }
         self.cleanup_conflict = self.cleanup_conflict.or(other.cleanup_conflict);
         self.cleanup = other.cleanup.or(self.cleanup);
+    }
+}
+
+impl SparseAttrs for keel_ir::FunctionAttrs {
+    fn empty() -> &'static Self {
+        static EMPTY: std::sync::LazyLock<keel_ir::FunctionAttrs> =
+            std::sync::LazyLock::new(keel_ir::FunctionAttrs::default);
+        &EMPTY
+    }
+
+    /// Attribute parsing builds sorted contract lists, so merging with the
+    /// default leaves them unchanged.
+    fn merge(&mut self, other: Self) {
+        keel_ir::FunctionAttrs::merge(self, other);
+    }
+}
+
+impl Attrs {
+    fn merge(&mut self, other: Self) {
+        self.symbol.merge(other.symbol);
         self.mode = other.mode.or(self.mode);
         self.vector_size = other.vector_size.or(self.vector_size);
         if let Some(a) = other.aligned {
@@ -206,15 +272,6 @@ impl Attrs {
         self.noreturn |= other.noreturn;
         self.function_attrs.merge(other.function_attrs);
         self.function_policy = self.function_policy.or(other.function_policy);
-    }
-    fn set_visibility(&mut self, visibility: Visibility, loc: Loc) {
-        match self.visibility {
-            None => self.visibility = Some((visibility, loc)),
-            Some((v, _)) if v != visibility => {
-                self.visibility_conflict.get_or_insert(loc);
-            }
-            Some(_) => {}
-        }
     }
     /// Rejects the attributes that only a function or an object with
     /// linkage can carry, written where no such symbol is declared.
@@ -242,7 +299,7 @@ impl Attrs {
         Ok(())
     }
     fn no_cleanup(&self) -> R<()> {
-        if let Some((_, loc)) = self.cleanup {
+        if let Some((_, loc)) = self.symbol.cleanup {
             return Err(Error::new(
                 loc,
                 "cleanup applies only to automatic local objects",
@@ -261,30 +318,31 @@ impl Attrs {
             return Err(unsupported_attribute(loc, "ms_abi"));
         }
         self.no_cleanup()?;
-        if let Some((_, loc)) = self.alias {
+        let symbol = &*self.symbol;
+        if let Some((_, loc)) = symbol.alias {
             return Err(Error::new(
                 loc,
                 "alias requires a file-scope function declaration",
             ));
         }
-        if let Some(loc) = self
+        if let Some(loc) = symbol
             .lifecycle
-            .or(self.used)
-            .or(self.retain)
-            .or(self.section.map(|s| s.1))
+            .or(symbol.used)
+            .or(symbol.retain)
+            .or(symbol.section.map(|s| s.1))
         {
             return Err(Error::new(
                 loc,
                 "lifecycle/used/retain/section attributes require a function or static-storage object",
             ));
         }
-        if let Some(loc) = self.weak {
+        if let Some(loc) = symbol.weak {
             return Err(Error::new(
                 loc,
                 "weak applies only to functions and variables with external linkage",
             ));
         }
-        if let Some(loc) = self.visibility_conflict.or(self
+        if let Some(loc) = symbol.visibility_conflict.or(symbol
             .visibility
             .filter(|(v, _)| v.hidden())
             .map(|(_, loc)| loc))
@@ -1779,7 +1837,7 @@ impl<'a> Parser<'a> {
                 let asm_register = label
                     .map(|label| self.local_register_declaration(spec, name_loc, &d.ty, label))
                     .transpose()?;
-                let cleanup = attrs.cleanup.take();
+                let cleanup = attrs.symbol.written().and_then(|s| s.cleanup.take());
                 if let Some((_, loc)) = cleanup
                     && spec.thread_local
                 {
@@ -1794,7 +1852,7 @@ impl<'a> Parser<'a> {
                         "block-scope thread-local storage requires static or extern",
                     ));
                 }
-                if let Some(loc) = attrs.cleanup_conflict {
+                if let Some(loc) = attrs.symbol.cleanup_conflict {
                     return Err(Error::new(
                         loc,
                         "multiple cleanup attributes on one declaration",
@@ -1944,7 +2002,7 @@ impl<'a> Parser<'a> {
         inferred_init: Option<Init<'a>>,
     ) -> R<()> {
         let (name, name_loc) = *d.name.as_ref().unwrap();
-        if d.attrs.alias.is_some() {
+        if d.attrs.symbol.alias.is_some() {
             return Err(Error::new(
                 name_loc,
                 "alias requires a file-scope function declaration",
@@ -2195,7 +2253,8 @@ impl<'a> Parser<'a> {
     /// symbol it declares.
     fn symbol_attrs(&mut self, g: usize, attrs: &Attrs) -> R<()> {
         attrs.no_cleanup()?;
-        if let Some(loc) = attrs.visibility_conflict {
+        let symbol = &*attrs.symbol;
+        if let Some(loc) = symbol.visibility_conflict {
             return Err(Error::new(loc, "conflicting visibility attributes"));
         }
         if let Some(loc) = attrs.function_policy
@@ -2207,7 +2266,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let global = &mut self.globals[g];
-        if let Some(loc) = attrs.lifecycle {
+        if let Some(loc) = symbol.lifecycle {
             if !matches!(global.ty, Ty::Func(_)) {
                 return Err(Error::new(
                     loc,
@@ -2216,23 +2275,23 @@ impl<'a> Parser<'a> {
             }
             global.lifecycle.get_or_insert(loc);
         }
-        if let Some(loc) = attrs.section_conflict {
+        if let Some(loc) = symbol.section_conflict {
             return Err(Error::new(loc, "conflicting section attributes"));
         }
-        if let Some((section, loc)) = attrs.section {
+        if let Some((section, loc)) = symbol.section {
             if global.section.is_some_and(|s| s != section) {
                 return Err(Error::new(loc, "conflicting section redeclarations"));
             }
             global.section = Some(section);
         }
-        global.retain = global.retain.or(attrs.retain);
-        global.used |= attrs.used.is_some();
+        global.retain = global.retain.or(symbol.retain);
+        global.used |= symbol.used.is_some();
         if matches!(global.ty, Ty::Func(_)) {
-            global.function_attrs.used |= attrs.used.is_some();
-            global.function_attrs.retain |= attrs.retain.is_some();
+            global.function_attrs.used |= symbol.used.is_some();
+            global.function_attrs.retain |= symbol.retain.is_some();
             global.function_attrs.section = global.section;
         }
-        if let Some((visibility, loc)) = attrs.visibility {
+        if let Some((visibility, loc)) = symbol.visibility {
             if global.visibility.is_some_and(|v| v != visibility) {
                 return Err(Error::new(
                     loc,
@@ -2244,7 +2303,7 @@ impl<'a> Parser<'a> {
             }
             global.visibility = Some(visibility);
         }
-        if let Some(loc) = attrs.weak {
+        if let Some(loc) = symbol.weak {
             global.weak.get_or_insert(loc);
         }
         Ok(())
@@ -2794,12 +2853,12 @@ impl<'a> Parser<'a> {
                         self.expect("(")?;
                         let name = self.asm_string()?;
                         self.expect(")")?;
-                        if attrs.alias.is_some() {
+                        if attrs.symbol.alias.is_some() {
                             return Err(Error::new(loc, "duplicate alias attribute"));
                         }
                         let index = self.alias_names.len();
                         self.alias_names.push(self.text.intern(&name));
-                        attrs.alias = Some((index, loc));
+                        attrs.symbol.alias = Some((index, loc));
                     }
                     "constructor" | "destructor" => {
                         if self.eat("(") {
@@ -2827,7 +2886,7 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                         }
-                        attrs.lifecycle.get_or_insert(loc);
+                        attrs.symbol.lifecycle.get_or_insert(loc);
                         if name == "constructor" {
                             attrs.function_attrs.constructor = true;
                         } else {
@@ -2852,22 +2911,23 @@ impl<'a> Parser<'a> {
                             .map_err(|_| Error::new(loc, "section requires ASCII"))?;
                         let section =
                             keel_ir::SectionName::new(name).map_err(|e| Error::new(loc, e))?;
-                        if attrs.section.is_some_and(|s| s.0 != section) {
-                            attrs.section_conflict = Some(loc);
+                        let symbol = &mut *attrs.symbol;
+                        if symbol.section.is_some_and(|s| s.0 != section) {
+                            symbol.section_conflict = Some(loc);
                         }
-                        attrs.section = Some((section, loc));
+                        symbol.section = Some((section, loc));
                     }
                     "retain" => {
                         if self.is("(") {
                             return Err(self.unexpected("an attribute without arguments"));
                         }
-                        attrs.retain.get_or_insert(loc);
+                        attrs.symbol.retain.get_or_insert(loc);
                     }
                     "used" => {
                         if self.is("(") {
                             return Err(self.unexpected("an attribute without arguments"));
                         }
-                        attrs.used.get_or_insert(loc);
+                        attrs.symbol.used.get_or_insert(loc);
                     }
                     "cleanup" => {
                         self.expect("(")?;
@@ -2884,17 +2944,18 @@ impl<'a> Parser<'a> {
                             }
                         };
                         self.expect(")")?;
-                        if attrs.cleanup.is_some() {
-                            attrs.cleanup_conflict = Some(loc);
+                        let symbol = &mut *attrs.symbol;
+                        if symbol.cleanup.is_some() {
+                            symbol.cleanup_conflict = Some(loc);
                         }
-                        attrs.cleanup = Some((g, loc));
+                        symbol.cleanup = Some((g, loc));
                     }
                     // Ordinary weak binding is merged over the complete translation unit.
                     "weak" => {
                         if self.is("(") {
                             return Err(self.unexpected("an attribute without arguments"));
                         }
-                        attrs.weak.get_or_insert(loc);
+                        attrs.symbol.weak.get_or_insert(loc);
                     }
                     "visibility" => {
                         self.expect("(")?;
@@ -2919,7 +2980,7 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                         };
-                        attrs.set_visibility(visibility, loc);
+                        attrs.symbol.set_visibility(visibility, loc);
                     }
                     "vector_size" => {
                         self.expect("(")?;
@@ -3662,7 +3723,7 @@ impl<'a> Parser<'a> {
         // do not acquire indirect-call contracts.
         if !matches!(d.ty, Ty::Func(_)) {
             d.attrs.returns_twice = false;
-            d.attrs.function_attrs = DeclFunctionAttrs::default();
+            d.attrs.function_attrs = Sparse::default();
         }
         Ok(d)
     }
