@@ -285,6 +285,8 @@ pub fn form(i: &Instruction) -> Option<&'static EvexForm> {
     Some(first)
 }
 /// Select an AVX-512 adapter when operands require its register file.
+/// Inlined: every emitted instruction asks, and almost none qualify.
+#[inline]
 pub fn promote(opcode: Opcode, operands: &[Operand]) -> Opcode {
     if matches!(opcode, Opcode::Evex(_)) {
         return opcode;
@@ -298,11 +300,16 @@ pub fn promote(opcode: Opcode, operands: &[Operand]) -> Opcode {
         Operand::Register(r) => wide(r),
         Operand::Memory(m) => m.width == 512 || m.index.as_ref().is_some_and(wide),
         _ => false,
-    }) && let Some(op) = EvexOpcode::parse(&opcode.to_string())
-    {
-        return Opcode::Evex(op);
+    }) {
+        return promote_by_name(opcode);
     }
     opcode
+}
+/// The AVX-512 adapter of `opcode`'s mnemonic, if there is one.
+#[cold]
+#[inline(never)]
+fn promote_by_name(opcode: Opcode) -> Opcode {
+    EvexOpcode::parse(&opcode.to_string()).map_or(opcode, Opcode::Evex)
 }
 
 pub(super) fn write<W: Write + ?Sized>(
