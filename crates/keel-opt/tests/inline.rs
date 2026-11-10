@@ -43,7 +43,7 @@ fn calls(m: &Module, name: &str) -> usize {
                     .find(|f| f.name == name)
                     .unwrap()
                     .inst_data(*i),
-                InstData::Call { .. }
+                InstData::Call { .. } | InstData::ReturnCall { .. }
             )
         })
         .count()

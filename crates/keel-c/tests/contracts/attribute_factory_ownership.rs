@@ -14,7 +14,7 @@ fn expected(attr: &str) -> FunctionAttrs {
     }
 }
 fn calls(f: &Function, name: &str) -> bool {
-    f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == name))
+    f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } | InstData::ReturnCall { func, .. } if f.callee(*func).name == name))
 }
 fn source(attr: &str, final_placement: bool) -> String {
     let decl = if final_placement {

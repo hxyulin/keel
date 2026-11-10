@@ -225,13 +225,7 @@ fn run_with_policy(func: &mut Function, preserve_branches: bool) -> bool {
             continue;
         }
         if leaf {
-            changed |= rematerialize(
-                func,
-                inst,
-                &inst_users,
-                &mut groups,
-                preserve_branches,
-            );
+            changed |= rematerialize(func, inst, &inst_users, &mut groups, preserve_branches);
             continue;
         }
 
@@ -503,7 +497,8 @@ fn rematerialize(
         if group == kept {
             continue;
         }
-        let first = first_user(func, block, local.iter().map(|&(_, user)| user)).expect("a user in its block");
+        let first = first_user(func, block, local.iter().map(|&(_, user)| user))
+            .expect("a user in its block");
         let copy = func.insert_inst(
             rematerialization_point(func, first, preserve_branches),
             data.clone(),

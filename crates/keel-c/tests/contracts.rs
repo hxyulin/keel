@@ -195,10 +195,10 @@ fn explicit_inline_conflicts_are_diagnosed_in_both_orders() {
     keel_opt::optimize(&mut m).unwrap();
     keel_ir::verify_module(&m).unwrap();
     let f = m.functions.iter().find(|f| f.name == "f").unwrap();
-    assert!(
-        f.layout_insts()
-            .any(|(_, i)| matches!(f.inst_data(i), InstData::Call { .. }))
-    );
+    assert!(f.layout_insts().any(|(_, i)| matches!(
+        f.inst_data(i),
+        InstData::Call { .. } | InstData::ReturnCall { .. }
+    )));
 }
 
 #[cfg(any(

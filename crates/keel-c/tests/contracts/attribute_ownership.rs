@@ -2,7 +2,7 @@
 use keel_ir::{Function, FunctionAttrs, InstData, Target};
 const TARGETS: [Target; 2] = [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu];
 fn calls(f: &Function, name: &str) -> bool {
-    f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == name))
+    f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } | InstData::ReturnCall { func, .. } if f.callee(*func).name == name))
 }
 fn block_source(storage: &str, declaration: &str, late: bool, policy: &str) -> String {
     let definition =
