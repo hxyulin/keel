@@ -487,6 +487,9 @@ impl fmt::Display for SourceLoc {
 struct BlockData {
     params: ListRange<Value>,
     insts: ListRange<Inst>,
+    /// Every instruction below this index in `insts` has its index as
+    /// [`InstNode::pos`]; the ones from here on may have stale positions.
+    valid: u32,
     /// Whether the block is in [`Function::layout`].
     in_layout: bool,
 }
@@ -500,6 +503,9 @@ struct InstNode {
     block: u32,
     /// One more than the location's index in [`Function::locs`]; 0 for none.
     loc: u32,
+    /// The index in its block when last known; exact below the block's
+    /// [`BlockData::valid`].
+    pos: u32,
 }
 
 const NO_BLOCK: u32 = u32::MAX;
@@ -1106,6 +1112,7 @@ impl Function {
             results,
             block: NO_BLOCK,
             loc: 0,
+            pos: 0,
         });
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
@@ -1126,9 +1133,15 @@ impl Function {
                 // appended terminator in an already existing block.
                 self.cfg_stamp = fresh_cfg_stamp();
                 let data = &mut self.blocks[block];
+                let index = data.insts.len() as u32;
                 self.block_insts.push(&mut data.insts, inst);
+                if data.valid == index {
+                    data.valid = index + 1;
+                }
                 self.layout_len += usize::from(data.in_layout);
-                self.insts[inst].block = block.index() as u32;
+                let node = &mut self.insts[inst];
+                node.block = block.index() as u32;
+                node.pos = index;
                 self.compact_insts_if_wasteful();
                 return;
             }
@@ -1142,8 +1155,12 @@ impl Function {
             self.cfg_stamp = fresh_cfg_stamp();
         }
         self.block_insts.insert(&mut data.insts, index, inst);
+        // The instructions after `index` moved up one.
+        data.valid = data.valid.min(index as u32 + 1);
         self.layout_len += usize::from(data.in_layout);
-        self.insts[inst].block = block.index() as u32;
+        let node = &mut self.insts[inst];
+        node.block = block.index() as u32;
+        node.pos = index as u32;
         self.compact_insts_if_wasteful();
     }
 
@@ -1162,12 +1179,45 @@ impl Function {
         }
     }
 
-    /// Index of `inst` within its block.
-    fn position(&self, inst: Inst) -> usize {
+    /// Index of `inst` within its block, for an edit there. Positions below
+    /// the block's `valid` are exact, so a stale one is at or after it:
+    /// the scan from there records the index of every instruction it
+    /// passes. Each of those moved since it was last recorded, so the scans
+    /// cost no more than the shifts did.
+    fn position(&mut self, inst: Inst) -> usize {
         let block = self.inst_block(inst);
-        self.block_insts(block)
+        let hint = self.insts[inst].pos as usize;
+        let data = &mut self.blocks[block];
+        let list = self.block_insts.get(data.insts);
+        if list.get(hint) == Some(&inst) {
+            return hint;
+        }
+        let start = data.valid as usize;
+        for (index, &other) in list.iter().enumerate().skip(start) {
+            self.insts[other].pos = index as u32;
+            if other == inst {
+                data.valid = index as u32 + 1;
+                return index;
+            }
+        }
+        panic!("an instruction is in its block")
+    }
+
+    /// Index of `inst` within its block: the recorded position while it is
+    /// still right, or else found by a scan from the first stale one, which
+    /// is usually close.
+    pub fn inst_index(&self, inst: Inst) -> usize {
+        let block = self.inst_block(inst);
+        let hint = self.insts[inst].pos as usize;
+        let list = self.block_insts(block);
+        if list.get(hint) == Some(&inst) {
+            return hint;
+        }
+        let start = self.blocks[block].valid as usize;
+        list[start..]
             .iter()
             .position(|&i| i == inst)
+            .map(|offset| start + offset)
             .expect("an instruction is in its block")
     }
 
@@ -1183,6 +1233,8 @@ impl Function {
             self.cfg_stamp = fresh_cfg_stamp();
         }
         self.block_insts.remove(&mut data.insts, index);
+        // The instructions after `index` moved down one.
+        data.valid = data.valid.min(index as u32);
         self.layout_len -= usize::from(data.in_layout);
         self.insts[inst].block = NO_BLOCK;
     }
@@ -1220,15 +1272,19 @@ impl Function {
         }
         let data = &mut self.blocks[block];
         self.layout_len -= removed.len() * usize::from(data.in_layout);
-        let mut next = 0;
+        let nodes = &mut self.insts;
+        let (mut next, mut kept) = (0, 0);
         self.block_insts.retain(&mut data.insts, |inst| {
             if removed.get(next) == Some(&inst) {
                 next += 1;
                 false
             } else {
+                nodes[inst].pos = kept;
+                kept += 1;
                 true
             }
         });
+        data.valid = kept;
     }
 
     /// Moves `inst` to `at`, keeping its results.
@@ -1248,17 +1304,25 @@ impl Function {
             return;
         }
         let mut dest = self.blocks[to].insts;
+        let dest_valid = self.blocks[to].valid as usize == dest.len();
         for i in start..source.len() {
             // Pushing only appends to the pool, so `source` stays valid.
             let inst = self.block_insts.get(source)[i];
             self.inst_facts.remove(&inst);
+            let node = &mut self.insts[inst];
+            node.block = to.index() as u32;
+            node.pos = dest.len() as u32;
             self.block_insts.push(&mut dest, inst);
-            self.insts[inst].block = to.index() as u32;
         }
-        self.blocks[to].insts = dest;
+        let to_data = &mut self.blocks[to];
+        to_data.insts = dest;
+        if dest_valid {
+            to_data.valid = dest.len() as u32;
+        }
         let moved = source.len() - start;
         let from = &mut self.blocks[from];
         self.block_insts.truncate(&mut from.insts, start);
+        from.valid = from.valid.min(start as u32);
         self.layout_len -= if from.in_layout { moved } else { 0 };
         self.layout_len += if self.blocks[to].in_layout { moved } else { 0 };
         // The last instruction of `from` moved.
@@ -1428,6 +1492,7 @@ impl Function {
         }
         let removed = data.insts.len();
         self.block_insts.free(&mut data.insts);
+        data.valid = 0;
         if std::mem::replace(&mut data.in_layout, false) {
             self.layout_len -= removed;
             // A block is in the layout once; the blocks after it move up
@@ -1458,6 +1523,7 @@ impl Function {
             }
             let removed = data.insts.len();
             self.block_insts.free(&mut data.insts);
+            data.valid = 0;
             if std::mem::replace(&mut data.in_layout, false) {
                 self.layout_len -= removed;
             }
@@ -2712,6 +2778,83 @@ mod tests {
         let moved = tail.block_insts(exit)[1];
         assert_eq!(tail.inst_block(moved), exit);
         assert_eq!(tail.layout_insts().count(), each.layout_insts().count());
+    }
+
+    #[test]
+    fn positions_follow_random_edits() {
+        let mut func = Function::new("f", Signature::new(&[], &[]));
+        let mut blocks = vec![func.create_block()];
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let konst = InstData::Iconst {
+            ty: Type::I32,
+            imm: 0,
+        };
+        for step in 0..4000 {
+            let placed: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
+            let block = blocks[next(blocks.len())];
+            match next(8) {
+                _ if placed.is_empty() => {
+                    func.append_inst(block, konst.clone());
+                }
+                0 if blocks.len() < 6 => blocks.push(func.create_block()),
+                0 | 1 => {
+                    func.append_inst(block, konst.clone());
+                }
+                2 => {
+                    let before = placed[next(placed.len())];
+                    func.insert_inst(InsertPoint::Before(before), konst.clone());
+                }
+                3 => func.remove_inst(placed[next(placed.len())]),
+                4 => {
+                    let inst = placed[next(placed.len())];
+                    let at = placed[next(placed.len())];
+                    if at != inst {
+                        func.move_inst(inst, InsertPoint::Before(at));
+                    }
+                }
+                5 => {
+                    let removed: Vec<Inst> = func
+                        .block_insts(block)
+                        .to_vec()
+                        .into_iter()
+                        .filter(|_| next(3) == 0)
+                        .collect();
+                    func.remove_insts(block, &removed);
+                }
+                6 => {
+                    let to = blocks[next(blocks.len())];
+                    let len = func.block_insts(block).len();
+                    if to != block {
+                        func.move_insts_to_end(block, next(len + 1), to);
+                    }
+                }
+                _ => {
+                    let inst = placed[next(placed.len())];
+                    func.move_inst(inst, InsertPoint::End(block));
+                }
+            }
+            for &block in &blocks {
+                let valid = func.blocks[block].valid as usize;
+                let list = func.block_insts(block).to_vec();
+                assert!(valid <= list.len());
+                for (index, &inst) in list.iter().enumerate() {
+                    if index < valid {
+                        assert_eq!(func.insts[inst].pos as usize, index);
+                    }
+                    assert_eq!(func.inst_index(inst), index);
+                    if (step + index) % 3 == 0 {
+                        assert_eq!(func.position(inst), index);
+                    }
+                }
+            }
+        }
+        assert!(func.layout_insts().count() > 0);
     }
 
     #[test]

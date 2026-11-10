@@ -84,13 +84,13 @@ it without depending on the IR.
   redirect values with `replace_all_uses`.
 
 **Decisions.** Instruction storage keeps contiguous per-block slices; there
-is no linked list. `Function::remove_insts` removes an ordered subsequence
-with one block compaction, clearing its instruction metadata without changing
-surviving handles. DCE and noreturn cleanup use it. Other planned storage work
-includes position hints so an
-insertion does not scan its block, a CFG stamp taken on read, and a 48-byte
-`InstData` with indirect-call arguments and `invoke` kept inline. A
-mid-block insertion still shifts the rest of the block. Functions are not
+is no linked list. Each instruction records its index in its block, exact
+below a per-block mark, so finding an instruction to edit scans only what
+moved since the last edit. A mid-block insertion or removal still shifts the
+rest of the block. `Function::remove_insts` removes an ordered subsequence
+with one block compaction; DCE and noreturn cleanup use it. Other planned
+storage work includes a CFG stamp taken on read and a 48-byte `InstData`
+with indirect-call arguments and `invoke` kept inline. Functions are not
 compacted to drop removed entities unless a workload shows the waste
 matters.
 
