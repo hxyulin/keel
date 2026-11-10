@@ -208,6 +208,12 @@ pub(super) fn validate_homes(
     input: &crate::regalloc::AllocationInput<'_>,
     a: &Allocation,
 ) -> Result<(), String> {
+    // Every checked operand and parameter is an F80 value. Scanning the value
+    // types is cheaper than walking every operand of a function without one.
+    let f = input.func;
+    if !(0..f.num_values()).any(|i| f.value_type(Value::new(i)) == Type::F80) {
+        return Ok(());
+    }
     for (_, inst) in input.func.layout_insts() {
         let mut bad = false;
         input.for_each_operand(inst, |operand| {
