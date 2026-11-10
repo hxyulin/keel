@@ -59,5 +59,58 @@ class DriverTests(unittest.TestCase):
         self.assertIn('dot failed', result.stderr)
 
 
+@unittest.skipUnless(shutil.which('clang'), 'Clang required')
+class OrderedDriverTests(unittest.TestCase):
+    def exercise(self, transform):
+        source = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            kernel = work / 'ordered.c'
+            kernel.write_text(transform((source / 'ordered.c').read_text()))
+            binary = work / 'check'
+            subprocess.run(['clang', '-O3', '-fno-fast-math', '-ffp-contract=off',
+                            str(source / 'ordered_driver.c'), str(kernel), '-o', str(binary)],
+                           check=True, capture_output=True)
+            return subprocess.run([str(binary), 'check'], capture_output=True, text=True)
+
+    def test_scalar_passes(self):
+        self.assertEqual(self.exercise(lambda s: s).returncode, 0)
+
+    def test_changed_value_fails(self):
+        result = self.exercise(lambda s: s.replace('s += p[i]', 's += 0', 1))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('mismatch', result.stderr)
+
+    def test_reassociated_sum_fails(self):
+        def rewrite(s):
+            begin = s.index('double sum64(')
+            end = s.index('double abs64(', begin)
+            return s[:begin] + '''double sum64(const double *p, unsigned long n) {
+                double a=0,b=0;
+                for(unsigned long i=0;i<n;++i) { if(i&1) b+=p[i]; else a+=p[i]; }
+                return a+b;
+            }
+            ''' + s[end:]
+        result = self.exercise(rewrite)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('mismatch', result.stderr)
+
+    def test_tail_overread_faults(self):
+        result = self.exercise(lambda s: s.replace('return s;',
+                              'volatile double extra=p[n]; (void)extra; return s;', 1))
+        self.assertNotEqual(result.returncode, 0)
+
+
+class OrderedPlacementTests(unittest.TestCase):
+    def test_padding_is_deterministic_and_stays_before_functions(self):
+        from ordered import padded
+        source = '.text\n.globl _sum64\n.p2align 4\n_sum64:\nret\n'
+        self.assertEqual(padded(source, 0), source)
+        self.assertEqual(padded(source, 1), padded(source, 1))
+        result = padded(source, 1)
+        self.assertRegex(result, r'\.space \d+\n.globl _sum64')
+        self.assertTrue(result.endswith('_sum64:\nret\n'))
+
+
 if __name__ == '__main__':
     unittest.main()

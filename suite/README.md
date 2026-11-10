@@ -545,6 +545,40 @@ implementation without external assembly or old-format decoders. It does not
 measure an amalgamation or the upstream CLI. The driver checks round trips and
 runs compression and decompression separately on deterministic resident inputs.
 
+## Ordered reduction baselines
+
+The ordered mode of the same kernel runner compares f32/f64 sums and sums of
+absolute values with identical left-to-right additions. It runs on AArch64
+macOS and includes two hand-written assembly implementations: eight-element
+scalar pair loads and eight-element NEON loads/absolute values. Both retain
+scalar addition order, use caller-saved registers, and handle tails without
+reading beyond the input. These are reference schedules, not a performance
+ceiling.
+
+```sh
+cargo build --release -p keel
+python3 suite/c/fastmath/run.py --ordered --keel target/release/keel \
+  --out target/ordered-profile --sizes 8 4099 262147 \
+  --iterations 64 --rounds 3 --placements 4
+```
+
+The Keel rows share scalar IR preparation followed by the full `-O3` pipeline;
+only one row runs `loop-batch` before that pipeline. Clang uses strict `-O3`.
+All rows link the same strict driver without LTO. A volatile scalar left fold
+checks rounding-sensitive inputs, signed zero, subnormals, infinities and NaNs.
+Guard-page cases check empty inputs and batch/tail boundaries. Negative-control
+runner tests reject changed values, reassociation and overreads.
+
+Each size runs approximately `iterations * max(sizes)` elements. Four placements
+insert matching never-executed padding before function alignment. Every timed
+block shuffles variants and runs the order and its mirror. A byte-identical
+scalar executable is the control. The report retains commands, source and
+compiler hashes, assembly, raw whole-process cycles/instructions, per-placement
+ratios and their geometric means. These measurements screen kernel schedules;
+they do not replace the application acceptance gate. Short-call results include
+the common caller, startup and input checking costs. Use more rounds and inspect
+the control spread before interpreting small differences.
+
 ## Fast-math kernel baselines
 
 `suite/c/fastmath/run.py` compares nine single-precision kernels:

@@ -13,6 +13,8 @@ import subprocess
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--ordered', action='store_true', help='strict ordered sums and AArch64 assembly references')
+    parser.add_argument('--placements', type=int, default=4)
     parser.add_argument('--keel', required=True, type=Path)
     parser.add_argument('--clang', default='clang')
     parser.add_argument('--out', type=Path, required=True)
@@ -20,6 +22,10 @@ def main():
     parser.add_argument('--iterations', type=int, default=1000)
     parser.add_argument('--rounds', type=int, default=5)
     args = parser.parse_args()
+    if args.ordered:
+        from ordered import run_ordered
+        run_ordered(args)
+        return
     if args.rounds < 1 or not 1 <= args.iterations <= 1000000 or any(
             n < 1 or n > 1048576 for n in args.sizes):
         parser.error('positive rounds, sizes 1..1048576, iterations 1..1000000 required')
