@@ -105,7 +105,7 @@ pub struct Attrs {
     pub gnu_inline: bool,
     pub returns_twice: bool,
     pub noreturn: bool,
-    pub function_attrs: keel_ir::FunctionAttrs,
+    pub function_attrs: DeclFunctionAttrs,
     pub function_policy: Option<Loc>,
     /// `visibility(..)` and where it was written; see `Global::visibility`.
     pub visibility: Option<(Visibility, Loc)>,
@@ -120,6 +120,44 @@ pub struct Attrs {
     pub section_conflict: Option<Loc>,
     pub cleanup: Option<(usize, Loc)>,
     pub cleanup_conflict: Option<Loc>,
+}
+
+/// Function promises written in attributes. Most declarators write none, so
+/// the set is allocated by the first write; an absent set equals the default.
+#[derive(Default, Clone)]
+pub struct DeclFunctionAttrs(Option<Box<keel_ir::FunctionAttrs>>);
+
+impl DeclFunctionAttrs {
+    /// The same result as `FunctionAttrs::merge`: attribute parsing builds
+    /// sorted contract lists, so merging with the default leaves them unchanged.
+    fn merge(&mut self, other: Self) {
+        match (&mut self.0, other.0) {
+            (_, None) => {}
+            (None, other) => self.0 = other,
+            (Some(attrs), Some(other)) => attrs.merge(*other),
+        }
+    }
+}
+
+impl std::ops::Deref for DeclFunctionAttrs {
+    type Target = keel_ir::FunctionAttrs;
+    fn deref(&self) -> &keel_ir::FunctionAttrs {
+        static DEFAULT: std::sync::LazyLock<keel_ir::FunctionAttrs> =
+            std::sync::LazyLock::new(keel_ir::FunctionAttrs::default);
+        self.0.as_deref().unwrap_or(&DEFAULT)
+    }
+}
+
+impl std::ops::DerefMut for DeclFunctionAttrs {
+    fn deref_mut(&mut self) -> &mut keel_ir::FunctionAttrs {
+        self.0.get_or_insert_default()
+    }
+}
+
+impl PartialEq for DeclFunctionAttrs {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
 }
 
 impl Attrs {
@@ -2141,7 +2179,7 @@ impl<'a> Parser<'a> {
         if !attrs.function_attrs.contract.returns.is_empty() && !matches!(fty.ret, Ty::Ptr(_)) {
             return Err("malloc/returns_nonnull attributes require a pointer return type");
         }
-        let mut policies = attrs.function_attrs.clone();
+        let mut policies = keel_ir::FunctionAttrs::clone(&attrs.function_attrs);
         policies.align = attrs.aligned.map(|a| a as u32);
         policies.inlinehint |= spec.inline;
         policies.noreturn |= attrs.noreturn;
@@ -3625,7 +3663,7 @@ impl<'a> Parser<'a> {
         // do not acquire indirect-call contracts.
         if !matches!(d.ty, Ty::Func(_)) {
             d.attrs.returns_twice = false;
-            d.attrs.function_attrs = keel_ir::FunctionAttrs::default();
+            d.attrs.function_attrs = DeclFunctionAttrs::default();
         }
         Ok(d)
     }
@@ -3669,7 +3707,7 @@ impl<'a> Parser<'a> {
         if ambiguous_base
             && (attrs.returns_twice
                 || attrs.noreturn
-                || attrs.function_attrs != keel_ir::FunctionAttrs::default())
+                || *attrs.function_attrs != keel_ir::FunctionAttrs::default())
         {
             return Err(Error::new(
                 self.loc(),
