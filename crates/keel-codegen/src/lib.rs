@@ -634,7 +634,7 @@ pub(crate) fn validate_vector_width_per_function(
     maximum: impl Fn(&str, &keel_ir::FunctionAttrs) -> Result<u32, CodegenError>,
     byte_copy: impl Fn(Option<keel_ir::X86VectorAbi>, &keel_ir::Layout, bool) -> bool,
 ) -> Result<(), CodegenError> {
-    use keel_ir::InstData;
+    use keel_ir::{EntityRef, InstData};
     fn referenced(function: &keel_ir::Function) -> keel_ir::fxhash::FxHashSet<&str> {
         function
             .layout_insts()
@@ -728,6 +728,10 @@ pub(crate) fn validate_vector_width_per_function(
         // The value-type check below reports the last unsupported type, with
         // block parameters visited before instruction values. It shares this
         // walk, keeping the instructions' last type ahead of the parameters'.
+        // Every checked value is in the value table: without an unsupported
+        // type there, only the ABI types need the walk.
+        let check_values = (0..f.num_values())
+            .any(|i| unsupported(f.value_type(keel_ir::Value::new(i)), caller_maximum));
         let mut bad_value = None;
         let mut check_value = |value| {
             let ty = f.value_type(f.resolve(value));
@@ -738,8 +742,10 @@ pub(crate) fn validate_vector_width_per_function(
         for (_, i) in f.layout_insts() {
             let mut bad = None;
             let data = f.inst_data(i);
-            data.for_each_operand(&mut check_value);
-            f.inst_results(i).iter().copied().for_each(&mut check_value);
+            if check_values {
+                data.for_each_operand(&mut check_value);
+                f.inst_results(i).iter().copied().for_each(&mut check_value);
+            }
             let sig = match data {
                 InstData::Call { func, .. }
                 | InstData::ReturnCall { func, .. }
