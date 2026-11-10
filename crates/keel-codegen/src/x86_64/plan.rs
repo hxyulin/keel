@@ -488,7 +488,9 @@ pub(super) fn allocate(
     selection: &crate::select::Selection,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<(Allocation, HashSet<u32>), String> {
-    let is_call = |data: &InstData| is_call(func, data, pipeline.selector.x86_features());
+    // Read the features once: the allocator tests every instruction.
+    let features = pipeline.selector.x86_features();
+    let is_call = |data: &InstData| is_call(func, data, features);
     let returns_twice = |data: &InstData| lowering::returns_twice(func, data);
     let input = crate::regalloc::AllocationInput {
         func,
