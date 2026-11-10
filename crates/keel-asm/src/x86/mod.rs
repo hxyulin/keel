@@ -468,6 +468,11 @@ fn check_instruction_features(
     } else {
         instruction.required_features()
     };
+    // Most instructions require nothing. Comparing with NONE costs far less
+    // than `contains`, which packs both sets into bits.
+    if required == Features::NONE {
+        return Ok(());
+    }
     if !features.contains(required)
         || source_features.is_some_and(|features| !features.contains(required))
     {
