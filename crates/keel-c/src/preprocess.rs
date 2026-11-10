@@ -13,6 +13,9 @@ use std::sync::Arc;
 
 // The two constants are also used for controlled profiling ablations.
 const CACHE_HEADERS: bool = true;
+/// The main file is scanned and processed in chunks of at least this many
+/// tokens, each ending with a newline, so its tokens are never all live.
+const STREAM_CHUNK_TOKENS: usize = 4096;
 
 #[derive(Clone, Debug, Default)]
 pub struct PreprocessOptions {
@@ -123,7 +126,8 @@ impl PreprocessCache {
         path: &str,
         options: &PreprocessOptions,
     ) -> Result<String, Diagnostic> {
-        preprocess_inner::<false>(src, path, options, Some(self)).map(|(text, _)| text)
+        preprocess_inner::<false>(src, path, options, Some(self), STREAM_CHUNK_TOKENS)
+            .map(|(text, _)| text)
     }
 }
 
@@ -180,7 +184,7 @@ pub fn preprocess(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<String, Diagnostic> {
-    preprocess_inner::<false>(src, path, options, None).map(|(text, _)| text)
+    preprocess_inner::<false>(src, path, options, None, STREAM_CHUNK_TOKENS).map(|(text, _)| text)
 }
 
 /// Counters are collected only by the profiling entry point; the ordinary
@@ -205,13 +209,14 @@ pub fn preprocess_with_stats(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
-    preprocess_inner::<true>(src, path, options, None)
+    preprocess_inner::<true>(src, path, options, None, STREAM_CHUNK_TOKENS)
 }
 fn preprocess_inner<const TRACK: bool>(
     src: &str,
     path: &str,
     options: &PreprocessOptions,
     batch_cache: Option<&mut PreprocessCache>,
+    stream_chunk: usize,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
     if options.target == keel_ir::Target::Wasm32UnknownUnknown && options.sysroot.is_some() {
         return Err(Diagnostic {
@@ -233,6 +238,7 @@ fn preprocess_inner<const TRACK: bool>(
         stats: PreprocessStats::default(),
         batch_cache,
         options,
+        stream_chunk,
         in_condition: false,
         macros: HashMap::new(),
         expansion_scratch: Vec::new(),
@@ -297,6 +303,8 @@ struct Preprocessor<'a, const TRACK: bool> {
     sources: &'a typed_arena::Arena<FileSource>,
     token_buffers: &'a typed_arena::Arena<Box<[Token<'a>]>>,
     options: &'a PreprocessOptions,
+    /// [`STREAM_CHUNK_TOKENS`], or less in tests.
+    stream_chunk: usize,
     in_condition: bool,
     macros: HashMap<&'a str, &'a Macro<'a>>,
     expansion_scratch: Vec<Token<'a>>,
@@ -562,9 +570,10 @@ fn splice(src: &[u8]) -> Spliced<'_> {
 
 /// Advances only over consumed source spans. Sparse splice events translate
 /// logical token offsets back to physical offsets, including adjacent splices.
+#[derive(Default)]
 struct Locations<'a> {
     source: &'a [u8],
-    removed: &'a [(usize, usize)],
+    removed: Vec<(usize, usize)>,
     next: usize,
     skipped: usize,
     next_newline: Option<usize>,
@@ -627,141 +636,185 @@ fn punctuation_len(bytes: &[u8]) -> usize {
 
 /// Phase 2 splicing precedes phase 3 comments and preprocessing tokens.
 fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a>>, Diagnostic> {
-    let input = splice(src.as_bytes());
-    // Phase 2 removes only complete ASCII sequences, preserving UTF-8.
-    // Validate the spliced buffer once rather than validating every token.
-    let text: &'a str = match &input.bytes {
-        Cow::Borrowed(_) => src,
-        Cow::Owned(bytes) => arena.alloc_str(std::str::from_utf8(bytes).unwrap()),
-    };
-    let b = text.as_bytes();
-    let mut locations = Locations {
-        source: src.as_bytes(),
-        removed: &input.removed,
-        next: 0,
-        skipped: 0,
-        next_newline: find_byte(b'\n', src.as_bytes()),
-        line: 1,
-        line_start: 0,
-    };
+    let mut scanner = Scanner::new(src, file, arena);
     let mut out = Vec::new();
-    let (mut i, mut space) = (0, false);
-    while i < b.len() {
-        // Whitespace needs no token location. Advance the cursor once for the
-        // entire span; physical newlines remain explicit preprocessing tokens.
-        if b[i] != b'\n' && b[i].is_ascii_whitespace() {
-            i += 1;
-            while i < b.len() && b[i] != b'\n' && b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            space = true;
-            continue;
-        }
-        let start = i;
-        let (line, col) = locations.at(i);
-        let token = |text: &'a str, space| Token {
-            text,
-            space,
-            raw_spelling: None,
-            file,
-            line,
-            col,
-            hide: &[],
-        };
-        if b[i] == b'\n' {
-            out.push(token("\n", true));
-            i += 1;
-            space = true;
-            continue;
-        }
-        if b.get(i..i + 2) == Some(b"//") {
-            i += find_byte(b'\n', &b[i..]).unwrap_or(b.len() - i);
-            space = true;
-            continue;
-        }
-        if b.get(i..i + 2) == Some(b"/*") {
-            let end = find_comment_end(&b[i + 2..])
-                .map(|offset| i + 2 + offset)
-                .ok_or_else(|| token("", false).error("unterminated comment"))?;
-            i += 2;
-            while let Some(offset) = find_byte(b'\n', &b[i..end]) {
-                i += offset;
-                let (line, col) = locations.at(i);
-                out.push(Token {
-                    line,
-                    col,
-                    ..token("\n", true)
-                });
-                i += 1;
-            }
-            i = end + 2;
-            space = true;
-            continue;
-        }
-        let prefix = if b.get(i..i + 2) == Some(b"u8") && matches!(b.get(i + 2), Some(b'"' | b'\''))
-        {
-            2
-        } else if matches!(b[i], b'L' | b'u' | b'U') && matches!(b.get(i + 1), Some(b'"' | b'\'')) {
-            1
-        } else {
-            0
-        };
-        if matches!(b.get(i + prefix), Some(b'"' | b'\'')) {
-            i += prefix;
-            let q = b[i];
-            i += 1;
-            loop {
-                i += find_literal_end(q, &b[i.min(b.len())..]).unwrap_or(b.len() - i.min(b.len()));
-                match b.get(i) {
-                    Some(c) if *c == q => break,
-                    Some(b'\\') => i += 2,
-                    _ => return Err(token("", false).error("unterminated literal")),
-                }
-                if i > b.len() {
-                    return Err(token("", false).error("unterminated literal"));
-                }
-            }
-            i += 1;
-        } else if b[i].is_ascii_digit()
-            || (b[i] == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))
-        {
-            i += 1;
-            while i < b.len() {
-                if BYTE_CLASS[b[i] as usize] & NUMBER_CONTINUE != 0
-                    || (matches!(b[i], b'+' | b'-')
-                        && matches!(b[i - 1], b'e' | b'E' | b'p' | b'P'))
-                {
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-        } else if BYTE_CLASS[b[i] as usize] & IDENT_START != 0 {
-            i += 1;
-            while i < b.len() && BYTE_CLASS[b[i] as usize] & IDENT_CONTINUE != 0 {
-                i += 1;
-            }
-        } else {
-            i += punctuation_len(&b[i..]);
-        }
-        let raw = text
-            .get(start..i)
-            .ok_or_else(|| token("", false).error("invalid UTF-8 token"))?;
-        let normalized = match raw {
-            "%:%:" => Some("##"),
-            "%:" => Some("#"),
-            "<:" => Some("["),
-            ":>" => Some("]"),
-            "<%" => Some("{"),
-            "%>" => Some("}"),
-            _ => None,
-        };
-        let mut t = token(normalized.unwrap_or(raw), space);
-        t.raw_spelling = normalized.map(|_| raw);
-        out.push(t);
-        space = false;
-    }
+    scanner.fill(&mut out, usize::MAX)?;
     Ok(out)
+}
+
+/// Scans one file incrementally. Each `fill` resumes where the previous one
+/// stopped, so a file's tokens can be processed in line-aligned chunks.
+struct Scanner<'a> {
+    text: &'a str,
+    file: &'a str,
+    locations: Locations<'a>,
+    i: usize,
+    space: bool,
+}
+
+impl<'a> Scanner<'a> {
+    fn new(src: &'a str, file: &'a str, arena: &'a Bump) -> Self {
+        let input = splice(src.as_bytes());
+        // Phase 2 removes only complete ASCII sequences, preserving UTF-8.
+        // Validate the spliced buffer once rather than validating every token.
+        let text: &'a str = match &input.bytes {
+            Cow::Borrowed(_) => src,
+            Cow::Owned(bytes) => arena.alloc_str(std::str::from_utf8(bytes).unwrap()),
+        };
+        Self {
+            text,
+            file,
+            locations: Locations {
+                source: src.as_bytes(),
+                removed: input.removed,
+                next: 0,
+                skipped: 0,
+                next_newline: find_byte(b'\n', src.as_bytes()),
+                line: 1,
+                line_start: 0,
+            },
+            i: 0,
+            space: false,
+        }
+    }
+
+    /// Appends tokens to `out`, stopping after a physical newline once `out`
+    /// holds at least `min` tokens. Returns whether the input has ended.
+    fn fill(&mut self, out: &mut Vec<Token<'a>>, min: usize) -> Result<bool, Diagnostic> {
+        let (text, file) = (self.text, self.file);
+        let b = text.as_bytes();
+        // Locals keep the cursor in registers; an error ends the scan.
+        let mut locations = std::mem::take(&mut self.locations);
+        let (mut i, mut space) = (self.i, self.space);
+        while i < b.len() {
+            // Whitespace needs no token location. Advance the cursor once for the
+            // entire span; physical newlines remain explicit preprocessing tokens.
+            if b[i] != b'\n' && b[i].is_ascii_whitespace() {
+                i += 1;
+                while i < b.len() && b[i] != b'\n' && b[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                space = true;
+                continue;
+            }
+            let start = i;
+            let (line, col) = locations.at(i);
+            let token = |text: &'a str, space| Token {
+                text,
+                space,
+                raw_spelling: None,
+                file,
+                line,
+                col,
+                hide: &[],
+            };
+            if b[i] == b'\n' {
+                out.push(token("\n", true));
+                i += 1;
+                space = true;
+                if out.len() >= min {
+                    self.locations = locations;
+                    self.i = i;
+                    self.space = space;
+                    return Ok(false);
+                }
+                continue;
+            }
+            if b.get(i..i + 2) == Some(b"//") {
+                i += find_byte(b'\n', &b[i..]).unwrap_or(b.len() - i);
+                space = true;
+                continue;
+            }
+            if b.get(i..i + 2) == Some(b"/*") {
+                let end = find_comment_end(&b[i + 2..])
+                    .map(|offset| i + 2 + offset)
+                    .ok_or_else(|| token("", false).error("unterminated comment"))?;
+                i += 2;
+                while let Some(offset) = find_byte(b'\n', &b[i..end]) {
+                    i += offset;
+                    let (line, col) = locations.at(i);
+                    out.push(Token {
+                        line,
+                        col,
+                        ..token("\n", true)
+                    });
+                    i += 1;
+                }
+                i = end + 2;
+                space = true;
+                continue;
+            }
+            let prefix =
+                if b.get(i..i + 2) == Some(b"u8") && matches!(b.get(i + 2), Some(b'"' | b'\'')) {
+                    2
+                } else if matches!(b[i], b'L' | b'u' | b'U')
+                    && matches!(b.get(i + 1), Some(b'"' | b'\''))
+                {
+                    1
+                } else {
+                    0
+                };
+            if matches!(b.get(i + prefix), Some(b'"' | b'\'')) {
+                i += prefix;
+                let q = b[i];
+                i += 1;
+                loop {
+                    i += find_literal_end(q, &b[i.min(b.len())..])
+                        .unwrap_or(b.len() - i.min(b.len()));
+                    match b.get(i) {
+                        Some(c) if *c == q => break,
+                        Some(b'\\') => i += 2,
+                        _ => return Err(token("", false).error("unterminated literal")),
+                    }
+                    if i > b.len() {
+                        return Err(token("", false).error("unterminated literal"));
+                    }
+                }
+                i += 1;
+            } else if b[i].is_ascii_digit()
+                || (b[i] == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))
+            {
+                i += 1;
+                while i < b.len() {
+                    if BYTE_CLASS[b[i] as usize] & NUMBER_CONTINUE != 0
+                        || (matches!(b[i], b'+' | b'-')
+                            && matches!(b[i - 1], b'e' | b'E' | b'p' | b'P'))
+                    {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+            } else if BYTE_CLASS[b[i] as usize] & IDENT_START != 0 {
+                i += 1;
+                while i < b.len() && BYTE_CLASS[b[i] as usize] & IDENT_CONTINUE != 0 {
+                    i += 1;
+                }
+            } else {
+                i += punctuation_len(&b[i..]);
+            }
+            let raw = text
+                .get(start..i)
+                .ok_or_else(|| token("", false).error("invalid UTF-8 token"))?;
+            let normalized = match raw {
+                "%:%:" => Some("##"),
+                "%:" => Some("#"),
+                "<:" => Some("["),
+                ":>" => Some("]"),
+                "<%" => Some("{"),
+                "%>" => Some("}"),
+                _ => None,
+            };
+            let mut t = token(normalized.unwrap_or(raw), space);
+            t.raw_spelling = normalized.map(|_| raw);
+            out.push(t);
+            space = false;
+        }
+        self.locations = locations;
+        self.i = i;
+        self.space = space;
+        Ok(true)
+    }
 }
 
 impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
@@ -972,16 +1025,22 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         }
         // The caller-provided top-level text may differ from the on-disk file.
         // Only disk/embedded includes participate in the lexical file cache.
-        let key = (canonical.clone(), embedded);
-        let cached = if depth == 0 || !CACHE_HEADERS {
+        if depth == 0 || !CACHE_HEADERS {
             if TRACK {
                 self.stats.scanned_files += 1;
             }
-            CachedTokens {
-                tokens: self.scan_file(src, path)?,
-                guard: None,
+            self.include_stack.push((path, origin));
+            let mut state = FileState::new(path, canonical, depth);
+            let mut scanner = Scanner::new(src, path, self.arena);
+            let mut chunk = Vec::new();
+            self.stream(&mut scanner, &mut chunk, &mut state)?;
+            if TRACK {
+                self.stats.token_bytes += chunk.capacity() * std::mem::size_of::<Token>();
             }
-        } else if let Some(&cached) = self.scanned.get(&key) {
+            return self.finish_file(state);
+        }
+        let key = (canonical.clone(), embedded);
+        let cached = if let Some(&cached) = self.scanned.get(&key) {
             if TRACK {
                 self.stats.token_cache_hits += 1;
             }
@@ -1028,158 +1087,203 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return Ok(());
         }
         self.include_stack.push((path, origin));
-        let ts = cached.tokens;
-        let mut pending = Vec::new();
-        let mut stack: Vec<Conditional> = Vec::new();
-        let mut logical_file = path;
-        let mut line_delta: i64 = 0;
-        for physical in ts.split(|t| t.text == "\n") {
-            let active = stack.last().is_none_or(|c| c.active);
-            if !physical.first().is_some_and(|t| t.text == "#") {
-                if active {
-                    let start = pending.len();
-                    pending.extend_from_slice(physical);
-                    let added = &mut pending[start..];
-                    if line_delta != 0 || added.first().is_some_and(|t| t.file != logical_file) {
-                        for t in added.iter_mut() {
-                            t.file = logical_file;
-                            t.line = (t.line as i64 + line_delta) as u32;
-                        }
-                    }
-                    if let Some(first) = added.first_mut() {
-                        first.space = true;
+        let mut state = FileState::new(path, canonical, depth);
+        for physical in cached.tokens.split(|t| t.text == "\n") {
+            self.physical_line(physical, &mut state)?;
+        }
+        self.finish_file(state)
+    }
+
+    /// Processes `scanner`'s tokens in line-aligned chunks of `chunk`.
+    fn stream(
+        &mut self,
+        scanner: &mut Scanner<'a>,
+        chunk: &mut Vec<Token<'a>>,
+        state: &mut FileState<'a>,
+    ) -> Result<(), Diagnostic> {
+        loop {
+            chunk.clear();
+            let done = scanner.fill(chunk, self.stream_chunk)?;
+            let processed = chunk
+                .split(|t| t.text == "\n")
+                .try_for_each(|physical| self.physical_line(physical, state));
+            if let Err(error) = processed {
+                // Report a lexical error anywhere in the file before any
+                // directive error, as when the whole file was scanned first.
+                loop {
+                    chunk.clear();
+                    if scanner.fill(chunk, self.stream_chunk)? {
+                        return Err(error);
                     }
                 }
-                continue;
             }
-            self.flush(&mut pending)?;
-            // Borrow directive lines unless #line or a cached path alias needs
-            // new locations. Inactive ordinary lines require no token copies.
-            let physical_line = physical.get(1).map_or(0, |t| t.line);
-            let mut remapped;
-            let line =
-                if line_delta != 0 || physical.first().is_some_and(|t| t.file != logical_file) {
-                    remapped = physical.to_vec();
-                    for t in &mut remapped {
-                        t.file = logical_file;
-                        t.line = (t.line as i64 + line_delta) as u32;
+            if done {
+                return Ok(());
+            }
+        }
+    }
+
+    fn finish_file(&mut self, mut state: FileState<'a>) -> Result<(), Diagnostic> {
+        if let Some(c) = state.stack.last() {
+            return Err(c.start.error("unterminated conditional directive"));
+        }
+        self.flush(&mut state.pending)?;
+        self.include_stack.pop();
+        Ok(())
+    }
+
+    /// Processes one physical line: text joins the pending run, and a
+    /// directive first expands the pending run.
+    fn physical_line(
+        &mut self,
+        physical: &[Token<'a>],
+        state: &mut FileState<'a>,
+    ) -> Result<(), Diagnostic> {
+        let active = state.stack.last().is_none_or(|c| c.active);
+        if !physical.first().is_some_and(|t| t.text == "#") {
+            if active {
+                let start = state.pending.len();
+                state.pending.extend_from_slice(physical);
+                let added = &mut state.pending[start..];
+                if state.line_delta != 0
+                    || added.first().is_some_and(|t| t.file != state.logical_file)
+                {
+                    for t in added.iter_mut() {
+                        t.file = state.logical_file;
+                        t.line = (t.line as i64 + state.line_delta) as u32;
                     }
-                    remapped.as_slice()
+                }
+                if let Some(first) = added.first_mut() {
+                    first.space = true;
+                }
+            }
+            return Ok(());
+        }
+        self.flush(&mut state.pending)?;
+        // Borrow directive lines unless #line or a cached path alias needs
+        // new locations. Inactive ordinary lines require no token copies.
+        let physical_line = physical.get(1).map_or(0, |t| t.line);
+        let mut remapped;
+        let line = if state.line_delta != 0
+            || physical
+                .first()
+                .is_some_and(|t| t.file != state.logical_file)
+        {
+            remapped = physical.to_vec();
+            for t in &mut remapped {
+                t.file = state.logical_file;
+                t.line = (t.line as i64 + state.line_delta) as u32;
+            }
+            remapped.as_slice()
+        } else {
+            physical
+        };
+        let Some(directive) = line.get(1) else {
+            return Ok(());
+        };
+        let args = &line[2..];
+        match directive.text {
+            "if" | "ifdef" | "ifndef" => {
+                let yes = if !active {
+                    false
+                } else if directive.text == "if" {
+                    self.condition(args)?
                 } else {
-                    physical
-                };
-            let Some(directive) = line.get(1) else {
-                continue;
-            };
-            let args = &line[2..];
-            match directive.text {
-                "if" | "ifdef" | "ifndef" => {
-                    let yes = if !active {
-                        false
-                    } else if directive.text == "if" {
-                        self.condition(args)?
-                    } else {
-                        if args.len() != 1 || !ident(args[0].text) {
-                            return Err(directive.error("expected one macro name"));
-                        }
-                        self.is_defined(args[0].text) != (directive.text == "ifndef")
-                    };
-                    stack.push(Conditional {
-                        parent: active,
-                        active: active && yes,
-                        taken: yes,
-                        otherwise: false,
-                        start: *directive,
-                    });
-                }
-                "elif" | "else" => {
-                    let Some(c) = stack.last_mut() else {
-                        return Err(directive.error("conditional without #if"));
-                    };
-                    if c.otherwise {
-                        return Err(directive.error("conditional after #else"));
-                    }
-                    let yes = if directive.text == "else" {
-                        c.otherwise = true;
-                        true
-                    } else if c.parent && !c.taken {
-                        self.condition(args)?
-                    } else {
-                        false
-                    };
-                    c.active = c.parent && !c.taken && yes;
-                    c.taken |= c.active;
-                }
-                "endif" => {
-                    if stack.pop().is_none() {
-                        return Err(directive.error("#endif without #if"));
-                    }
-                }
-                _ if !active => {}
-                "define" => self.define(args)?,
-                "undef" => {
                     if args.len() != 1 || !ident(args[0].text) {
                         return Err(directive.error("expected one macro name"));
                     }
-                    self.macros.remove(args[0].text);
-                    self.undefined.insert(args[0].text);
+                    self.is_defined(args[0].text) != (directive.text == "ifndef")
+                };
+                state.stack.push(Conditional {
+                    parent: active,
+                    active: active && yes,
+                    taken: yes,
+                    otherwise: false,
+                    start: *directive,
+                });
+            }
+            "elif" | "else" => {
+                let Some(c) = state.stack.last_mut() else {
+                    return Err(directive.error("conditional without #if"));
+                };
+                if c.otherwise {
+                    return Err(directive.error("conditional after #else"));
                 }
-                "include" | "include_next" => {
-                    let expanded = if args
-                        .first()
-                        .is_some_and(|t| t.text == "<" || t.text.starts_with('"'))
-                    {
-                        args.to_vec()
-                    } else {
-                        self.expand(args.to_vec(), 0)?
-                    };
-                    let (name, quoted) =
-                        header(&expanded).ok_or_else(|| directive.error("expected header name"))?;
-                    let include = self
-                        .find_header(&name, quoted, directive.text == "include_next")
-                        .ok_or_else(|| directive.error(format!("header not found: {name}")))?;
-                    self.include_file(include, depth + 1, directive)?;
-                }
-                "pragma" => {
-                    if args.first().is_some_and(|t| t.text == "once") {
-                        self.once.insert(canonical.clone());
-                    } else {
-                        self.output.push_str("#pragma ");
-                        self.output.push_str(&spelling(args));
-                        self.output.push('\n');
-                        self.output_next = None;
-                    }
-                }
-                "line" => {
-                    let expanded = self.expand(args.to_vec(), 0)?;
-                    let n = expanded
-                        .first()
-                        .and_then(|t| t.text.parse::<u32>().ok())
-                        .filter(|&n| n > 0)
-                        .ok_or_else(|| directive.error("invalid #line number"))?;
-                    // The directive's physical line, before any previous #line adjustment.
-                    line_delta = n as i64 - physical_line as i64 - 1;
-                    if let Some(t) = expanded.get(1) {
-                        logical_file = self.arena.alloc_str(
-                            &unquote(t.text).ok_or_else(|| t.error("expected #line file name"))?,
-                        );
-                    }
-                }
-                "error" => return Err(directive.error(spelling(args))),
-                "warning" => {} // Warnings are currently non-fatal; no warning sink yet.
-                _ => {
-                    return Err(directive.error(format!(
-                        "unsupported preprocessing directive #{}",
-                        directive.text
-                    )));
+                let yes = if directive.text == "else" {
+                    c.otherwise = true;
+                    true
+                } else if c.parent && !c.taken {
+                    self.condition(args)?
+                } else {
+                    false
+                };
+                c.active = c.parent && !c.taken && yes;
+                c.taken |= c.active;
+            }
+            "endif" => {
+                if state.stack.pop().is_none() {
+                    return Err(directive.error("#endif without #if"));
                 }
             }
+            _ if !active => {}
+            "define" => self.define(args)?,
+            "undef" => {
+                if args.len() != 1 || !ident(args[0].text) {
+                    return Err(directive.error("expected one macro name"));
+                }
+                self.macros.remove(args[0].text);
+                self.undefined.insert(args[0].text);
+            }
+            "include" | "include_next" => {
+                let expanded = if args
+                    .first()
+                    .is_some_and(|t| t.text == "<" || t.text.starts_with('"'))
+                {
+                    args.to_vec()
+                } else {
+                    self.expand(args.to_vec(), 0)?
+                };
+                let (name, quoted) =
+                    header(&expanded).ok_or_else(|| directive.error("expected header name"))?;
+                let include = self
+                    .find_header(&name, quoted, directive.text == "include_next")
+                    .ok_or_else(|| directive.error(format!("header not found: {name}")))?;
+                self.include_file(include, state.depth + 1, directive)?;
+            }
+            "pragma" => {
+                if args.first().is_some_and(|t| t.text == "once") {
+                    self.once.insert(state.canonical.clone());
+                } else {
+                    self.output.push_str("#pragma ");
+                    self.output.push_str(&spelling(args));
+                    self.output.push('\n');
+                    self.output_next = None;
+                }
+            }
+            "line" => {
+                let expanded = self.expand(args.to_vec(), 0)?;
+                let n = expanded
+                    .first()
+                    .and_then(|t| t.text.parse::<u32>().ok())
+                    .filter(|&n| n > 0)
+                    .ok_or_else(|| directive.error("invalid #line number"))?;
+                // The directive's physical line, before any previous #line adjustment.
+                state.line_delta = n as i64 - physical_line as i64 - 1;
+                if let Some(t) = expanded.get(1) {
+                    state.logical_file = self.arena.alloc_str(
+                        &unquote(t.text).ok_or_else(|| t.error("expected #line file name"))?,
+                    );
+                }
+            }
+            "error" => return Err(directive.error(spelling(args))),
+            "warning" => {} // Warnings are currently non-fatal; no warning sink yet.
+            _ => {
+                return Err(directive.error(format!(
+                    "unsupported preprocessing directive #{}",
+                    directive.text
+                )));
+            }
         }
-        if let Some(c) = stack.last() {
-            return Err(c.start.error("unterminated conditional directive"));
-        }
-        self.flush(&mut pending)?;
-        self.include_stack.pop();
         Ok(())
     }
     fn scan_file(&mut self, src: &'a str, path: &'a str) -> Result<&'a [Token<'a>], Diagnostic> {
@@ -1400,6 +1504,27 @@ struct Include {
     path: PathBuf,
     origin: Option<usize>,
     contents: Option<&'static str>,
+}
+/// The state of one file being processed.
+struct FileState<'a> {
+    pending: Vec<Token<'a>>,
+    stack: Vec<Conditional<'a>>,
+    logical_file: &'a str,
+    line_delta: i64,
+    canonical: PathBuf,
+    depth: usize,
+}
+impl<'a> FileState<'a> {
+    fn new(path: &'a str, canonical: PathBuf, depth: usize) -> Self {
+        Self {
+            pending: Vec::new(),
+            stack: Vec::new(),
+            logical_file: path,
+            line_delta: 0,
+            canonical,
+            depth,
+        }
+    }
 }
 struct Conditional<'a> {
     parent: bool,
@@ -2139,7 +2264,7 @@ mod scanner_tests {
             );
             let mut locations = Locations {
                 source: bytes,
-                removed: &input.removed,
+                removed: input.removed,
                 next: 0,
                 skipped: 0,
                 next_newline: find_byte(b'\n', bytes),
@@ -2178,6 +2303,57 @@ mod scanner_tests {
                 source
             );
         }
+    }
+
+    fn chunked(src: &str, chunk: usize) -> String {
+        match preprocess_inner::<false>(src, "chunk.c", &PreprocessOptions::default(), None, chunk)
+        {
+            Ok((text, _)) => text,
+            Err(e) => format!("error {}:{}:{}: {}", e.file, e.line, e.col, e.message),
+        }
+    }
+
+    /// Small chunks put a boundary after every line; one unbounded chunk
+    /// scans the whole file first. Output and diagnostics must agree.
+    #[test]
+    fn streamed_main_file_matches_whole_file_scan() {
+        for src in [
+            "",
+            "\n",
+            "a",
+            "a\r\nb\r\n",
+            // Splices inside tokens, directives and conditions.
+            "#define A 1 \\\n + 2\nA __LINE__\nin\\\nt x = A;\n#if A == \\\n3\nyes __LINE__\n#endif\n",
+            "x\\\n",
+            // Comments that span chunk boundaries.
+            "int a; /* one\ntwo\nthree */ int b; __LINE__\n/*\n*/#define X 4\nX __LINE__\n// c \\\nstill comment\nX\n",
+            // Conditionals whose branches span chunks.
+            "#if 0\nno\n#if 1\nnested\n#endif\n#elif 1\nyes __LINE__\n#else\nno\n#endif\n#ifdef X\nno\n#endif\n",
+            // Directives on a last line without a newline.
+            "#define X 1\nX\n#undef X\nX\n#define Y 2",
+            "#if 1\nint a;\n#endif",
+            "int x;\n#pragma pack(1)",
+            // Macro invocations and `#line` state across chunks.
+            "#define F(a, b) a + b\nF(1,\n2) F\n(3,\n\n4)\n__LINE__\n",
+            "#line 100 \"v.c\"\n__LINE__ __FILE__\n#line 7\n__LINE__\nlast\n",
+            "int a;\n\n\n\n\n\n\n\n\n\n\nint b;\n",
+            // Errors keep their locations and lexical errors stay first.
+            "#if 1\nint a;\n",
+            "#else\n",
+            "#error stop\n/* unterminated",
+            "#if 1\n#endif\n\"unterminated",
+            "int a;\n#include \"missing-header.h\"\n'x",
+            "#include \"missing-header.h\"\n",
+        ] {
+            let whole = chunked(src, usize::MAX);
+            for chunk in [1, 2, 3, 7] {
+                assert_eq!(chunked(src, chunk), whole, "{src:?} in chunks of {chunk}");
+            }
+        }
+        assert_eq!(
+            chunked("#error stop\nok\n/* unterminated", 1),
+            "error chunk.c:3:1: unterminated comment"
+        );
     }
 
     #[test]

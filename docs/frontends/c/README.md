@@ -56,6 +56,11 @@ supported, as are `#line`, `#error`, pragma forwarding, `_Pragma`, `__FILE__`,
 and each expansion has a token and work limit. `-D` and `-U` apply in
 command-line order after the predefined macros.
 
+The preprocessor scans the main file in chunks of about 4,096 tokens that end
+at a line break, and processes each chunk before it scans the next. The main
+file's tokens are therefore never all in memory. A lexical error anywhere in
+the main file is still reported before any directive error.
+
 For raw-source batches, `PreprocessCache::preprocess` and
 `BatchCompiler::compile_raw` reuse caller-owned header contents and unexpanded
 lexical tokens. `keel cc -flto --reuse-header-lexing a.c b.c` enables the same
