@@ -1,15 +1,12 @@
 use keel_link::{Dylib, Input, Options};
-use std::{
-    collections::BTreeSet,
-    io::{self, Cursor, Seek, SeekFrom, Write},
-};
+use std::io::{self, Cursor, Seek, SeekFrom, Write};
 
 fn options(debug: bool) -> Options {
     Options {
         dylibs: vec![Dylib {
             install_name: "/usr/lib/libSystem.B.dylib".into(),
-            exports: BTreeSet::new(),
-            weak_exports: BTreeSet::new(),
+            exports: Default::default(),
+            weak_exports: Default::default(),
         }],
         debug_directory: debug.then(|| std::env::temp_dir().join("keel-file-output-debug")),
         ..Options::default()

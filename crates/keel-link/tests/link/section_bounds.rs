@@ -1,7 +1,6 @@
 //! Raw assembler coverage deliberately independent of C section attributes.
 use keel_link::{Dylib, Input, Options, elf};
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::collections::BTreeSet;
 
 fn elf_obj(s: &str) -> Vec<u8> {
     keel_asm::x86::assemble_object(s).unwrap()
@@ -27,8 +26,8 @@ fn macho_link(objects: &[Vec<u8>]) -> Result<Vec<u8>, keel_link::Error> {
         Options {
             dylibs: vec![Dylib {
                 install_name: "/usr/lib/libSystem.B.dylib".into(),
-                exports: BTreeSet::new(),
-                weak_exports: BTreeSet::new(),
+                exports: Default::default(),
+                weak_exports: Default::default(),
             }],
             ..Default::default()
         },
@@ -286,8 +285,8 @@ fn native_arm64_and_apple_execute_same_registration_objects() {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: BTreeSet::new(),
-                    weak_exports: BTreeSet::new(),
+                    exports: Default::default(),
+                    weak_exports: Default::default(),
                 }],
                 ..Default::default()
             },
@@ -502,8 +501,8 @@ fn macho_selected_dylib_definition_precedes_boundary_synthesis() {
         Options {
             dylibs: vec![Dylib {
                 install_name: "/usr/lib/libSystem.B.dylib".into(),
-                exports: BTreeSet::from(["section$start$__DATA$registry".into()]),
-                weak_exports: BTreeSet::new(),
+                exports: ["section$start$__DATA$registry"].into_iter().collect(),
+                weak_exports: Default::default(),
             }],
             ..Default::default()
         },

@@ -18,7 +18,7 @@ use read::{Object, Symbol};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use symbols::{GlobalId, Globals};
-pub use tbd::Dylib;
+pub use tbd::{Dylib, SymbolSet};
 
 /// A link failure. The message names the input, section or symbol involved.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -746,7 +746,7 @@ impl Linker<'_> {
                     .weak_exports
                     .iter()
                     .filter(|n| matches!(self.globals.get(n), Some(Target::Definition(_, _))))
-                    .cloned(),
+                    .map(str::to_owned),
             );
         }
         // Private extern definitions coalesce statically, never across images.

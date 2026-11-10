@@ -1672,8 +1672,8 @@ mod tests {
                 Options {
                     dylibs: vec![Dylib {
                         install_name: "/usr/lib/libSystem.B.dylib".into(),
-                        exports: BTreeSet::new(),
-                        weak_exports: BTreeSet::new(),
+                        exports: Default::default(),
+                        weak_exports: Default::default(),
                     }],
                     ..Options::default()
                 },
@@ -1773,8 +1773,8 @@ mod tests {
                 Options {
                     dylibs: vec![Dylib {
                         install_name: "/usr/lib/libSystem.B.dylib".into(),
-                        exports: BTreeSet::new(),
-                        weak_exports: BTreeSet::new(),
+                        exports: Default::default(),
+                        weak_exports: Default::default(),
                     }],
                     ..Options::default()
                 },
@@ -1821,8 +1821,8 @@ mod tests {
                 dead_strip: true,
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: BTreeSet::from(["_puts".into()]),
-                    weak_exports: BTreeSet::new(),
+                    exports: ["_puts"].into_iter().collect(),
+                    weak_exports: Default::default(),
                 }],
                 ..Options::default()
             };
@@ -1887,8 +1887,8 @@ mod tests {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: BTreeSet::from(["_puts".into()]),
-                    weak_exports: BTreeSet::new(),
+                    exports: ["_puts"].into_iter().collect(),
+                    weak_exports: Default::default(),
                 }],
                 ..Default::default()
             },
@@ -1954,8 +1954,8 @@ mod tests {
                 dead_strip: true,
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: BTreeSet::new(),
-                    weak_exports: BTreeSet::new(),
+                    exports: Default::default(),
+                    weak_exports: Default::default(),
                 }],
                 ..Default::default()
             },

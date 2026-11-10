@@ -233,7 +233,9 @@ Objects must be thin little-endian arm64 `MH_OBJECT` files, as produced by
 ## Dylib interfaces
 
 Libraries are read from `usr/lib/libNAME.tbd` in the SDK. Only TAPI v4 is
-accepted. YAML is parsed structurally; only arm64-macos and compatible
+accepted, in the YAML subset TAPI writes: block and flow collections, plain and
+quoted scalars and comments. Anchors, aliases, block scalars, multi-line
+scalars and escapes are rejected. Only arm64-macos and compatible
 arm64e-macos groups are admitted, and embedded or external re-exported libraries
 are traversed. Runtime paths come from install names, and alias interfaces are
 deduplicated. Unknown imports fail before any output is written. TAPI

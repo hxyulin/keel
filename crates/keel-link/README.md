@@ -40,7 +40,7 @@ links (`-r`) take `relocatable.rs`.
 | `gc.rs` | Mach-O dead-section collection |
 | `symbols.rs` | Stable global IDs and ordered selected definitions |
 | `parallel.rs` | Ordered scoped workers for independent Mach-O work |
-| `tbd.rs` | Bounded TAPI v4 dylib interfaces |
+| `tbd.rs`, `tbd/yaml.rs` | Bounded TAPI v4 dylib interfaces and their YAML subset |
 | `unwind.rs` | `__unwind_info` from compact unwind entries |
 | `write.rs` | Mach-O image writing and relocation |
 | `sign.rs` | Ad-hoc code signatures |

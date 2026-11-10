@@ -10,8 +10,8 @@ fn options(gc: bool) -> Options {
         dead_strip: gc,
         dylibs: vec![Dylib {
             install_name: "/usr/lib/libSystem.B.dylib".into(),
-            exports: BTreeSet::from(["_puts".into(), "_p0".into()]),
-            weak_exports: BTreeSet::new(),
+            exports: ["_puts", "_p0"].into_iter().collect(),
+            weak_exports: Default::default(),
         }],
         ..Default::default()
     }

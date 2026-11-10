@@ -6,8 +6,8 @@ fn options() -> Options {
     Options {
         dylibs: vec![Dylib {
             install_name: "/usr/lib/libSystem.B.dylib".into(),
-            exports: BTreeSet::new(),
-            weak_exports: BTreeSet::new(),
+            exports: Default::default(),
+            weak_exports: Default::default(),
         }],
         ..Options::default()
     }

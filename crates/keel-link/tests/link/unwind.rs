@@ -1,6 +1,5 @@
 use keel_link::{Dylib, Input, Options};
 use object::{Object, ObjectSection, ObjectSymbol};
-use std::collections::BTreeSet;
 
 fn link(source: &str) -> keel_link::Result<keel_link::Executable> {
     let bytes = keel_asm::assemble_object(source).unwrap();
@@ -12,8 +11,8 @@ fn link(source: &str) -> keel_link::Result<keel_link::Executable> {
         Options {
             dylibs: vec![Dylib {
                 install_name: "/usr/lib/libSystem.B.dylib".into(),
-                exports: BTreeSet::from(["_p0".into(), "_p1".into(), "_p2".into()]),
-                weak_exports: BTreeSet::new(),
+                exports: ["_p0", "_p1", "_p2"].into_iter().collect(),
+                weak_exports: Default::default(),
             }],
             ..Options::default()
         },
@@ -242,8 +241,8 @@ fn weak_copies_keep_their_own_dwarf_unwind_entries() {
                         dead_strip,
                         dylibs: vec![Dylib {
                             install_name: "/usr/lib/libSystem.B.dylib".into(),
-                            exports: BTreeSet::new(),
-                            weak_exports: BTreeSet::new(),
+                            exports: Default::default(),
+                            weak_exports: Default::default(),
                         }],
                         ..Options::default()
                     },
@@ -311,8 +310,8 @@ fn tlv_metadata_replans_when_an_untracked_tls_template_moves() {
         Options {
             dylibs: vec![Dylib {
                 install_name: "/usr/lib/libSystem.B.dylib".into(),
-                exports: BTreeSet::new(),
-                weak_exports: BTreeSet::new(),
+                exports: Default::default(),
+                weak_exports: Default::default(),
             }],
             ..Options::default()
         },

@@ -600,8 +600,8 @@ mod tests {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: std::collections::BTreeSet::from(["_p0".into()]),
-                    weak_exports: std::collections::BTreeSet::new(),
+                    exports: ["_p0"].into_iter().collect(),
+                    weak_exports: Default::default(),
                 }],
                 ..Options::default()
             },
@@ -657,8 +657,8 @@ mod tests {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: std::collections::BTreeSet::new(),
-                    weak_exports: std::collections::BTreeSet::new(),
+                    exports: Default::default(),
+                    weak_exports: Default::default(),
                 }],
                 ..Options::default()
             },
@@ -713,8 +713,8 @@ mod tests {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: BTreeSet::new(),
-                    weak_exports: BTreeSet::new(),
+                    exports: Default::default(),
+                    weak_exports: Default::default(),
                 }],
                 ..Options::default()
             },
@@ -779,8 +779,8 @@ mod tests {
             Options {
                 dylibs: vec![Dylib {
                     install_name: "/usr/lib/libSystem.B.dylib".into(),
-                    exports: std::collections::BTreeSet::from(["_p0".into()]),
-                    weak_exports: std::collections::BTreeSet::new(),
+                    exports: ["_p0"].into_iter().collect(),
+                    weak_exports: Default::default(),
                 }],
                 ..Options::default()
             },

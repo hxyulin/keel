@@ -13,13 +13,12 @@ mod section_bounds;
 #[path = "link/unwind.rs"]
 mod unwind;
 use keel_link::{Dylib, Input, Options};
-use std::collections::BTreeSet;
 fn options() -> Options {
     Options {
         dylibs: vec![Dylib {
             install_name: "/usr/lib/libSystem.B.dylib".into(),
-            exports: BTreeSet::from(["_puts".into()]),
-            weak_exports: BTreeSet::new(),
+            exports: ["_puts"].into_iter().collect(),
+            weak_exports: Default::default(),
         }],
         ..Options::default()
     }

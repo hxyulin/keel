@@ -11,12 +11,12 @@ keel-asm-ir = { path = "../keel-asm-ir" }
 keel-util = { path = "../keel-util" }
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 sha2 = "0.11.1"
-serde = "1"
-serde_yaml = "0.9"
 
 [dev-dependencies]
 keel-asm = { path = "../keel-asm" }
 keel-test-support = { path = "../keel-test-support" }
+serde = "1"
+serde_yaml = "0.9"
 
 [lints]
 workspace = true
