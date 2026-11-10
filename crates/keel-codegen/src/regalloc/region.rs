@@ -114,8 +114,12 @@ fn repair_inner(
                 continue;
             }
             let d = f.inst_data(inst);
+            // Only an instruction with a recorded constraint can have one
+            // other than `Any`.
             let mut constrained = false;
-            input.for_each_operand(inst, |op| constrained |= op.constraint != Constraint::Any);
+            if input.selection.has_constraint(inst) {
+                input.for_each_operand(inst, |op| constrained |= op.constraint != Constraint::Any);
+            }
             let barrier = constrained
                 || (input.is_call)(d)
                 || d.is_terminator()
@@ -195,16 +199,22 @@ fn apply<'a>(
     }
     let f = input.func;
     let mut counts = keel_ir::fxhash::FxHashMap::default();
-    let mut defined = std::collections::BTreeSet::new();
+    // A window holds at most `MAX_REGION_INSTRUCTIONS`: short lists suffice.
+    let mut defined = Vec::new();
+    let mut seen = Vec::new();
     for &(inst, _) in region {
-        let mut seen = std::collections::BTreeSet::new();
+        seen.clear();
         input.for_each_operand(inst, |op| {
             if op.kind == OperandKind::Def {
-                defined.insert(op.part.value);
+                defined.push(op.part.value);
             }
             if op.kind == OperandKind::Use
                 && !op.part.high
-                && seen.insert(op.part.value)
+                && !seen.contains(&op.part.value)
+                && {
+                    seen.push(op.part.value);
+                    true
+                }
                 && matches!(op.ty, Type::I32 | Type::I64 | Type::Ptr)
                 && matches!(alloc.loc(op.part.value), Some(Loc::Stack(_)))
             {
