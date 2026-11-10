@@ -755,10 +755,15 @@ mod budget_tests {
 /// Bounded emission estimate, not an object-size promise. Single-use private
 /// bodies can disappear; duplicated bodies get only a small call-site allowance.
 pub(super) fn size_bytes_fit(f: &Function, target: crate::VectorTarget, removable: bool) -> bool {
-    if removable || target == crate::VectorTarget::Portable {
+    if removable {
         return true;
     }
-    target_bytes(f, target).is_some_and(|bytes| bytes <= 64)
+    let limit = match target {
+        crate::VectorTarget::Aarch64Neon => 16,
+        crate::VectorTarget::X86Sse2 => 32,
+        crate::VectorTarget::Portable => return true,
+    };
+    target_bytes(f, target).is_some_and(|bytes| bytes <= limit)
 }
 
 fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {

@@ -473,8 +473,7 @@ pub(super) fn run_observed_policy_budgeted(
                 let removable = callee.local
                     && calls.get(&callee.name) == Some(&1)
                     && !roots.contains(&callee.name);
-                let byte_reject = std::env::var_os("KEEL_TARGET_BYTE_SIZE").is_some()
-                    && !super::cost::size_bytes_fit(callee, target, removable);
+                let byte_reject = !super::cost::size_bytes_fit(callee, target, removable);
                 byte_reject
                     || code_insts(callee).take(129).count() > 128
                     || !(callee.attrs.inlinehint

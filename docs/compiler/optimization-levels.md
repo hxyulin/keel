@@ -125,11 +125,11 @@ restoration after register allocation at both size and speed goals when the
 epilogue has at least three instructions.
 `--opt-tier` and `-p` change IR passes without resetting the preset's codegen goal.
 
-`KEEL_TARGET_BYTE_SIZE=1` enables an experimental target byte estimate for
-optional Size inlining. It scans at most 128 IR instructions, estimates fixed
+Optional Size inlining also uses a target byte estimate. It scans at most
+128 IR instructions, estimates fixed
 four-byte AArch64 instructions (including wide-constant materialization), and
-uses bounded x86 instruction allowances. Duplicated bodies have a 64-byte
-allowance, including credit for eliminating call and frame overhead. Removable
+uses bounded x86 instruction allowances. Duplicated bodies have a 16-byte
+allowance on AArch64 and a 32-byte allowance on x86-64. Removable
 single-use private bodies bypass this filter because their out-of-line code
 disappears. Inline assembly and intrinsics have no estimate and remain calls.
 Portable targets keep the existing IR policy. Required inlining and flatten

@@ -10,6 +10,8 @@ mod public_required_inline;
 mod required_frame_observers;
 #[path = "inline/required_inline_discard.rs"]
 mod required_inline_discard;
+#[path = "inline/size_cost.rs"]
+mod size_cost;
 #[path = "inline/weak_odr.rs"]
 mod weak_odr;
 
