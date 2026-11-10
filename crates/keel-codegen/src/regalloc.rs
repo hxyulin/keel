@@ -1224,7 +1224,15 @@ fn compute_liveness(
     calls.clear();
     preserved_calls.clear();
     twice.clear();
-    let unread = unread_entry_params(func, order, selection);
+    // Every parameter gets a range at its header here. Afterwards, those of
+    // the entry block that no instruction reads lose theirs, as
+    // `unread_entry_params` describes.
+    let drop_unread = order.first().is_some_and(|&entry| {
+        debug_assert_eq!(Some(entry), func.entry_block());
+        func.debug_loc.is_none()
+            && func.debug_vars.is_empty()
+            && !func.block_params(entry).is_empty()
+    });
     // Slot `k` owns the read point 2k and the write point 2k + 1.
     let mut slot = 0u32;
     for &block in order {
@@ -1234,7 +1242,7 @@ fn compute_liveness(
         slot += 1;
         for &param in func.block_params(block) {
             def_block[param.index()] = b;
-            if !is_alias(param) && !unread.get(param.index()).is_some_and(|&u| u) {
+            if !is_alias(param) {
                 extend(open, param, header, touched);
             }
         }
@@ -1290,6 +1298,9 @@ fn compute_liveness(
     // value: edge arguments are explicit reads and parameters are definitions.
     // The exact fixed point is empty.
     if order.len() <= 1 {
+        if drop_unread {
+            drop_unread_entry_params(bounds[0].0, segment_ends, segments, |_| false);
+        }
         scratch.live_in.fill(n, &[]);
         scratch.live_out.fill(n, &[]);
         return slot;
@@ -1302,6 +1313,11 @@ fn compute_liveness(
     }
     for i in 0..num_values {
         start[i + 1] += start[i];
+    }
+    if drop_unread {
+        drop_unread_entry_params(bounds[0].0, segment_ends, segments, |v| {
+            start[v.index() + 1] != start[v.index()]
+        });
     }
     let fill = &mut scratch.fill;
     fill.clear();
@@ -1359,6 +1375,35 @@ fn compute_liveness(
     scratch.live_in.fill(n, live_in);
     scratch.live_out.fill(n, live_out);
     slot
+}
+
+/// Removes the entry block's segments of parameters that no instruction
+/// reads. In the entry block, only parameters start at its `header`; one
+/// that also ends there is not read in the entry block, and `read_later`
+/// says whether a later block reads it.
+fn drop_unread_entry_params(
+    header: u32,
+    segment_ends: &mut [u32],
+    segments: &mut Vec<(Value, u32, u32)>,
+    read_later: impl Fn(Value) -> bool,
+) {
+    let end = segment_ends[0] as usize;
+    let mut kept = 0;
+    for i in 0..end {
+        let (v, from, to) = segments[i];
+        if from == header && to == header && !read_later(v) {
+            continue;
+        }
+        segments[kept] = segments[i];
+        kept += 1;
+    }
+    if kept < end {
+        segments.drain(kept..end);
+        let removed = (end - kept) as u32;
+        for e in segment_ends.iter_mut() {
+            *e -= removed;
+        }
+    }
 }
 
 /// Builds one interval per defined value: the program points of each
