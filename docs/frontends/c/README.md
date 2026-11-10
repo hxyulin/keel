@@ -61,8 +61,10 @@ at a line break, and processes each chunk before it scans the next. The main
 file's tokens are therefore never all in memory. A lexical error anywhere in
 the main file is still reported before any directive error. A header keeps
 its tokens for later inclusions until its include guard is defined or
-`#pragma once` applies, then releases them. Including it again after
-`#undef` of the guard scans it again.
+`#pragma once` applies, then releases them. The preprocessor skips the lines
+of inactive groups without tokenizing them; kept tokens mark where they were,
+and a later inclusion tokenizes them if it activates them. Including a header
+again after `#undef` of its guard scans it again.
 
 For raw-source batches, `PreprocessCache::preprocess` and
 `BatchCompiler::compile_raw` reuse caller-owned header contents and unexpanded

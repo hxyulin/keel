@@ -6,6 +6,7 @@ use crate::int_const::{self, IntConst, IntTy, Policy, Ub};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -374,7 +375,19 @@ struct Included<'a> {
     whole: bool,
     /// The tokens after the guard group, or all of them without a guard;
     /// `None` for a whole guard group, or if they were not kept.
-    rest: Option<Rc<Vec<Token<'a>>>>,
+    rest: Option<Rc<Kept<'a>>>,
+}
+
+/// A header's tokens kept for later inclusions. A token with empty text
+/// stands for the lines of an inactive group, unscanned, at the logical
+/// offsets `line..col` of `text`, the spliced source.
+struct Kept<'a> {
+    tokens: Vec<Token<'a>>,
+    text: &'a str,
+    removed: Vec<(usize, usize)>,
+    /// The tokens of the lines of each placeholder scanned so far, by the
+    /// placeholder's start.
+    scanned: RefCell<HashMap<usize, Rc<[Token<'a>]>>>,
 }
 
 /// A set of names that may report a name it does not hold, but never misses
@@ -524,7 +537,7 @@ impl<'a> GuardScan<'a> {
         }
     }
     /// What later inclusions reuse, given the tokens kept by [`Self::keep`].
-    fn included(&self, kept: Option<Vec<Token<'a>>>) -> Included<'a> {
+    fn included(&self, kept: Option<Kept<'a>>) -> Included<'a> {
         let (guard, whole) = match self.state {
             GuardState::Closed(guard) => (Some(guard), true),
             GuardState::Leading(guard) => (Some(guard), false),
@@ -724,7 +737,18 @@ struct Locations<'a> {
     line: u32,
     line_start: usize,
 }
-impl Locations<'_> {
+impl<'a> Locations<'a> {
+    fn new(source: &'a str, removed: Vec<(usize, usize)>) -> Self {
+        Self {
+            source: source.as_bytes(),
+            removed,
+            next: 0,
+            skipped: 0,
+            next_newline: find_byte(b'\n', source.as_bytes()),
+            line: 1,
+            line_start: 0,
+        }
+    }
     fn at(&mut self, logical: usize) -> (u32, u32) {
         while let Some(&(offset, skipped)) = self.removed.get(self.next) {
             if offset > logical {
@@ -815,15 +839,7 @@ impl<'a> Scanner<'a> {
         Self {
             text,
             file,
-            locations: Locations {
-                source: src.as_bytes(),
-                removed: input.removed,
-                next: 0,
-                skipped: 0,
-                next_newline: find_byte(b'\n', src.as_bytes()),
-                line: 1,
-                line_start: 0,
-            },
+            locations: Locations::new(src, input.removed),
             i: 0,
             space: false,
         }
@@ -983,10 +999,13 @@ impl<'a> Scanner<'a> {
     /// directive lines of nested groups are scanned and kept. A line that
     /// might hold a lexical error is scanned with `fill` instead, which
     /// reports it, and so is the line after a directive with a comment that
-    /// spans lines.
-    fn skip(&mut self, out: &mut Vec<Token<'a>>) -> Result<bool, Diagnostic> {
+    /// spans lines. With `lazy`, a placeholder token, followed by a newline,
+    /// stands for each run of skipped lines; see [`Kept`].
+    fn skip(&mut self, out: &mut Vec<Token<'a>>, lazy: bool) -> Result<bool, Diagnostic> {
         let b = self.text.as_bytes();
+        let lazy = lazy && u32::try_from(b.len()).is_ok();
         let mut i = self.i;
+        let mut from = i;
         let mut depth = 0usize;
         'lines: while i < b.len() {
             let line = i;
@@ -1023,8 +1042,10 @@ impl<'a> Scanner<'a> {
                         i = j;
                         break;
                     }
+                    self.skipped(lazy, from..line, out);
                     let start = out.len();
                     let done = self.fill_line(line, out)?;
+                    from = self.i;
                     let tokens = &out[start..];
                     let ends = tokens.last().is_some_and(|t| t.text == "\n");
                     let lines = tokens.iter().filter(|t| t.text == "\n").count();
@@ -1036,7 +1057,10 @@ impl<'a> Scanner<'a> {
                         Some("elif" | "else" | "endif") if depth == 0 => return Ok(done),
                         Some("endif") => depth -= 1,
                         Some("elif" | "else") => {}
-                        _ => out.truncate(start),
+                        _ => {
+                            out.truncate(start);
+                            from = line;
+                        }
                     }
                     if done {
                         return Ok(true);
@@ -1051,6 +1075,7 @@ impl<'a> Scanner<'a> {
                     }
                     Some(b'/') if b.get(i + 1) == Some(&b'*') => {
                         let Some(end) = find_comment_end(&b[i + 2..]) else {
+                            self.skipped(lazy, from..line, out);
                             return self.fill_line(line, out);
                         };
                         let spans = find_byte(b'\n', &b[i + 2..i + 2 + end]).is_some();
@@ -1079,6 +1104,7 @@ impl<'a> Scanner<'a> {
                     }
                     Some(b'/') if b.get(i + 1) == Some(&b'*') => {
                         let Some(end) = find_comment_end(&b[i + 2..]) else {
+                            self.skipped(lazy, from..line, out);
                             return self.fill_line(line, out);
                         };
                         let spans = find_byte(b'\n', &b[i + 2..i + 2 + end]).is_some();
@@ -1097,9 +1123,13 @@ impl<'a> Scanner<'a> {
                             match b.get(i) {
                                 Some(c) if *c == q => break,
                                 Some(b'\\') => i += 2,
-                                _ => return self.fill_line(line, out),
+                                _ => {
+                                    self.skipped(lazy, from..line, out);
+                                    return self.fill_line(line, out);
+                                }
                             }
                             if i > b.len() {
+                                self.skipped(lazy, from..line, out);
                                 return self.fill_line(line, out);
                             }
                         }
@@ -1108,9 +1138,34 @@ impl<'a> Scanner<'a> {
                 }
             }
         }
+        self.skipped(lazy, from..b.len(), out);
         self.i = b.len();
         self.space = true;
         Ok(true)
+    }
+
+    /// With `lazy`, appends a placeholder for the skipped lines at `span`,
+    /// if there are any.
+    fn skipped(&self, lazy: bool, span: Range<usize>, out: &mut Vec<Token<'a>>) {
+        if !lazy || span.is_empty() {
+            return;
+        }
+        let placeholder = Token {
+            text: "",
+            file: self.file,
+            hide: &NO_HIDE,
+            line: span.start as u32,
+            col: span.end as u32,
+            space: true,
+            digraph: false,
+        };
+        out.extend([
+            placeholder,
+            Token {
+                text: "\n",
+                ..placeholder
+            },
+        ]);
     }
 
     /// Scans from `line`, the start of a line, with `fill` until a newline.
@@ -1380,14 +1435,26 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if tokens.is_none()
             && let Some(key) = &key
         {
-            tokens = self.restore(key, src, name).map(|t| Rc::new(t.into_vec()));
+            tokens = self.restore(key, src, name).map(|tokens| {
+                Rc::new(Kept {
+                    tokens: tokens.into_vec(),
+                    text: "",
+                    removed: Vec::new(),
+                    scanned: RefCell::default(),
+                })
+            });
         }
         let mut kept = None;
-        if let Some(tokens) = tokens {
+        if let Some(rest) = tokens {
             if TRACK {
-                self.stats.token_bytes += std::mem::size_of_val(tokens.as_slice());
+                self.stats.token_bytes += std::mem::size_of_val(rest.tokens.as_slice());
             }
-            self.lines(&tokens, &mut state)?;
+            state.skipped = Some(Skipped {
+                source: src,
+                kept: Rc::clone(&rest),
+                locations: None,
+            });
+            self.lines(&rest.tokens, &mut state)?;
         } else {
             if TRACK {
                 self.stats.scanned_files += 1;
@@ -1397,8 +1464,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             // The batch cache keeps every token of a header; otherwise only
             // those that its later inclusions process.
             let batch = key.is_some() && self.batch_cache.is_some();
-            kept = state.guard.is_some().then(Vec::new);
-            self.stream(&mut scanner, &mut chunk, &mut state, &mut kept, batch)?;
+            let mut tokens = state.guard.is_some().then(Vec::new);
+            self.stream(&mut scanner, &mut chunk, &mut state, &mut tokens, batch)?;
             if TRACK {
                 self.stats.token_bytes += chunk.capacity() * std::mem::size_of::<Token>();
             }
@@ -1406,12 +1473,18 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             self.chunks.push(chunk);
             if batch
                 && let (Some(tokens), Some(key), Some(cache)) =
-                    (kept.take(), &key, &mut self.batch_cache)
+                    (tokens.take(), &key, &mut self.batch_cache)
             {
                 cache
                     .headers
                     .insert(key.clone(), CachedHeader::new(src, &tokens));
             }
+            kept = tokens.map(|tokens| Kept {
+                tokens,
+                text: scanner.text,
+                removed: std::mem::take(&mut scanner.locations.removed),
+                scanned: RefCell::default(),
+            });
         }
         let included = state.guard.as_ref().map(|scan| scan.included(kept));
         self.finish_file(state)?;
@@ -1450,19 +1523,20 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     ) -> Result<(), Diagnostic> {
         loop {
             chunk.clear();
-            // Inactive lines can be skipped unless their tokens are kept.
-            // Before a guard group opens, scan line by line so that skipping
-            // can start inside it.
-            let (skippable, min) = match state.guard.as_ref().map(|scan| scan.state) {
-                _ if keep_all => (false, self.stream_chunk),
+            // Inactive lines are skipped, and placeholders stand for them
+            // where tokens are kept, except for the batch cache. Before a
+            // guard group opens, scan line by line so that skipping can start
+            // inside it.
+            let (skippable, lazy, min) = match state.guard.as_ref().map(|scan| scan.state) {
+                _ if keep_all => (false, false, self.stream_chunk),
                 None | Some(GuardState::Open(_) | GuardState::Malformed) => {
-                    (true, self.stream_chunk)
+                    (true, false, self.stream_chunk)
                 }
-                Some(GuardState::Start | GuardState::Ifndef(_)) => (false, 1),
-                Some(_) => (false, self.stream_chunk),
+                Some(GuardState::Start | GuardState::Ifndef(_)) => (false, false, 1),
+                Some(_) => (true, kept.is_some(), self.stream_chunk),
             };
             let done = if skippable && state.stack.last().is_some_and(|c| !c.active) {
-                scanner.skip(chunk)?
+                scanner.skip(chunk, lazy)?
             } else {
                 scanner.fill(chunk, min, skippable)?
             };
@@ -1530,6 +1604,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     ) -> Result<(), Diagnostic> {
         let active = state.stack.last().is_none_or(|c| c.active);
         if !physical.first().is_some_and(|t| t.text == "#") {
+            if active && physical.first().is_some_and(|t| t.text.is_empty()) {
+                let t = physical[0];
+                return self.skipped_lines(t.file, t.line as usize..t.col as usize, state);
+            }
             if active {
                 let start = state.pending.len();
                 state.pending.extend_from_slice(physical);
@@ -1676,6 +1754,40 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
         }
         Ok(())
+    }
+    /// Scans and processes the lines that a kept placeholder stands for, in
+    /// the active group of a later inclusion.
+    fn skipped_lines(
+        &mut self,
+        file: FileName<'a>,
+        span: Range<usize>,
+        state: &mut FileState<'a>,
+    ) -> Result<(), Diagnostic> {
+        let skipped = (state.skipped.as_mut()).expect("kept placeholders have their source");
+        let scanned = skipped.kept.scanned.borrow().get(&span.start).cloned();
+        let tokens = if let Some(tokens) = scanned {
+            tokens
+        } else {
+            // Placeholders are in source order, so one location table
+            // serves all of them.
+            let locations = (skipped.locations.take())
+                .unwrap_or_else(|| Locations::new(skipped.source, skipped.kept.removed.clone()));
+            let mut scanner = Scanner {
+                text: &skipped.kept.text[..span.end],
+                file,
+                locations,
+                i: span.start,
+                space: true,
+            };
+            let mut tokens = Vec::new();
+            scanner.fill(&mut tokens, usize::MAX, false)?;
+            skipped.locations = Some(scanner.locations);
+            let tokens: Rc<[Token<'a>]> = tokens.into();
+            let scanned = &skipped.kept.scanned;
+            scanned.borrow_mut().insert(span.start, Rc::clone(&tokens));
+            tokens
+        };
+        self.lines(&tokens, state)
     }
     fn canonical_path(&mut self, path: &Path) -> PathBuf {
         if let Some(canonical) = self.canonical_paths.get(path) {
@@ -1898,6 +2010,15 @@ struct FileState<'a> {
     guard: Option<GuardScan<'a>>,
     /// The end of the guard group's `#endif` line in the current chunk.
     guard_closed_at: Option<usize>,
+    /// The source of the placeholders in kept tokens being processed.
+    skipped: Option<Skipped<'a>>,
+}
+/// What scanning the lines that placeholders stand for needs.
+struct Skipped<'a> {
+    source: &'a str,
+    kept: Rc<Kept<'a>>,
+    /// The locations scanning has reached.
+    locations: Option<Locations<'a>>,
 }
 impl<'a> FileState<'a> {
     fn new(path: FileName<'a>, canonical: PathBuf, depth: usize) -> Self {
@@ -1910,6 +2031,7 @@ impl<'a> FileState<'a> {
             depth,
             guard: None,
             guard_closed_at: None,
+            skipped: None,
         }
     }
 }
@@ -2836,7 +2958,8 @@ mod scanner_tests {
     }
 
     /// Later inclusions skip a defined guard group and process the kept
-    /// tokens after it, wherever chunk boundaries fall.
+    /// tokens after it, and scan the skipped inactive lines they activate,
+    /// wherever chunk boundaries fall.
     #[test]
     fn reinclusions_process_the_tokens_after_a_defined_guard_group() {
         let dir = std::env::temp_dir().join(format!("keel-pp-reinclude-{}", std::process::id()));
@@ -2849,10 +2972,14 @@ mod scanner_tests {
             ("plain.h", "#if 1\nplain MODE\n#endif\n"),
             ("else.h", "#ifndef E\n#define E\na\n#else\nb\n#endif\n"),
             ("whole.h", "#ifndef W\n#define W\nw MODE\n#endif\n"),
+            (
+                "lazy.h",
+                "#ifdef FLIP\nflip __LINE__ MODE\n#define FLIPPED 1\n#else\nnoflip __LINE__\n#endif\n#if defined(FLIP) && FLIPPED\n#if 0\nnever\n#endif\nboth /* a\ncomment */ __LINE__\n#endif\n",
+            ),
         ] {
             std::fs::write(dir.join(name), text).unwrap();
         }
-        let src = "#define MODE 1\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef MODE\n#define MODE 2\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef LEAD_H\n#undef W\n#include \"lead.h\"\n#include \"whole.h\"\n";
+        let src = "#define MODE 1\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef MODE\n#define MODE 2\n#include \"lead.h\"\n#include \"plain.h\"\n#include \"else.h\"\n#include \"whole.h\"\n#undef LEAD_H\n#undef W\n#include \"lead.h\"\n#include \"whole.h\"\n#include \"lazy.h\"\n#define FLIP\n#include \"lazy.h\"\n#include \"lazy.h\"\n";
         let path = dir.join("main.c");
         let run = |chunk| {
             let opts = PreprocessOptions::default();
@@ -2867,7 +2994,7 @@ mod scanner_tests {
         let whole = run(usize::MAX);
         assert_eq!(
             whole,
-            "head tail 1 7 plain 1 a w 1 tail 2 7 plain 2 b head tail 2 7 w 2"
+            "head tail 1 7 plain 1 a w 1 tail 2 7 plain 2 b head tail 2 7 w 2 noflip 5 flip 2 2 both 12 flip 2 2 both 12"
         );
         for chunk in [1, 2, 3, 5] {
             assert_eq!(run(chunk), whole, "chunks of {chunk}");
