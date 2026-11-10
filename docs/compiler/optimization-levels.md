@@ -139,6 +139,13 @@ retain their contracts. This admission filter can reduce text while adding
 calls and runtime cost. It does not predict final object size after selection
 and allocation.
 
+Balanced and Size fold scalar reads from bounded local immutable data before
+their cleanup rounds. Both share equivalent terminal blocks after the release
+epilogue. External inputs, block-argument types, memory flags and instruction
+contracts must match; local definitions cannot escape the shared block.
+The [optimizer reference](optimizer.md#constant-data) defines the data and
+placement limits.
+
 Size does not guarantee the smallest machine code: selection and allocation
 have no target byte-cost model, and losing profitable
 inlining can make a program larger. Unwind emission is independent of `-Os`; see [unwind metadata](../linking/unwind.md)

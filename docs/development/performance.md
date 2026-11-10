@@ -24,6 +24,10 @@ earlier one.
    Linux. Retired instructions vary little between runs, but repeat the run
    before reading a difference under one percent. Wall time on a shared machine
    does not decide a compile-time change.
+   Time built compiler binaries directly. Shell wrappers and `env` startup
+   contribute their own retired instructions. Wrappers can select prototype
+   options for output and application-runtime comparisons, but those counts
+   do not measure the production compiler's work.
 3. **Runtime.** Changes to generated code are decided by
    [`cargo suite ab`](../../suite/README.md#timing-two-compilers) on the
    application benchmarks, under the acceptance rule below.

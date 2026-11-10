@@ -23,6 +23,7 @@ mod call_load_reuse;
 mod canonicalize;
 mod const_fold;
 mod constant_args;
+mod constant_data;
 mod counted_loop;
 mod devirtualize;
 mod loop_matmul;
@@ -56,6 +57,7 @@ mod loop_unroll_exact;
 mod loop_vectorize;
 pub mod private_aggregate;
 mod tail_calls;
+mod terminal_merge;
 pub use loop_vectorize::VectorTarget;
 
 /// Per-invocation immutable target context.
@@ -320,6 +322,12 @@ pub(crate) static GCM_SIZE: &dyn Pass = &BuiltinPass::new(
     "global code motion with constant branch arguments placed before adjacent comparisons",
     |f, _| gcm::run_size(f),
 );
+pub(crate) static TERMINAL_MERGE: &dyn Pass = &BuiltinPass::new(
+    "terminal-merge",
+    "merge equivalent terminal blocks with matching external inputs and local definitions",
+    |f, _| terminal_merge::run(f),
+);
+pub(crate) static CONSTANT_DATA: &dyn Pass = &constant_data::ConstantData;
 pub(crate) static INSTCOMBINE: &dyn Pass = &BuiltinPass {
     requires_canonical: true,
     ..BuiltinPass::new(
@@ -440,6 +448,8 @@ pub static PASSES: &[&dyn Pass] = &[
     DCE,
     GCM,
     GCM_SIZE,
+    TERMINAL_MERGE,
+    CONSTANT_DATA,
     INSTCOMBINE,
     PHI_SIMPLIFY,
     MEMORY_FORWARD,
@@ -699,6 +709,7 @@ const RELEASE_EPILOGUE: [&str; 13] = [
 // `const-fold` ahead of the first inliner: frontends may leave operations on
 // literals, such as `ineg 1`, and inliner admission counts instructions.
 const BALANCED_PARTS: &[&[&str]] = &[
+    &["constant-data"],
     &["private-aggregate-cleanup"],
     &["known-bits"],
     &["const-fold"],
@@ -713,6 +724,7 @@ const BALANCED_PARTS: &[&[&str]] = &[
     &RELEASE_ROUND_SCALAR,
     &RELEASE_ROUND_MEMORY,
     &RELEASE_EPILOGUE,
+    &["terminal-merge"],
 ];
 
 /// Balanced release pipeline: three rounds of binding-aware inlining and
@@ -723,6 +735,7 @@ pub const BALANCED_PIPELINE: &[&str] = &concat::<{ total_len(BALANCED_PARTS) }>(
 
 // The first Size round cleans up before any inlining.
 const SIZE_PARTS: &[&[&str]] = &[
+    &["constant-data"],
     &["private-aggregate-cleanup"],
     &["known-bits"],
     &RELEASE_ROUND_SCALAR,
@@ -740,6 +753,7 @@ const SIZE_PARTS: &[&[&str]] = &[
     // and address copies afterward to avoid long-lived values and their spills.
     &["gcm-size", "gvn", "gcm-size", "dce"],
     &RELEASE_EPILOGUE,
+    &["terminal-merge"],
 ];
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining

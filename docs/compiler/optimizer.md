@@ -124,6 +124,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `gvn` | Scoped hash table over the dominator tree; loads are never merged |
 | `dce` | Mark from pinned instructions; dead block parameters die with their arguments; lifetime markers stay only while another needed instruction addresses their slot |
 | `gcm`, `gcm-size` | Global code motion; Size preserves adjacent compare/branch pairs when rematerializing branch arguments |
+| `constant-data` | Fold scalar reads from bounded local immutable initializers |
+| `terminal-merge` | Share equivalent terminal blocks with matching external inputs and nonescaping local definitions |
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
@@ -303,6 +305,36 @@ block whose parameter is used outside its own jump stays. One forwarding step
 per round lets closed forwarding cycles collapse to self-loops without changing
 nontermination. Block merging takes one edge census and layout snapshot and
 retries each predecessor after a merge; the entry block is never merged away.
+
+`terminal-merge` shares blocks of 2–64 instructions ending in a return, trap or
+non-self jump. It compares operations, types, external SSA inputs, memory flags,
+call contracts and producer facts after renaming block parameters and local
+results. All uses of a removed block's definitions must stay in that block,
+including uses in unreachable code. Incoming edges keep their argument tuples.
+Only functions changed by merging receive the subsequent CFG and dead-code
+cleanup. Debug, special-entry, returns-twice, EH and opaque machine-state
+observers prevent merging. Balanced and Size run this after their epilogue.
+Sharing IR can add machine-level argument copies, so it does not guarantee
+smaller code in every block or function.
+
+## Constant data
+
+`constant-data` folds ordinary integer, f32 and f64 loads from local immutable
+data definitions. It reads little-endian initializer bytes directly, preserving
+integer widths, floating payloads and signed zero. Fixed-offset pointer chains
+are bounded at 16 definitions. The complete access must fit in the initializer
+and meet the load's alignment contract.
+
+Objects are at most 4096 bytes. Mutable, nonlocal, weak, TLS, explicitly placed
+and relocation-bearing objects remain memory accesses. Volatile and atomic
+loads remain unchanged. Module or inline assembly prevents the pass, as do
+opaque machine-state observers in the affected function. The pass needs an
+explicit data layout and honors function optimization policies. Balanced and
+Size run it before their scalar and inlining rounds, so ordinary cleanup can
+use the exposed literals.
+Wide literals can cost more instructions than a memory read when later
+optimization does not simplify their uses. Selection still determines the
+materialization sequence.
 
 ## GVN and GCM
 

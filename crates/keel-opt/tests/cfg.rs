@@ -366,3 +366,112 @@ block1(v2: i64, v4: i64):
         }
     }
 }
+
+#[test]
+fn terminal_merging_preserves_edge_permutations_and_memory_effects() {
+    use keel_ir::InstData;
+    let source = "func @f(i64, i64, i8) -> i64 {
+ss0 = stack_slot 8, align 8
+block0(v0:i64, v1:i64, v2:i8):
+ v3 = stack_addr ss0
+ v4 = iconst.i64 13
+ store v4, v3
+ brif v2, block1(v0,v1), block2(v1,v0)
+block1(v5:i64,v6:i64):
+ v7 = load.i64 v3
+ v8 = isub v5,v6
+ v9 = iadd v8,v7
+ store v9,v3
+ jump block3(v9)
+block2(v10:i64,v11:i64):
+ v12 = load.i64 v3
+ v13 = isub v10,v11
+ v14 = iadd v13,v12
+ store v14,v3
+ jump block3(v14)
+block3(v15:i64):
+ v16 = load.i64 v3
+ v17 = iadd v15,v16
+ return v17
+}";
+    let original = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&original).unwrap();
+    let mut m = original.clone();
+    keel_opt::run_passes(&mut m, &["terminal-merge"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(
+        m.functions[0]
+            .layout_insts()
+            .filter(|(_, i)| matches!(m.functions[0].inst_data(*i), InstData::Store { .. }))
+            .count(),
+        2
+    );
+    for a in [0, 1, u64::MAX] {
+        for b in [0, 2, u64::MAX] {
+            for gate in [0, 1] {
+                let diff = if gate == 0 {
+                    b.wrapping_sub(a)
+                } else {
+                    a.wrapping_sub(b)
+                };
+                let expected = diff.wrapping_add(13).wrapping_mul(2);
+                assert_eq!(execute(&original.functions[0], &[a, b, gate]), expected);
+                assert_eq!(execute(&m.functions[0], &[a, b, gate]), expected);
+            }
+        }
+    }
+    let once = m.to_string();
+    keel_opt::run_passes(&mut m, &["terminal-merge"]).unwrap();
+    assert_eq!(m.to_string(), once);
+}
+
+#[test]
+fn terminal_merging_keeps_distinct_external_values_and_escaping_definitions() {
+    for source in [
+        "func @f(i64,i64,i8)->i64 {\nblock0(v0:i64,v1:i64,v2:i8):\n brif v2,block1,block2\nblock1:\n v3=iconst.i64 1\n v4=iadd v0,v3\n return v4\nblock2:\n v5=iconst.i64 1\n v6=iadd v1,v5\n return v6\n}",
+        "func @f()->i64 {\nblock0:\n jump block1\nblock1:\n v0=iconst.i64 1\n jump block4\nblock2:\n v1=iconst.i64 1\n jump block4\nblock3:\n return v1\nblock4:\n v2=iconst.i64 0\n return v2\n}",
+    ] {
+        let mut m = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        let before = m.to_string();
+        keel_opt::run_passes(&mut m, &["terminal-merge"]).unwrap();
+        assert_eq!(m.to_string(), before);
+    }
+}
+
+#[test]
+fn terminal_merging_keeps_call_contracts_and_producer_facts_separate() {
+    use keel_ir::{CallContract, InstData, ValueFacts};
+    let source = "decl @poll(i64)->i64\nfunc @f(i64,i8)->i64 {\nblock0(v0:i64,v1:i8):\n brif v1,block1,block2\nblock1:\n v2=call @poll(v0)\n return v2\nblock2:\n v3=call @poll(v0)\n return v3\n}";
+    for facts in [false, true] {
+        let mut m = keel_ir::parse(source).unwrap();
+        let f = &mut m.functions[0];
+        let call = f
+            .layout_insts()
+            .find_map(|(_, i)| matches!(f.inst_data(i), InstData::Call { .. }).then_some(i))
+            .unwrap();
+        if facts {
+            f.set_inst_facts(
+                call,
+                ValueFacts {
+                    range: Some(keel_ir::IntegerRange { lower: 0, upper: 7 }),
+                    ..ValueFacts::default()
+                },
+            )
+            .unwrap();
+        } else {
+            f.set_call_contract(
+                call,
+                CallContract {
+                    nofree: true,
+                    ..CallContract::default()
+                },
+            )
+            .unwrap();
+        }
+        keel_ir::verify_module(&m).unwrap();
+        let before = m.to_string();
+        keel_opt::run_passes(&mut m, &["terminal-merge"]).unwrap();
+        assert_eq!(m.to_string(), before);
+    }
+}
