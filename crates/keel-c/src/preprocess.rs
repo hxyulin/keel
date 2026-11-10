@@ -566,6 +566,12 @@ fn hide_intersection<'a>(
     out.into_bump_slice()
 }
 
+/// Whether two file names are equal, testing first whether they share
+/// storage, as tokens of one file do.
+fn same_file(a: &str, b: &str) -> bool {
+    (a.as_ptr() == b.as_ptr() && a.len() == b.len()) || a == b
+}
+
 fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     quoted_to(&mut out, s);
@@ -1216,14 +1222,16 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             if t.text.is_empty() {
                 continue;
             }
-            if prev != Some((t.file, t.line)) {
+            if !prev.is_some_and(|(file, line)| line == t.line && same_file(file, t.file)) {
                 if let Some((file, line)) = prev {
                     self.output.push('\n');
                     self.output_next = Some((file, line + 1));
                 }
                 // Like Clang, write up to 8 newlines rather than a marker.
                 match self.output_next {
-                    Some((file, next)) if file == t.file && (next..=next + 8).contains(&t.line) => {
+                    Some((file, next))
+                        if (next..=next + 8).contains(&t.line) && same_file(file, t.file) =>
+                    {
                         for _ in next..t.line {
                             self.output.push('\n');
                         }
@@ -1465,7 +1473,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 state.pending.extend_from_slice(physical);
                 let added = &mut state.pending[start..];
                 if state.line_delta != 0
-                    || added.first().is_some_and(|t| t.file != state.logical_file)
+                    || added
+                        .first()
+                        .is_some_and(|t| !same_file(t.file, state.logical_file))
                 {
                     for t in added.iter_mut() {
                         t.file = state.logical_file;
@@ -1486,7 +1496,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         let line = if state.line_delta != 0
             || physical
                 .first()
-                .is_some_and(|t| t.file != state.logical_file)
+                .is_some_and(|t| !same_file(t.file, state.logical_file))
         {
             remapped = physical.to_vec();
             for t in &mut remapped {
