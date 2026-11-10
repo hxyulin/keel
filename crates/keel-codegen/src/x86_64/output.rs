@@ -68,6 +68,15 @@ impl Output {
                 operands: Vec::from(operands),
                 lock,
             }),
+            // An instruction naming a symbol misses the encoding cache, where
+            // the assembler would copy it, names included: move it in instead.
+            Self::Stream(s) if operands.iter().any(names_symbol) => {
+                s.item(Item::X86Instruction(Instruction {
+                    opcode,
+                    operands: Vec::from(operands),
+                    lock,
+                }))
+            }
             Self::Stream(s) => s.assembler.push_x86_instruction(opcode, &operands, lock),
         }
     }
@@ -590,4 +599,14 @@ fn write_escaped(out: &mut crate::text::Text, name: &str) {
             }
         }
     }
+}
+
+/// Whether `o`'s address names a symbol.
+fn names_symbol(o: &Operand) -> bool {
+    let a = match o {
+        Operand::Immediate(a) => a,
+        Operand::Memory(m) => &m.displacement,
+        Operand::Register(_) => return false,
+    };
+    a.expression.add.is_some() || a.expression.subtract.is_some()
 }
