@@ -99,6 +99,8 @@ const USAGE: &str = "usage:
   Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    fix_mmap_threshold();
     #[cfg(feature = "profile-with-tracy")]
     let _client = tracy_client::Client::start();
     profiling::register_thread!("keel");
@@ -108,6 +110,26 @@ fn main() -> ExitCode {
             eprintln!("keel: {message}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Pin glibc's mmap threshold. Left dynamic, glibc raises it to the size of
+/// each mapped block freed (up to 32 MiB), so later large buffers come from
+/// the heap, where freed space below the top stays resident. Blocks of
+/// 512 KiB and up stay mapped and return to the system when freed; smaller
+/// values save little more memory and fault in more fresh pages. An explicit
+/// `MALLOC_MMAP_THRESHOLD_` takes precedence.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn fix_mmap_threshold() {
+    use std::ffi::c_int;
+    const M_MMAP_THRESHOLD: c_int = -3;
+    unsafe extern "C" {
+        fn mallopt(param: c_int, value: c_int) -> c_int;
+    }
+    if std::env::var_os("MALLOC_MMAP_THRESHOLD_").is_none() {
+        // SAFETY: mallopt only sets an allocator parameter, and this runs
+        // before keel starts any thread.
+        unsafe { mallopt(M_MMAP_THRESHOLD, 512 * 1024) };
     }
 }
 
