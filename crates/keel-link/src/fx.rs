@@ -4,6 +4,7 @@
 use std::hash::{BuildHasherDefault, Hasher};
 
 pub(crate) type Map<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<FxHasher>>;
+pub(crate) type Set<K> = std::collections::HashSet<K, BuildHasherDefault<FxHasher>>;
 
 /// FxHash, as used by rustc: rotate, xor and multiply per word.
 #[derive(Clone, Copy, Debug, Default)]

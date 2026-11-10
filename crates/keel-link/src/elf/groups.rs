@@ -17,8 +17,26 @@ pub(super) struct Plan {
     metadata: BTreeSet<usize>,
     pub frames: BTreeMap<usize, super::unwind::Filtered>,
     /// Symbols referenced by retained allocated sections, and by any allocated section.
-    pub live: BTreeSet<usize>,
-    pub referenced: BTreeSet<usize>,
+    pub live: Marks,
+    pub referenced: Marks,
+}
+/// A set of symbol indices, one flag per symbol table entry. Relocations may
+/// name indices past the table; only real symbols are ever queried, so those
+/// marks are dropped.
+#[derive(Default)]
+pub(super) struct Marks(Vec<bool>);
+impl Marks {
+    fn new(symbols: usize) -> Self {
+        Self(vec![false; symbols])
+    }
+    fn insert(&mut self, index: usize) {
+        if let Some(mark) = self.0.get_mut(index) {
+            *mark = true;
+        }
+    }
+    pub fn contains(&self, index: &usize) -> bool {
+        self.0.get(*index).copied().unwrap_or(false)
+    }
 }
 /// Immutable input metadata. Selection never reserves signatures here.
 pub(super) struct Metadata<'a> {
@@ -252,10 +270,13 @@ impl<'a> Metadata<'a> {
     }
 
     pub fn select(&self, conflicts: &[bool]) -> Result<Plan> {
+        let symbols = self.symbols.last().map_or(0, |s| s.index + 1);
         let mut plan = Plan {
             membership: self.membership.clone(),
             signature_symbols: self.signature_symbols.clone(),
             metadata: self.metadata.clone(),
+            live: Marks::new(symbols),
+            referenced: Marks::new(symbols),
             ..Plan::default()
         };
         for (group, &conflict) in self.groups.iter().zip(conflicts) {

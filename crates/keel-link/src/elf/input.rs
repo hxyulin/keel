@@ -1,12 +1,13 @@
 //! Input ordering and demand-driven archive extraction. No filesystem access.
 use super::dynamic::Library;
 use super::groups::{Metadata, Plan};
+use crate::fx::{Map, Set};
 use crate::{
     Input, Result,
     elf_selection::{Request, Selection},
 };
 use object::Object;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub(super) struct Named<'a> {
     pub name: String,
@@ -18,8 +19,8 @@ pub(super) struct Named<'a> {
 // Ordered maps still compare name contents, including equal names in different
 // members/DSOs, without allocating another copy for each demand/provider set.
 struct Symbols<'data> {
-    defined: BTreeMap<&'data str, u8>,
-    required: BTreeSet<&'data str>,
+    defined: Map<&'data str, u8>,
+    required: Set<&'data str>,
 }
 fn symbols<'a>(metadata: &Metadata<'a>, plan: &Plan) -> Result<Symbols<'a>> {
     let mut out = Symbols::default();
@@ -198,8 +199,8 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
     let mut selected = Vec::new();
     let mut signatures = BTreeSet::new();
     let mut libraries = Vec::new();
-    let mut defined = BTreeMap::<&str, u8>::new();
-    let mut required = BTreeSet::from([entry]);
+    let mut defined = Map::<&str, u8>::default();
+    let mut required = Set::from_iter([entry]);
     while position < requests.len() {
         let index = position;
         position += 1;
@@ -330,11 +331,7 @@ fn prepare_requests<'a>(requests: &[Request<'a>], entry: &str) -> Result<Prepare
     Ok((selected, libraries, concrete))
 }
 
-fn absorb<'a>(
-    summary: Symbols<'a>,
-    defined: &mut BTreeMap<&'a str, u8>,
-    required: &mut BTreeSet<&'a str>,
-) {
+fn absorb<'a>(summary: Symbols<'a>, defined: &mut Map<&'a str, u8>, required: &mut Set<&'a str>) {
     for (name, rank) in summary.defined {
         defined
             .entry(name)

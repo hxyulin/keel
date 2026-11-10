@@ -786,7 +786,10 @@ impl<'a> Parsed<'a> {
             // The generic relocation iterator skips malformed tables. Validate
             // explicitly before consuming it so bad inputs cannot mislink.
             section.elf_linked_rela().map_err(|e| e.to_string())?;
-            let mut unwind_relocations = BTreeSet::new();
+            // One flag per encoded pointer field: a relocation must address a
+            // field, so this detects duplicates without an ordered set.
+            let frames = unwind_sections.get(&(sections.len() - 1));
+            let mut unwind_relocations = vec![false; frames.map_or(0, |f| f.field_count())];
             let mut sframe_relocations = BTreeSet::new();
             for (offset, r) in section.relocations() {
                 let Some(offset) = group_plan.offset(section.index().0, offset) else {
@@ -821,13 +824,18 @@ impl<'a> Parsed<'a> {
                 if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                     return Err("relocation field is outside file-backed section data".into());
                 }
-                if let Some(frames) = unwind_sections.get(&(sections.len() - 1)) {
-                    if !unwind_relocations.insert(offset) {
+                if let Some(frames) = frames {
+                    // A first relocation at a non-field offset fails here, so a
+                    // duplicate always addresses a field, as an offset set would find.
+                    let field = frames
+                        .field_at(offset)
+                        .map_err(|e| format!(".eh_frame: {e}"))?;
+                    if std::mem::replace(&mut unwind_relocations[field], true) {
                         return Err("duplicate .eh_frame pointer relocation".into());
                     }
                     frames
-                        .relocation(
-                            offset,
+                        .check_field(
+                            field,
                             if arm {
                                 use object::elf::*;
                                 match kind {

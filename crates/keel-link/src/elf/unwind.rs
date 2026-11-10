@@ -107,16 +107,52 @@ struct Frame {
     pc: Pointer,
     range: Pointer,
 }
+/// Encoded pointer fields in ascending offset order. Parsing appends them in
+/// order, so lookups binary-search a vector instead of a tree.
+#[derive(Default)]
+struct Fields(Vec<Pointer>);
+impl Fields {
+    fn insert(&mut self, pointer: Pointer) {
+        match self.0.last() {
+            Some(last) if last.offset >= pointer.offset => {
+                match self.0.binary_search_by_key(&pointer.offset, |p| p.offset) {
+                    Ok(at) => self.0[at] = pointer,
+                    Err(at) => self.0.insert(at, pointer),
+                }
+            }
+            _ => self.0.push(pointer),
+        }
+    }
+    /// The position of the field at `offset`.
+    fn find(&self, offset: u64) -> Option<usize> {
+        self.0
+            .binary_search_by_key(&offset, |p| p.offset as u64)
+            .ok()
+    }
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn iter(&self) -> impl Iterator<Item = (u64, &Pointer)> {
+        self.0.iter().map(|p| (p.offset as u64, p))
+    }
+    fn range(&self, range: std::ops::Range<u64>) -> impl Iterator<Item = (u64, &Pointer)> {
+        let start = self.0.partition_point(|p| (p.offset as u64) < range.start);
+        let end = self.0.partition_point(|p| (p.offset as u64) < range.end);
+        self.0[start..end.max(start)]
+            .iter()
+            .map(|p| (p.offset as u64, p))
+    }
+}
 pub(super) struct Frames {
     frames: Vec<Frame>,
-    fields: BTreeMap<u64, Pointer>,
+    fields: Fields,
     last_record: Option<usize>,
 }
 impl Frames {
     pub fn parse(data: &[u8]) -> Result<Self> {
         let mut result = Self {
             frames: Vec::new(),
-            fields: BTreeMap::new(),
+            fields: Fields::default(),
             last_record: None,
         };
         let mut cies = BTreeMap::new();
@@ -234,13 +270,24 @@ impl Frames {
         Ok(result)
     }
     fn field(&mut self, pointer: Pointer) {
-        self.fields.insert(pointer.offset as u64, pointer);
+        self.fields.insert(pointer);
     }
     pub fn relocation(&self, offset: u64, kind: u32) -> Result<()> {
-        let field = self
-            .fields
-            .get(&offset)
-            .ok_or("unwind relocation must address an encoded pointer field")?;
+        self.check_field(self.field_at(offset)?, kind)
+    }
+    /// The number of encoded pointer fields, which [`Self::field_at`] numbers.
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
+    }
+    /// The number of the field that a relocation at `offset` addresses.
+    pub fn field_at(&self, offset: u64) -> Result<usize> {
+        self.fields
+            .find(offset)
+            .ok_or_else(|| "unwind relocation must address an encoded pointer field".into())
+    }
+    /// Check that relocation `kind` matches the encoding of field `index`.
+    pub fn check_field(&self, index: usize, kind: u32) -> Result<()> {
+        let field = &self.fields.0[index];
         let supported = match (field.encoding & 0x70, field.width()?) {
             (0, 8) => kind == object::elf::R_X86_64_64,
             (0, 4) => matches!(kind, object::elf::R_X86_64_32 | object::elf::R_X86_64_32S),
@@ -536,7 +583,7 @@ impl Frames {
                     // ranges retain the original ascending field order.
                     .range(cie as u64..end(cie) as u64)
                     .chain(self.fields.range(f.record as u64..end(f.record) as u64))
-                    .map(|(&offset, _)| offset)
+                    .map(|(offset, _)| offset)
                     .collect();
                 Ok(FrameOwner {
                     record: f.record,
@@ -610,7 +657,7 @@ impl Frames {
         // Both fields and kept ranges are ordered. Visit each range once,
         // retaining the original field validation and error order.
         let mut ranges = filtered.ranges.iter().peekable();
-        for (&offset, pointer) in &self.fields {
+        for (offset, pointer) in self.fields.iter() {
             while ranges.peek().is_some_and(|&&(_, end, _)| end <= offset) {
                 ranges.next();
             }
@@ -735,7 +782,7 @@ mod tests {
                 put32(&mut filtered.data, base + 4, (base + 4 - cie) as u32);
             }
         }
-        for (&offset, pointer) in &parsed.fields {
+        for (offset, pointer) in parsed.fields.iter() {
             if filtered.offset(offset).is_some()
                 && !relocated.contains(&offset)
                 && pointer.encoding & 0x70 != 0
@@ -807,17 +854,17 @@ mod tests {
                 for nonzero in [false, true] {
                     let mut data = original.clone();
                     if nonzero {
-                        for pointer in parsed.fields.values() {
+                        for (_, pointer) in parsed.fields.iter() {
                             data[pointer.offset] = 1;
                         }
                     }
                     for relocations in [0, 1, 2] {
                         let relocated = parsed
                             .fields
-                            .keys()
+                            .iter()
                             .enumerate()
                             .filter(|(i, _)| relocations == 2 || (relocations == 1 && i % 2 == 0))
-                            .map(|(_, &offset)| offset)
+                            .map(|(_, (offset, _))| offset)
                             .collect();
                         let expected = compact_reference(&parsed, &data, &dead, &relocated);
                         let actual = parsed.compact(&data, &dead, &relocated);
@@ -855,7 +902,7 @@ mod tests {
                 .filter(|(i, _)| i % 4 != 0)
                 .map(|(_, f)| f.record)
                 .collect();
-            let relocated = parsed.fields.keys().copied().collect();
+            let relocated = parsed.fields.iter().map(|(offset, _)| offset).collect();
             let expected = compact_reference(&parsed, &data, &dead, &relocated).unwrap();
             let actual = parsed.compact(&data, &dead, &relocated).unwrap();
             assert_eq!(actual.data, expected.data);
