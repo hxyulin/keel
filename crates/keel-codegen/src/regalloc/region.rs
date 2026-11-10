@@ -166,8 +166,21 @@ struct Live<'a> {
 
 impl<'a> Live<'a> {
     fn new(intervals: &'a [Interval]) -> Self {
+        // A counting sort on the start point: points are dense and bounded.
+        let last = intervals.iter().map(Interval::start).max().unwrap_or(0) as usize;
+        let mut first = vec![0u32; last + 2];
+        for iv in intervals {
+            first[iv.start() as usize + 1] += 1;
+        }
+        for p in 0..=last {
+            first[p + 1] += first[p];
+        }
         let mut by_start: Vec<_> = intervals.iter().collect();
-        by_start.sort_unstable_by_key(|iv| iv.start());
+        for iv in intervals {
+            let slot = &mut first[iv.start() as usize];
+            by_start[*slot as usize] = iv;
+            *slot += 1;
+        }
         Self {
             by_start,
             next: 0,
