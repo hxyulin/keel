@@ -1098,7 +1098,8 @@ impl<'a> FunctionCompiler<'a> {
             && !func.attrs.optnone
         {
             plan::prefer_abi_gprs(func, &named, &mut covers.selection);
-        }        crate::backend_profile::count_covers(&covers.selection);
+        }
+        crate::backend_profile::count_covers(&covers.selection);
         let (alloc, f80_homes) =
             plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?;
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
