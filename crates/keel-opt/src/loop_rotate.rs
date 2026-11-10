@@ -17,7 +17,7 @@ impl crate::Pass for LoopRotate {
         let headers: Vec<_> = f.blocks().collect();
         let mut changed = false;
         for h in headers {
-            changed |= rotate(f, h);
+            changed |= rotate(f, h, false);
         }
         changed
     }
@@ -25,7 +25,12 @@ impl crate::Pass for LoopRotate {
         true
     }
 }
-fn rotate(f: &mut Function, h: Block) -> bool {
+/// Versioned batching creates several guarded entries to its original tail.
+/// Keep that admission local rather than changing ordinary loop rotation.
+pub(crate) fn rotate_batched_tail(f: &mut Function, h: Block) -> bool {
+    rotate(f, h, true)
+}
+fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     let analysis = crate::analysis::get(f);
     let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let hi = f.block_insts(h).to_vec();
@@ -75,7 +80,9 @@ fn rotate(f: &mut Function, h: Block) -> bool {
         return false;
     };
     let latch = *latch;
-    if latch == h || cfg.preds(h).len() != 2 {
+    // Keep every external entry guarded. Rotation only redirects the unique
+    // backedge, so versioned loops may have several external predecessors.
+    if latch == h || (!batched && cfg.preds(h).len() != 2) {
         return false;
     }
     let Some(&back) = f.block_insts(latch).last() else {

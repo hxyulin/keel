@@ -355,3 +355,30 @@ block3:
         assert_eq!(split.matches(folded).count(), 2, "{split}");
     }
 }
+
+#[test]
+fn adjacent_proven_float_loads_pair_without_widening_the_footprint() {
+    for (ty, bytes) in [("f32", 4), ("f64", 8)] {
+        for (flags, pair) in [
+            ("trap_ub", true),
+            ("notrap", true),
+            ("", false),
+            ("volatile", false),
+        ] {
+            let src = format!(
+                "func @f(ptr) -> {ty} {{\nblock0(v0:ptr):\n v1=iconst.i64 {bytes}\n v2=ptradd v0,v1\n v3=load.{ty} {flags} v0\n v4=load.{ty} {flags} v2\n v5=fadd v3,v4\n return v5\n}}"
+            );
+            let asm = output(&src, Target::Aarch64AppleDarwin, SelectionOptions::ALL);
+            let class = if ty == "f32" { "s" } else { "d" };
+            assert_eq!(asm.contains(&format!("ldp\t{class}")), pair, "{asm}");
+            let spaced = src.replace(
+                &format!("iconst.i64 {bytes}"),
+                &format!("iconst.i64 {}", bytes * 2),
+            );
+            assert!(
+                !output(&spaced, Target::Aarch64AppleDarwin, SelectionOptions::ALL)
+                    .contains(&format!("ldp\t{class}"))
+            );
+        }
+    }
+}

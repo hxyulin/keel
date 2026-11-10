@@ -2,8 +2,98 @@
 use super::*;
 
 impl FunctionCompiler<'_> {
+    /// Pair adjacent, nonobservable scalar reads after allocation. No IR value
+    /// moves across another instruction, and both results must have distinct
+    /// registers (spilled or constrained cases keep their original loads).
+    fn pair_float_load(&mut self, inst: Inst) -> bool {
+        let f = self.func;
+        let InstData::Load {
+            ty: ty @ (Type::F32 | Type::F64),
+            addr,
+            flags,
+        } = *f.inst_data(inst)
+        else {
+            return false;
+        };
+        if flags.volatile
+            || !(flags.notrap || flags.trap_ub)
+            || f.inst_loc(inst).is_some()
+            || !self.selection.is_free(inst)
+        {
+            return false;
+        }
+        let list = f.block_insts(f.inst_block(inst));
+        let Some(&next) = list.get(f.inst_index(inst) + 1) else {
+            return false;
+        };
+        let InstData::Load {
+            ty: other_ty,
+            addr: other_addr,
+            flags: other_flags,
+        } = *f.inst_data(next)
+        else {
+            return false;
+        };
+        if other_ty != ty
+            || other_flags.volatile
+            || !(other_flags.notrap || other_flags.trap_ub)
+            || f.inst_loc(next).is_some()
+            || !self.selection.is_free(next)
+        {
+            return false;
+        }
+        let address = |v| {
+            self.selection
+                .addresses
+                .get(&f.resolve(v))
+                .copied()
+                .unwrap_or((f.resolve(v), 0))
+        };
+        let (base, offset) = address(addr);
+        let (other_base, other_offset) = address(other_addr);
+        let bytes = i64::from(ty.bytes().unwrap());
+        if base != other_base
+            || other_offset.checked_sub(offset) != Some(bytes)
+            || offset % bytes != 0
+            || !(-64..=63).contains(&(offset / bytes))
+            || self.alloc.loc(base).is_none()
+        {
+            return false;
+        }
+        let (Some(Loc::FReg(a)), Some(Loc::FReg(b))) = (
+            self.alloc.loc(f.first_result(inst)),
+            self.alloc.loc(f.first_result(next)),
+        ) else {
+            return false;
+        };
+        if a == b {
+            return false;
+        }
+        let p = self.use_reg(base, S0);
+        let (opcode, class) = if ty == Type::F64 {
+            (Opcode::LDP_D_ldstpair_off, 'd')
+        } else {
+            (Opcode::LDP_S_ldstpair_off, 's')
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Rt, a.into()),
+                (FieldId::Rt2, b.into()),
+                (FieldId::Rn, p.into()),
+                (FieldId::imm7, ((offset / bytes) as u32) & 127),
+            ],
+            |out| write!(out, "ldp\t{class}{a}, {class}{b}, [x{p}, #{offset}]"),
+        );
+        self.paired_float_load_second = Some(next);
+        true
+    }
+
     /// Variadic arguments, loads, stores, atomic operations and fences.
     pub(super) fn memory_inst(&mut self, inst: Inst, result: Option<Value>) {
+        if self.pair_float_load(inst) {
+            return;
+        }
         let func = self.func;
         match *func.inst_data(inst) {
             // Load the pointer, store it advanced by a slot, then read the

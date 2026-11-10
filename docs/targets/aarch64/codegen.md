@@ -244,6 +244,13 @@ flags is documented on `BrifTest` in `crates/keel-codegen/src/aarch64.rs`.
 
 ## Integer, float and atomic lowering
 
+Adjacent scalar f32/f64 loads with `notrap` or `trap_ub` proofs can lower to
+one `ldp` after allocation. They must read adjacent elements from the same
+base with an encodable offset, have distinct register results, and carry no
+source locations or volatile flag. Spills and constrained selection keep the
+original loads. This combines the two original footprints without an extra read.
+
+
 - A single-use i32/i64 add/sub overflow flag feeding a branch, directly or
   through `xor flag, 1`, stays in NZCV and branches with `hs`, `lo` or `vs`.
   Intervening work, extra flag users, debug boundaries, inline assembly and

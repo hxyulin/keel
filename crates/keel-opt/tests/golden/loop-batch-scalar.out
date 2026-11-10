@@ -1,0 +1,84 @@
+func @sum_abs(ptr, i64, f64) -> f64 cc(c) {
+block0(v0: ptr, v1: i64, v2: f64):
+    v3 = iconst.i64 0
+    jump block4
+block1(v4: i64, v5: f64):
+    v6 = icmp.ult v4, v1
+    brif v6, block2(v4, v5), block3(v4, v5)
+block2(v75: i64, v76: f64):
+    v7 = iconst.i64 3
+    v8 = shl v75, v7
+    v9 = ptradd v0, v8
+    v10 = load.f64 trap_ub v9
+    v11 = fabs v10
+    v12 = fadd v76, v11
+    v13 = iconst.i64 1
+    v14 = iadd v75, v13
+    v79 = icmp.ult v14, v1
+    brif v79, block2(v14, v12), block3(v14, v12)
+block3(v77: i64, v78: f64):
+    return v78
+block4:
+    v18 = iconst.i64 8
+    v19 = icmp.uge v1, v18
+    brif v19, block5, block1(v3, v2)
+block5:
+    v20 = iconst.i64 3
+    v21 = shl v1, v20
+    v22 = ushr v21, v20
+    v23 = icmp.eq v22, v1
+    v24 = ptrtoint.i64 v0
+    v25 = iadd v24, v21
+    v26 = icmp.uge v25, v24
+    v27 = and v23, v26
+    v28 = iconst.i64 3
+    v29 = ushr v1, v28
+    v30 = shl v29, v28
+    brif v27, block6(v29, v2, v0), block1(v3, v2)
+block6(v15: i64, v16: f64, v17: ptr):
+    v31 = iconst.i64 0
+    v32 = ptradd v17, v31
+    v33 = iconst.i64 8
+    v34 = ptradd v17, v33
+    v35 = iconst.i64 16
+    v36 = ptradd v17, v35
+    v37 = iconst.i64 24
+    v38 = ptradd v17, v37
+    v39 = iconst.i64 32
+    v40 = ptradd v17, v39
+    v41 = iconst.i64 40
+    v42 = ptradd v17, v41
+    v43 = iconst.i64 48
+    v44 = ptradd v17, v43
+    v45 = iconst.i64 56
+    v46 = ptradd v17, v45
+    v47 = load.f64 trap_ub v32
+    v48 = load.f64 trap_ub v34
+    v49 = load.f64 trap_ub v36
+    v50 = load.f64 trap_ub v38
+    v51 = load.f64 trap_ub v40
+    v52 = load.f64 trap_ub v42
+    v53 = load.f64 trap_ub v44
+    v54 = load.f64 trap_ub v46
+    v55 = fabs v47
+    v56 = fabs v48
+    v57 = fabs v49
+    v58 = fabs v50
+    v59 = fabs v51
+    v60 = fabs v52
+    v61 = fabs v53
+    v62 = fabs v54
+    v63 = fadd v16, v55
+    v64 = fadd v63, v56
+    v65 = fadd v64, v57
+    v66 = fadd v65, v58
+    v67 = fadd v66, v59
+    v68 = fadd v67, v60
+    v69 = fadd v68, v61
+    v70 = fadd v69, v62
+    v71 = iconst.i64 64
+    v72 = ptradd v17, v71
+    v73 = iconst.i64 1
+    v74 = isub v15, v73
+    brif v74, block6(v74, v70, v72), block1(v30, v70)
+}

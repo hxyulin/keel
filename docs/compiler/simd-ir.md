@@ -207,7 +207,13 @@ values precede scalar additions in input order; additions are never
 reassociated, even in `fast_math` functions. Input and accumulator types must
 match. Integer-to-float and f32-to-f64 reductions are not admitted. Calls,
 stores, observable loads, other recurrences and debugger metadata stay scalar.
-No default tier schedules this pass. Select it before strength reduction and
+The experimental AArch64-only `loop-batch-scalar` variant uses eight scalar
+loads and scalar absolute values, without vector extraction. Adjacent proven
+floating reads can lower to register-pair loads after allocation. Spilled
+results, observable reads and source-location boundaries retain separate loads.
+Both rotate their generated scalar tail despite its multiple guarded entries.
+Ordinary loop rotation keeps its existing admission rules.
+Neither pass is scheduled by default. Select either before strength reduction and
 loop rotation, after stack promotion and scalar cleanup.
 
 The opt-in `loop-dot` pass handles read-only floating dot products on the native

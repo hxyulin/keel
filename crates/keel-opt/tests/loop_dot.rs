@@ -344,3 +344,63 @@ fn batching_retains_order_even_with_fast_math_permission() {
     assert!(m.to_string().contains("load.f64x2"));
     assert!(!m.to_string().contains("vfadd"));
 }
+
+#[test]
+fn batched_fallback_rotates_with_multiple_guarded_entries() {
+    let src = sum_source("f64", true);
+    let mut m = batch(&src, VectorTarget::Aarch64Neon);
+    assert!(!m.functions[0].layout_insts().any(|(_, inst)| matches!(m.functions[0].inst_data(inst), InstData::Jump { dest } if dest.block == m.functions[0].blocks().nth(1).unwrap())));
+    let original = keel_ir::parse(&src).unwrap();
+    keel_opt::run_passes_for_target(&mut m, &["loop-rotate"], VectorTarget::Aarch64Neon).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_ne!(m.to_string(), original.to_string());
+    for n in [0, 1, 7, 8, 9, 17] {
+        let a = vec![-3.5; n];
+        assert_eq!(execute(&m, &a, &a, -0.0), execute(&original, &a, &a, -0.0));
+    }
+}
+
+#[test]
+fn scalar_batch_schedule_preserves_order_without_packed_values() {
+    for ty in ["f32", "f64"] {
+        for absolute in [false, true] {
+            let src = sum_source(ty, absolute);
+            let original = keel_ir::parse(&src).unwrap();
+            let mut m = original.clone();
+            keel_opt::run_passes_for_target(
+                &mut m,
+                &["loop-batch-scalar", "loop-rotate"],
+                VectorTarget::Aarch64Neon,
+            )
+            .unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            assert_ne!(m.to_string(), original.to_string());
+            assert!(!m.to_string().contains("vextract"));
+            let a = [
+                9007199254740992.0,
+                1.0,
+                -9007199254740992.0,
+                1.0,
+                -0.0,
+                3.0,
+                -5.0,
+                7.0,
+                11.0,
+                1.0,
+                0.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+                7.0,
+            ];
+            for n in [0, 1, 7, 8, 9, 16, 17] {
+                assert_eq!(
+                    execute(&m, &a[..n], &a[..n], -0.0),
+                    execute(&original, &a[..n], &a[..n], -0.0)
+                );
+            }
+        }
+    }
+}

@@ -157,25 +157,27 @@ int main(void) {
         cc.arg(format!("-D{name}=ref_{name}"));
     }
     run(&mut cc);
-    run(Command::new(env!("CARGO_BIN_EXE_keel"))
-        .current_dir(&dir)
-        .args([
-            "cc",
-            "--verify-each",
-            "-p",
-            pipeline,
-            "--emit-object",
-            "kernels.c",
-            "-o",
+    for pass in ["loop-batch", "loop-batch-scalar"] {
+        run(Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args([
+                "cc",
+                "--verify-each",
+                "-p",
+                &pipeline.replace("loop-batch", pass),
+                "--emit-object",
+                "kernels.c",
+                "-o",
+                "kernels.o",
+            ]));
+        run(Command::new("clang").current_dir(&dir).args([
+            "-O2",
+            "oracle.c",
+            "reference.o",
             "kernels.o",
+            "-o",
+            "oracle",
         ]));
-    run(Command::new("clang").current_dir(&dir).args([
-        "-O2",
-        "oracle.c",
-        "reference.o",
-        "kernels.o",
-        "-o",
-        "oracle",
-    ]));
-    run(&mut Command::new(dir.join("oracle")));
+        run(&mut Command::new(dir.join("oracle")));
+    }
 }

@@ -62,8 +62,8 @@ def run_ordered(args):
     prefix = 'simplify-cfg,canonicalize,stack-promote,instcombine,dce'
     # Both sides receive identical scalar preparation followed by full -O3.
     # Only the opt-in loop-batch invocation differs.
-    for label in ('scalar', 'batch'):
-        pipeline = prefix + (',loop-batch' if label == 'batch' else '')
+    for label in ('scalar', 'batch', 'batch-scalar'):
+        pipeline = prefix + ({'batch': ',loop-batch', 'batch-scalar': ',loop-batch-scalar'}.get(label, ''))
         command([keel, 'opt', '-p', pipeline, out / 'raw.ir', '-o', out / (label + '.ir')])
         command([keel, 'compile', '-O3', out / (label + '.ir'), '-o', out / (label + '.s')])
     ir = (out / 'batch.ir').read_text()
@@ -72,7 +72,7 @@ def run_ordered(args):
     command([clang, '-O3', *strict, '-S', source / 'ordered.c', '-o', out / 'clang.s'])
     for name, packed in (('hand-scalar', 0), ('hand-neon', 1)):
         command([clang, '-E', '-P', f'-DPACKED={packed}', source / 'ordered_m5.S', '-o', out / (name + '.s')])
-    names = ['scalar', 'batch', 'clang', 'hand-scalar', 'hand-neon']
+    names = ['scalar', 'batch', 'batch-scalar', 'clang', 'hand-scalar', 'hand-neon']
     images = {}
     for placement in range(args.placements):
         for name in names:

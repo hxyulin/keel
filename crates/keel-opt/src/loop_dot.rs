@@ -47,7 +47,7 @@ impl crate::Pass for LoopDot {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        run(f, context, false)
+        run(f, context, false, false)
     }
 }
 
@@ -66,11 +66,34 @@ impl crate::Pass for LoopBatch {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        run(f, context, true)
+        run(f, context, true, false)
     }
 }
 
-fn run(f: &mut Function, context: &crate::OptimizationContext, batching: bool) -> bool {
+pub(crate) struct LoopBatchScalar;
+impl crate::Pass for LoopBatchScalar {
+    fn name(&self) -> &'static str {
+        "loop-batch-scalar"
+    }
+    fn description(&self) -> &'static str {
+        "experiment with ordered AArch64 scalar load batches"
+    }
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
+    }
+    fn deterministic(&self) -> bool {
+        true
+    }
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, true, true)
+    }
+}
+fn run(
+    f: &mut Function,
+    context: &crate::OptimizationContext,
+    batching: bool,
+    scalar: bool,
+) -> bool {
     if context.layout != Some(keel_ir::DataLayout::NATIVE64)
         || context.target == crate::VectorTarget::Portable
         || f.debug_return.is_some()
@@ -83,7 +106,10 @@ fn run(f: &mut Function, context: &crate::OptimizationContext, batching: bool) -
     let mut changed = false;
     for header in f.blocks().collect::<Vec<_>>() {
         if let Some(c) = analyze(f, header, batching) {
-            transform(f, c);
+            transform(f, c, scalar);
+            if batching {
+                crate::loop_rotate::rotate_batched_tail(f, header);
+            }
             changed = true;
         }
     }
@@ -310,7 +336,7 @@ fn integer(f: &mut Function, block: Block, n: i64) -> Value {
 fn cmp(f: &mut Function, block: Block, cond: IntCC, a: Value, b: Value) -> Value {
     emit(f, block, D::Icmp { cond, args: [a, b] })
 }
-fn transform(f: &mut Function, c: Candidate) {
+fn transform(f: &mut Function, c: Candidate, scalar: bool) {
     let relaxed = f.attrs.fast_math && !matches!(c.product, Product::Sum | Product::Absolute);
     // Four independent recurrences amortize loop control without exhausting
     // the baseline register banks. Strict left folds retain eight elements.
@@ -420,72 +446,113 @@ fn transform(f: &mut Function, c: Candidate) {
         },
     );
     let mut products = Vec::new();
-    for chunk in 0..group_size / i64::from(c.shape.lanes()) {
-        let mut inputs = Vec::new();
-        for (index, stream) in c.streams.iter().enumerate() {
-            let addr = if chunk == 0 {
-                pointers[index]
-            } else {
-                let delta = integer(f, body, chunk * 16);
-                bin(f, body, B::Ptradd, pointers[index], delta)
-            };
-            let flags = MemoryFlags {
-                align: stream.flags.align.min(16),
-                ..stream.flags
-            };
-            inputs.push(emit(
+    if scalar {
+        let addresses: Vec<_> = (0..group_size)
+            .map(|lane| {
+                let delta = integer(f, body, lane * i64::from(bytes));
+                bin(f, body, B::Ptradd, pointers[0], delta)
+            })
+            .collect();
+        for addr in addresses {
+            let stream = &c.streams[0];
+            let input = emit(
                 f,
                 body,
                 D::Load {
-                    ty: Type::Vector(c.shape),
+                    ty: c.shape.lane_type(),
                     addr,
-                    flags,
+                    flags: MemoryFlags {
+                        align: stream.flags.align.min(bytes),
+                        ..stream.flags
+                    },
+                },
+            );
+            products.push(input);
+        }
+        if matches!(c.product, Product::Absolute) {
+            for input in &mut products {
+                *input = emit(
+                    f,
+                    body,
+                    D::Unary {
+                        op: UnaryOp::Fabs,
+                        arg: *input,
+                    },
+                );
+            }
+        }
+    } else {
+        for chunk in 0..group_size / i64::from(c.shape.lanes()) {
+            let mut inputs = Vec::new();
+            for (index, stream) in c.streams.iter().enumerate() {
+                let addr = if chunk == 0 {
+                    pointers[index]
+                } else {
+                    let delta = integer(f, body, chunk * 16);
+                    bin(f, body, B::Ptradd, pointers[index], delta)
+                };
+                let flags = MemoryFlags {
+                    align: stream.flags.align.min(16),
+                    ..stream.flags
+                };
+                inputs.push(emit(
+                    f,
+                    body,
+                    D::Load {
+                        ty: Type::Vector(c.shape),
+                        addr,
+                        flags,
+                    },
+                ));
+            }
+            if matches!(c.product, Product::Sum | Product::Absolute) {
+                products.push(if matches!(c.product, Product::Absolute) {
+                    emit(
+                        f,
+                        body,
+                        D::VectorUnary {
+                            op: UnaryOp::Fabs,
+                            arg: inputs[0],
+                        },
+                    )
+                } else {
+                    inputs[0]
+                });
+                continue;
+            }
+            let factors = match c.product {
+                Product::Sum | Product::Absolute => unreachable!("single stream handled above"),
+                Product::Multiply => [inputs[0], inputs[1]],
+                Product::Square => [inputs[0], inputs[0]],
+                Product::SquaredDifference => {
+                    let difference = emit(
+                        f,
+                        body,
+                        D::VectorBinary {
+                            op: VectorBinaryOp::Fsub,
+                            args: [inputs[0], inputs[1]],
+                        },
+                    );
+                    [difference, difference]
+                }
+            };
+            products.push(emit(
+                f,
+                body,
+                D::VectorBinary {
+                    op: VectorBinaryOp::Fmul,
+                    args: factors,
                 },
             ));
         }
-        if matches!(c.product, Product::Sum | Product::Absolute) {
-            products.push(if matches!(c.product, Product::Absolute) {
-                emit(
-                    f,
-                    body,
-                    D::VectorUnary {
-                        op: UnaryOp::Fabs,
-                        arg: inputs[0],
-                    },
-                )
-            } else {
-                inputs[0]
-            });
-            continue;
-        }
-        let factors = match c.product {
-            Product::Sum | Product::Absolute => unreachable!("single stream handled above"),
-            Product::Multiply => [inputs[0], inputs[1]],
-            Product::Square => [inputs[0], inputs[0]],
-            Product::SquaredDifference => {
-                let difference = emit(
-                    f,
-                    body,
-                    D::VectorBinary {
-                        op: VectorBinaryOp::Fsub,
-                        args: [inputs[0], inputs[1]],
-                    },
-                );
-                [difference, difference]
-            }
-        };
-        products.push(emit(
-            f,
-            body,
-            D::VectorBinary {
-                op: VectorBinaryOp::Fmul,
-                args: factors,
-            },
-        ));
     }
     let mut total = sum;
     let mut next_accumulators = Vec::new();
-    if relaxed {
+    if scalar {
+        for product in products {
+            total = bin(f, body, B::Fadd, total, product);
+        }
+    } else if relaxed {
         for (acc, product) in accumulators.iter().zip(products) {
             next_accumulators.push(emit(
                 f,

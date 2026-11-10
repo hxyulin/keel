@@ -870,6 +870,7 @@ struct FunctionCompiler<'a> {
     /// Vector shifts by a splatted constant, with the count.
     constant_shifts: HashMap<Inst, u32>,
     packed_absolute_values: HashMap<Inst, Value>,
+    paired_float_load_second: Option<Inst>,
     packed_low_loads: HashMap<Inst, Value>,
     packed_minmax: HashMap<Inst, packed_minmax::MinMax>,
     extended_adds: HashMap<Inst, extended_add::ExtendedAdd>,
@@ -1183,6 +1184,7 @@ impl<'a> FunctionCompiler<'a> {
             selection,
             replicate_loads,
             constant_shifts,
+            paired_float_load_second: None,
             packed_low_loads,
             packed_minmax,
             extended_adds,
@@ -1903,6 +1905,10 @@ impl<'a> FunctionCompiler<'a> {
     /// Lowers one instruction: through a cover that claimed it, the i128
     /// lowering, or its instruction family.
     fn inst(&mut self, inst: Inst) {
+        if self.paired_float_load_second == Some(inst) {
+            self.paired_float_load_second = None;
+            return;
+        }
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.cover(inst, result) {
