@@ -614,7 +614,10 @@ fn find_literal_end(quote: u8, bytes: &[u8]) -> Option<usize> {
     memchr::memchr3(quote, b'\\', b'\n', bytes)
 }
 fn find_comment_end(bytes: &[u8]) -> Option<usize> {
-    memchr::memmem::find(bytes, b"*/")
+    // `memmem::find` builds a searcher on every call; build it once.
+    static FINDER: std::sync::LazyLock<memchr::memmem::Finder<'static>> =
+        std::sync::LazyLock::new(|| memchr::memmem::Finder::new(b"*/"));
+    FINDER.find(bytes)
 }
 
 fn punctuation_len(bytes: &[u8]) -> usize {
