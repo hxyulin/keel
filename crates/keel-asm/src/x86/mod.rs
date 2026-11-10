@@ -379,6 +379,83 @@ fn concrete_operands(instruction: &x86::Instruction) -> bool {
     })
 }
 
+/// A symbol-free instruction as an encoding-cache key: its opcode, lock
+/// flag and operands packed into words. Hashing and comparing a few words
+/// costs far less than walking the instruction's operand structs.
+#[derive(PartialEq, Eq)]
+struct Concrete {
+    opcode: x86::Opcode,
+    lock: bool,
+    len: u8,
+    /// `words[..len]`; the rest stay zero.
+    words: [u64; 7],
+}
+impl Hash for Concrete {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.opcode.hash(state);
+        for &word in &self.words[..usize::from(self.len)] {
+            state.write_u64(word);
+        }
+    }
+}
+impl Concrete {
+    /// `None` when an operand names a symbol, or the operands need more
+    /// words than a key holds. Each operand's first word gives its kind and
+    /// how many words follow, so equal words mean equal operands.
+    fn of(i: &x86::Instruction) -> Option<Self> {
+        fn register(r: x86::Register) -> u64 {
+            // Twelve classes fit below the high-byte bit.
+            u64::from(r.class as u8 | u8::from(r.high_byte) << 7)
+                | u64::from(r.number) << 8
+                | u64::from(r.width) << 16
+        }
+        let mut key = Self {
+            opcode: i.opcode,
+            lock: i.lock,
+            len: 0,
+            words: [0; 7],
+        };
+        for o in &i.operands {
+            let (header, address) = match o {
+                x86::Operand::Register(r) => (register(*r) << 8, None),
+                x86::Operand::Immediate(a) => (1, Some(a)),
+                x86::Operand::Memory(m) => (
+                    2 | u64::from(m.base.is_some()) << 12
+                        | u64::from(m.index.is_some()) << 13
+                        | u64::from(m.segment.is_some()) << 14
+                        | u64::from(m.scale) << 16
+                        | u64::from(m.segment.unwrap_or(0)) << 24
+                        | u64::from(m.width) << 32,
+                    Some(&m.displacement),
+                ),
+            };
+            let Some(a) = address else {
+                key.push(header)?;
+                continue;
+            };
+            if !symbol_free(a) {
+                return None;
+            }
+            let c = a.expression.constant;
+            let wide = i64::try_from(c).is_err();
+            key.push(header | (a.modifier as u64 | u64::from(wide) << 3) << 8)?;
+            if let x86::Operand::Memory(m) = o {
+                key.push(m.base.map_or(0, register) | m.index.map_or(0, register) << 32)?;
+            }
+            key.push(c as u64)?;
+            if wide {
+                key.push((c >> 64) as u64)?;
+            }
+        }
+        Some(key)
+    }
+    fn push(&mut self, word: u64) -> Option<()> {
+        *self.words.get_mut(usize::from(self.len))? = word;
+        self.len += 1;
+        Some(())
+    }
+}
+
 fn check_instruction_features(
     instruction: &x86::Instruction,
     features: Features,
@@ -811,7 +888,7 @@ struct Items {
     /// keyed before EVEX promotion. Every entry passed the feature check; the
     /// bytes depend only on the instruction value, including its selected
     /// encoding form.
-    encodings: FxHashMap<x86::Instruction, (u32, u32)>,
+    encodings: FxHashMap<Concrete, (u32, u32)>,
 }
 impl Items {
     fn new(features: x86::Features) -> Self {
@@ -995,11 +1072,14 @@ impl Items {
         // An identical instruction passed the feature check under the same
         // target features. A scoped source can only narrow them, so only
         // there does a cached instruction need its promotion and check again.
-        let concrete = self.metrics.is_none() && concrete_operands(source);
-        if concrete
+        let concrete = match self.metrics {
+            None => Concrete::of(source),
+            Some(_) => None,
+        };
+        if let Some(key) = &concrete
             && self.source_features.is_none()
             && self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(source)
+            && let Some(&(start, end)) = self.encodings.get(key)
         {
             self.encoded
                 .extend_from_within(start as usize..end as usize);
@@ -1018,9 +1098,9 @@ impl Items {
             });
             return;
         }
-        if concrete
+        if let Some(key) = &concrete
             && self.unsupported.is_none()
-            && let Some(&(start, end)) = self.encodings.get(source)
+            && let Some(&(start, end)) = self.encodings.get(key)
         {
             self.encoded
                 .extend_from_within(start as usize..end as usize);
@@ -1030,7 +1110,9 @@ impl Items {
         let start = index32(self.encoded.len());
         if self.encode(i, line) {
             let end = index32(self.encoded.len());
-            self.encodings.insert(source.clone(), (start, end));
+            if let Some(key) = concrete {
+                self.encodings.insert(key, (start, end));
+            }
         } else {
             let index = self.symbolic.push(i, &mut self.symbols);
             self.push(Entry::Symbolic {
