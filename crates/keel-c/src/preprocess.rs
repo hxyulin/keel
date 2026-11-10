@@ -274,6 +274,8 @@ fn preprocess_inner<const TRACK: bool>(
         framework_dirs: Vec::new(),
         include_stack: Vec::new(),
         once: HashSet::default(),
+        paths: Vec::new(),
+        path_ids: HashMap::default(),
         canonical_paths: HashMap::default(),
         canonical_dirs: HashMap::default(),
         header_cache: HashMap::default(),
@@ -312,7 +314,8 @@ fn preprocess_inner<const TRACK: bool>(
             pp.undefined.insert(arena.alloc_str(name));
         }
     }
-    pp.file(src, path, 0, None, false)?;
+    let canonical = pp.canonical_path(Path::new(path));
+    pp.file(src, path, canonical, 0, None, false)?;
     let output = if options.dump_macros {
         pp.macro_dump()
     } else {
@@ -342,13 +345,17 @@ struct Preprocessor<'a, const TRACK: bool> {
     search_dirs: Vec<PathBuf>,
     framework_dirs: Vec<PathBuf>,
     include_stack: Vec<(&'a str, Option<usize>)>,
-    once: HashSet<PathBuf>,
-    canonical_paths: HashMap<PathBuf, PathBuf>,
+    once: HashSet<FileId>,
+    /// The canonical path of each file id.
+    paths: Vec<PathBuf>,
+    path_ids: HashMap<PathBuf, FileId>,
+    /// The file id of each path, by the spelling that reached it.
+    canonical_paths: HashMap<PathBuf, FileId>,
     canonical_dirs: HashMap<PathBuf, PathBuf>,
     header_cache: HashMap<HeaderContext<'a>, HashMap<String, Option<Include>>>,
-    file_sources: HashMap<(PathBuf, bool), &'a str>,
+    file_sources: HashMap<(FileId, bool), &'a str>,
     /// Each header processed to its end.
-    included: HashMap<(PathBuf, bool), Included<'a>>,
+    included: HashMap<(FileId, bool), Included<'a>>,
     /// Token buffers for the chunks of files being processed.
     chunks: Vec<Vec<Token<'a>>>,
     counter: u64,
@@ -364,6 +371,9 @@ enum FileSource {
     Shared(Arc<str>),
     Mapped(memmap2::Mmap),
 }
+/// A file, by its canonical path; see `Preprocessor::paths`.
+type FileId = u32;
+
 /// What later inclusions of a header reuse from its first inclusion.
 #[derive(Clone)]
 struct Included<'a> {
@@ -1398,6 +1408,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         &mut self,
         src: &'a str,
         path: &'a str,
+        canonical: FileId,
         depth: usize,
         origin: Option<usize>,
         embedded: bool,
@@ -1405,7 +1416,6 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if depth > 200 {
             return Err(self.error("include nesting exceeds 200"));
         }
-        let canonical = self.canonical_path(Path::new(path));
         if self.once.contains(&canonical) {
             if TRACK {
                 self.stats.once_skips += 1;
@@ -1414,7 +1424,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         }
         // The caller-provided top-level text may differ from the on-disk file.
         // Only disk/embedded includes participate in the header caches.
-        let key = (depth > 0 && CACHE_HEADERS).then(|| (canonical.clone(), embedded));
+        let key = (depth > 0 && CACHE_HEADERS).then_some((canonical, embedded));
         let known = key.as_ref().and_then(|key| self.included.get(key).cloned());
         let mut tokens = None;
         if let Some(known) = &known {
@@ -1443,7 +1453,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if tokens.is_none()
             && let Some(key) = &key
         {
-            tokens = self.restore(key, src, name).map(|tokens| {
+            tokens = self.restore(*key, src, name).map(|tokens| {
                 Rc::new(Kept {
                     tokens: tokens.into_vec(),
                     text: "",
@@ -1483,9 +1493,11 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 && let (Some(tokens), Some(key), Some(cache)) =
                     (tokens.take(), &key, &mut self.batch_cache)
             {
-                cache
-                    .headers
-                    .insert(key.clone(), CachedHeader::new(src, &tokens));
+                let (id, embedded) = *key;
+                cache.headers.insert(
+                    (self.paths[id as usize].clone(), embedded),
+                    CachedHeader::new(src, &tokens),
+                );
             }
             kept = tokens.map(|tokens| Kept {
                 tokens,
@@ -1505,12 +1517,14 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
     /// A header's tokens from the batch cache, if it holds this source.
     fn restore(
         &mut self,
-        key: &(PathBuf, bool),
+        (id, embedded): (FileId, bool),
         src: &str,
         path: FileName<'a>,
     ) -> Option<Box<[Token<'a>]>> {
         let cache = self.batch_cache.as_mut()?;
-        let header = cache.headers.get(key)?;
+        let header = cache
+            .headers
+            .get(&(self.paths[id as usize].clone(), embedded))?;
         if header.source.as_ref() != src {
             return None;
         }
@@ -1729,7 +1743,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
             "pragma" => {
                 if args.first().is_some_and(|t| t.text == "once") {
-                    self.once.insert(state.canonical.clone());
+                    self.once.insert(state.canonical);
                 } else {
                     self.output.push_str("#pragma ");
                     self.output.push_str(&spelling(args));
@@ -1797,9 +1811,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         };
         self.lines(&tokens, state)
     }
-    fn canonical_path(&mut self, path: &Path) -> PathBuf {
-        if let Some(canonical) = self.canonical_paths.get(path) {
-            return canonical.clone();
+    fn canonical_path(&mut self, path: &Path) -> FileId {
+        if let Some(&id) = self.canonical_paths.get(path) {
+            return id;
         }
         // realpath walks every component. Most headers are ordinary files in
         // a few shared directories: resolve each directory once, then append
@@ -1825,9 +1839,17 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 Some(canonical_dir.join(name))
             })
             .unwrap_or_else(|| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
-        self.canonical_paths
-            .insert(path.to_path_buf(), canonical.clone());
-        canonical
+        let id = match self.path_ids.get(&canonical) {
+            Some(&id) => id,
+            None => {
+                let id = self.paths.len() as FileId;
+                self.paths.push(canonical.clone());
+                self.path_ids.insert(canonical, id);
+                id
+            }
+        };
+        self.canonical_paths.insert(path.to_path_buf(), id);
+        id
     }
     fn include_file(
         &mut self,
@@ -1862,14 +1884,12 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 FileSource::open(&include.path)
                     .map_err(|e| at.error(format!("{}: {e}", include.path.display())))?
             };
-            let loaded = if let Some(header) = self
-                .batch_cache
-                .as_ref()
-                .and_then(|cache| cache.headers.get(&key))
-                && header.source.as_ref()
-                    == loaded
-                        .text()
-                        .map_err(|e| at.error(format!("{}: {e}", include.path.display())))?
+            let loaded = if let Some(header) = self.batch_cache.as_ref().and_then(|cache| {
+                (cache.headers).get(&(self.paths[canonical as usize].clone(), embedded))
+            }) && header.source.as_ref()
+                == loaded
+                    .text()
+                    .map_err(|e| at.error(format!("{}: {e}", include.path.display())))?
             {
                 FileSource::Shared(Arc::clone(&header.source))
             } else {
@@ -1892,7 +1912,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             source
         };
         let path = self.arena.alloc_str(&include.path.to_string_lossy());
-        self.file(source, path, depth, include.origin, embedded)
+        self.file(source, path, canonical, depth, include.origin, embedded)
     }
     fn find_header(&mut self, name: &str, quoted: bool, next: bool) -> Option<Include> {
         let &(path, origin) = self.include_stack.last()?;
@@ -2012,7 +2032,7 @@ struct FileState<'a> {
     stack: Vec<Conditional<'a>>,
     logical_file: FileName<'a>,
     line_delta: i64,
-    canonical: PathBuf,
+    canonical: FileId,
     depth: usize,
     /// Present while a header's include guard is unknown.
     guard: Option<GuardScan<'a>>,
@@ -2029,7 +2049,7 @@ struct Skipped<'a> {
     locations: Option<Locations<'a>>,
 }
 impl<'a> FileState<'a> {
-    fn new(path: FileName<'a>, canonical: PathBuf, depth: usize) -> Self {
+    fn new(path: FileName<'a>, canonical: FileId, depth: usize) -> Self {
         Self {
             pending: Vec::new(),
             stack: Vec::new(),
