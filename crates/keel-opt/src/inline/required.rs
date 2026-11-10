@@ -335,10 +335,26 @@ fn expand_required_calls(
     }
     for first in 0..module.functions.len() {
         let mut dirty = false;
+        // Layout blocks before `resume` have no mandatory sites left.
+        // Inlining appends the continuation and callee blocks to the layout
+        // and leaves earlier blocks without sites, so the next site is never
+        // before the block after the call's. Cleanup can reorder blocks, so
+        // it rescans from the entry.
+        let mut resume = 0usize;
         loop {
             let mut next = None;
             let caller = &module.functions[first];
-            for (_, call) in caller.layout_insts() {
+            let sites = caller
+                .blocks()
+                .enumerate()
+                .skip(resume)
+                .flat_map(|(index, block)| {
+                    caller
+                        .block_insts(block)
+                        .iter()
+                        .map(move |&call| (index, call))
+                });
+            for (index, call) in sites {
                 let reference = match caller.inst_data(call) {
                     InstData::Call { func, .. }
                     | InstData::ReturnCall { func, .. }
@@ -406,14 +422,15 @@ fn expand_required_calls(
                         "required inline growth exceeds one million instructions",
                     ));
                 }
-                next = Some((call, target));
+                next = Some((index, call, target));
                 break;
             }
-            let Some((call, target)) = next else {
+            let Some((index, call, target)) = next else {
                 if dirty {
                     crate::phi_simplify::run(&mut module.functions[first]);
                     crate::simplify_cfg::run(&mut module.functions[first]);
                     dirty = false;
+                    resume = 0;
                     // Cleanup can expose or remove sites. Finish this caller
                     // before its body can become a later caller's template.
                     continue;
@@ -427,7 +444,10 @@ fn expand_required_calls(
                     crate::phi_simplify::run(caller);
                     crate::simplify_cfg::run(caller);
                 }
-                RequiredCleanup::PerCaller => dirty = true,
+                RequiredCleanup::PerCaller => {
+                    dirty = true;
+                    resume = index + 1;
+                }
             }
         }
     }
