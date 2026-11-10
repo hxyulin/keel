@@ -653,6 +653,14 @@ fn quoted_to(out: &mut String, s: &str) {
 }
 
 fn ident(s: &str) -> bool {
+    if s.is_ascii() {
+        let b = s.as_bytes();
+        return b
+            .first()
+            .is_some_and(|&c| BYTE_CLASS[usize::from(c)] & IDENT_START != 0)
+            && b.iter()
+                .all(|&c| BYTE_CLASS[usize::from(c)] & IDENT_CONTINUE != 0);
+    }
     let mut c = s.chars();
     c.next().is_some_and(|c| c == '_' || c.is_alphabetic())
         && c.all(|c| c == '_' || c.is_alphanumeric())
@@ -3000,6 +3008,26 @@ mod scanner_tests {
             assert_eq!(run(chunk), whole, "chunks of {chunk}");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ascii_identifier_test_matches_the_unicode_test() {
+        let unicode = |s: &str| {
+            let mut c = s.chars();
+            c.next().is_some_and(|c| c == '_' || c.is_alphabetic())
+                && c.all(|c| c == '_' || c.is_alphanumeric())
+        };
+        let ascii = (0..128u8).map(char::from);
+        for a in ascii.clone() {
+            for b in ascii.clone() {
+                for s in [a.to_string(), format!("{a}{b}"), format!("x{a}{b}")] {
+                    assert_eq!(ident(&s), unicode(&s), "{s:?}");
+                }
+            }
+        }
+        for s in ["", "λ", "_λ1", "aλ", "1λ"] {
+            assert_eq!(ident(s), unicode(s), "{s:?}");
+        }
     }
 
     #[test]
