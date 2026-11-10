@@ -1903,7 +1903,7 @@ struct ExpansionInput<'t, 'a> {
     stack: Vec<Token<'a>>,
     rest: &'t [Token<'a>],
 }
-impl<'a> ExpansionInput<'_, 'a> {
+impl<'t, 'a> ExpansionInput<'t, 'a> {
     fn len(&self) -> usize {
         self.stack.len() + self.rest.len()
     }
@@ -1937,10 +1937,15 @@ impl<'a> ExpansionInput<'_, 'a> {
             out.extend_from_slice(&self.rest[range.start.max(n) - n..range.end - n]);
         }
     }
-    fn collect_range(&self, range: Range<usize>) -> Vec<Token<'a>> {
+    /// The tokens at `range`, borrowed if no replacement token is among them.
+    fn slice(&self, range: Range<usize>) -> Cow<'t, [Token<'a>]> {
+        let n = self.stack.len();
+        if range.start >= n {
+            return Cow::Borrowed(&self.rest[range.start - n..range.end - n]);
+        }
         let mut out = Vec::with_capacity(range.len());
         self.copy_range(range, &mut out);
-        out
+        Cow::Owned(out)
     }
     fn pop(&mut self) -> Option<Token<'a>> {
         self.stack.pop().or_else(|| {
@@ -2147,7 +2152,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if args.len() != 1 {
                     return Err(t.error("expected one argument to preprocessing builtin"));
                 }
-                let arg = input.collect_range(args[0].clone());
+                let arg = input.slice(args[0].clone());
                 let value = if matches!(name, "__has_include" | "__has_include_next") {
                     let expanded = self.expand(&arg, depth + 1)?;
                     let (h, q) = header(&expanded)
@@ -2174,7 +2179,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if args.len() != 1 {
                     return Err(t.error("expected one _Pragma argument"));
                 }
-                let arg = input.collect_range(args[0].clone());
+                let arg = input.slice(args[0].clone());
                 let expanded = self.expand(&arg, depth + 1)?;
                 let value = if expanded.len() == 1 {
                     unquote(expanded[0].text)
@@ -2246,7 +2251,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     {
                         if !omitted {
                             body.push(*b);
-                            let arg = input.collect_range(args.last().unwrap().clone());
+                            let arg = input.slice(args.last().unwrap().clone());
                             body.extend(self.expand(&arg, depth + 1)?);
                         }
                         j += 3;
@@ -2268,7 +2273,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                                 expanded.resize_with(params.len(), || None);
                             }
                             if expanded[p].is_none() {
-                                let arg = input.collect_range(args[p].clone());
+                                let arg = input.slice(args[p].clone());
                                 expanded[p] = Some(self.expand(&arg, depth + 1)?);
                             }
                             body.extend_from_slice(expanded[p].as_deref().unwrap_or_default());
