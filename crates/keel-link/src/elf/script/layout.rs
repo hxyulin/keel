@@ -74,8 +74,8 @@ struct OutputSection {
 }
 struct Layout<'a> {
     inputs: &'a [Section],
-    units: &'a [Unit],
-    globals: &'a BTreeMap<String, (usize, usize)>,
+    units: &'a [Unit<'a>],
+    globals: &'a crate::elf::Globals<'a>,
     placements: Vec<Option<Placement>>,
     used: Vec<bool>,
     outputs: Vec<OutputSection>,
@@ -128,8 +128,8 @@ impl Layout<'_> {
             .into());
         }
         if symbol.global() {
-            if self.definitions.contains_key(&symbol.name) {
-                return self.named(&symbol.name, depth + 1);
+            if self.definitions.contains_key(symbol.name) {
+                return self.named(symbol.name, depth + 1);
             }
             if let Some(&(u, s)) = self.globals.get(&symbol.name) {
                 return self.raw_symbol(u, &self.units[u].symbols[&s]);
@@ -366,7 +366,8 @@ impl Layout<'_> {
             }
             self.dot = value;
         } else if !a.provide
-            || !self.globals.contains_key(&a.name) && !self.definitions.contains_key(&a.name)
+            || !self.globals.contains_key(a.name.as_str())
+                && !self.definitions.contains_key(&a.name)
         {
             // Freeze dot at the assignment; defer forward aliases until addresses exist.
             let definition = if self.definitions.contains_key(&a.name) && a.expr.references(&a.name)
@@ -590,7 +591,7 @@ pub(in crate::elf) fn link(
     mut script: Script,
     mut sections: Vec<Section>,
     mut units: Vec<Unit>,
-    globals: BTreeMap<String, (usize, usize)>,
+    globals: crate::elf::Globals<'_>,
     options: &Options,
     warnings: Vec<String>,
 ) -> Result<Executable> {
@@ -623,7 +624,7 @@ pub(in crate::elf) fn link(
                 continue;
             }
             let entry = common_offsets
-                .entry(symbol.name.clone())
+                .entry(symbol.name)
                 .or_insert((0u64, 1u64, 0u64));
             entry.0 = entry.0.max(symbol.size);
             entry.1 = entry.1.max(symbol.value.max(1));
@@ -641,7 +642,7 @@ pub(in crate::elf) fn link(
             .filter_map(|s| s.section.index().map(|i| i.0))
             .max()
             .unwrap_or(0)
-            .max(unit.sections.last_key_value().map_or(0, |(i, _)| *i))
+            .max(unit.sections.last_key().unwrap_or(0))
             + 1;
         unit.sections.insert(synthetic, common_index);
         for symbol in unit
@@ -1095,12 +1096,12 @@ fn emit(
             .filter(|s| !s.global() && !s.name.is_empty())
         {
             if let Ok(value) = layout.raw_symbol(ui, symbol) {
-                record(&symbol.name, value, symbol.size, symbol.info, symbol.other)?;
+                record(symbol.name, value, symbol.size, symbol.info, symbol.other)?;
                 locals += 1;
             }
         }
     }
-    for (name, &(ui, si)) in layout.globals {
+    for (name, (ui, si)) in crate::elf::ordered(layout.globals) {
         if script_values.contains_key(name) {
             continue;
         }

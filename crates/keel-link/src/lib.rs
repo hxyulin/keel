@@ -6,6 +6,7 @@ pub mod archive;
 pub mod elf;
 pub mod elf_selection;
 mod extract;
+mod fx;
 mod gc;
 mod parallel;
 mod read;

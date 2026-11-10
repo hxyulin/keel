@@ -50,7 +50,7 @@ pub(super) fn alignments(sections: &[Section]) -> BTreeMap<usize, u64> {
 pub(super) fn symbols(
     sections: &[Section],
     units: &[Unit],
-    globals: &BTreeMap<String, (usize, usize)>,
+    globals: &super::Globals,
 ) -> Result<BTreeMap<String, (usize, bool)>> {
     let mut groups: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for (i, s) in sections.iter().enumerate().filter(|(_, s)| ordinary(s)) {
@@ -71,7 +71,7 @@ pub(super) fn symbols(
         .filter(|s| {
             s.global() && s.section == SymbolSection::Undefined && !globals.contains_key(&s.name)
         })
-        .map(|s| s.name.as_str())
+        .map(|s| s.name)
         .collect();
     let mut result = BTreeMap::new();
     for (name, (first, last)) in groups {

@@ -41,7 +41,7 @@ impl SymbolLookup {
 }
 
 struct SelectedSymbol<'a> {
-    symbol: &'a Symbol,
+    symbol: &'a Symbol<'a>,
     canonical: usize,
     target: Option<usize>,
 }
@@ -50,8 +50,8 @@ struct SelectedSymbol<'a> {
 /// infallible: missing relocation symbols are still diagnosed only on demand,
 /// and unselected section mappings remain absent rather than being validated.
 fn selected_symbols<'a>(
-    units: &'a [Unit],
-    globals: &BTreeMap<String, Key>,
+    units: &'a [Unit<'a>],
+    globals: &super::Globals,
 ) -> (Vec<SymbolLookup>, Vec<SelectedSymbol<'a>>) {
     let mut selected = Vec::with_capacity(units.iter().map(|unit| unit.symbols.len()).sum());
     let lookups: Vec<_> = units
@@ -62,13 +62,13 @@ fn selected_symbols<'a>(
             let sections = SymbolLookup::new(
                 unit.sections
                     .iter()
-                    .map(|(&raw, &target)| (raw, target))
+                    .map(|(raw, &target)| (raw, target))
                     .collect(),
             );
             SymbolLookup::new(
                 unit.symbols
                     .iter()
-                    .map(|(&raw, symbol)| {
+                    .map(|(raw, symbol)| {
                         let id = selected.len();
                         selected.push(SelectedSymbol {
                             symbol,
@@ -227,7 +227,7 @@ pub(super) fn collect(
     sections: &mut Vec<Section>,
     units: &mut [Unit],
     frames: &mut BTreeMap<usize, unwind::Frames>,
-    globals: &mut BTreeMap<String, Key>,
+    globals: &mut super::Globals,
     roots: Roots<'_>,
     sframe: &mut Option<(usize, sframe::Table)>,
     sframe_targets: &mut Option<sframe::Bindings>,
@@ -568,7 +568,7 @@ pub(super) fn collect(
         let retained_sections = SymbolLookup::new(
             u.sections
                 .iter()
-                .map(|(&raw, &target)| (raw, target))
+                .map(|(raw, &target)| (raw, target))
                 .collect(),
         );
         u.symbols.retain(|&si, s| {
@@ -611,7 +611,7 @@ pub(super) fn collect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elf::Reloc;
+    use crate::elf::{Reloc, slots::Slots};
 
     #[test]
     fn sparse_raw_weak_identity_survives_dense_marking() {
@@ -626,8 +626,8 @@ mod tests {
             data: vec![0xc3],
             offset: 0,
         };
-        let symbol = |name: &str, input, info| Symbol {
-            name: name.into(),
+        let symbol = |name: &'static str, input, info| Symbol {
+            name,
             section: SymbolSection::Section(object::SectionIndex(input)),
             value: 0,
             size: 1,
@@ -642,15 +642,15 @@ mod tests {
         let mut units = [
             Unit {
                 name: "weak.o".into(),
-                sections: BTreeMap::from([(usize::MAX - 1, 0), (usize::MAX, 1)]),
-                symbols: BTreeMap::from([
-                    (usize::MAX - 1, symbol("_start", usize::MAX - 1, 0x12)),
-                    (usize::MAX, symbol("choice", usize::MAX, 0x22)),
+                sections: Slots::from_iter([(8, 0), (9, 1)]),
+                symbols: Slots::from_iter([
+                    (8, symbol("_start", 8, 0x12)),
+                    (9, symbol("choice", 9, 0x22)),
                 ]),
                 relocs: vec![Reloc {
                     section: 0,
                     offset: 0,
-                    symbol: usize::MAX,
+                    symbol: 9,
                     kind: object::elf::R_X86_64_64,
                     addend: 0,
                 }],
@@ -659,21 +659,21 @@ mod tests {
             },
             Unit {
                 name: "strong.o".into(),
-                sections: BTreeMap::from([(usize::MAX, 2)]),
-                symbols: BTreeMap::from([
-                    (usize::MAX, symbol("choice", usize::MAX, 0x12)),
+                sections: Slots::from_iter([(9, 2)]),
+                symbols: Slots::from_iter([
+                    (9, symbol("choice", 9, 0x12)),
                     // Prebinding must not diagnose an unreferenced, unmapped symbol.
-                    (usize::MAX - 1, symbol("unused", 123, 0x12)),
+                    (8, symbol("unused", 123, 0x12)),
                 ]),
                 relocs: vec![],
                 consumed_properties: BTreeSet::new(),
                 groups: BTreeMap::new(),
             },
         ];
-        let mut globals = BTreeMap::from([
-            ("_start".into(), (0, usize::MAX - 1)),
-            ("choice".into(), (1, usize::MAX)),
-            ("unused".into(), (1, usize::MAX - 1)),
+        let mut globals = crate::elf::Globals::from_iter([
+            ("_start", (0, 8)),
+            ("choice", (1, 9)),
+            ("unused", (1, 8)),
         ]);
         let remap = collect(
             &mut sections,
@@ -689,17 +689,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(remap, [Some(0), None, Some(1)]);
-        assert_eq!(units[0].relocs[0].symbol, usize::MAX);
+        assert_eq!(units[0].relocs[0].symbol, 9);
+        assert_eq!(units[0].symbols[&9].section, SymbolSection::Undefined);
         assert_eq!(
-            units[0].symbols[&usize::MAX].section,
-            SymbolSection::Undefined
+            units[1].symbols[&9].section,
+            SymbolSection::Section(object::SectionIndex(9))
         );
-        assert_eq!(
-            units[1].symbols[&usize::MAX].section,
-            SymbolSection::Section(object::SectionIndex(usize::MAX))
-        );
-        assert!(!units[1].symbols.contains_key(&(usize::MAX - 1)));
-        assert_eq!(globals["choice"], (1, usize::MAX));
+        assert!(!units[1].symbols.contains_key(&(8)));
+        assert_eq!(globals["choice"], (1, 9));
     }
 
     #[test]
@@ -729,8 +726,8 @@ mod tests {
 
     #[test]
     fn prebinding_matches_lazy_symbol_and_section_selection() {
-        let symbol = |name: &str, section, info| Symbol {
-            name: name.into(),
+        let symbol = |name: &'static str, section, info| Symbol {
+            name,
             section,
             info,
             value: u64::MAX,
@@ -738,12 +735,12 @@ mod tests {
             other: 0,
         };
         let mut units = vec![];
-        for (sparse, raw_section) in [(false, 1), (true, usize::MAX)] {
-            let offset = if sparse { usize::MAX - 5 } else { 0 };
+        for (sparse, raw_section) in [(false, 1), (true, 900)] {
+            let offset = if sparse { 1000 } else { 0 };
             units.push(Unit {
                 name: "bindings.o".into(),
-                sections: BTreeMap::from([(raw_section, 0)]),
-                symbols: BTreeMap::from([
+                sections: Slots::from_iter([(raw_section, 0)]),
+                symbols: Slots::from_iter([
                     (
                         offset,
                         symbol(
@@ -770,13 +767,10 @@ mod tests {
                 groups: BTreeMap::new(),
             });
         }
-        let globals = BTreeMap::from([
-            ("choice".into(), (1, usize::MAX - 5)),
-            ("common".into(), (0, 2)),
-        ]);
+        let globals = crate::elf::Globals::from_iter([("choice", (1, 1000)), ("common", (0, 2))]);
         let (lookups, selected) = selected_symbols(&units, &globals);
         for (ui, unit) in units.iter().enumerate() {
-            for (&raw, symbol) in &unit.symbols {
+            for (raw, symbol) in unit.symbols.iter() {
                 let key = if symbol.global() {
                     globals.get(&symbol.name).copied().unwrap_or((ui, raw))
                 } else {
@@ -798,7 +792,7 @@ mod tests {
 
     #[test]
     fn sparse_alias_mappings_rewrite_a_contributing_unit_only_once() {
-        let code = usize::MAX;
+        let code = 30;
         let dead = code - 1;
         let frame = code - 2;
         let alias = code - 3;
@@ -830,8 +824,8 @@ mod tests {
             section(".text.dead", 6, vec![0xc3]),
             section(".eh_frame", 2, data),
         ];
-        let symbol = |name: &str, input, value, size, info| super::super::Symbol {
-            name: name.into(),
+        let symbol = |name: &'static str, input, value, size, info| super::super::Symbol {
+            name,
             section: SymbolSection::Section(object::SectionIndex(input)),
             value,
             size,
@@ -840,8 +834,8 @@ mod tests {
         };
         let mut units = [Unit {
             name: "sparse.o".into(),
-            sections: BTreeMap::from([(code, 0), (dead, 1), (frame, 2), (alias, 2)]),
-            symbols: BTreeMap::from([
+            sections: Slots::from_iter([(code, 0), (dead, 1), (frame, 2), (alias, 2)]),
+            symbols: Slots::from_iter([
                 (1, symbol("_start", code, 0, 1, 0x12)),
                 (2, symbol("dead", dead, 0, 1, 2)),
                 (3, symbol("record", alias, 40, 24, 0)),
@@ -860,7 +854,7 @@ mod tests {
             consumed_properties: BTreeSet::new(),
             groups: BTreeMap::new(),
         }];
-        let mut globals = BTreeMap::from([("_start".into(), (0, 1))]);
+        let mut globals = crate::elf::Globals::from_iter([("_start", (0, 1))]);
         let remap = collect(
             &mut sections,
             &mut units,
@@ -877,8 +871,12 @@ mod tests {
         assert_eq!(remap, [Some(0), None, Some(1)]);
         assert_eq!(sections[1].size, 40);
         assert_eq!(
-            units[0].sections,
-            BTreeMap::from([(code, 0), (frame, 1), (alias, 1)])
+            units[0]
+                .sections
+                .iter()
+                .map(|(k, &v)| (k, v))
+                .collect::<Vec<_>>(),
+            [(alias, 1), (frame, 1), (code, 0)]
         );
         assert_eq!(units[0].relocs.len(), 1);
         assert_eq!(
@@ -949,8 +947,8 @@ mod tests {
     fn unwind_index_preserves_first_owner_and_all_edges_in_input_order() {
         let unit = |locations: &[(usize, u64)]| Unit {
             name: "index.o".into(),
-            sections: BTreeMap::new(),
-            symbols: BTreeMap::new(),
+            sections: Slots::default(),
+            symbols: Slots::default(),
             relocs: locations
                 .iter()
                 .map(|&(section, offset)| Reloc {

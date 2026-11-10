@@ -69,11 +69,11 @@ fn section(unit: &Unit, symbol: &Symbol) -> Option<usize> {
     }
 }
 fn selected<'a>(
-    units: &'a [Unit],
+    units: &'a [Unit<'a>],
     globals: &Globals,
     ui: usize,
     si: usize,
-) -> Option<(usize, &'a Symbol)> {
+) -> Option<(usize, &'a Symbol<'a>)> {
     let symbol = units[ui].symbols.get(&si)?;
     let (ui, si) = if symbol.global() {
         globals.get(&symbol.name).copied().unwrap_or((ui, si))

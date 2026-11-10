@@ -15,6 +15,7 @@ pub mod relocatable;
 mod script;
 mod selected;
 mod sframe;
+mod slots;
 mod tls;
 mod unwind;
 use crate::{Input, Result, elf_selection::Selection};
@@ -23,6 +24,7 @@ use object::{
     Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget, SectionFlags,
     SymbolFlags, SymbolSection,
 };
+use slots::Slots;
 use std::collections::{BTreeMap, BTreeSet};
 
 const BASE: u64 = 0x400000;
@@ -154,15 +156,15 @@ impl Section {
     }
 }
 #[derive(Clone)]
-struct Symbol {
-    name: String,
+struct Symbol<'a> {
+    name: &'a str,
     section: SymbolSection,
     value: u64,
     size: u64,
     info: u8,
     other: u8,
 }
-impl Symbol {
+impl Symbol<'_> {
     fn global(&self) -> bool {
         self.info >> 4 != 0
     }
@@ -188,10 +190,10 @@ struct Reloc {
     kind: u32,
     addend: i64,
 }
-struct Unit {
+struct Unit<'a> {
     name: String,
-    sections: BTreeMap<usize, usize>,
-    symbols: BTreeMap<usize, Symbol>,
+    sections: Slots<usize>,
+    symbols: Slots<Symbol<'a>>,
     relocs: Vec<Reloc>,
     consumed_properties: BTreeSet<usize>,
     groups: BTreeMap<usize, usize>,
@@ -300,18 +302,26 @@ pub fn link_selected(selection: &Selection<'_>, options: Options) -> Result<Exec
 }
 
 /// Selected definition of each global name, as `(unit, symbol)`.
-type Globals = BTreeMap<String, (usize, usize)>;
+type Globals<'a> = crate::fx::Map<&'a str, (usize, usize)>;
+/// The selected globals in name order, for output that lists them.
+type OrderedGlobals<'a> = Vec<(&'a str, (usize, usize))>;
+
+fn ordered<'a>(globals: &Globals<'a>) -> OrderedGlobals<'a> {
+    let mut ordered: OrderedGlobals<'a> = globals.iter().map(|(&name, &key)| (name, key)).collect();
+    ordered.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    ordered
+}
 /// Size and alignment of each common symbol.
-type Commons = BTreeMap<String, (u64, u64)>;
+type Commons<'a> = BTreeMap<&'a str, (u64, u64)>;
 /// Output `(section, offset)` of each placed common symbol.
-type CommonLocations = BTreeMap<String, (usize, u64)>;
+type CommonLocations<'a> = BTreeMap<&'a str, (usize, u64)>;
 
 /// Allocated input sections and the metadata parsed with them. Section
 /// indices in `sections`, `unwind_sections`, `sframe_section`, `note_plan` and
 /// each `Unit::sections` agree until a phase renumbers them.
-struct Parsed {
+struct Parsed<'a> {
     sections: Vec<Section>,
-    units: Vec<Unit>,
+    units: Vec<Unit<'a>>,
     unwind_sections: BTreeMap<usize, unwind::Frames>,
     sframe_section: Option<(usize, sframe::Table)>,
     warnings: Vec<String>,
@@ -364,6 +374,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         !libraries.is_empty(),
     )?;
     merge_metadata(&mut parsed, &mut sframe_targets, options.gc_sections)?;
+    let ordered = ordered(&globals);
     let Parsed {
         mut sections,
         mut units,
@@ -394,7 +405,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     let mut dynamic = if libraries.is_empty() {
         None
     } else {
-        let definitions = dynamic_definitions(&units, &globals, &common_sizes);
+        let definitions = dynamic_definitions(&units, &ordered, &common_sizes);
         let absolute = absolute_imports(arm, &units, &sections, &selected)?;
         let lifecycle = lifecycle::Plan::new(&sections, &units, &globals)?;
         Some(dynamic::Dynamic::prepare(
@@ -423,6 +434,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
         sections: &sections,
         units: &units,
         globals: &globals,
+        ordered: &ordered,
         selected: &selected,
         linker_symbols: &linker_symbols,
         common_locations: &common_locations,
@@ -471,7 +483,7 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
 
 /// Parse and validate every input object. Output section indices are assigned
 /// in input order.
-fn parse_units(inputs: &[input::Named<'_>], arm: bool) -> Result<Parsed> {
+fn parse_units<'a>(inputs: &[input::Named<'a>], arm: bool) -> Result<Parsed<'a>> {
     let mut parsed = Parsed {
         sections: Vec::new(),
         units: Vec::new(),
@@ -492,15 +504,15 @@ fn parse_units(inputs: &[input::Named<'_>], arm: bool) -> Result<Parsed> {
     Ok(parsed)
 }
 
-impl Parsed {
+impl<'a> Parsed<'a> {
     /// Validate one relocatable object, append its allocated sections, and
     /// return its symbols and relocations. GNU property notes go to `properties`.
     fn parse_unit(
         &mut self,
-        input: &input::Named<'_>,
+        input: &input::Named<'a>,
         arm: bool,
         properties: &mut notes::Properties,
-    ) -> Result<Unit> {
+    ) -> Result<Unit<'a>> {
         let Self {
             sections,
             unwind_sections,
@@ -565,8 +577,8 @@ impl Parsed {
         }
         let mut unit = Unit {
             name: input.name.clone(),
-            sections: BTreeMap::new(),
-            symbols: BTreeMap::new(),
+            sections: Slots::default(),
+            symbols: Slots::default(),
             relocs: Vec::new(),
             consumed_properties: BTreeSet::new(),
             groups: group_plan.membership.clone(),
@@ -851,7 +863,7 @@ impl Parsed {
         unit.symbols.insert(
             0,
             Symbol {
-                name: String::new(),
+                name: "",
                 section: SymbolSection::Absolute,
                 value: 0,
                 size: 0,
@@ -906,7 +918,7 @@ impl Parsed {
                 .into());
             }
             let mut symbol = Symbol {
-                name: s.name().map_err(|e| e.to_string())?.into(),
+                name: s.name().map_err(|e| e.to_string())?,
                 section: if group_plan.dead_symbol(s.index().0, s.section()) {
                     SymbolSection::Undefined
                 } else {
@@ -956,15 +968,15 @@ impl Parsed {
 
 /// Choose the definition each global name binds to, as `(unit, symbol)`, and
 /// the largest size and alignment requested for each common symbol.
-fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
-    let mut globals: Globals = BTreeMap::new();
+fn resolve_globals<'a>(units: &[Unit<'a>]) -> Result<(Globals<'a>, Commons<'a>)> {
+    let mut globals = Globals::default();
     let mut commons: Commons = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
-        for (&si, s) in &u.symbols {
+        for (si, s) in u.symbols.iter() {
             if !s.global() || s.rank() == 0 {
                 continue;
             }
-            if linker_owned(&s.name) {
+            if linker_owned(s.name) {
                 return Err(format!(
                     "{}: input defines reserved linker-owned symbol `{}`",
                     u.name, s.name
@@ -973,7 +985,7 @@ fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
             }
             if s.section == SymbolSection::Common {
                 align(0, s.value.max(1))?;
-                let c = commons.entry(s.name.clone()).or_insert((0, 1));
+                let c = commons.entry(s.name).or_insert((0, 1));
                 c.0 = c.0.max(s.size);
                 c.1 = c.1.max(s.value.max(1));
             }
@@ -990,7 +1002,7 @@ fn resolve_globals(units: &[Unit]) -> Result<(Globals, Commons)> {
                     continue;
                 }
             }
-            globals.insert(s.name.clone(), (ui, si));
+            globals.insert(s.name, (ui, si));
         }
     }
     Ok((globals, commons))
@@ -1100,12 +1112,12 @@ fn merge_metadata(
 
 /// Append `.bss.common` and place each common symbol that is still the selected
 /// definition. Returns each placed symbol's `(section, offset)` and its size.
-fn allocate_commons(
+fn allocate_commons<'a>(
     sections: &mut Vec<Section>,
-    units: &[Unit],
-    globals: &Globals,
-    commons: Commons,
-) -> Result<(CommonLocations, BTreeMap<String, u64>)> {
+    units: &[Unit<'a>],
+    globals: &Globals<'a>,
+    commons: Commons<'a>,
+) -> Result<(CommonLocations<'a>, BTreeMap<&'a str, u64>)> {
     let mut common_locations = BTreeMap::new();
     let mut common_sizes = BTreeMap::new();
     let mut common = Section {
@@ -1125,7 +1137,7 @@ fn allocate_commons(
             continue;
         }
         let offset = align(common.size, alignment)?;
-        common_sizes.insert(name.clone(), size);
+        common_sizes.insert(name, size);
         common_locations.insert(name, (sections.len(), offset));
         common.size = end(offset, size)?;
         common.align = common.align.max(alignment);
@@ -1162,7 +1174,7 @@ fn plan_imports(
                     && s.section == SymbolSection::Undefined
                     && s.info & 15 != object::elf::STT_TLS
                 {
-                    direct_weak.insert(s.name.as_str());
+                    direct_weak.insert(s.name);
                 }
             }
         }
@@ -1174,10 +1186,10 @@ fn plan_imports(
             {
                 continue;
             }
-            if bounds.contains_key(s.name.as_str()) {
+            if bounds.contains_key(s.name) {
                 continue;
             }
-            if linker_owned(&s.name) {
+            if linker_owned(s.name) {
                 if s.name == "_DYNAMIC" && libraries.is_empty() && !s.weak() {
                     return Err(format!(
                         "{}: `_DYNAMIC` requires dynamically linked output",
@@ -1190,12 +1202,12 @@ fn plan_imports(
             let export = libraries
                 .iter()
                 .enumerate()
-                .find_map(|(i, l)| l.exports.get(s.name.as_str()).map(|e| (i, e)));
+                .find_map(|(i, l)| l.exports.get(s.name).map(|e| (i, e)));
             if export.is_none() && !s.weak() {
                 return Err(format!("{}: undefined symbol `{}`", u.name, s.name).into());
             }
             if libraries.is_empty()
-                || (export.is_none() && s.weak() && direct_weak.contains(s.name.as_str()))
+                || (export.is_none() && s.weak() && direct_weak.contains(s.name))
             {
                 continue;
             }
@@ -1221,7 +1233,7 @@ fn plan_imports(
                 .into());
             }
             imports
-                .entry(s.name.clone())
+                .entry(s.name.to_owned())
                 .and_modify(|i| i.weak &= s.weak())
                 .or_insert(dynamic::Import {
                     index: 0,
@@ -1336,11 +1348,11 @@ fn plan_got(
 /// default or protected visibility in a retained section.
 fn dynamic_definitions(
     units: &[Unit],
-    globals: &Globals,
-    common_sizes: &BTreeMap<String, u64>,
+    ordered: &OrderedGlobals,
+    common_sizes: &BTreeMap<&str, u64>,
 ) -> Vec<dynamic::Definition> {
     let mut definitions = Vec::new();
-    for (name, &(ui, si)) in globals {
+    for &(name, (ui, si)) in ordered {
         let s = &units[ui].symbols[&si];
         if s.other & 3 == 2 || s.other & 3 == 1 {
             continue;
@@ -1349,7 +1361,7 @@ fn dynamic_definitions(
             continue;
         }
         definitions.push(dynamic::Definition {
-            name: name.clone(),
+            name: name.to_owned(),
             info: s.info,
             other: s.other,
             size: common_sizes.get(name).copied().unwrap_or(s.size),
@@ -1503,15 +1515,16 @@ fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
 /// Read-only view of the laid-out link, shared by the phases that write bytes.
 struct Placed<'a> {
     sections: &'a [Section],
-    units: &'a [Unit],
-    globals: &'a Globals,
+    units: &'a [Unit<'a>],
+    globals: &'a Globals<'a>,
+    ordered: &'a OrderedGlobals<'a>,
     selected: &'a selected::Index<'a>,
     linker_symbols: &'a BTreeMap<String, (usize, bool)>,
-    common_locations: &'a CommonLocations,
-    common_sizes: &'a BTreeMap<String, u64>,
+    common_locations: &'a CommonLocations<'a>,
+    common_sizes: &'a BTreeMap<&'a str, u64>,
 }
 
-impl Placed<'_> {
+impl<'a> Placed<'a> {
     // Output symbol tables already traverse selected definitions or locals.
     // Use those symbols directly instead of looking up and selecting them again.
     fn definition_address(&self, ui: usize, s: &Symbol) -> Result<u64> {
@@ -1524,10 +1537,8 @@ impl Placed<'_> {
         } = self;
         match s.section {
             SymbolSection::Absolute => Ok(s.value),
-            SymbolSection::Undefined
-                if s.global() && linker_symbols.contains_key(s.name.as_str()) =>
-            {
-                let (index, stop) = linker_symbols[s.name.as_str()];
+            SymbolSection::Undefined if s.global() && linker_symbols.contains_key(s.name) => {
+                let (index, stop) = linker_symbols[s.name];
                 Ok(BASE + sections[index].offset + if stop { sections[index].size } else { 0 })
             }
             SymbolSection::Undefined if s.weak() => Ok(0),
@@ -1742,15 +1753,15 @@ impl Placed<'_> {
     }
 
     /// Section index and address of every exported global, for `.dynsym`.
-    fn dynamic_exports(&self) -> Result<BTreeMap<String, (u64, u16)>> {
+    fn dynamic_exports(&self) -> Result<BTreeMap<&'a str, (u64, u16)>> {
         let Self {
             units,
-            globals,
+            ordered,
             common_locations,
             ..
         } = self;
         let mut definitions = BTreeMap::new();
-        for (name, &(ui, si)) in *globals {
+        for &(name, (ui, si)) in *ordered {
             let s = &units[ui].symbols[&si];
             let index = match s.section {
                 SymbolSection::Absolute => 0xfff1,
@@ -1768,10 +1779,7 @@ impl Placed<'_> {
             if index >= 0xff00 && index != 0xfff1 {
                 return Err("too many output sections".into());
             }
-            definitions.insert(
-                name.clone(),
-                (self.definition_address(ui, s)?, index as u16),
-            );
+            definitions.insert(name, (self.definition_address(ui, s)?, index as u16));
         }
         Ok(definitions)
     }
@@ -1786,7 +1794,7 @@ impl Placed<'_> {
         let Self {
             sections,
             units,
-            globals,
+            ordered,
             linker_symbols,
             common_locations,
             common_sizes,
@@ -1837,7 +1845,7 @@ impl Placed<'_> {
                     return Err("too many output sections".into());
                 }
                 symbols.extend_from_slice(&symbol_record(
-                    string(&mut strings, &s.name),
+                    string(&mut strings, s.name),
                     s.info,
                     s.other,
                     index as u16,
@@ -1848,7 +1856,7 @@ impl Placed<'_> {
         }
         let first_global =
             u32::try_from(symbols.len() / 24).map_err(|_| "too many local symbols")?;
-        for (name, &(ui, si)) in *globals {
+        for &(name, (ui, si)) in *ordered {
             let s = &units[ui].symbols[&si];
             // Nonallocated metadata symbols are not part of the executable image.
             let index = match s.section {

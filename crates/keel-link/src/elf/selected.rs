@@ -7,23 +7,23 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy)]
 pub(super) struct Selection<'a> {
     pub key: (usize, usize),
-    pub definition: &'a Symbol,
+    pub definition: &'a Symbol<'a>,
     // Import eligibility belongs to the original symbol, not its selected
     // definition. In particular, same-named locals must never become imports.
     pub import: Option<&'a str>,
 }
 
 pub(super) struct Index<'a> {
-    units: &'a [Unit],
-    globals: &'a BTreeMap<String, (usize, usize)>,
+    units: &'a [Unit<'a>],
+    globals: &'a super::Globals<'a>,
     imports: &'a BTreeMap<String, dynamic::Import>,
     dense: Vec<Vec<Option<Selection<'a>>>>,
 }
 
 impl<'a> Index<'a> {
     pub fn new(
-        units: &'a [Unit],
-        globals: &'a BTreeMap<String, (usize, usize)>,
+        units: &'a [Unit<'a>],
+        globals: &'a super::Globals<'a>,
         imports: &'a BTreeMap<String, dynamic::Import>,
     ) -> Self {
         let mut index = Self {
@@ -33,19 +33,12 @@ impl<'a> Index<'a> {
             dense: Vec::with_capacity(units.len()),
         };
         for (ui, unit) in units.iter().enumerate() {
-            // Storage is bounded by twice the actual retained symbol count,
-            // never by an unchecked raw input index. GC/COMDAT can leave large
-            // holes; those units keep the existing tree lookup with no cache.
-            let len = unit.symbols.last_key_value().and_then(|(&last, _)| {
-                last.checked_add(1)
-                    .filter(|&len| len.saturating_sub(unit.symbols.len()) <= unit.symbols.len())
-            });
+            // Symbol indices are dense, so the cache is bounded by the input
+            // symbol table. Units without relocations select on demand.
             let mut dense = Vec::new();
-            if !unit.relocs.is_empty()
-                && let Some(len) = len
-            {
-                dense.resize(len, None);
-                for (&si, symbol) in &unit.symbols {
+            if !unit.relocs.is_empty() {
+                dense.resize(unit.symbols.bound(), None);
+                for (si, symbol) in unit.symbols.iter() {
                     dense[si] = Some(index.select(ui, si, symbol));
                 }
             }
@@ -54,7 +47,7 @@ impl<'a> Index<'a> {
         index
     }
 
-    fn select(&self, ui: usize, si: usize, symbol: &'a Symbol) -> Selection<'a> {
+    fn select(&self, ui: usize, si: usize, symbol: &'a Symbol<'a>) -> Selection<'a> {
         let key = if symbol.global() {
             self.globals.get(&symbol.name).copied().unwrap_or((ui, si))
         } else {
@@ -67,8 +60,8 @@ impl<'a> Index<'a> {
             } else {
                 &self.units[key.0].symbols[&key.1]
             },
-            import: (symbol.global() && self.imports.contains_key(&symbol.name))
-                .then_some(symbol.name.as_str()),
+            import: (symbol.global() && self.imports.contains_key(symbol.name))
+                .then_some(symbol.name),
         }
     }
 
@@ -92,12 +85,13 @@ impl<'a> Index<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elf::slots::Slots;
     use object::SymbolSection;
     use std::collections::BTreeSet;
 
-    fn symbol(name: &str, info: u8, section: SymbolSection) -> Symbol {
+    fn symbol(name: &'static str, info: u8, section: SymbolSection) -> Symbol<'static> {
         Symbol {
-            name: name.into(),
+            name,
             section,
             value: 0,
             size: 0,
@@ -106,10 +100,10 @@ mod tests {
         }
     }
 
-    fn unit(symbols: BTreeMap<usize, Symbol>) -> Unit {
+    fn unit(symbols: Slots<Symbol<'static>>) -> Unit<'static> {
         Unit {
             name: "fixture.o".into(),
-            sections: BTreeMap::new(),
+            sections: Slots::default(),
             symbols,
             // Construction uses only the presence of relocations, never their
             // raw symbol indices or validity.
@@ -126,9 +120,9 @@ mod tests {
     }
 
     #[test]
-    fn dense_holes_and_sparse_extreme_indices_remain_lazy_and_bounded() {
+    fn holes_and_out_of_range_indices_are_invalid_and_stay_lazy() {
         let units = [
-            unit(BTreeMap::from([
+            unit(Slots::from_iter([
                 (
                     1,
                     symbol(
@@ -139,28 +133,22 @@ mod tests {
                 ),
                 (3, symbol("unresolved", 0, SymbolSection::Undefined)),
             ])),
-            unit(BTreeMap::from([
-                (1, symbol("small", 0, SymbolSection::Absolute)),
-                (usize::MAX, symbol("huge", 0, SymbolSection::Absolute)),
-            ])),
-            unit(BTreeMap::from([
-                (1, symbol("small", 0, SymbolSection::Absolute)),
-                (1_000_000_000, symbol("sparse", 0, SymbolSection::Absolute)),
-            ])),
+            unit(Slots::from_iter([(
+                1,
+                symbol("small", 0, SymbolSection::Absolute),
+            )])),
         ];
-        let globals = BTreeMap::new();
+        let globals = crate::elf::Globals::default();
         let imports = BTreeMap::new();
         let index = Index::new(&units, &globals, &imports);
         assert_eq!(index.dense[0].len(), 4);
-        assert!(index.dense[1].is_empty());
-        assert!(index.dense[2].is_empty());
-        for (ui, si) in [(0, 0), (0, 2), (0, usize::MAX), (1, 2), (2, 2)] {
+        for (ui, si) in [(0, 0), (0, 2), (0, 4), (0, usize::MAX), (1, 0), (1, 2)] {
             assert_eq!(
                 index.get(ui, si).err().unwrap(),
                 "relocation references an invalid symbol index"
             );
         }
-        for (ui, si) in [(0, 1), (0, 3), (1, 1), (1, usize::MAX), (2, 1_000_000_000)] {
+        for (ui, si) in [(0, 1), (0, 3), (1, 1)] {
             let selection = index.get(ui, si).unwrap();
             assert_eq!(selection.key, (ui, si));
             assert!(std::ptr::eq(selection.definition, &units[ui].symbols[&si]));
@@ -169,20 +157,20 @@ mod tests {
 
     #[test]
     fn selected_definitions_and_imports_preserve_original_local_identity() {
-        for sparse in [false, true] {
+        for relocations in [true, false] {
             let mut units = [
-                unit(BTreeMap::from([
+                unit(Slots::from_iter([
                     (0, symbol("same", 0x20, SymbolSection::Undefined)),
                     (1, symbol("same", 0, SymbolSection::Absolute)),
                     (2, symbol("external", 0x20, SymbolSection::Undefined)),
                     (3, symbol("external", 0, SymbolSection::Absolute)),
                 ])),
-                unit(BTreeMap::from([(
+                unit(Slots::from_iter([(
                     0,
                     symbol("same", 0x10, SymbolSection::Common),
                 )])),
             ];
-            let globals = BTreeMap::from([("same".into(), (1, 0))]);
+            let globals = crate::elf::Globals::from_iter([("same", (1, 0))]);
             let imports = BTreeMap::from([(
                 "external".into(),
                 dynamic::Import {
@@ -193,14 +181,12 @@ mod tests {
                     version: None,
                 },
             )]);
-            if sparse {
-                for unit in &mut units {
-                    unit.symbols
-                        .insert(1_000_000_000, symbol("padding", 0, SymbolSection::Absolute));
-                }
+            if !relocations {
+                // Units without relocations select on demand.
+                units[0].relocs.clear();
             }
             let index = Index::new(&units, &globals, &imports);
-            assert_eq!(index.dense[0].is_empty(), sparse);
+            assert_eq!(index.dense[0].is_empty(), !relocations);
             assert_eq!(index.get(0, 0).unwrap().key, (1, 0));
             assert!(std::ptr::eq(
                 index.get(0, 0).unwrap().definition,

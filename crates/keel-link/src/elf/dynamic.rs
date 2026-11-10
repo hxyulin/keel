@@ -657,7 +657,7 @@ impl Dynamic {
         &mut self,
         bytes: &mut [u8],
         sections: &[Section],
-        definitions: &BTreeMap<String, (u64, u16)>,
+        definitions: &BTreeMap<&str, (u64, u16)>,
     ) -> Result<()> {
         let at = |i: usize| sections[i].offset as usize;
         let symbol_count = self.imports.len() + self.definitions.len() + 1;
@@ -685,7 +685,7 @@ impl Dynamic {
         for (i, d) in self.definitions.iter().enumerate() {
             let i = i + self.imports.len() + 1;
             let (value, section) = definitions
-                .get(&d.name)
+                .get(d.name.as_str())
                 .ok_or("missing exported definition")?;
             put32(&mut dynsym, i * 24, self.symbol_names[&d.name]);
             dynsym[i * 24 + 4] = d.info;

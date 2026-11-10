@@ -446,7 +446,7 @@ impl Table {
         section: usize,
         units: &[Unit],
         sections: &[Section],
-        globals: &BTreeMap<String, (usize, usize)>,
+        globals: &super::Globals,
         validate_original: bool,
     ) -> Result<Bindings> {
         let mut targets: Vec<Option<CodeBinding>> =
@@ -1024,11 +1024,11 @@ mod tests {
         let sections = vec![section("original"), section("winner")];
         let unit = |value: usize| Unit {
             name: "test".into(),
-            sections: BTreeMap::from([(1, value / 8)]),
-            symbols: BTreeMap::from([(
+            sections: crate::elf::slots::Slots::from_iter([(1, value / 8)]),
+            symbols: crate::elf::slots::Slots::from_iter([(
                 7,
                 Symbol {
-                    name: "same".into(),
+                    name: "same",
                     section: SymbolSection::Section(object::SectionIndex(1)),
                     value: value as u64,
                     size: 5,
@@ -1048,7 +1048,7 @@ mod tests {
             kind: object::elf::R_X86_64_PC64,
             addend: 3,
         });
-        let globals = BTreeMap::from([("same".into(), (1, 7))]);
+        let globals = crate::elf::Globals::from_iter([("same", (1, 7))]);
         let bound = table.bind(2, &units, &sections, &globals, true).unwrap();
         let b = &bound.functions[0];
         assert_eq!(b.original_code, Some((0, 3)));

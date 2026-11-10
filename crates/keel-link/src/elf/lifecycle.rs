@@ -2,7 +2,6 @@
 //! input's symbol/relocation identity while placing runtime spans together.
 use super::{BASE, Result, Section, Unit};
 use object::SymbolSection;
-use std::collections::BTreeMap;
 
 const ARRAYS: [(&str, u32, u64, u64); 3] = [
     (".preinit_array", 16, 32, 33),
@@ -135,7 +134,7 @@ impl Plan {
     pub(super) fn new(
         sections: &[Section],
         units: &[Unit],
-        globals: &BTreeMap<String, (usize, usize)>,
+        globals: &super::Globals,
     ) -> Result<Self> {
         let mut functions = Vec::new();
         for (name, tag) in [("_init", 12), ("_fini", 13)] {
