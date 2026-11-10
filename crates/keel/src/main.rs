@@ -1434,7 +1434,19 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
         let written = stream_output(opts, |sink| {
-            with_codegen_report(opts, target, || request.text_chunks(&module, sink))
+            with_codegen_report(opts, target, || {
+                if threads.get() == 1 {
+                    return request.text_chunks(&module, sink);
+                }
+                std::thread::scope(|scope| {
+                    keel_codegen::parallel::text_chunks(
+                        &module,
+                        parallel,
+                        &|job| spawn_worker(scope, job),
+                        sink,
+                    )
+                })
+            })
         });
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.

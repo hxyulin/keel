@@ -127,11 +127,14 @@ Neither report flag overwrites an existing file, and they need different paths.
 keel cc -O --codegen-report spills.json --emit-object input.c -o input.o
 ```
 
-`--emit-object` generates code for several functions at once: one thread per
-available core, but at most one per 250 IR instructions, so a small module
-uses one thread. `--codegen-threads n` sets the count, and
-`--codegen-threads 1` compiles one function at a time. The object is the same
-for every count. `--codegen-report` always uses one thread.
+`keel compile` and `keel cc` generate code for several functions at once: one
+thread per available core, but at most one per 250 IR instructions, so a
+small module uses one thread. `--codegen-threads n` sets the count, and
+`--codegen-threads 1` compiles one function at a time. The object or assembly
+is the same for every count. `--codegen-report` always uses one thread.
+Assembly is written to the output as each function is finished, not held
+whole in memory, and the file at `-o` is replaced only once all of it is
+written.
 
 ### Whole-program compilation
 
@@ -268,8 +271,9 @@ let object = keel_asm::assemble_program_for(target, &program)?;
 - `keel_codegen::Request`: one target, pipeline, emission policy and optional
   register pool; `text`, `text_chunks`, `program` and `program_chunks`
   compile with it.
-- `keel_codegen::parallel::program_chunks`: `program_chunks` with functions
-  compiled on worker threads that the caller starts.
+- `keel_codegen::parallel::program_chunks` and `text_chunks`: the `Request`
+  methods of those names, with functions compiled on worker threads that the
+  caller starts.
 - `keel_asm::ObjectAssembler::for_target`: incremental objects for any native
   target; `assemble_program_for` and `assemble_source_for` assemble one input.
 

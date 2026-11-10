@@ -130,6 +130,38 @@ pub fn program_chunks<'module>(
     Ok(())
 }
 
+/// [`program_chunks`] for assembly text: `sink` receives the same pieces as
+/// [`crate::Request::text_chunks`], in order, and they join to the same text.
+///
+/// # Errors
+/// As [`program_chunks`]. Pieces already given to `sink` before an error
+/// are not taken back.
+/// # Panics
+/// As [`program_chunks`].
+pub fn text_chunks<'module>(
+    module: &'module keel_ir::Module,
+    options: Options<'module>,
+    spawn: &dyn Fn(Job<'module>),
+    sink: &mut dyn FnMut(&str),
+) -> Result<(), CodegenError> {
+    let request = request(options);
+    if crate::backend_profile::is_active() {
+        return request.text_chunks(module, sink);
+    }
+    profiling::scope!("codegen", options.target.triple());
+    match crate::emission::compile_with_executor(
+        module,
+        &request,
+        false,
+        crate::emission::Sink::Text(sink),
+        Some(&execution(options, spawn)),
+    )? {
+        crate::emission::Output::Text(text) => sink(&text),
+        _ => unreachable!("text emission requested"),
+    }
+    Ok(())
+}
+
 fn request(options: Options<'_>) -> SerialRequest<'_> {
     let mut request =
         SerialRequest::new(options.target, options.pipeline.serial()).emission(options.emission);

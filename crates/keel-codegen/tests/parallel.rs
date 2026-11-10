@@ -133,10 +133,29 @@ fn compare_policy(
             );
         }
     }
+    let mut reference_text = Vec::new();
+    let text_result = keel_codegen::Request::new(target, pipeline)
+        .emission(emission)
+        .text_chunks(module, &mut |t| reference_text.push(t.to_owned()));
+    for (workers, budget) in [(1, 1), (4, 2), (4, 8)] {
+        let mut actual = Vec::new();
+        let got = std::thread::scope(|scope| {
+            parallel::text_chunks(
+                module,
+                options(target, &selector, &allocator, emission, workers, budget),
+                &|job| {
+                    scope.spawn(move || job.run());
+                },
+                &mut |t| actual.push(t.to_owned()),
+            )
+        });
+        assert_eq!(got, text_result, "text error order on {target:?}");
+        assert_eq!(actual, reference_text, "text pieces on {target:?}");
+    }
 }
 
 #[test]
-fn snapshot_corpus_preserves_chunks_errors_and_objects() {
+fn snapshot_corpus_preserves_chunks_errors_objects_and_text() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let mut files: Vec<_> = std::fs::read_dir(directory)
         .unwrap()
