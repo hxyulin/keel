@@ -846,6 +846,11 @@ impl Default for SourceValidator {
     }
 }
 
+/// A symbol name interned by a [`ProgramAssembler`], valid in that
+/// assembly only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SymbolKey(SymId);
+
 /// Incremental form of [`assemble_program_object_with_features`]: programs
 /// pushed in order assemble exactly like their concatenation, with the same
 /// item positions in diagnostics. Each chunk is consumed as it arrives, so a
@@ -950,6 +955,48 @@ impl ProgramAssembler {
             lock,
         };
         self.items.x86_parts(parts, None, line);
+    }
+    /// The symbol named `name` in this assembly.
+    pub fn symbol(&mut self, name: &str) -> SymbolKey {
+        SymbolKey(self.items.symbols.intern(name))
+    }
+    /// Push a label as the next item, as [`Item::Label`] of its name.
+    pub fn push_label(&mut self, symbol: SymbolKey) {
+        if self.error.is_some() {
+            return;
+        }
+        let line = line32(self.next_line);
+        self.next_line += 1;
+        self.items.push(Entry::Label {
+            sym: symbol.0,
+            line,
+        });
+    }
+    /// Push `jmp`, `jcc` or `call` to `target` with `modifier` as the next
+    /// item, as [`Self::push_x86_instruction`] would push it with one
+    /// immediate operand naming `target`.
+    ///
+    /// # Panics
+    /// Panics for any other opcode.
+    pub fn push_x86_branch(
+        &mut self,
+        opcode: x86::Opcode,
+        target: SymbolKey,
+        modifier: x86::Modifier,
+    ) {
+        assert!(
+            matches!(
+                opcode,
+                x86::Opcode::Jmp | x86::Opcode::Jcc(_) | x86::Opcode::Call
+            ),
+            "{opcode:?} is not a branch"
+        );
+        if self.error.is_some() {
+            return;
+        }
+        let line = self.next_line;
+        self.next_line += 1;
+        self.items.x86_branch(opcode, target.0, modifier, line);
     }
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         match self.error {
@@ -1333,6 +1380,39 @@ impl Items {
                 });
             }
         }
+    }
+    /// [`Self::x86_instruction`] of `opcode` (`jmp`, `jcc` or `call`) with
+    /// one immediate operand naming `target` with `modifier`.
+    fn x86_branch(
+        &mut self,
+        opcode: x86::Opcode,
+        target: SymId,
+        modifier: x86::Modifier,
+        line: usize,
+    ) {
+        // Branches need no feature and do not promote; collection for
+        // metrics keeps whole instructions.
+        if self.metrics.is_some()
+            || self.source_features.is_some()
+            || opcode.required_features() != Features::NONE
+        {
+            let name = self.symbols.name(target).to_owned();
+            let operand = x86::Operand::Immediate(x86::Address {
+                expression: keel_asm_ir::Expression::symbol(name),
+                modifier,
+            });
+            let i = x86::Instruction {
+                opcode,
+                operands: vec![operand],
+                lock: false,
+            };
+            return self.x86_instruction(&i, line);
+        }
+        let index = self.symbolic.push_branch(opcode, target, modifier);
+        self.push(Entry::Symbolic {
+            index,
+            line: line32(line),
+        });
     }
     /// Append the cached encoding of `source`, if there is one, from its key
     /// or else its classified key with its constants patched in.

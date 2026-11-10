@@ -25,6 +25,8 @@ pub(crate) struct Stream {
     resolver: Box<BinaryInputs>,
     /// Sources given since the last [`Output::validate_sources`].
     sources: Vec<keel_asm_ir::X86Source>,
+    /// The label symbols of the current function's blocks, by block.
+    blocks: Vec<Option<keel_asm::x86::SymbolKey>>,
 }
 impl Stream {
     pub(crate) fn new(
@@ -35,11 +37,24 @@ impl Stream {
             assembler,
             resolver,
             sources: Vec::new(),
+            blocks: Vec::new(),
         }
     }
     fn item(&mut self, item: Item) {
         self.assembler
             .push_item_with_binary_inputs(item, &mut *self.resolver);
+    }
+    /// The label symbol of block `block` of `function`, the current one.
+    fn block(&mut self, function: &str, block: keel_ir::Block) -> keel_asm::x86::SymbolKey {
+        use keel_ir::EntityRef;
+        let index = block.index();
+        if index >= self.blocks.len() {
+            self.blocks.resize(index + 1, None);
+        }
+        *self.blocks[index].get_or_insert_with(|| {
+            self.assembler
+                .symbol(&crate::text::block_label(".L", function, block))
+        })
     }
 }
 impl Output {
@@ -210,8 +225,9 @@ impl Output {
                 std::mem::swap(sources, module_sources);
                 own.len()
             }
-            (Self::Structured(own), Self::Stream(_)) => {
+            (Self::Structured(own), Self::Stream(stream)) => {
                 debug_assert!(own.items.is_empty());
+                stream.blocks.clear();
                 std::mem::swap(self, module);
                 0
             }
@@ -253,6 +269,10 @@ impl Output {
                 write_block_label(s, function, block);
                 s.push_str(":\n");
             }
+            Self::Stream(s) => {
+                let symbol = s.block(function, block);
+                s.assembler.push_label(symbol);
+            }
             _ => self.label(crate::text::block_label(".L", function, block)),
         }
     }
@@ -281,7 +301,11 @@ impl Output {
                 crate::text::write_decimal(s, "_block", block.index() as i128).unwrap();
                 s.push_str("\"\n");
             }
-            Self::Structured(_) | Self::Stream(_) => {
+            Self::Stream(s) => {
+                let symbol = s.block(function, block);
+                s.assembler.push_x86_branch(opcode, symbol, Modifier::None);
+            }
+            Self::Structured(_) => {
                 let label = crate::text::block_label(".L", function, block);
                 self.instruction(opcode, [asm_arg(label)], false);
             }
@@ -298,7 +322,12 @@ impl Output {
                 write_escaped(s, name);
                 s.push_str(if plt { "\"@PLT\n" } else { "\"\n" });
             }
-            Self::Structured(_) | Self::Stream(_) => {
+            Self::Stream(s) => {
+                let modifier = if plt { Modifier::Plt } else { Modifier::None };
+                let symbol = s.assembler.symbol(name);
+                s.assembler.push_x86_branch(opcode, symbol, modifier);
+            }
+            Self::Structured(_) => {
                 let modifier = if plt { Modifier::Plt } else { Modifier::None };
                 self.instruction(opcode, [asm_arg(symbol_address(name, modifier))], false);
             }

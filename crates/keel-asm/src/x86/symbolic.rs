@@ -239,6 +239,96 @@ impl Cache {
         self.entries.push(s);
         index
     }
+    /// [`Self::push`] of `opcode` (`jmp`, `jcc` or `call`) to `target`
+    /// with `modifier`, without building the instruction.
+    pub fn push_branch(&mut self, opcode: x86::Opcode, target: SymId, modifier: Modifier) -> u32 {
+        let short =
+            matches!(opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_)) && modifier == Modifier::None;
+        let mut s = Symbolic {
+            bytes: 0,
+            fixups: 0,
+            len: 0,
+            count: 0,
+            cached: false,
+            short,
+            lock: false,
+            opcode,
+            operands: NONE,
+        };
+        let address = AddressShape {
+            add: true,
+            subtract: false,
+            constant: 0,
+            modifier,
+        };
+        let shape = Shape {
+            opcode,
+            lock: false,
+            short,
+            operands: smallvec::smallvec![OperandShape::Immediate(address)],
+        };
+        // The encoder reads only whether the address has a symbol.
+        let template = self.templates.entry(shape).or_insert_with(|| {
+            let i = x86::Instruction {
+                opcode,
+                operands: vec![Operand::Immediate(Address {
+                    expression: Expression::symbol(String::new()),
+                    modifier,
+                })],
+                lock: false,
+            };
+            Template::encode(&i, short)
+        });
+        if let Some(t) = template
+            && let (Ok(len), Ok(count)) =
+                (u8::try_from(t.bytes.len()), u8::try_from(t.fixups.len()))
+            && let Ok(fixups) = t
+                .fixups
+                .iter()
+                .map(|f| {
+                    Ok(CachedFix {
+                        add: target,
+                        subtract: NONE,
+                        constant: i64::try_from(f.adjust)?,
+                        offset: f.offset,
+                        width: f.width,
+                        kind: f.kind,
+                        modifier,
+                    })
+                })
+                .collect::<Result<SmallVec<[CachedFix; 1]>, std::num::TryFromIntError>>()
+        {
+            s.bytes = u32::try_from(self.bytes.len()).expect("instruction cache exceeds 4 GiB");
+            s.len = len;
+            self.bytes.extend_from_slice(&t.bytes);
+            s.fixups = u32::try_from(self.fixups.len()).expect("instruction cache exceeds 4 GiB");
+            s.count = count;
+            self.fixups.extend(fixups);
+            s.cached = true;
+        }
+        // As in `push`: a plain symbol may fold, so its one fixup must be
+        // its operand's.
+        if s.cached && modifier == Modifier::None {
+            s.cached = self
+                .fixups(&s)
+                .iter()
+                .filter(|f| f.candidate())
+                .map(|f| (f.add, f.subtract))
+                .eq([(target, NONE)]);
+        }
+        let needed = !s.cached || s.short || modifier == Modifier::None;
+        if needed {
+            s.operands = u32::try_from(self.operands.len()).expect("operand records exceed 4 GiB");
+            let operand = Operand::Immediate(Address {
+                expression: Expression::default(),
+                modifier,
+            });
+            self.write_operands(&[operand], &[(target, NONE)]);
+        }
+        let index = u32::try_from(self.entries.len()).expect("too many symbolic instructions");
+        self.entries.push(s);
+        index
+    }
     /// Encode `i` with the entry's `short` into the cache.
     fn fill(
         &mut self,
