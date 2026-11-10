@@ -75,7 +75,8 @@ macros. Each invocation or expansion directive must be its own statement.
 Keyword, default, required and variadic parameters, Darwin `$0` parameters,
 `\@`, symbolic conditions, `.ifdef` and `.include` are unsupported. Expansion
 starts only when the parser reaches an expansion directive. Nesting is limited
-to 64, expansion work to 100,000 steps and expanded output to 8 MiB.
+to 64, expansion work to 100,000 steps and expanded output to 8 MiB. The
+input's own top-level lines do not count toward either limit.
 Diagnostics name both the definition and invocation lines.
 
 ## Generated encoding tables

@@ -270,6 +270,24 @@ fn comments_conditionals_and_expanded_error_lines() {
 }
 
 #[test]
+fn symbol_assignment_does_not_bound_top_level_source() {
+    // An assignment sends the whole file through the expander. Its step and
+    // size limits apply to expanded text only, not to the input's own lines.
+    let mut source = String::from(".att_syntax prefix\n.set value, 7\n");
+    source.push_str(&"nop\n".repeat(100_001));
+    let chunk = "x".repeat(1 << 20);
+    for _ in 0..9 {
+        source.push_str(&format!(".ascii \"{chunk}\"\n"));
+    }
+    source.push_str("movl $value, %eax\n");
+    let bytes = assemble_object(&source).unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let text = file.section_by_name(".text").unwrap().data().unwrap();
+    assert_eq!(text.len(), 100_001 + (9 << 20) + 5);
+    assert_eq!(&text[text.len() - 5..], &[0xb8, 7, 0, 0, 0]);
+}
+
+#[test]
 fn macro_state_and_numeric_labels_survive_program_fragments() {
     let mut p = Program::new();
     p.text(

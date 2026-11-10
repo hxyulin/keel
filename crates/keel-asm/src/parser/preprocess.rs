@@ -459,10 +459,12 @@ impl Processor {
         }
         Ok(())
     }
-    fn emit(&mut self, line: &Line) -> Result<(), Error> {
-        self.emitted_bytes = self.emitted_bytes.saturating_add(line.text.len() + 1);
-        if self.emitted_bytes > MAX_BYTES {
-            return Err(line.error("assembly expansion exceeds 8 MiB"));
+    fn emit(&mut self, line: &Line, depth: usize) -> Result<(), Error> {
+        if depth > 0 {
+            self.emitted_bytes = self.emitted_bytes.saturating_add(line.text.len() + 1);
+            if self.emitted_bytes > MAX_BYTES {
+                return Err(line.error("assembly expansion exceeds 8 MiB"));
+            }
         }
         self.output.push_str(&line.text);
         self.output.push('\n');
@@ -498,7 +500,12 @@ impl Processor {
         let mut conditions: Vec<(bool, bool, bool, bool)> = Vec::new();
         while i < lines.len() {
             let line = &lines[i];
-            self.step(line)?;
+            // The budget bounds what expansion produces. Top-level lines are
+            // bounded by the input, so a large file with one assignment
+            // passes through in linear time.
+            if depth > 0 {
+                self.step(line)?;
+            }
             let (op, args) = parts(&line.text);
             // GAS ends the macro name at `(`, but keeps the parentheses in
             // the argument. This is assembler syntax, not C macro expansion.
@@ -802,7 +809,7 @@ impl Processor {
                         } else {
                             line.clone()
                         };
-                        self.emit(&line)?;
+                        self.emit(&line, depth)?;
                     }
                 }
                 _ => {}
