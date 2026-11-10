@@ -51,6 +51,10 @@ returns-twice and custom-pool paths keep the reserved bank. Linux retains its
 original x9–x15 caller pool. A custom allocator must explicitly opt into this
 policy through `RegisterAllocator::call_site_base`.
 
+With a Compact base, the extended bank also prefers scalar ABI placements
+before other free registers. Live ranges, scratch clobbers and interference
+still determine whether that register is available.
+
 ## Calls and copies
 
 Base allocation puts call-live values in callee-saved registers, proven

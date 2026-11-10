@@ -178,7 +178,7 @@ pub struct Selection {
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
     allocation_folds: HashMap<Inst, Vec<Value>>,
-    /// Result-to-input affinities, never constraints: interference wins.
+    /// Copy and scalar ABI register affinities, never constraints.
     pub hints: Hints,
     /// The cover that claimed each root instruction, indexed by instruction.
     owners: Vec<Option<Cover>>,
@@ -191,26 +191,54 @@ pub struct Selection {
     pub(crate) overflow_branches: HashMap<Inst, (Inst, bool)>,
 }
 
-/// The input each result would like to share a register with, if any,
-/// indexed by the result rather than hashed: most results have one.
+/// Dense copy and scalar ABI preferences. The allocator may ignore a preference
+/// when its register is occupied, outside the pool, or clobbered while live.
 #[derive(Default, Debug)]
-pub struct Hints(Vec<Option<Value>>);
+pub struct Hints {
+    values: Vec<Option<Value>>,
+    gprs: Vec<Option<u8>>,
+}
 impl Hints {
     pub fn insert(&mut self, result: Value, input: Value) {
-        if self.0.len() <= result.index() {
-            self.0.resize(result.index() + 1, None);
+        if self.values.len() <= result.index() {
+            self.values.resize(result.index() + 1, None);
         }
-        self.0[result.index()] = Some(input);
+        self.values[result.index()] = Some(input);
     }
     pub fn get(&self, result: Value) -> Option<Value> {
-        self.0.get(result.index()).copied().flatten()
+        self.values.get(result.index()).copied().flatten()
+    }
+    pub(crate) fn prefer_gpr(&mut self, value: Value, register: u8) {
+        if self.gprs.len() <= value.index() {
+            self.gprs.resize(value.index() + 1, None);
+        }
+        self.gprs[value.index()].get_or_insert(register);
+    }
+    pub(crate) fn gpr(&self, value: Value) -> Option<u8> {
+        self.gprs.get(value.index()).copied().flatten()
     }
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.values.is_empty() && self.gprs.is_empty()
     }
 }
 
 impl Selection {
+    pub(crate) fn prefer_abi_gpr(
+        &mut self,
+        func: &Function,
+        value: Value,
+        loc: crate::regalloc::Loc,
+    ) {
+        let value = func.resolve(value);
+        if matches!(
+            func.value_type(value),
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+        ) && let crate::regalloc::Loc::Reg(register) = loc
+        {
+            self.hints.prefer_gpr(value, register);
+        }
+    }
+
     /// Run after custom selection/constraints and before compare fusion. Keep
     /// the unmasked leaf live at the eventual compare/branch/select boundary.
     pub(crate) fn fold_mask_tests(
@@ -1442,7 +1470,7 @@ impl Selection {
         // Generate affinities only for instructions that survive selection.
         // Three-address fused instructions need no destructive-input copy.
         if options.register_hints {
-            plan.hints.0.reserve(func.num_values());
+            plan.hints.values.reserve(func.num_values());
         }
         for (_, inst) in func.layout_insts().filter(|_| options.register_hints) {
             if plan.covered(inst) {

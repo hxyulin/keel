@@ -1834,14 +1834,21 @@ fn linear_scan_with_preferences<'a>(
             Loc::FReg(n) if cur.float => available_number(n),
             _ => false,
         };
-        let preferred = if hints.is_empty() {
-            None
-        } else {
-            hints
-                .get(cur.value)
-                .and_then(|v| locs[cur.half][v.index()])
-                .filter(|&r| available(r))
-        };
+        let physical = (!cur.float && !cur.vector && cur.half == 0)
+            .then(|| hints.gpr(cur.value))
+            .flatten()
+            .map(Loc::Reg)
+            .filter(|&r| available(r));
+        let preferred = physical.or_else(|| {
+            if hints.is_empty() {
+                None
+            } else {
+                hints
+                    .get(cur.value)
+                    .and_then(|v| locs[cur.half][v.index()])
+                    .filter(|&r| available(r))
+            }
+        });
         let callee = (callee_first && cur.crosses_call && !cur.float)
             .then(|| {
                 preferred
@@ -2192,6 +2199,62 @@ mod tests {
     fn function(src: &str) -> Function {
         let module: Module = parse(src).expect("test IR parses");
         module.functions.into_iter().next().expect("one function")
+    }
+
+    #[test]
+    fn physical_preferences_respect_pool_membership_and_interference() {
+        let func = function(
+            "func @f(i64, i64) -> i64 {\nblock0(v0:i64,v1:i64):\n v2 = iadd v0,v1\n return v2\n}",
+        );
+        let pools = Pools {
+            caller_saved: &[0, 1],
+            callee_saved: &[],
+            float_caller_saved: &[],
+            float_callee_saved: &[],
+        };
+        let mut selection = crate::select::Selection::default();
+        selection.hints.prefer_gpr(Value::new(0), 1);
+        selection.hints.prefer_gpr(Value::new(1), 1);
+        selection.hints.prefer_gpr(Value::new(2), 250);
+        for tier in [AllocationTier::Full, AllocationTier::Compact] {
+            let alloc = allocate_tier(&func, &pools, |_| false, |_| false, &selection, tier);
+            assert_eq!(alloc.loc(Value::new(0)), Some(Loc::Reg(1)));
+            assert_eq!(alloc.loc(Value::new(1)), Some(Loc::Reg(0)));
+            assert!(matches!(alloc.loc(Value::new(2)), Some(Loc::Reg(0 | 1))));
+        }
+    }
+
+    #[test]
+    fn physical_preferences_cannot_put_live_values_in_call_clobbers() {
+        let func = function(
+            "decl @clobber()\nfunc @f(i64, i64) -> i64 {\nblock0(v0:i64,v1:i64):\n call @clobber()\n v2 = iadd v0,v1\n return v2\n}",
+        );
+        let pools = Pools {
+            caller_saved: &[0, 1],
+            callee_saved: &[3],
+            float_caller_saved: &[],
+            float_callee_saved: &[],
+        };
+        let mut selection = crate::select::Selection::default();
+        selection.hints.prefer_gpr(Value::new(0), 1);
+        selection.hints.prefer_gpr(Value::new(1), 3);
+        for tier in [AllocationTier::Full, AllocationTier::Compact] {
+            let alloc = allocate_tier(
+                &func,
+                &pools,
+                |d| matches!(d, InstData::Call { .. }),
+                |_| false,
+                &selection,
+                tier,
+            );
+            for value in [Value::new(0), Value::new(1)] {
+                assert!(matches!(
+                    alloc.loc(value),
+                    Some(Loc::Reg(3) | Loc::Stack(_))
+                ));
+            }
+            assert_ne!(alloc.loc(Value::new(0)), alloc.loc(Value::new(1)));
+        }
     }
 
     fn intervals(func: &Function) -> Vec<Interval> {

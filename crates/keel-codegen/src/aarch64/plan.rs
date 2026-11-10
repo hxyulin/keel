@@ -622,6 +622,59 @@ impl Covers {
     }
 }
 
+/// Prefer the first scalar ABI placement of a value. These are affinities,
+/// never constraints: the allocator still checks interference and clobbers.
+pub(super) fn prefer_abi_gprs(
+    func: &Function,
+    param_locs: &[ArgLoc],
+    calls: &CallArea,
+    selection: &mut crate::select::Selection,
+    linux: bool,
+) {
+    let hint = |selection: &mut crate::select::Selection, value: Value, loc: &ArgLoc| {
+        if let ArgLoc::Value(Slot::Reg(register)) = loc {
+            selection.prefer_abi_gpr(func, value, *register);
+        }
+    };
+    if let Some(entry) = func.entry_block() {
+        for (&value, loc) in func.block_params(entry).iter().zip(param_locs) {
+            hint(selection, value, loc);
+        }
+    }
+    for (_, inst) in func.layout_insts() {
+        let (args, sig) = match func.inst_data(inst) {
+            InstData::Call { func: callee, args } | InstData::ReturnCall { func: callee, args } => {
+                (args, &func.callee(*callee).sig)
+            }
+            InstData::CallIndirect { sig, args, .. }
+            | InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
+            InstData::Return { args } if func.sig.returns.len() == 1 => {
+                for &value in args {
+                    hint(selection, value, &ArgLoc::Value(Slot::Reg(Loc::Reg(0))));
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        let scratch;
+        let locations = if let Some(layout) = calls.call_layouts.get(&inst) {
+            &layout.locations
+        } else {
+            scratch =
+                abi::arg_locs_for(&arg_kinds(func, &sig.params, args), sig.params.len(), linux).0;
+            &scratch
+        };
+        for (&value, loc) in args.iter().zip(locations) {
+            hint(selection, value, loc);
+        }
+        if sig.returns.len() == 1 {
+            for &value in func.inst_results(inst) {
+                hint(selection, value, &ArgLoc::Value(Slot::Reg(Loc::Reg(0))));
+            }
+        }
+    }
+}
+
 /// Runs the allocator and validates the result.
 pub(super) fn allocate(
     func: &Function,

@@ -495,6 +495,50 @@ impl Covers {
     }
 }
 
+/// Keep scalar values in their first ABI register when interference permits.
+pub(super) fn prefer_abi_gprs(
+    func: &Function,
+    named: &sysv::Placement,
+    selection: &mut crate::select::Selection,
+) {
+    let hint = |selection: &mut crate::select::Selection, value: Value, loc: &ArgLoc| {
+        if let ArgLoc::Value(Slot::Regs(register, None)) = loc {
+            selection.prefer_abi_gpr(func, value, *register);
+        }
+    };
+    if let Some(entry) = func.entry_block() {
+        for (&value, loc) in func.block_params(entry).iter().zip(&named.locs) {
+            hint(selection, value, loc);
+        }
+    }
+    let mut placement = sysv::Placement::default();
+    for (_, inst) in func.layout_insts() {
+        let (args, sig) = match func.inst_data(inst) {
+            InstData::Call { func: callee, args } | InstData::ReturnCall { func: callee, args } => {
+                (args, &func.callee(*callee).sig)
+            }
+            InstData::CallIndirect { sig, args, .. }
+            | InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
+            InstData::Return { args } if func.sig.returns.len() == 1 => {
+                for &value in args {
+                    selection.prefer_abi_gpr(func, value, Loc::Reg(RAX));
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        placement.fill_signature(sig, arg_kinds(func, sig, args));
+        for (&value, loc) in args.iter().zip(&placement.locs) {
+            hint(selection, value, loc);
+        }
+        if sig.returns.len() == 1 {
+            for &value in func.inst_results(inst) {
+                selection.prefer_abi_gpr(func, value, Loc::Reg(RAX));
+            }
+        }
+    }
+}
+
 /// Runs the allocator, places the extended-precision stack homes and
 /// validates the result. Gives the allocation and those homes' slots.
 pub(super) fn allocate(

@@ -18,6 +18,9 @@ roles and the frame layout. The rules that differ from AArch64:
   into place as one parallel copy (`f(b, a)` with `a` in rdi and `b` in rsi is
   a swap, broken with r11). Several results move the same way, into their
   return registers before `ret` and out of them after a call.
+  `CallSiteAllocator` with a Compact base prefers scalar ABI registers when
+  they are available. These affinities keep the existing pools: reserved
+  registers such as rax remain unavailable.
 - Instructions are two-address (`add d, b` overwrites `d`), and many use fixed
   registers (`div` in rdx:rax, shift counts in cl). rax, rcx and rdx are
   therefore never allocated and serve as scratch. r10 holds indirect call

@@ -1069,7 +1069,12 @@ impl<'a> FunctionCompiler<'a> {
         let allocation_pools =
             plan::AllocationPools::plan(pools, private_bank, extended_bank, &asm, moves_sp);
         let pools = allocation_pools.pools(pools);
-        let covers = plan::Covers::select(func, pipeline, &facts, leaf_summaries);
+        let mut covers = plan::Covers::select(func, pipeline, &facts, leaf_summaries);
+        if extended_bank
+            && pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
+        {
+            plan::prefer_abi_gprs(func, &param_locs, &calls, &mut covers.selection, linux);
+        }
         crate::backend_profile::count_covers(&covers.selection);
         let bank = extended_bank.then(|| pipeline.allocator.call_site_base().unwrap());
         let mut alloc =

@@ -19,7 +19,7 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 selection. Bounded allocation retains Full's homes and caches repeated spilled
 scalar reads within call-free windows. `--regalloc full --no-schedule-pressure`
 restores the previous backend policy. Both overrides work before or after `-O`.
-Compact allocation at `-Os` keeps Full's register choices but reuses spill homes
+Compact allocation at `-Os` uses Full's register scan but reuses spill homes
 across nonintersecting lifetime ranges and prefers branch-edge copy partners.
 `--regalloc full` retains contiguous-span spill homes. Both allocation policies
 remain independently selectable.
@@ -30,6 +30,10 @@ functions can also allocate x0–x7, with ABI staging and scratch clobbers handl
 by the adapter. Float and vector call restrictions retain the base tier's policy.
 Explicit `--regalloc` selects the base tier without this adapter, in either flag
 order. `-O0`, `-O1`, `-O3` and library defaults retain their existing allocation.
+At `-Os`, this adapter also enables scalar ABI register preferences. Values
+prefer their first incoming, call or return register when it is available,
+reducing register copies. Preferences do not admit reserved registers or bypass
+liveness and call-clobber checks. `-O2` retains its existing copy preferences.
 See the [allocation and scheduling contracts](design.md#register-allocation).
 
 Balanced omits GCM, whose placement after stack promotion regressed Lua

@@ -687,6 +687,15 @@ names do not grant this policy. Eligible Darwin AArch64 functions can also use
 [argument registers](../targets/aarch64/codegen.md#argument-registers), with the
 target handling their scratch clobbers and ABI staging.
 
+With a Compact base, target selection also publishes scalar GPR ABI
+preferences. Each value keeps its first ABI placement, visiting incoming
+parameters and then instructions in layout order. An available
+ABI preference precedes its value-copy preference in the scan. Pool membership,
+interference and call-clobber checks still apply. Split values, aggregates and
+FP/vector placements do not get these preferences. On Darwin AArch64 this
+requires the extended argument bank; x86 uses its existing pools. An explicit
+base allocator without `CallSiteAllocator` retains the original preferences.
+
 Selected operands publish their exact IR type and early-use/late-definition
 position. They still describe lowering sequences, not individual machine
 instructions. ABI shuffles, FLAGS effects and internal scratch temporaries remain
@@ -742,7 +751,7 @@ value.
    spilled value lives in a stack slot for its whole life: no splitting.
    Spill slots are shared by intervals that do not overlap (holes ignored).
 
-   Compact retains Full's register choices. Its spill homes prefer the primary
+   Compact uses Full's register scan. Its spill homes prefer the primary
    input's home, then other branch-edge partners' homes, and can share
    nonintersecting lifetime ranges. Separate width pools preserve each home's
    size. Per width pool, discovery is bounded to 65,536 possible range

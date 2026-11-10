@@ -1093,8 +1093,12 @@ impl<'a> FunctionCompiler<'a> {
         };
         plan::check_guaranteed_tails(func, &named, present).map_err(err)?;
         let calls = plan::CallArea::plan(func, &facts, &named, shape.frame_align);
-        let covers = plan::Covers::select(func, pipeline, &facts);
-        crate::backend_profile::count_covers(&covers.selection);
+        let mut covers = plan::Covers::select(func, pipeline, &facts);
+        if pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
+            && !func.attrs.optnone
+        {
+            plan::prefer_abi_gprs(func, &named, &mut covers.selection);
+        }        crate::backend_profile::count_covers(&covers.selection);
         let (alloc, f80_homes) =
             plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?;
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
