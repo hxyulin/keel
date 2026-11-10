@@ -444,9 +444,23 @@ fn link_prepared(prepared: &Prepared<'_>, resolved: ResolvedOptions) -> Result<E
     };
     let entry = placed.entry(&options.entry)?;
     let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(page);
-    let mut bytes = placed.image(file_end, &got, arm)?;
+    let mut bytes = placed.blank_image(file_end, arm);
+    let written = placed.write_sections(&mut bytes, &got, dynamic.as_ref(), arm);
+    // Report failures in the order of the serial phases: GOT slots, TLS
+    // slots, then relocations. Import relocations follow the TLS ones.
+    placed.got_slots(&mut bytes, &got)?;
     got.tls.emit(&placed, &mut bytes, &mut dynamic)?;
-    placed.relocate(&mut bytes, &got, &mut dynamic, arm)?;
+    if let Some((_, error)) = written.error {
+        return Err(error);
+    }
+    if let Some(d) = dynamic.as_mut() {
+        d.relocations.extend(
+            written
+                .imports
+                .into_iter()
+                .map(|(_, relocation)| relocation),
+        );
+    }
     if let Some((section, table)) = &sframe_section {
         table.finish(
             &mut bytes,
@@ -1594,6 +1608,25 @@ fn layout(sections: &mut [Section], page: u64) -> Result<Vec<Segment>> {
     Ok(segments)
 }
 
+/// `(r_offset, symbol, r_type, r_addend)` of a dynamic relocation.
+type DynamicRelocation = (u64, u32, u32, i64);
+
+/// What writing the sections produced: dynamic relocations for imports and the
+/// first failure, each keyed by `(unit, relocation)`.
+#[derive(Default)]
+struct Written {
+    imports: Vec<((usize, usize), DynamicRelocation)>,
+    error: Option<((usize, usize), crate::Error)>,
+}
+
+/// Sections written by one worker, and the image bytes from file offset `base`
+/// that cover them.
+struct SectionJob<'b> {
+    sections: Vec<usize>,
+    base: usize,
+    bytes: &'b mut [u8],
+}
+
 /// Read-only view of the laid-out link, shared by the phases that write bytes.
 struct Placed<'a> {
     sections: &'a [Section<'a>],
@@ -1678,158 +1711,281 @@ impl<'a> Placed<'a> {
         self.address(entry_u, entry_s)
     }
 
-    /// The file image with section contents and GOT slots, before relocation.
-    fn image(&self, file_end: u64, got: &Got, arm: bool) -> Result<Vec<u8>> {
-        let sections = self.sections;
+    /// The zero-filled file image, with x86-64 code padding between the
+    /// executable sections of each lifecycle group.
+    fn blank_image(&self, file_end: u64, arm: bool) -> Vec<u8> {
         let mut bytes = vec![0; file_end as usize];
         if !arm {
-            lifecycle::code_padding(&mut bytes, sections);
+            lifecycle::code_padding(&mut bytes, self.sections);
         }
-        for s in sections {
-            if !s.bss && !s.data.is_empty() {
-                bytes[s.offset as usize..s.offset as usize + s.data.len()].copy_from_slice(&s.data);
-            }
-        }
-        for (&(ui, si), &offset) in &got.slots {
-            put64(
-                &mut bytes,
-                (sections[got.section].offset + offset) as usize,
-                {
-                    let selection = self.selected.get(ui, si)?;
-                    let value = self.address(ui, si)?;
-                    if selection.definition.info & 15 == object::elf::STT_TLS {
-                        let tls = tls_header(sections).ok_or("TLS GOT without template")?;
-                        value.wrapping_sub(align(tls.4, tls.5)?)
-                    } else {
-                        value
-                    }
-                },
-            );
-        }
-        Ok(bytes)
+        bytes
     }
 
-    /// Apply every input relocation. Absolute 64-bit references to imports
-    /// become dynamic relocations instead.
-    fn relocate(
+    /// Copy each section's bytes into place and apply the input relocations
+    /// that target it. Sections are independent jobs, run in parallel for
+    /// large images. Within a section, relocations apply in (unit,
+    /// relocation) order, as one serial pass did, because a field may read
+    /// bytes an earlier relocation wrote. Absolute 64-bit references to
+    /// imports become dynamic relocations, returned in that order with the
+    /// first failure.
+    fn write_sections(
         &self,
         bytes: &mut [u8],
         got: &Got,
-        dynamic: &mut Option<dynamic::Dynamic>,
+        dynamic: Option<&dynamic::Dynamic>,
         arm: bool,
-    ) -> Result<()> {
+    ) -> Written {
+        // Copies and relocation are memory-bound: more, smaller jobs add page
+        // fault contention without shortening the link.
+        const COST_PER_WORKER: usize = 8 << 20;
+        let sections = self.sections;
+        let mut runs: Vec<Vec<(usize, std::ops::Range<usize>)>> = vec![Vec::new(); sections.len()];
+        for (ui, u) in self.units.iter().enumerate() {
+            let mut start = 0;
+            for ri in 1..=u.relocs.len() {
+                if ri == u.relocs.len() || u.relocs[ri].section != u.relocs[start].section {
+                    runs[u.relocs[start].section].push((ui, start..ri));
+                    start = ri;
+                }
+            }
+        }
+        let mut order: Vec<usize> = (0..sections.len())
+            .filter(|&i| !sections[i].bss && !sections[i].data.is_empty())
+            .collect();
+        order.sort_by_key(|&i| sections[i].offset);
+        let disjoint = order.windows(2).all(|pair| {
+            let first = &sections[pair[0]];
+            first.offset + first.data.len() as u64 <= sections[pair[1]].offset
+        }) && (0..sections.len())
+            .all(|i| runs[i].is_empty() || (!sections[i].bss && !sections[i].data.is_empty()));
+        let mut jobs = Vec::new();
+        if disjoint {
+            let mut rest = &mut *bytes;
+            let mut consumed = 0;
+            for &i in &order {
+                let s = &sections[i];
+                let (_, tail) = rest.split_at_mut(s.offset as usize - consumed);
+                let (field, tail) = tail.split_at_mut(s.data.len());
+                consumed = (s.offset + s.data.len() as u64) as usize;
+                rest = tail;
+                jobs.push(SectionJob {
+                    sections: vec![i],
+                    base: s.offset as usize,
+                    bytes: field,
+                });
+            }
+        } else {
+            // Overlapping file ranges: one serial job in section index order.
+            jobs.push(SectionJob {
+                sections: (0..sections.len()).collect(),
+                base: 0,
+                bytes,
+            });
+        }
+        let results = crate::parallel::map(
+            jobs,
+            |job| {
+                job.sections
+                    .iter()
+                    .map(|&i| {
+                        sections[i].data.len()
+                            + 32 * runs[i].iter().map(|(_, r)| r.len()).sum::<usize>()
+                    })
+                    .sum()
+            },
+            COST_PER_WORKER,
+            |job| self.write_job(job, &runs, got, dynamic, arm),
+        );
+        let mut written = Written::default();
+        for result in results {
+            written.imports.extend(result.imports);
+            if let Some((key, error)) = result.error
+                && written.error.as_ref().is_none_or(|(first, _)| key < *first)
+            {
+                written.error = Some((key, error));
+            }
+        }
+        written.imports.sort_unstable_by_key(|&(key, _)| key);
+        written
+    }
+
+    fn write_job(
+        &self,
+        job: SectionJob<'_>,
+        runs: &[Vec<(usize, std::ops::Range<usize>)>],
+        got: &Got,
+        dynamic: Option<&dynamic::Dynamic>,
+        arm: bool,
+    ) -> Written {
+        let SectionJob {
+            sections: indices,
+            base,
+            bytes,
+        } = job;
+        for &i in &indices {
+            let s = &self.sections[i];
+            if !s.bss && !s.data.is_empty() {
+                let at = s.offset as usize - base;
+                bytes[at..at + s.data.len()].copy_from_slice(&s.data);
+            }
+        }
+        let mut relocations: Vec<_> = indices
+            .iter()
+            .flat_map(|&i| runs[i].iter())
+            .flat_map(|(ui, range)| range.clone().map(move |ri| (*ui, ri)))
+            .collect();
+        if indices.len() > 1 {
+            relocations.sort_unstable();
+        }
+        let mut written = Written::default();
+        for (ui, ri) in relocations {
+            match self.relocate(ui, ri, bytes, base, got, dynamic, arm) {
+                Ok(Some(import)) => written.imports.push(((ui, ri), import)),
+                Ok(None) => {}
+                Err(error) => {
+                    written.error = Some(((ui, ri), error));
+                    break;
+                }
+            }
+        }
+        written
+    }
+
+    /// Apply input relocation `ri` of unit `ui` to `bytes`, which hold the
+    /// image from file offset `base`. Returns the dynamic relocation that
+    /// replaces an absolute 64-bit reference to an import.
+    #[allow(clippy::too_many_arguments)]
+    fn relocate(
+        &self,
+        ui: usize,
+        ri: usize,
+        bytes: &mut [u8],
+        base: usize,
+        got: &Got,
+        dynamic: Option<&dynamic::Dynamic>,
+        arm: bool,
+    ) -> Result<Option<DynamicRelocation>> {
         let Self {
             sections,
             units,
             selected,
             ..
         } = self;
-        for (ui, u) in units.iter().enumerate() {
-            for r in &u.relocs {
-                let selection = selected.get(ui, r.symbol)?;
-                let import = selection.import;
-                if let (Some(name), Some(d)) = (import, dynamic.as_mut())
-                    && r.kind
-                        == if arm {
-                            object::elf::R_AARCH64_ABS64
-                        } else {
-                            object::elf::R_X86_64_64
-                        }
-                {
-                    let offset = sections[r.section].offset + r.offset;
-                    d.relocations.push((
-                        BASE + offset,
-                        d.imports[name].index,
-                        if arm {
-                            object::elf::R_AARCH64_ABS64
-                        } else {
-                            object::elf::R_X86_64_64
-                        },
-                        r.addend,
-                    ));
-                    bytes[offset as usize..offset as usize + 8].fill(0);
-                    continue;
+        let u = &units[ui];
+        let r = &u.relocs[ri];
+        let selection = selected.get(ui, r.symbol)?;
+        let import = selection.import;
+        if let (Some(name), Some(d)) = (import, dynamic)
+            && r.kind
+                == if arm {
+                    object::elf::R_AARCH64_ABS64
+                } else {
+                    object::elf::R_X86_64_64
                 }
-                if !arm && r.kind == object::elf::R_X86_64_TLSDESC_CALL {
-                    let at = (sections[r.section].offset + r.offset) as usize;
-                    if bytes.get(at..at + 2) != Some(&[0xff, 0x10]) {
-                        return Err("TLSDESC_CALL requires call *(%rax)".into());
-                    }
-                }
-                let result = || -> Result<(usize, [u8; 8], usize)> {
-                    let offset = sections[r.section].offset + r.offset;
-                    let p = i128::from(BASE + offset);
-                    let mut value = if let Some(model) = tls::model(r.kind, arm) {
-                        tls::value(self, got, r, ui, model)?
-                    } else if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
-                        if if arm {
-                            aarch64::got(r.kind)
-                        } else {
-                            reloc::x86_64::uses_got(r.kind)
-                        } {
-                            i128::from(d.slot(name, sections))
-                        } else {
-                            i128::from(d.stub(name, sections)?)
-                        }
-                    } else if if arm {
-                        aarch64::got(r.kind)
-                    } else {
-                        reloc::x86_64::uses_got(r.kind)
-                    } {
-                        i128::from(BASE + sections[got.section].offset + got.slots[&selection.key])
-                    } else {
-                        i128::from(self.definition_address(selection.key.0, selection.definition)?)
-                    } + i128::from(r.addend);
-                    let tls_reloc = if arm {
-                        matches!(r.kind, 523..=538 | 544..=559 | 570..=573)
-                    } else {
-                        matches!(r.kind, 17 | 18 | 21 | 23)
-                    };
-                    if tls::model(r.kind, arm).is_some() {
-                        // TLS GOT addressing was resolved separately above.
-                    } else if tls_reloc {
-                        if selection.definition.info & 15 != object::elf::STT_TLS
-                            || import.is_some()
-                        {
-                            return Err("TLS relocation requires a defined TLS symbol".into());
-                        }
-                        let tls = tls_header(sections).ok_or("TLS relocation without template")?;
-                        if arm && matches!(r.kind, 544..=559 | 570 | 571) {
-                            value += i128::from(align(16, tls.5)?);
-                        } else if matches!(r.kind, 18 | 23) {
-                            value -= i128::from(align(tls.4, tls.5)?);
-                        }
-                    } else if selection.definition.info & 15 == object::elf::STT_TLS {
-                        return Err("non-TLS relocation against TLS symbol is unsupported".into());
-                    }
-                    if arm {
-                        let width = aarch64::width(r.kind)? as usize;
-                        let encoded = aarch64::apply(
-                            r.kind,
-                            value,
-                            p,
-                            &bytes[offset as usize..offset as usize + width],
-                        )?;
-                        let mut data = [0u8; 8];
-                        data[..width].copy_from_slice(&encoded);
-                        return Ok((offset as usize, data, width));
-                    }
-                    let field = reloc::x86_64::encode(r.kind, value, BASE + offset).map_err(
-                        |e| match e {
-                            reloc::x86_64::Error::Unsupported => {
-                                format!("unsupported x86-64 relocation {}", r.kind)
-                            }
-                            reloc::x86_64::Error::Overflow => format!(
-                                "relocation {} overflow for `{}`",
-                                r.kind, u.symbols[&r.symbol].name
-                            ),
-                        },
-                    )?;
-                    Ok((offset as usize, field.bytes, field.width))
-                };
-                let (offset, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
-                bytes[offset..offset + width].copy_from_slice(&data[..width]);
+        {
+            let offset = sections[r.section].offset + r.offset;
+            let at = offset as usize - base;
+            bytes[at..at + 8].fill(0);
+            return Ok(Some((
+                BASE + offset,
+                d.imports[name].index,
+                if arm {
+                    object::elf::R_AARCH64_ABS64
+                } else {
+                    object::elf::R_X86_64_64
+                },
+                r.addend,
+            )));
+        }
+        if !arm && r.kind == object::elf::R_X86_64_TLSDESC_CALL {
+            let at = (sections[r.section].offset + r.offset) as usize - base;
+            if bytes.get(at..at + 2) != Some(&[0xff, 0x10]) {
+                return Err("TLSDESC_CALL requires call *(%rax)".into());
             }
+        }
+        let result = || -> Result<(usize, [u8; 8], usize)> {
+            let offset = sections[r.section].offset + r.offset;
+            let at = offset as usize - base;
+            let p = i128::from(BASE + offset);
+            let mut value = if let Some(model) = tls::model(r.kind, arm) {
+                tls::value(self, got, r, ui, model)?
+            } else if let (Some(name), Some(d)) = (import, dynamic) {
+                if if arm {
+                    aarch64::got(r.kind)
+                } else {
+                    reloc::x86_64::uses_got(r.kind)
+                } {
+                    i128::from(d.slot(name, sections))
+                } else {
+                    i128::from(d.stub(name, sections)?)
+                }
+            } else if if arm {
+                aarch64::got(r.kind)
+            } else {
+                reloc::x86_64::uses_got(r.kind)
+            } {
+                i128::from(BASE + sections[got.section].offset + got.slots[&selection.key])
+            } else {
+                i128::from(self.definition_address(selection.key.0, selection.definition)?)
+            } + i128::from(r.addend);
+            let tls_reloc = if arm {
+                matches!(r.kind, 523..=538 | 544..=559 | 570..=573)
+            } else {
+                matches!(r.kind, 17 | 18 | 21 | 23)
+            };
+            if tls::model(r.kind, arm).is_some() {
+                // TLS GOT addressing was resolved separately above.
+            } else if tls_reloc {
+                if selection.definition.info & 15 != object::elf::STT_TLS || import.is_some() {
+                    return Err("TLS relocation requires a defined TLS symbol".into());
+                }
+                let tls = tls_header(sections).ok_or("TLS relocation without template")?;
+                if arm && matches!(r.kind, 544..=559 | 570 | 571) {
+                    value += i128::from(align(16, tls.5)?);
+                } else if matches!(r.kind, 18 | 23) {
+                    value -= i128::from(align(tls.4, tls.5)?);
+                }
+            } else if selection.definition.info & 15 == object::elf::STT_TLS {
+                return Err("non-TLS relocation against TLS symbol is unsupported".into());
+            }
+            if arm {
+                let width = aarch64::width(r.kind)? as usize;
+                let encoded = aarch64::apply(r.kind, value, p, &bytes[at..at + width])?;
+                let mut data = [0u8; 8];
+                data[..width].copy_from_slice(&encoded);
+                return Ok((at, data, width));
+            }
+            let field =
+                reloc::x86_64::encode(r.kind, value, BASE + offset).map_err(|e| match e {
+                    reloc::x86_64::Error::Unsupported => {
+                        format!("unsupported x86-64 relocation {}", r.kind)
+                    }
+                    reloc::x86_64::Error::Overflow => format!(
+                        "relocation {} overflow for `{}`",
+                        r.kind, u.symbols[&r.symbol].name
+                    ),
+                })?;
+            Ok((at, field.bytes, field.width))
+        };
+        let (at, data, width) = result().map_err(|e| format!("{}: {e}", u.name))?;
+        bytes[at..at + width].copy_from_slice(&data[..width]);
+        Ok(None)
+    }
+
+    /// Fill the GOT slots of selected non-import targets.
+    fn got_slots(&self, bytes: &mut [u8], got: &Got) -> Result<()> {
+        let sections = self.sections;
+        for (&(ui, si), &offset) in &got.slots {
+            put64(bytes, (sections[got.section].offset + offset) as usize, {
+                let selection = self.selected.get(ui, si)?;
+                let value = self.address(ui, si)?;
+                if selection.definition.info & 15 == object::elf::STT_TLS {
+                    let tls = tls_header(sections).ok_or("TLS GOT without template")?;
+                    value.wrapping_sub(align(tls.4, tls.5)?)
+                } else {
+                    value
+                }
+            });
         }
         Ok(())
     }
