@@ -353,6 +353,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
+            Builtin::Abs => {
+                let zero = ins.iconst(e.ty.ir_with_layout(self.g.p.c_layout), 0);
+                let negative = self.b.ins().icmp(IntCC::Slt, vals[0], zero);
+                let negated = self.b.ins().ineg(vals[0]);
+                self.b.ins().select(negative, negated, vals[0])
+            }
             Builtin::Overflow(op) => {
                 let (value, overflow) = ins.overflow(op, vals[0], vals[1]);
                 let flags = self.object_flags(

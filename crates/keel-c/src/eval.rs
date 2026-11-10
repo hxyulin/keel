@@ -227,6 +227,17 @@ fn fold(cx: &Eval<'_>, e: &Expr<'_>, comma: Comma) -> Option<Const> {
             cx.mark(Class::Arithmetic);
             Const::Float(*f)
         }
+        ExprKind::Builtin(Builtin::Abs, args) => {
+            let [arg] = *args else { return None };
+            let Const::Int(value) = constant(arg)? else {
+                return None;
+            };
+            Const::Int(if value.is_negative() {
+                int_const::unary(UnOp::Neg, value, policy).ok()?
+            } else {
+                value
+            })
+        }
         ExprKind::Builtin(Builtin::Bswap | Builtin::Ffs, args) => {
             // Existing builtin signatures are native LP64; do not infer a
             // 64-bit swap from unsigned long on the private ILP32 profile.

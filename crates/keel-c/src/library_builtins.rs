@@ -5,6 +5,18 @@ use keel_ir::Intrinsic;
 /// A standard-library operation that ordinary direct calls may use as a builtin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LibraryBuiltin {
+    /// Absolute value of an `int`.
+    Abs,
+    /// Absolute value of a `long`.
+    Labs,
+    /// Absolute value of a `long long`.
+    Llabs,
+    /// Absolute value of a `double`.
+    Fabs,
+    /// Absolute value of a `float`.
+    Fabsf,
+    /// Absolute value of a `long double` with the `double` format.
+    Fabsl,
     /// Copy bytes between nonoverlapping regions.
     Memcpy,
     /// Copy bytes while allowing overlap.
@@ -21,7 +33,13 @@ pub enum LibraryBuiltin {
 
 impl LibraryBuiltin {
     /// Every operation, in the order of their `-fno-builtin-` names.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 12] = [
+        Self::Abs,
+        Self::Labs,
+        Self::Llabs,
+        Self::Fabs,
+        Self::Fabsf,
+        Self::Fabsl,
         Self::Memcpy,
         Self::Memmove,
         Self::Memset,
@@ -33,6 +51,12 @@ impl LibraryBuiltin {
     /// The library function's name.
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Abs => "abs",
+            Self::Labs => "labs",
+            Self::Llabs => "llabs",
+            Self::Fabs => "fabs",
+            Self::Fabsf => "fabsf",
+            Self::Fabsl => "fabsl",
             Self::Memcpy => "memcpy",
             Self::Memmove => "memmove",
             Self::Memset => "memset",
@@ -48,7 +72,7 @@ impl LibraryBuiltin {
             .find(|operation| operation.name() == name)
     }
 
-    const fn bit(self) -> u8 {
+    const fn bit(self) -> u16 {
         1 << self as u8
     }
 
@@ -58,7 +82,7 @@ impl LibraryBuiltin {
             Self::Memcpy => Some(Intrinsic::Memcpy),
             Self::Memmove => Some(Intrinsic::Memmove),
             Self::Memset => Some(Intrinsic::Memset),
-            Self::Sqrt | Self::Sqrtf | Self::Sqrtl => None,
+            _ => None,
         }
     }
 
@@ -68,16 +92,18 @@ impl LibraryBuiltin {
         };
         if self.intrinsic().is_none() {
             // `long double` has the `double` format exactly where it is `Ty::Double`.
-            let float = if self == Self::Sqrtf {
-                Ty::Float
-            } else {
-                Ty::Double
+            let scalar = match self {
+                Self::Abs => Ty::Int(IntKind::Int),
+                Self::Labs => Ty::Int(IntKind::Long),
+                Self::Llabs => Ty::Int(IntKind::LLong),
+                Self::Fabsf | Self::Sqrtf => Ty::Float,
+                _ => Ty::Double,
             };
             return f.has_prototype()
                 && !f.variadic
                 && !f.microsoft_x64
-                && f.ret == float
-                && f.params == [float]
+                && f.ret == scalar
+                && f.params == [scalar]
                 && f.param_quals == [&[] as &[u8]];
         }
         const COPY_QUALIFIERS: &[&[u8]] = &[&[0], &[1], &[]];
@@ -108,7 +134,7 @@ impl LibraryBuiltin {
 /// retain their semantics regardless of this policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LibraryBuiltins {
-    enabled: u8,
+    enabled: u16,
     math_errno: bool,
 }
 
@@ -119,10 +145,11 @@ impl Default for LibraryBuiltins {
 }
 
 impl LibraryBuiltins {
+    const OPERATION_COUNT: usize = LibraryBuiltin::ALL.len();
     /// Recognize supported canonical library declarations in hosted C.
     pub const fn hosted() -> Self {
         Self {
-            enabled: 0x3f,
+            enabled: (1 << Self::OPERATION_COUNT) - 1,
             math_errno: true,
         }
     }

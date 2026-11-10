@@ -187,7 +187,7 @@ struct Options {
     dump_macros: bool,
     freestanding: bool,
     no_builtin: bool,
-    disabled_library_builtins: u8,
+    disabled_library_builtins: u16,
     sysroot: Option<std::path::PathBuf>,
     system_include_dirs: Vec<std::path::PathBuf>,
     darwin_deployment: Option<String>,
@@ -516,7 +516,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     .position(|builtin| builtin.name() == name)
                 else {
                     return Err(format!(
-                        "unsupported builtin opt-out `{raw}`; expected memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
+                        "unsupported builtin opt-out `{raw}`; expected abs, labs, llabs, fabs, fabsf, fabsl, memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
                     ));
                 };
                 opts.disabled_library_builtins |= 1 << index;

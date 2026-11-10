@@ -245,3 +245,45 @@ fn architecture_names_match_supported_cpu_levels() {
     baseline.push("-march=x86-64");
     assert_eq!(successful(&dir, &repeated), successful(&dir, &baseline));
 }
+
+#[test]
+fn absolute_builtin_opt_outs_cover_every_policy_bit() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("absolute-builtin-flags");
+    fs::create_dir_all(&dir).unwrap();
+    for (name, ty) in [
+        ("abs", "int"),
+        ("labs", "long"),
+        ("llabs", "long long"),
+        ("fabs", "double"),
+        ("fabsf", "float"),
+        ("fabsl", "long double"),
+    ] {
+        fs::write(
+            dir.join("input.c"),
+            format!("{ty} {name}({ty}); {ty} f({ty} x) {{ return {name}(x); }}"),
+        )
+        .unwrap();
+        for flag in [
+            None,
+            Some("-fno-builtin".to_owned()),
+            Some(format!("-fno-builtin-{name}")),
+        ] {
+            let mut args = vec![
+                "cc",
+                "--target",
+                "aarch64-apple-darwin",
+                "--emit-ir",
+                "input.c",
+            ];
+            if let Some(flag) = &flag {
+                args.push(flag);
+            }
+            let text = String::from_utf8(successful(&dir, &args)).unwrap();
+            assert_eq!(
+                text.contains(&format!("call @{name}(")),
+                flag.is_some(),
+                "{args:?}\n{text}"
+            );
+        }
+    }
+}

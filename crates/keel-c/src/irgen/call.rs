@@ -110,12 +110,22 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 && global.weak.is_none()
                 && !global.returns_twice
                 && !global.incompatible_return
-                && (operation != crate::LibraryBuiltin::Sqrtl
-                    || self.g.p.target == keel_ir::Target::Aarch64AppleDarwin)
+                && (!matches!(
+                    operation,
+                    crate::LibraryBuiltin::Sqrtl | crate::LibraryBuiltin::Fabsl
+                ) || self.g.p.target == keel_ir::Target::Aarch64AppleDarwin)
             {
                 return match operation.intrinsic() {
                     Some(id) => self.builtin(Builtin::Memory(id), args, e),
-                    None => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
+                    None => match operation {
+                        crate::LibraryBuiltin::Abs
+                        | crate::LibraryBuiltin::Labs
+                        | crate::LibraryBuiltin::Llabs => self.builtin(Builtin::Abs, args, e),
+                        crate::LibraryBuiltin::Fabs
+                        | crate::LibraryBuiltin::Fabsf
+                        | crate::LibraryBuiltin::Fabsl => self.builtin(Builtin::Fabs, args, e),
+                        _ => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
+                    },
                 };
             }
         }

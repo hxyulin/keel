@@ -62,6 +62,14 @@ impl<'a> Parser<'a> {
             "isnan" | "isinf" | "isinf_sign" | "isfinite" | "isnormal" | "signbit" | "signbitf"
             | "signbitl" | "fpclassify" | "isgreater" | "isgreaterequal" | "isless"
             | "islessequal" | "islessgreater" | "isunordered" => self.float_class(base, loc),
+            "abs" | "labs" | "llabs" => {
+                let ty = match base {
+                    "abs" => INT,
+                    "labs" => LONG,
+                    _ => Ty::Int(IntKind::LLong),
+                };
+                self.builtin_call(Builtin::Abs, &[ty], ty, loc)
+            }
             "fabs" | "fabsf" | "fabsl" => self.fabs(base, loc),
             "bswap16" => self.builtin_call(
                 Builtin::Bswap,

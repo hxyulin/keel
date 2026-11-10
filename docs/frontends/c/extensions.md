@@ -8,14 +8,16 @@ their limits. [C frontend](README.md) covers the overall language support.
 
 Hosted native C compilation recognizes direct calls to canonical external
 `memcpy`, `memmove` and `memset` declarations as memory intrinsics, and calls to
-`sqrt`, `sqrtf` and `sqrtl` as the IR `fsqrt` operation. The library
+`sqrt`, `sqrtf` and `sqrtl` as the IR `fsqrt` operation.
+`abs`, `labs` and `llabs` become integer compare/negate/select operations;
+`fabs`, `fabsf` and `fabsl` become the IR `fabs` operation. The library
 API's `compile` and `compile_with_binding` entry points use this hosted policy.
 `compile_with_policies` accepts `LibraryBuiltins` for explicit control. The bounded
 Wasm profile remains freestanding and does not recognize ordinary library calls.
 
 Recognition uses declaration identity and types after parsing the complete
 translation unit. All declarations must retain the canonical native LP64
-prototype, including pointer qualifiers and `unsigned long` size. `sqrtl` is
+prototype, including pointer qualifiers and `unsigned long` size. `sqrtl` and `fabsl` are
 recognized only on Darwin, where `long double` is `double`. Typedef aliases
 and top-level parameter `restrict` do not prevent recognition. Definitions,
 static or weak bindings, renamed linker symbols, multiple C names for one linker
@@ -31,13 +33,20 @@ Taking a function's address still produces the library function's address.
 
 `-fno-builtin` disables ordinary-call recognition. The bounded per-function forms
 are `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
-`-fno-builtin-sqrt`, `-fno-builtin-sqrtf` and `-fno-builtin-sqrtl`.
+`-fno-builtin-sqrt`, `-fno-builtin-sqrtf`, `-fno-builtin-sqrtl`,
+`-fno-builtin-abs`, `-fno-builtin-labs`, `-fno-builtin-llabs`,
+`-fno-builtin-fabs`, `-fno-builtin-fabsf` and `-fno-builtin-fabsl`.
 `-ffreestanding` sets `__STDC_HOSTED__` to zero and disables ordinary recognition;
 `-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
 reenables global recognition without changing `__STDC_HOSTED__`. Later global
 flags win; per-function exclusions remain active across global toggles.
 Explicit `__builtin_memcpy`, `__builtin_memmove` and `__builtin_memset` retain
 their existing semantics regardless of these ordinary-call policies.
+
+Absolute-value arguments are evaluated once. Integer absolute value is defined
+for representable magnitudes; the signed minimum has no positive value in its
+return type. Floating absolute value clears the sign, including for negative
+zero, without requiring fast math or disabling errno preservation.
 
 Arguments are evaluated once even for zero-length operations. Small fixed-size
 intrinsics may become direct loads/stores; larger or dynamic operations can call
@@ -93,7 +102,7 @@ and [object size checking](https://gcc.gnu.org/onlinedocs/gcc/Object-Size-Checki
 
 Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
 `constant_p`, variadic access, `bswap16/32/64`, `clz/ctz/popcount` and their
-`l`/`ll` forms, floating-point classification, `fabs`, `alloca`,
+`l`/`ll` forms, `abs`/`labs`/`llabs`, floating-point classification, `fabs`, `alloca`,
 `frame_address(0)`, `debugtrap` and the overflow builtins below. A
 `__builtin_` name with a declared library equivalent can also resolve to that
 function; this is not blanket support for every builtin. Some builtins have
