@@ -165,6 +165,7 @@ struct Options {
     /// The least inlining allowance; a merge sets it to its inputs' sum.
     inline_allowance: usize,
     allocation: keel_codegen::regalloc::AllocationTier,
+    call_sites: bool,
     selection: keel_codegen::SelectionOptions,
     pressure_schedule: Option<bool>,
     #[cfg(feature = "experimental-regalloc")]
@@ -811,6 +812,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     // Explicit selectors override the convenience preset regardless of order.
     // IR tier changes and explicit pipelines do not reset selection.
     if let Some(level) = optimize_preset {
+        opts.call_sites = !explicit_allocation && level.call_sites();
         if !explicit_selection {
             opts.selection = level.selection().options();
         }
@@ -820,6 +822,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     }
     // Keep rematerialization experiments on their existing base allocator unless
     // the user explicitly selects another one. Segment edits prevent recipe substitution.
+    #[cfg(feature = "experimental-regalloc")]
+    if opts.remat != 0 {
+        opts.call_sites = false;
+    }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat != 0
         && !explicit_allocation
@@ -1387,7 +1393,14 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         stack_addresses: opts.remat & 2 != 0,
         null_pointers: opts.remat & 8 != 0,
     };
-    let allocator: &(dyn keel_codegen::regalloc::RegisterAllocator + Sync) = &opts.allocation;
+    let call_sites = keel_codegen::regalloc::CallSiteAllocator {
+        base: opts.allocation,
+    };
+    let allocator: &(dyn keel_codegen::regalloc::RegisterAllocator + Sync) = if opts.call_sites {
+        &call_sites
+    } else {
+        &opts.allocation
+    };
     #[cfg(feature = "experimental-regalloc")]
     let allocator: &(dyn keel_codegen::regalloc::RegisterAllocator + Sync) =
         if opts.remat != 0 { &remat } else { allocator };
@@ -1938,6 +1951,28 @@ mod tests {
             options(&["-O1", "-O0"]).unwrap().allocation,
             options(&[]).unwrap().allocation
         );
+    }
+
+    #[test]
+    fn caller_saves_follow_selected_presets_and_explicit_allocator_overrides() {
+        for level in ["-O0", "-O1", "-O2", "-O", "-O3", "-Os"] {
+            assert_eq!(
+                options(&[level]).unwrap().call_sites,
+                matches!(level, "-O2" | "-Os"),
+                "{level}"
+            );
+            for flags in [
+                [level, "--regalloc", "compact"],
+                ["--regalloc", "compact", level],
+            ] {
+                assert!(!options(&flags).unwrap().call_sites, "{flags:?}");
+            }
+        }
+        assert!(!options(&[]).unwrap().call_sites);
+        assert!(!options(&["-Os", "-O3"]).unwrap().call_sites);
+        assert!(options(&["-O3", "-Os"]).unwrap().call_sites);
+        #[cfg(feature = "experimental-regalloc")]
+        assert!(!options(&["-Os", "--remat", "null"]).unwrap().call_sites);
     }
 
     #[test]

@@ -95,6 +95,7 @@ mod remat;
 #[cfg(feature = "experimental-regalloc")]
 pub use remat::RematerializingAllocator;
 pub(crate) use remat::{RematRecipe, remat_recipe};
+pub(crate) mod call_site;
 #[cfg(feature = "experimental-regalloc")]
 mod loop_region;
 mod region;
@@ -176,6 +177,14 @@ impl Allocation {
 pub trait RegisterAllocator {
     fn name(&self) -> &'static str;
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation;
+
+    /// Opt into target-managed caller-save allocation. AArch64 may then offer
+    /// x0-x7 to the built-in caller-save implementation for the returned base
+    /// tier, rather than calling `allocate`. It handles scratch clobbers and
+    /// ABI staging. Custom allocators keep their original pools by default.
+    fn call_site_base(&self) -> Option<AllocationTier> {
+        None
+    }
 }
 
 /// Fast uses conservative contiguous intervals without register affinities.
@@ -245,6 +254,35 @@ impl RegisterAllocator for AllocationTier {
             input.selection,
             *self,
         )
+    }
+}
+
+/// Compare whole-value spilling with explicit GPR saves at clobber sites.
+/// The base tier retains its spill-home and bounded-repair policies. Float and
+/// vector allocation keeps the base tier's call restrictions. Unsupported base
+/// tiers delegate directly; this adapter does not change the library default.
+#[derive(Debug)]
+pub struct CallSiteAllocator {
+    pub base: AllocationTier,
+}
+
+impl RegisterAllocator for CallSiteAllocator {
+    fn name(&self) -> &'static str {
+        "call-sites"
+    }
+
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        self.call_site_base()
+            .and_then(|base| call_site::allocate(input, base, false))
+            .unwrap_or_else(|| self.base.allocate(input))
+    }
+
+    fn call_site_base(&self) -> Option<AllocationTier> {
+        matches!(
+            self.base,
+            AllocationTier::Full | AllocationTier::Compact | AllocationTier::Bounded
+        )
+        .then_some(self.base)
     }
 }
 
@@ -325,7 +363,7 @@ fn allocate_tier_inner(
             let intervals =
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
             let mut spilled = weighted::linear_scan(
-                func, selection, &order, &intervals, pools, &mut locs, &weights,
+                func, selection, &order, &intervals, pools, &mut locs, &weights, false,
             );
             if tier == AllocationTier::Compact {
                 assign_compact_spill_slots(func, &mut spilled, &mut locs, &selection.hints)
@@ -1594,12 +1632,24 @@ fn linear_scan<'a>(
 
 /// A higher priority keeps a value in a register. Full compares spill costs
 /// (see `weighted`); the other scans prefer the earliest endpoint.
+#[cfg(feature = "experimental-regalloc")]
 fn linear_scan_with_priority<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &crate::select::Hints,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
+) -> Vec<&'a Interval> {
+    linear_scan_with_preferences(intervals, pools, locs, hints, priority, false)
+}
+
+fn linear_scan_with_preferences<'a>(
+    intervals: &'a [Interval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+    hints: &crate::select::Hints,
+    priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
+    callee_first: bool,
 ) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
     backend_scope!(Scan);
@@ -1792,7 +1842,20 @@ fn linear_scan_with_priority<'a>(
                 .and_then(|v| locs[cur.half][v.index()])
                 .filter(|&r| available(r))
         };
-        let free = preferred.or_else(|| {
+        let callee = (callee_first && cur.crosses_call && !cur.float)
+            .then(|| {
+                preferred
+                    .filter(|r| callee_saved.iter().any(|&n| class(n) == *r))
+                    .or_else(|| {
+                        callee_saved
+                            .iter()
+                            .copied()
+                            .find(|&n| available_number(n))
+                            .map(class)
+                    })
+            })
+            .flatten();
+        let free = callee.or(preferred).or_else(|| {
             callers
                 .iter()
                 .chain(callee_saved)

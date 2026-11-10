@@ -12,7 +12,7 @@ in [IR and backend design](../../compiler/design.md#instruction-selection).
 
 | Registers | Use |
 |---|---|
-| x0–x7 | call arguments and results; never allocated |
+| x0–x7 | call arguments and results; eligible Darwin functions may allocate them |
 | x8, x16, x17 | scratch for reloading spilled operands, intermediate values and parallel copies; never allocated. x8 also carries an `sret` address |
 | x9–x15 | allocatable, caller-saved |
 | x18 | reserved by Apple; never touched |
@@ -23,11 +23,9 @@ in [IR and backend design](../../compiler/design.md#instruction-selection).
 | v16–v18 | scratch |
 | v19–v31 | allocatable, caller-saved |
 
-Keeping x0–x7 out of the pool means a call's arguments can be moved into
-place without moving live values out of the way first. It also gives the
-`i128` lowerings free working registers: they copy their operands into x0–x7
-as pairs, compute there, and move the result out. The cost is that no value
-is ever placed in x0–x7, which the [allocator decisions](#decisions) change.
+Base pools reserve x0–x7 for ABI setup and the fixed working registers of
+`i128` lowering. Darwin can offer them through the
+[argument-register policies](#argument-registers) below.
 
 Each instruction is lowered with its operands in their allocated registers,
 or reloaded into x16, x17 or x8 if spilled. It computes straight into its
@@ -37,9 +35,27 @@ lowering must read every operand before it writes the destination. Values
 narrower than 64 bits have unspecified upper bits; comparisons, division,
 right shifts and extensions extend their operands first.
 
+### Argument registers
+
+Private Darwin scalar Fast leaves retain an x0-first allocation order. With
+`CallSiteAllocator`, other eligible Darwin functions can use x0–x7 after the
+existing x9–x15 caller pool. Wide arithmetic and atomics publish clobber points:
+inputs in the argument bank get stack bindings, their result definitions stay
+outside that bank, and live GPRs get saves and restores. Terminator restores go
+on the appropriate successor edges, combined with block-parameter copies.
+
+ABI setup stages indirect targets and aggregate or sret operands that are read
+after scalar argument moves. Incoming register parameters move before stack
+parameters load into their homes. Variadic, TLS, inline-assembly, EH, debug-variable,
+returns-twice and custom-pool paths keep the reserved bank. Linux retains its
+original x9–x15 caller pool. A custom allocator must explicitly opt into this
+policy through `RegisterAllocator::call_site_base`.
+
 ## Calls and copies
 
-An interval live across a call takes a callee-saved register or is spilled.
+Base allocation puts call-live values in callee-saved registers, proven
+preserved caller registers or spill homes. `CallSiteAllocator` can instead save
+GPRs at clobber sites and keep them in caller registers between those sites.
 The prologue saves the callee-saved registers the function uses with
 `stp`/`ldp` pairs, and the epilogue restores them.
 
@@ -269,14 +285,6 @@ After the IR steps in
    snapshots). Add a focused `arm_*` target test when the lowering has
    boundaries such as immediate ranges.
 
-## Decisions
-
-The register-assignment design settled the AArch64 policy: x0–x7 become
-allocatable and leaf functions frameless on Darwin first, and on Linux after
-the ARM container interoperability test runs. Values with no preference take
-x0–x7 after x9–x15, once both orders are measured. Before that, the indirect
-call lowering must read its target as part of the argument copy.
-
 ## Tests
 
 ```sh
@@ -285,4 +293,5 @@ cargo test -p keel-codegen --test arm_zero_branches
 cargo test -p keel-codegen --test arm_indexed_memory
 cargo test -p keel-codegen --test arm_constant_division
 cargo test -p keel-codegen --test vector_aarch64
+cargo test -p keel --test optimization_levels call_sites
 ```

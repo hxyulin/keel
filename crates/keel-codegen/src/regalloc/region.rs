@@ -41,6 +41,7 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         input.pools,
         &mut locs,
         &weights,
+        false,
     );
     let spill_slots = assign_spill_slots(&mut spills, &mut locs);
     let alloc = baseline_allocation(order, locs, spill_slots, input.pools);
@@ -71,6 +72,15 @@ pub(super) fn repair_free(
     intervals: &[Interval],
 ) -> Allocation {
     repair_inner(input, alloc, intervals, &[], true)
+}
+
+pub(super) fn repair_free_with_reserved(
+    input: &AllocationInput<'_>,
+    alloc: Allocation,
+    intervals: &[Interval],
+    reserved: &[keel_ir::Block],
+) -> Allocation {
+    repair_inner(input, alloc, intervals, reserved, true)
 }
 
 fn repair_inner(

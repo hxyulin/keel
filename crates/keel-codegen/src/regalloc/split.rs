@@ -127,6 +127,7 @@ pub(super) fn allocate_adaptive(input: &AllocationInput<'_>) -> Allocation {
         input.pools,
         &mut locs,
         &weights,
+        false,
     );
     let spill_slots = assign_spill_slots(&mut spills, &mut locs);
     let alloc = baseline_allocation(order, locs, spill_slots, input.pools);

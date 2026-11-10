@@ -56,9 +56,14 @@ struct Allocator {
 }
 impl RegisterAllocator for Allocator {
     fn name(&self) -> &'static str {
-        "test-constraints"
+        "full"
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        // A built-in name does not opt a custom allocator into wider pools.
+        assert!(
+            input.pools.caller_saved == keel_codegen::aarch64::REGISTERS.caller_saved
+                || input.pools.caller_saved == keel_codegen::x86_64::REGISTERS.caller_saved
+        );
         let mut alloc = AllocationTier::Full.allocate(input);
         for (i, loc) in alloc.locs[0].iter_mut().enumerate() {
             *loc = Some(Loc::Stack(i as u32));

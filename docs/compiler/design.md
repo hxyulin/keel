@@ -653,6 +653,9 @@ Allocation is selected through `RegisterAllocator`, independently of
 selector with any allocator, so tiers can be compared on the same selected
 instruction plan and register pools. `--regalloc` picks the tier; `-O1` uses
 Fast, `-O2`/`-O3` use Bounded, `-O0` uses Full, and `-Os` uses Compact.
+The CLI wraps Bounded at `-O2` and Compact at `-Os` in `CallSiteAllocator`.
+Explicit `--regalloc` bypasses that adapter. Library defaults and the other
+presets retain their base allocators.
 
 | Tier | Build | What it does |
 | --- | --- | --- |
@@ -667,6 +670,22 @@ All tiers share liveness, selected operands, ABI clobber contracts and emission
 machinery. Every allocation passes `Allocation::validate` before emission. The experimental
 tiers stay only while they build, pass clippy and pass the
 [experimental codegen lane](../development/testing.md#experimental-codegen-features).
+
+`CallSiteAllocator` prices ordinary GPR spilling against callee-first register
+allocation with explicit caller saves. Both static and loop-weighted memory
+traffic must decrease, including callee-save frame traffic, sparse edits and
+actual block-parameter copies. This is a traffic estimate, not a per-function
+object-size guarantee. Float and vector intervals retain their original call
+restrictions. Returns-twice, EH, debug variables and entry policies without a
+preservation contract use the base tier. Compact's ordinary-pool comparison
+requires a direct call in the function; other supported bases also consider
+indirect-only functions. The target's argument-bank policy handles either form.
+
+`RegisterAllocator::call_site_base` explicitly permits the target to use its
+caller-save implementation. Custom allocators return `None` by default; their
+names do not grant this policy. Eligible Darwin AArch64 functions can also use
+[argument registers](../targets/aarch64/codegen.md#argument-registers), with the
+target handling their scratch clobbers and ABI staging.
 
 Selected operands publish their exact IR type and early-use/late-definition
 position. They still describe lowering sequences, not individual machine

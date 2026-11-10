@@ -59,6 +59,7 @@ pub(super) fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Bl
     weights
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn linear_scan<'a>(
     func: &Function,
     selection: &crate::select::Selection,
@@ -67,19 +68,28 @@ pub(super) fn linear_scan<'a>(
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
     weights: &[u32],
+    callee_first: bool,
 ) -> Vec<&'a Interval> {
     // Reuse layout loop weights. Build operand costs only when the scan
     // must choose between spilling two values.
     let costs = std::cell::OnceCell::new();
-    linear_scan_with_priority(intervals, pools, locs, &selection.hints, |a, b| {
-        let (costs, lengths) = costs
-            .get_or_init(|| spill_costs_with_weights(func, selection, order, intervals, weights));
-        // Products can exceed u64 for very large functions. Keep comparisons
-        // exact and deterministic without floating point or truncating ratios.
-        let score_a = u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]);
-        let score_b = u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()]);
-        score_a.cmp(&score_b).then_with(|| b.end().cmp(&a.end()))
-    })
+    linear_scan_with_preferences(
+        intervals,
+        pools,
+        locs,
+        &selection.hints,
+        |a, b| {
+            let (costs, lengths) = costs.get_or_init(|| {
+                spill_costs_with_weights(func, selection, order, intervals, weights)
+            });
+            // Products can exceed u64 for very large functions. Keep comparisons
+            // exact and deterministic without floating point or truncating ratios.
+            let score_a = u128::from(costs[a.value.index()]) * u128::from(lengths[b.value.index()]);
+            let score_b = u128::from(costs[b.value.index()]) * u128::from(lengths[a.value.index()]);
+            score_a.cmp(&score_b).then_with(|| b.end().cmp(&a.end()))
+        },
+        callee_first,
+    )
 }
 
 #[cfg(test)]

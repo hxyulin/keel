@@ -211,3 +211,6 @@ fn size_preset_controls_codegen_independently_of_pass_and_stage_overrides() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[path = "optimization_levels/call_sites.rs"]
+mod call_sites;

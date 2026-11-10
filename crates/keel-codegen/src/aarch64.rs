@@ -916,6 +916,7 @@ struct FunctionCompiler<'a> {
     frame_size: usize,
     /// A private leaf that neither needs nor observes a stack frame.
     frameless: bool,
+    extended_arguments: bool,
     /// Share ordinary return restoration after allocation, leaving value homes
     /// and the first return path unchanged. Tiny epilogues stay duplicated.
     share_returns: bool,
@@ -1060,13 +1061,19 @@ impl<'a> FunctionCompiler<'a> {
             });
         let asm = plan::InlineAsmPlans::plan(func, present, moves_sp).map_err(err)?;
         let has_tls_getter = plan::has_tls_getter(func, symbols, present);
-        let argument_bank =
+        let private_bank =
             plan::argument_bank(func, module, pools, incoming, has_tls_getter, linux);
-        let allocation_pools = plan::AllocationPools::plan(pools, argument_bank, &asm, moves_sp);
+        let extended_bank = !private_bank
+            && pipeline.allocator.call_site_base().is_some()
+            && plan::extended_argument_bank(func, pools, has_tls_getter, linux);
+        let allocation_pools =
+            plan::AllocationPools::plan(pools, private_bank, extended_bank, &asm, moves_sp);
         let pools = allocation_pools.pools(pools);
         let covers = plan::Covers::select(func, pipeline, &facts, leaf_summaries);
         crate::backend_profile::count_covers(&covers.selection);
-        let mut alloc = plan::allocate(func, &pools, &covers.selection, pipeline).map_err(err)?;
+        let bank = extended_bank.then(|| pipeline.allocator.call_site_base().unwrap());
+        let mut alloc =
+            plan::allocate(func, &pools, &covers.selection, pipeline, bank).map_err(err)?;
         let plan::InlineAsmPlans {
             asm_saved,
             asm_float_saved,
@@ -1182,6 +1189,7 @@ impl<'a> FunctionCompiler<'a> {
             variadic_offset: 16 + (incoming as usize).next_multiple_of(8),
             frame_size,
             frameless,
+            extended_arguments: extended_bank,
             share_returns,
             return_epilogue_emitted: false,
             next_block: None,
@@ -1480,6 +1488,8 @@ impl<'a> FunctionCompiler<'a> {
             let (locs, _) = abi::arg_locs_for(&kinds, kinds.len(), self.linux);
             let mut moves = Vec::new();
             let mut addresses = Vec::new();
+            let mut stack_params = Vec::new();
+            let postpone_stack_params = self.extended_arguments;
             for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
                 let Some(dst) = self
                     .alloc
@@ -1500,10 +1510,19 @@ impl<'a> FunctionCompiler<'a> {
                     }
                     ArgLoc::Value(Slot::Stack(offset)) | ArgLoc::Copy(Slot::Stack(offset)) => {
                         if let Some(hi) = hi {
-                            self.load_stack_param(dst, Type::I64, 16 + offset as usize);
-                            self.load_stack_param(hi, Type::I64, 24 + offset as usize);
+                            if postpone_stack_params {
+                                stack_params.push((dst, Type::I64, 16 + offset as usize));
+                                stack_params.push((hi, Type::I64, 24 + offset as usize));
+                            } else {
+                                self.load_stack_param(dst, Type::I64, 16 + offset as usize);
+                                self.load_stack_param(hi, Type::I64, 24 + offset as usize);
+                            }
                         } else {
-                            self.load_stack_param(dst, abi_param.ty, 16 + offset as usize)
+                            if postpone_stack_params {
+                                stack_params.push((dst, abi_param.ty, 16 + offset as usize));
+                            } else {
+                                self.load_stack_param(dst, abi_param.ty, 16 + offset as usize);
+                            }
                         }
                     }
                     ArgLoc::SretMemory => moves.push((dst, Loc::Reg(8))),
@@ -1521,6 +1540,9 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             self.parallel_copy(&moves);
+            for (dst, ty, offset) in stack_params {
+                self.load_stack_param(dst, ty, offset);
+            }
             for (dst, base, offset) in addresses {
                 self.address(dst, base, offset);
             }

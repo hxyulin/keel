@@ -2,6 +2,7 @@
 //! Every definition produces a fresh symbolic token; reads must observe that
 //! token after the actual parallel copies and call clobbers have executed.
 use super::*;
+use keel_ir::Inst;
 use std::path::Path;
 
 fn location(loc: Loc) -> usize {
@@ -27,7 +28,16 @@ fn copies(state: &mut [Option<u64>], moves: &[(Loc, Loc)], current: &[Vec<Option
         state[location(dst)] = Some(value);
     }
 }
-pub(super) fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
+pub(super) fn check(input: &AllocationInput<'_>, allocation: &Allocation, seed: u64) {
+    check_with_clobbers(input, allocation, seed, |_, _| {});
+}
+
+pub(super) fn check_with_clobbers(
+    input: &AllocationInput<'_>,
+    allocation: &Allocation,
+    mut seed: u64,
+    extra: impl Fn(Inst, &mut dyn FnMut(Loc)),
+) {
     let func = input.func;
     let mut state = vec![None; 512 + allocation.spill_slots as usize];
     let mut values = [vec![None; func.num_values()], vec![None; func.num_values()]];
@@ -75,6 +85,7 @@ pub(super) fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut se
                 }
             });
             input.for_each_clobber(inst, |loc| state[location(loc)] = None);
+            extra(inst, &mut |loc| state[location(loc)] = None);
             input.for_each_operand(inst, |op| {
                 if op.kind == OperandKind::Def {
                     token += 1;

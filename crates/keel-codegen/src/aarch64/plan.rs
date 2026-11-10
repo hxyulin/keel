@@ -323,11 +323,37 @@ pub(super) fn has_tls_getter(
         })
 }
 
-/// Whether a scalar integer private leaf may allocate x0-x7. It never
-/// runs the wide-ABI staging or call helpers that reserve them, so it can
-/// compute in its argument/result bank directly. Custom pools, including
-/// forced-spill tests, keep their registers. `incoming` is the bytes of
-/// stack parameters.
+/// Whether caller-save allocation can use x0-x7 with ABI staging. The
+/// existing private-leaf bank takes precedence and retains its register order.
+/// Custom pools and ABI paths with other fixed-register contracts stay reserved.
+pub(super) fn extended_argument_bank(
+    func: &Function,
+    pools: &Pools,
+    has_tls_getter: bool,
+    linux: bool,
+) -> bool {
+    !linux
+        && !has_tls_getter
+        && func.personality.is_none()
+        && !func.attrs.optnone
+        && !func.attrs.naked
+        && !func.attrs.interrupt
+        && !func.sig.returns_twice
+        && !func.sig.variadic
+        && func.debug_vars.is_empty()
+        && pools.caller_saved == REGISTERS.caller_saved
+        && pools.callee_saved == REGISTERS.callee_saved
+        && !func.layout_insts().any(|(_, i)| {
+            matches!(
+                func.inst_data(i),
+                InstData::InlineAsm { .. }
+                    | InstData::LandingPad { .. }
+                    | InstData::VaArg { .. }
+                    | InstData::AggregateVaArg { .. }
+            ) || lowering::returns_twice(func, func.inst_data(i))
+        })
+}
+
 pub(super) fn argument_bank(
     func: &Function,
     module: &Module,
@@ -390,12 +416,21 @@ pub(super) struct AllocationPools {
 }
 
 impl AllocationPools {
-    pub fn plan(pools: &Pools, argument_bank: bool, asm: &InlineAsmPlans, moves_sp: bool) -> Self {
+    pub fn plan(
+        pools: &Pools,
+        private_bank: bool,
+        extended_bank: bool,
+        asm: &InlineAsmPlans,
+        moves_sp: bool,
+    ) -> Self {
         let mut private_callers = Vec::new();
-        if argument_bank {
+        if private_bank {
             private_callers.extend(0..8);
         }
         private_callers.extend_from_slice(pools.caller_saved);
+        if extended_bank {
+            private_callers.extend(0..8);
+        }
         let callee_saved: Vec<u8> = (pools.callee_saved.iter().copied())
             .filter(|&r| !(moves_sp && r == BASE) && !asm.asm_saved.contains(&r))
             .collect();
@@ -593,6 +628,7 @@ pub(super) fn allocate(
     pools: &Pools,
     selection: &crate::select::Selection,
     pipeline: &crate::CodegenPipeline<'_>,
+    bank: Option<crate::regalloc::AllocationTier>,
 ) -> Result<Allocation, String> {
     let is_call = |data: &InstData| is_call(func, data);
     let returns_twice = |data: &InstData| lowering::returns_twice(func, data);
@@ -603,7 +639,12 @@ pub(super) fn allocate(
         is_call: &is_call,
         returns_twice: &returns_twice,
     };
-    let mut alloc = pipeline.allocator.allocate(&input);
+    let mut alloc = if let Some(base) = bank {
+        crate::regalloc::call_site::allocate(&input, base, true)
+            .unwrap_or_else(|| crate::regalloc::RegisterAllocator::allocate(&base, &input))
+    } else {
+        pipeline.allocator.allocate(&input)
+    };
     alloc.finish(&input);
     alloc.validate(&input)?;
     Ok(alloc)

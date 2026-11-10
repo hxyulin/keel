@@ -11,9 +11,9 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 |---|---|---|---|---|
 | `-O0` | None | Covers | Full | Inspect unoptimized IR and debug. |
 | `-O1` | Fast | Trees | Fast | Short builds with bounded cleanup. |
-| `-O2` | Balanced | Full | Bounded | Three bounded inlining rounds and scalar/memory optimization, without GCM. |
+| `-O2` | Balanced | Full | Bounded + caller saves | Three bounded inlining rounds and scalar/memory optimization, without GCM. |
 | `-O3`, `-O` | Full | Full | Bounded | Three inlining rounds and guarded loop transformations. |
-| `-Os` | Size | Full | Compact | Scalar cleanup and bounded helper inlining, without loop expansion. |
+| `-Os` | Size | Full | Compact + caller saves | Scalar cleanup and bounded helper inlining, without loop expansion. |
 
 `-O2` and `-O3` also enable bounded integer pressure scheduling before target
 selection. Bounded allocation retains Full's homes and caches repeated spilled
@@ -23,6 +23,13 @@ Compact allocation at `-Os` keeps Full's register choices but reuses spill homes
 across nonintersecting lifetime ranges and prefers branch-edge copy partners.
 `--regalloc full` retains contiguous-span spill homes. Both allocation policies
 remain independently selectable.
+At `-O2` and `-Os`, `CallSiteAllocator` compares whole-value GPR spills with
+explicit saves at clobber sites. It accepts the alternative only when both
+static and loop-weighted memory traffic decrease. Eligible Darwin AArch64
+functions can also allocate x0–x7, with ABI staging and scratch clobbers handled
+by the adapter. Float and vector call restrictions retain the base tier's policy.
+Explicit `--regalloc` selects the base tier without this adapter, in either flag
+order. `-O0`, `-O1`, `-O3` and library defaults retain their existing allocation.
 See the [allocation and scheduling contracts](design.md#register-allocation).
 
 Balanced omits GCM, whose placement after stack promotion regressed Lua

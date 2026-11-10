@@ -41,6 +41,10 @@ impl Level {
         }
     }
 
+    pub(crate) fn call_sites(self) -> bool {
+        matches!(self, Self::O2 | Self::Size)
+    }
+
     pub(crate) fn allocation(self) -> AllocationTier {
         match self {
             Self::O1 => AllocationTier::Fast,
