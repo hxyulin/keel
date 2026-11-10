@@ -508,6 +508,8 @@ struct InstNode {
     pos: u32,
 }
 
+const _: () = assert!(std::mem::size_of::<InstNode>() == 72);
+
 const NO_BLOCK: u32 = u32::MAX;
 
 static NEXT_CFG_STAMP: AtomicU64 = AtomicU64::new(1);

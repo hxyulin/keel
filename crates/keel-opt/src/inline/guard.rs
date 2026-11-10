@@ -241,10 +241,10 @@ impl Guard {
         let slow = f.create_block();
         f.move_insts_to_end(block, position, slow);
         let destinations = [slow, continuation];
-        let dests = std::array::from_fn(|i| BlockCall {
+        let dests = Box::new(std::array::from_fn(|i| BlockCall {
             block: destinations[i ^ usize::from(!self.execute_when_true)],
             args: Vec::new(),
-        });
+        }));
         f.insert_inst(
             InsertPoint::End(block),
             InstData::Brif {

@@ -89,8 +89,9 @@ below a per-block mark, so finding an instruction to edit scans only what
 moved since the last edit. A mid-block insertion or removal still shifts the
 rest of the block. `Function::remove_insts` removes an ordered subsequence
 with one block compaction; DCE and noreturn cleanup use it. A function takes
-a CFG stamp only when one is read. Other planned storage work is a 48-byte
-`InstData` with indirect-call arguments and `invoke` kept inline. Functions are not
+a CFG stamp only when one is read. `InstData` is 48 bytes: `brif`
+destinations, `switch` case values and call ABI descriptors are boxed, and
+indirect-call arguments and `invoke` stay inline. Functions are not
 compacted to drop removed entities unless a workload shows the waste
 matters.
 

@@ -304,7 +304,7 @@ fn rewrite(f: &mut Function, site: Site) {
     }
     // The nonnegative AND mask proves every index is within this target set.
     // Zero is the default; all remaining values receive explicit cases.
-    let cases = (1..dests.len() as i64).collect();
+    let cases = Box::new((1..dests.len() as i64).collect());
     let switch = f.append_inst(
         head,
         D::Switch {

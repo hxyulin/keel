@@ -2270,7 +2270,7 @@ impl Verifier<'_> {
                     return;
                 }
                 let mut seen = FxHashSet::default();
-                for &case in cases {
+                for &case in cases.iter() {
                     if !fits(case) {
                         self.inst_error(inst, format!("case {case} does not fit in {t}"));
                     } else if !seen.insert(case as u64 & mask) {

@@ -1036,7 +1036,7 @@ fn branch(
         b,
         D::Brif {
             cond: c,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: yes,
                     args: ya,
@@ -1045,7 +1045,7 @@ fn branch(
                     block: no,
                     args: na,
                 },
-            ],
+            ]),
         },
     );
 }

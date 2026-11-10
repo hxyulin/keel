@@ -450,7 +450,7 @@ fn branch(f: &mut Function, block: Block, cond: Value, yes: BlockCall, no: Block
         block,
         D::Brif {
             cond,
-            dests: [yes, no],
+            dests: Box::new([yes, no]),
         },
     );
 }

@@ -382,7 +382,7 @@ fn switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses_
                     args: vec![av, bv],
                 },
             ],
-            cases: vec![0],
+            cases: Box::new(vec![0]),
         },
     );
     f.append_inst(target, InstData::Return { args: vec![] });

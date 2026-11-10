@@ -22,7 +22,7 @@ fn repeated_edge_arguments_stay_live_and_unused_parameters_die() {
         InstData::Switch {
             arg: input,
             dests: vec![dest; 257],
-            cases: (0..256).collect(),
+            cases: Box::new((0..256).collect()),
         },
     );
     let sum = func.ins(InsertPoint::End(join)).iadd(a, b);

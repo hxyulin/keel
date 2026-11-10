@@ -18,7 +18,7 @@ fn switches(m: &keel_ir::Module) -> Vec<(&Vec<i64>, &Vec<keel_ir::BlockCall>)> {
         .iter()
         .flat_map(|f| {
             f.layout_insts().filter_map(|(_, i)| match f.inst_data(i) {
-                InstData::Switch { cases, dests, .. } => Some((cases, dests)),
+                InstData::Switch { cases, dests, .. } => Some((&**cases, dests)),
                 _ => None,
             })
         })

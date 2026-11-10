@@ -316,7 +316,7 @@ fn transform(f: &mut Function, c: Candidate) {
         pair_header,
         D::Brif {
             cond: enough,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: pair_body,
                     args: vec![],
@@ -325,7 +325,7 @@ fn transform(f: &mut Function, c: Candidate) {
                     block: combine,
                     args: vec![],
                 },
-            ],
+            ]),
         },
     );
     let originals = f.block_insts(c.body).to_vec();

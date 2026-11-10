@@ -50,10 +50,8 @@ impl FunctionCompiler<'_> {
                 self.block_args(dest, 0);
                 self.branch_unless_next(dest.block);
             }
-            InstData::Brif {
-                cond,
-                dests: [ref then_dest, ref else_dest],
-            } => {
+            InstData::Brif { cond, ref dests } => {
+                let [then_dest, else_dest] = &**dests;
                 // To the else-branch when the condition is zero, or when a
                 // fused compare's condition does not hold.
                 let not = match func.value_def(func.resolve(cond)) {

@@ -120,10 +120,8 @@ impl FunctionCompiler<'_> {
                 #[cfg(not(feature = "experimental-dispatch"))]
                 self.branch_unless_next(dest.block);
             }
-            InstData::Brif {
-                cond,
-                dests: [ref then_dest, ref else_dest],
-            } => {
+            InstData::Brif { cond, ref dests } => {
+                let [then_dest, else_dest] = &**dests;
                 // Take the same false edge, with the same landing pads and
                 // edge copies, whether testing a register or a comparison.
                 let test = if let Some(&(producer, inverted)) =

@@ -440,7 +440,7 @@ impl InstBuilder<'_> {
     ) -> Inst {
         self.build(InstData::Brif {
             cond,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: then_block,
                     args: then_args.to_vec(),
@@ -449,7 +449,7 @@ impl InstBuilder<'_> {
                     block: else_block,
                     args: else_args.to_vec(),
                 },
-            ],
+            ]),
         })
     }
 
@@ -458,7 +458,11 @@ impl InstBuilder<'_> {
         let (cases, rest): (Vec<i64>, Vec<BlockCall>) = cases.into_iter().unzip();
         let mut dests = vec![default];
         dests.extend(rest);
-        self.build(InstData::Switch { arg, dests, cases })
+        self.build(InstData::Switch {
+            arg,
+            dests,
+            cases: Box::new(cases),
+        })
     }
 
     pub fn return_(self, args: &[Value]) -> Inst {

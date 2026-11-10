@@ -2154,7 +2154,7 @@ impl Parser {
                     self.expect(Tok::Punct(','))?;
                     InstData::Brif {
                         cond,
-                        dests: [then_dest, self.block_call(names)?],
+                        dests: Box::new([then_dest, self.block_call(names)?]),
                     }
                 }
                 "switch" => {
@@ -2176,7 +2176,11 @@ impl Parser {
                             self.expect(Tok::Punct(','))?;
                         }
                     }
-                    InstData::Switch { arg, dests, cases }
+                    InstData::Switch {
+                        arg,
+                        dests,
+                        cases: Box::new(cases),
+                    }
                 }
                 "return" => {
                     no_suffix()?;

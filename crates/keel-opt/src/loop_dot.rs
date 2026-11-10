@@ -304,7 +304,7 @@ fn transform(f: &mut Function, c: Candidate) {
         gate,
         D::Brif {
             cond: enough,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: guard,
                     args: vec![],
@@ -313,7 +313,7 @@ fn transform(f: &mut Function, c: Candidate) {
                     block: c.header,
                     args: vec![c.zero, c.seed],
                 },
-            ],
+            ]),
         },
     );
     let shift = integer(f, guard, i64::from(bytes.trailing_zeros()));
@@ -364,7 +364,7 @@ fn transform(f: &mut Function, c: Candidate) {
         guard,
         D::Brif {
             cond: safe,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: body,
                     args: initial,
@@ -373,7 +373,7 @@ fn transform(f: &mut Function, c: Candidate) {
                     block: c.header,
                     args: vec![c.zero, c.seed],
                 },
-            ],
+            ]),
         },
     );
     let mut products = Vec::new();
@@ -498,13 +498,13 @@ fn transform(f: &mut Function, c: Candidate) {
         body,
         D::Brif {
             cond: next_groups,
-            dests: [
+            dests: Box::new([
                 BlockCall {
                     block: body,
                     args: back_args,
                 },
                 exit,
-            ],
+            ]),
         },
     );
     *f.inst_data_mut(c.entry) = D::Jump {

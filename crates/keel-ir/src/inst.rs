@@ -246,7 +246,8 @@ pub enum InstData {
     /// Branch to `dests[0]` if `cond` is non-zero, else to `dests[1]`.
     Brif {
         cond: Value,
-        dests: [BlockCall; 2],
+        /// Boxed, like `invoke`'s, to keep [`InstData`] at 48 bytes.
+        dests: Box<[BlockCall; 2]>,
     },
     /// Branch to `dests[i + 1]` if `arg` equals `cases[i]`, else to
     /// `dests[0]`. Case values are bit patterns of `arg`'s type, written
@@ -254,7 +255,8 @@ pub enum InstData {
     Switch {
         arg: Value,
         dests: Vec<BlockCall>,
-        cases: Vec<i64>,
+        /// Boxed to keep [`InstData`] at 48 bytes.
+        cases: Box<Vec<i64>>,
     },
     Return {
         args: Vec<Value>,
@@ -295,6 +297,9 @@ pub enum InstData {
     /// Stops the program. A terminator, since nothing after it runs.
     Trap,
 }
+
+// One per instruction ever created; see `InstNode`.
+const _: () = assert!(std::mem::size_of::<InstData>() == 48);
 
 // Fails to compile if a format that `clone` copies bitwise gains a field
 // that is not `Copy`. Patterns list every field, so a new field also fails.
@@ -1119,9 +1124,8 @@ impl InstData {
     pub fn branch_dests(&self) -> &[BlockCall] {
         match self {
             InstData::Jump { dest } => std::slice::from_ref(dest),
-            InstData::Brif { dests, .. } => dests,
+            InstData::Brif { dests, .. } | InstData::Invoke { dests, .. } => &dests[..],
             InstData::Switch { dests, .. } => dests,
-            InstData::Invoke { dests, .. } => &dests[..],
             _ => &[],
         }
     }
@@ -1130,9 +1134,8 @@ impl InstData {
     pub fn branch_dests_mut(&mut self) -> &mut [BlockCall] {
         match self {
             InstData::Jump { dest } => std::slice::from_mut(dest),
-            InstData::Brif { dests, .. } => dests,
+            InstData::Brif { dests, .. } | InstData::Invoke { dests, .. } => &mut dests[..],
             InstData::Switch { dests, .. } => dests,
-            InstData::Invoke { dests, .. } => &mut dests[..],
             _ => &mut [],
         }
     }
