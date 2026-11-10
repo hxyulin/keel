@@ -269,25 +269,27 @@ pub(super) struct CallArea {
 }
 
 impl CallArea {
-    pub fn plan(
-        func: &Function,
-        present: crate::kinds::InstKinds,
-        named: &sysv::Placement,
-        frame_align: usize,
-    ) -> Self {
-        let f80_fma = func.layout_insts().any(|(_, i)| matches!(*func.inst_data(i), InstData::Fma { args } if func.value_type(func.resolve(args[0])) == Type::F80));
-        let (mut outgoing, mut staging, mut needs_sret_save) =
-            (if f80_fma { 48 } else { 0 }, 0, false);
-        // Only calls and tail calls need outgoing stack or staging.
-        let call_insts = (present.call || present.return_call).then(|| func.layout_insts());
-        for (_, inst) in call_insts.into_iter().flatten() {
-            let (args, sig) = match func.inst_data(inst) {
+    pub fn plan(func: &Function, named: &sysv::Placement, frame_align: usize) -> Self {
+        let (mut outgoing, mut staging, mut needs_sret_save) = (0, 0, false);
+        let mut scalar_result = false;
+        for (_, inst) in func.layout_insts() {
+            let data = func.inst_data(inst);
+            let (args, sig) = match data {
+                // An f80 FMA calls `fmal` with its three operands on the stack.
+                InstData::Fma { args } => {
+                    if func.value_type(func.resolve(args[0])) == Type::F80 {
+                        outgoing = outgoing.max(48);
+                    }
+                    continue;
+                }
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::CallIndirect { sig, args, .. }
                 | InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
                 _ => continue,
             };
+            scalar_result |= matches!(data, InstData::Call { .. } | InstData::CallIndirect { .. })
+                && sysv::scalar_memory_result(sig);
             let params = &sig.params;
             // Up to three scalars take at most six integer registers: they
             // need neither stack nor staging.
@@ -333,19 +335,7 @@ impl CallArea {
             *offset += 8;
             *offset - 8
         };
-        let scalar_result = (present.call
-            && func
-                .layout_insts()
-                .any(|(_, inst)| match func.inst_data(inst) {
-                    InstData::Call { func: callee, .. } => {
-                        sysv::scalar_memory_result(&func.callee(*callee).sig)
-                    }
-                    InstData::CallIndirect { sig, .. } => {
-                        sysv::scalar_memory_result(func.signature(*sig))
-                    }
-                    _ => false,
-                }))
-        .then(|| slot8(&mut offset));
+        let scalar_result = scalar_result.then(|| slot8(&mut offset));
         let sret_save = needs_sret_save.then(|| slot8(&mut offset));
         let sret_ptr = (named.locs.contains(&ArgLoc::SretMemory)
             || sysv::scalar_memory_result(&func.sig))
