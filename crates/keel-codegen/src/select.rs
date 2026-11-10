@@ -54,6 +54,53 @@ pub struct Match {
     pub shift: u8,
 }
 
+/// Tree matches by root instruction: dense indices, so the operand walks of
+/// every allocation pass test an instruction without hashing it.
+#[derive(Default, Debug)]
+pub struct InstMatches {
+    indices: Vec<u32>,
+    entries: Vec<(Inst, Match)>,
+}
+impl InstMatches {
+    pub fn get(&self, inst: &Inst) -> Option<&Match> {
+        let index = *self.indices.get(inst.index())?;
+        (index != u32::MAX).then(|| &self.entries[index as usize].1)
+    }
+    pub fn contains_key(&self, inst: &Inst) -> bool {
+        self.indices
+            .get(inst.index())
+            .is_some_and(|&index| index != u32::MAX)
+    }
+    /// Sets the match of `inst`, returning the one it replaces.
+    pub fn insert(&mut self, inst: Inst, matched: Match) -> Option<Match> {
+        if self.indices.len() <= inst.index() {
+            self.indices.resize(inst.index() + 1, u32::MAX);
+        }
+        let index = &mut self.indices[inst.index()];
+        if *index == u32::MAX {
+            *index = self.entries.len() as u32;
+            self.entries.push((inst, matched));
+            None
+        } else {
+            Some(std::mem::replace(
+                &mut self.entries[*index as usize].1,
+                matched,
+            ))
+        }
+    }
+    /// The matches, in the order of their first insertion.
+    pub fn values(&self) -> impl Iterator<Item = &Match> {
+        self.entries.iter().map(|(_, matched)| matched)
+    }
+}
+impl std::ops::Index<&Inst> for InstMatches {
+    type Output = Match;
+
+    fn index(&self, inst: &Inst) -> &Match {
+        self.get(inst).expect("instruction has no tree match")
+    }
+}
+
 /// Exact 64-bit modular address arithmetic, evaluated at the memory access.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IndexedAddress {
@@ -108,7 +155,7 @@ pub struct Selection {
     /// Target-proven GPRs untouched by a complete call lowering sequence.
     /// Absent entries retain the ordinary ABI clobber set.
     pub(crate) preserved_call_gprs: HashMap<Inst, u64>,
-    pub matches: HashMap<Inst, Match>,
+    pub matches: InstMatches,
     covered: Vec<bool>,
     /// Single-use ptradd results encoded at their original memory consumer.
     pub(crate) addresses: HashMap<Value, (Value, i64)>,
