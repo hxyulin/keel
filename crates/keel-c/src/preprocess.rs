@@ -1568,7 +1568,7 @@ struct Conditional<'a> {
     otherwise: bool,
     start: Token<'a>,
 }
-fn spelling<'a>(ts: &[Token<'a>]) -> String {
+fn spelling<'t, 'a: 't>(ts: impl IntoIterator<Item = &'t Token<'a>>) -> String {
     let mut s = String::new();
     for t in ts {
         if t.space && !s.is_empty() {
@@ -1636,6 +1636,11 @@ impl<'a> ExpansionInput<'a> {
     fn pop(&mut self) -> Option<Token<'a>> {
         self.0.pop()
     }
+    /// The tokens at `range`, last first.
+    fn reversed(&self, range: Range<usize>) -> &[Token<'a>] {
+        let n = self.0.len();
+        &self.0[n - range.end..n - range.start]
+    }
     fn replace<R>(&mut self, end: usize, replacement: R)
     where
         R: IntoIterator<Item = Token<'a>>,
@@ -1658,28 +1663,29 @@ impl std::ops::IndexMut<usize> for ExpansionInput<'_> {
     }
 }
 
-/// An invocation's arguments, the commas between them, and the index after
-/// its `)`.
-type Arguments<'a> = (Vec<Vec<Token<'a>>>, Vec<Token<'a>>, usize);
+/// The index ranges of an invocation's arguments, and the index after its
+/// `)`. Single comma tokens separate consecutive ranges.
+type Arguments = (Vec<Range<usize>>, usize);
 
 /// The arguments of the invocation whose `(` is at `open`.
-fn arguments<'a>(ts: &ExpansionInput<'a>, open: usize) -> Result<Arguments<'a>, Diagnostic> {
-    let mut args = vec![Vec::new()];
-    let mut commas = Vec::new();
+fn arguments(ts: &ExpansionInput<'_>, open: usize) -> Result<Arguments, Diagnostic> {
+    let mut args = Vec::new();
+    let mut start = open + 1;
     let mut depth = 0;
     for (i, t) in ts.iter().enumerate().skip(open + 1) {
         match t.text {
             "(" => depth += 1,
-            ")" if depth == 0 => return Ok((args, commas, i + 1)),
+            ")" if depth == 0 => {
+                args.push(start..i);
+                return Ok((args, i + 1));
+            }
             ")" => depth -= 1,
             "," if depth == 0 => {
-                args.push(Vec::new());
-                commas.push(*t);
-                continue;
+                args.push(start..i);
+                start = i + 1;
             }
             _ => {}
         }
-        args.last_mut().unwrap().push(*t);
     }
     Err(ts[open].error("unterminated macro invocation"))
 }
@@ -1690,11 +1696,19 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         mut ts: Vec<Token<'a>>,
         depth: usize,
     ) -> Result<Vec<Token<'a>>, Diagnostic> {
+        ts.reverse();
+        self.expand_reversed(ts, depth)
+    }
+    /// Expands the tokens of `reversed`, which holds them last first.
+    fn expand_reversed(
+        &mut self,
+        reversed: Vec<Token<'a>>,
+        depth: usize,
+    ) -> Result<Vec<Token<'a>>, Diagnostic> {
         if depth > 200 {
             return Err(self.error("macro argument nesting exceeds 200"));
         }
-        ts.reverse();
-        let mut input = ExpansionInput(ts);
+        let mut input = ExpansionInput(reversed);
         let mut out = std::mem::take(&mut self.expansion_scratch);
         out.reserve(input.len());
         // Bound macro invocations and the tokens they add, not the input:
@@ -1800,12 +1814,13 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if !input.get(1).is_some_and(|t| t.text == "(") {
                     return Err(t.error("expected '(' after preprocessing builtin"));
                 }
-                let (args, _, end) = arguments(&input, 1)?;
+                let (args, end) = arguments(&input, 1)?;
                 if args.len() != 1 {
                     return Err(t.error("expected one argument to preprocessing builtin"));
                 }
+                let arg = input.reversed(args[0].clone());
                 let value = if matches!(name, "__has_include" | "__has_include_next") {
-                    let expanded = self.expand(args[0].clone(), depth + 1)?;
+                    let expanded = self.expand_reversed(arg.to_vec(), depth + 1)?;
                     let (h, q) = header(&expanded)
                         .ok_or_else(|| t.error("expected header name in __has_include"))?;
                     (self
@@ -1813,10 +1828,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         .is_some() as u8)
                         .to_string()
                 } else {
-                    if args[0].len() != 1 || !ident(args[0][0].text) {
+                    if arg.len() != 1 || !ident(arg[0].text) {
                         return Err(t.error("expected identifier in feature query"));
                     }
-                    crate::features::query(name, args[0][0].text, self.options.target).to_string()
+                    crate::features::query(name, arg[0].text, self.options.target).to_string()
                 };
                 input.replace(end, [t.with_text(self.arena, value)]);
                 out.push(input.pop().unwrap());
@@ -1826,11 +1841,12 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if !input.get(1).is_some_and(|t| t.text == "(") {
                     return Err(t.error("expected '(' after _Pragma"));
                 }
-                let (args, _, end) = arguments(&input, 1)?;
+                let (args, end) = arguments(&input, 1)?;
                 if args.len() != 1 {
                     return Err(t.error("expected one _Pragma argument"));
                 }
-                let expanded = self.expand(args[0].clone(), depth + 1)?;
+                let expanded =
+                    self.expand_reversed(input.reversed(args[0].clone()).to_vec(), depth + 1)?;
                 let value = if expanded.len() == 1 {
                     unquote(expanded[0].text)
                 } else {
@@ -1854,7 +1870,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     out.push(input.pop().unwrap());
                     continue;
                 }
-                let (mut args, commas, end) = arguments(&input, 1)?;
+                let (mut args, end) = arguments(&input, 1)?;
                 if params.is_empty() && args.len() == 1 && args[0].is_empty() {
                     args.clear();
                 }
@@ -1864,15 +1880,13 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     return Err(t.error(format!("wrong number of arguments to macro {name}")));
                 }
                 if m.variadic {
-                    let extras = args.split_off(fixed);
-                    let mut rest = Vec::new();
                     // Keep the invocation's commas and their spacing.
-                    for (n, arg) in extras.into_iter().enumerate() {
-                        if n > 0 {
-                            rest.push(commas[fixed + n - 1]);
-                        }
-                        rest.extend(arg);
-                    }
+                    let rest = match args.get(fixed..) {
+                        Some([first, .., last]) => first.start..last.end,
+                        Some([only]) => only.clone(),
+                        _ => end - 1..end - 1,
+                    };
+                    args.truncate(fixed);
                     args.push(rest);
                 }
                 // Each parameter's expansion, made on its first unpasted use.
@@ -1887,7 +1901,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             .iter()
                             .position(|p| p == &m.body[j + 1].text)
                             .unwrap();
-                        body.push(b.with_text(self.arena, quote(&spelling(&args[p]))));
+                        let arg = input.reversed(args[p].clone());
+                        body.push(b.with_text(self.arena, quote(&spelling(arg.iter().rev()))));
                         j += 2;
                         continue;
                     }
@@ -1902,7 +1917,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     {
                         if !omitted {
                             body.push(*b);
-                            body.extend(self.expand(args.last().unwrap().clone(), depth + 1)?);
+                            let arg = input.reversed(args.last().unwrap().clone());
+                            body.extend(self.expand_reversed(arg.to_vec(), depth + 1)?);
                         }
                         j += 3;
                         continue;
@@ -1914,7 +1930,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         // never operators in this replacement list.
                         let start = body.len();
                         if paste {
-                            body.extend_from_slice(&args[p]);
+                            body.extend(input.reversed(args[p].clone()).iter().rev());
                             if body.len() == start {
                                 body.push(b.with_text(self.arena, ""));
                             }
@@ -1923,7 +1939,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                                 expanded.resize_with(params.len(), || None);
                             }
                             if expanded[p].is_none() {
-                                expanded[p] = Some(self.expand(args[p].clone(), depth + 1)?);
+                                let arg = input.reversed(args[p].clone()).to_vec();
+                                expanded[p] = Some(self.expand_reversed(arg, depth + 1)?);
                             }
                             body.extend_from_slice(expanded[p].as_deref().unwrap_or_default());
                         }
