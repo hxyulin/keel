@@ -266,6 +266,7 @@ fn preprocess_inner<const TRACK: bool>(
         in_condition: false,
         // A TU that includes C library headers typically defines 1500 macros.
         macros: HashMap::with_capacity_and_hasher(2048, Default::default()),
+        defined: NameFilter::default(),
         buffers: Vec::new(),
         undefined: HashSet::default(),
         search_dirs: Vec::new(),
@@ -332,6 +333,8 @@ struct Preprocessor<'a, const TRACK: bool> {
     stream_chunk: usize,
     in_condition: bool,
     macros: HashMap<&'a str, &'a Macro<'a>>,
+    /// Every name `macros` has held.
+    defined: NameFilter,
     /// Empty token buffers that expansions reuse.
     buffers: Vec<Vec<Token<'a>>>,
     undefined: HashSet<&'a str>,
@@ -372,6 +375,34 @@ struct Included<'a> {
     /// The tokens after the guard group, or all of them without a guard;
     /// `None` for a whole guard group, or if they were not kept.
     rest: Option<Rc<Vec<Token<'a>>>>,
+}
+
+/// A set of names that may report a name it does not hold, but never misses
+/// one it holds. Few identifiers are macro names, and most of those that are
+/// not differ from every macro name in length or first or last byte, so this
+/// rules them out without hashing.
+struct NameFilter(Box<[u64; 2048]>);
+impl Default for NameFilter {
+    fn default() -> Self {
+        Self(Box::new([0; 2048]))
+    }
+}
+impl NameFilter {
+    /// The bit of a non-empty name.
+    fn bit(name: &str) -> usize {
+        let b = name.as_bytes();
+        ((b.len() & 31) << 12)
+            | ((usize::from(b[0]) & 63) << 6)
+            | (usize::from(b[b.len() - 1]) & 63)
+    }
+    fn insert(&mut self, name: &str) {
+        let bit = Self::bit(name);
+        self.0[bit / 64] |= 1 << (bit % 64);
+    }
+    fn may_contain(&self, name: &str) -> bool {
+        let bit = Self::bit(name);
+        self.0[bit / 64] & (1 << (bit % 64)) != 0
+    }
 }
 
 /// Recognizes the guard group that starts a header from the header's
@@ -1226,6 +1257,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
             }
         }
+        self.defined.insert(name.text);
         self.macros.insert(
             name.text,
             self.arena.alloc(Macro {
@@ -2061,7 +2093,11 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         {
             return None;
         }
-        let macro_definition = self.macros.get(name).copied();
+        let macro_definition = if self.defined.may_contain(name) {
+            self.macros.get(name).copied()
+        } else {
+            None
+        };
         // Every builtin name except `defined` starts with '_'.
         let special = || {
             (self.in_condition && name == "defined")
