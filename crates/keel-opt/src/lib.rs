@@ -9,7 +9,8 @@
 //! Passes must preserve valid IR regardless of verification policy. Repeated
 //! checks after passes and canonical restoration default on with debug assertions
 //! or the `verify-each` feature. Scoped options can override that default.
-//! Callers must validate input modules before optimization; the CLI always does.
+//! Callers must pass valid modules. The CLI verifies IR text input; it checks
+//! C frontend output only under the verification policy.
 
 use keel_ir::{DataLayout, Function, Module, VerifierError, verify};
 use std::fmt;

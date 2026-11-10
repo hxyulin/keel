@@ -87,9 +87,10 @@ const USAGE: &str = "usage:
   Unwind flags do not change stack frames, debug info or explicit user assembly CFI.
   -ffunction-sections and -fdata-sections give each ELF function or data object its own section,
   for the linker's --gc-sections; Mach-O output ignores them.
-  Repeated verification defaults on with debug assertions or feature verify-each.
-  --verify-each / --no-verify-each override this; contradictory flags are rejected.
-  Initial input verification and canonical restoration always run.
+  Verification of C frontend output and after each pass defaults on with debug
+  assertions or feature verify-each; --verify-each / --no-verify-each override
+  this, and contradictory flags are rejected. IR text input and merged modules are
+  always verified, and canonical restoration always runs.
   -f[no-]inline-functions, -f[no-]unroll-loops and -f[no-]tree-loop-vectorize
   set optional pass defaults; function optimize attributes override them.
   -fvectorize and -ftree-vectorize are loop-vectorization aliases, not SLP.
@@ -1615,7 +1616,11 @@ fn c_module(
         )
         .map_err(|e| e.to_string())?
     };
-    if let Err(errors) = keel_ir::verify_module(&module) {
+    // The frontend's output is trusted. Checking it is a compiler self-test,
+    // so it follows the optimizer's verification policy.
+    if opts.optimizer.verification.enabled()
+        && let Err(errors) = keel_ir::verify_module(&module)
+    {
         let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
         return Err(format!(
             "{input}: internal error, invalid IR:\n{}",

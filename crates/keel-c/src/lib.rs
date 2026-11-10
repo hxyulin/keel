@@ -317,5 +317,11 @@ fn finalize_inline_asm(
         return Ok(());
     }
     keel_opt::required_inline_asm_with_c_definitions(module, &inline_only, &definitions)?;
-    keel_ir::verify_module(module).map_err(|errors| format!("inline asm finalization: {errors:?}"))
+    // Release builds trust the expansion; the driver checks frontend output
+    // under its verification policy.
+    if cfg!(debug_assertions) {
+        keel_ir::verify_module(module)
+            .map_err(|errors| format!("inline asm finalization: {errors:?}"))?;
+    }
+    Ok(())
 }

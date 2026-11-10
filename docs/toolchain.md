@@ -106,8 +106,10 @@ keel opt -p instcombine,dce input.keel
 ```
 
 [Optimizer passes](compiler/optimizer.md#passes) lists the opt-in passes that no tier runs.
-`--verify-each` / `--no-verify-each` control IR verification after every pass
-(on by default in debug builds); `--opt-report file.json` writes an
+`--verify-each` / `--no-verify-each` control IR verification of the C
+frontend's output and after every pass. Verification is on by default in debug builds and
+with the `verify-each` Cargo feature, and off in release builds. IR text input
+is always verified. `--opt-report file.json` writes an
 optimization report. `--opt-disable`, `--opt-bisect-limit`,
 `--opt-bisect-verbose`, `--print-changed` and `--opt-function` find the pass
 invocation behind a regression; see the
