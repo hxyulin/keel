@@ -2387,3 +2387,66 @@ fn put32(b: &mut [u8], at: usize, v: u32) {
 fn put64(b: &mut [u8], at: usize, v: u64) {
     b[at..at + 8].copy_from_slice(&v.to_le_bytes());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Six objects that call, address and point into each other, with
+    /// unwind records, plus an absolute 32-bit field that overflows in each
+    /// object listed in `overflow`.
+    fn objects(overflow: &[usize]) -> Vec<(String, Vec<u8>)> {
+        (0..6)
+            .map(|i| {
+                let next = (i + 1) % 6;
+                let mut source = format!(
+                    ".text\n.globl f{i}\n.type f{i},@function\nf{i}:\n.cfi_startproc\ncall f{next}\nlea rax, [rip+data{i}]\nmov rax, qword ptr [rip+ptr{i}]\nret\n.cfi_endproc\n.data\n.globl data{i}\ndata{i}: .quad f{i}, data{next}\nptr{i}: .quad data{i}\n"
+                );
+                if i == 0 {
+                    source.push_str(".text\n.globl _start\n_start:\ncall f0\nmov eax, 60\nsyscall\n");
+                }
+                if overflow.contains(&i) {
+                    source.push_str(".data\n.long far\n");
+                }
+                if i == 5 {
+                    source.push_str(".globl far\n.set far, 0x123456789\n");
+                }
+                let bytes = keel_asm::x86::assemble_object(&source).unwrap();
+                (format!("object{i}.o"), bytes)
+            })
+            .collect()
+    }
+
+    fn link_with_workers(objects: &[(String, Vec<u8>)], workers: usize) -> Result<Vec<u8>> {
+        let inputs: Vec<_> = objects
+            .iter()
+            .map(|(name, bytes)| Input { name, bytes })
+            .collect();
+        crate::parallel::FORCED_WORKERS.set(Some(workers));
+        let linked = link(&inputs, Options::default());
+        crate::parallel::FORCED_WORKERS.set(None);
+        linked.map(|executable| executable.bytes)
+    }
+
+    #[test]
+    fn parallel_parse_and_section_writes_match_one_worker() {
+        let objects = objects(&[]);
+        let serial = link_with_workers(&objects, 1).unwrap();
+        for workers in [2, 3, 8] {
+            assert!(
+                link_with_workers(&objects, workers).unwrap() == serial,
+                "{workers} workers"
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_section_writes_report_the_first_relocation_error() {
+        let objects = objects(&[4, 2]);
+        let serial = link_with_workers(&objects, 1).unwrap_err();
+        assert!(serial.message().starts_with("object2.o: "), "{serial:?}");
+        for workers in [2, 3, 8] {
+            assert_eq!(link_with_workers(&objects, workers).unwrap_err(), serial);
+        }
+    }
+}

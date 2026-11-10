@@ -1,6 +1,16 @@
 //! Scoped, cost-balanced work with results restored to input order.
 
+#[cfg(test)]
+thread_local! {
+    /// A worker count that tests force on the calling thread.
+    pub(crate) static FORCED_WORKERS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
 pub(crate) fn workers(cost: usize, grain: usize) -> usize {
+    #[cfg(test)]
+    if let Some(workers) = FORCED_WORKERS.get() {
+        return workers;
+    }
     if cost / grain < 2 {
         return 1;
     }
