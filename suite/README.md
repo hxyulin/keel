@@ -387,6 +387,12 @@ generated code. Objects that both binaries fail to compile are reported and not
 compared. Retired-instruction totals are per configuration. They come from one
 run, so repeat the run before reading a difference under about one percent.
 
+On hybrid Linux CPUs, pin the command and its children to one idle CPU with
+`taskset -c <cpu> cargo suite codegen-diff ... --icount -j 1`. A compiler that
+migrates between performance and efficiency cores can produce partial readings
+from both PMUs. The counter parser omits partial readings, leaving the retired
+instruction totals unavailable.
+
 ## Pass and backend statistics
 
 ```sh
