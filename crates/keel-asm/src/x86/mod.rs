@@ -453,20 +453,20 @@ impl Concrete {
     /// `None` when an operand names a symbol, or the operands need more
     /// words than a key holds. Each operand's first word gives its kind and
     /// how many words follow, so equal words mean equal operands.
-    fn of(i: &x86::Instruction) -> Option<Self> {
+    fn of(i: Parts<'_>) -> Option<Self> {
         Self::key::<false>(i)
     }
     /// The classified key, as [`Self::of`]. Also `None` for EVEX forms,
     /// which scale displacements by the operand size, and instructions with
     /// more operands than a [`Field`] names.
-    fn classified(i: &x86::Instruction) -> Option<Self> {
+    fn classified(i: Parts<'_>) -> Option<Self> {
         if matches!(i.opcode, x86::Opcode::Evex(_)) || i.operands.len() > 8 {
             return None;
         }
         Self::key::<true>(i)
     }
     #[inline(always)]
-    fn key<const CLASSIFIED: bool>(i: &x86::Instruction) -> Option<Self> {
+    fn key<const CLASSIFIED: bool>(i: Parts<'_>) -> Option<Self> {
         fn register(r: x86::Register) -> u64 {
             // Twelve classes fit below the high-byte bit.
             u64::from(r.class as u8 | u8::from(r.high_byte) << 7)
@@ -484,7 +484,7 @@ impl Concrete {
             len: 0,
             words: [0; 7],
         };
-        for o in &i.operands {
+        for o in i.operands {
             let (header, address) = match o {
                 x86::Operand::Register(r) => {
                     if CLASSIFIED && wide(*r) {
@@ -539,6 +539,32 @@ impl Concrete {
         *self.words.get_mut(usize::from(self.len))? = word;
         self.len += 1;
         Some(())
+    }
+}
+
+/// An instruction by parts, as codegen holds one.
+#[derive(Clone, Copy)]
+struct Parts<'a> {
+    opcode: x86::Opcode,
+    operands: &'a [x86::Operand],
+    lock: bool,
+}
+impl<'a> From<&'a x86::Instruction> for Parts<'a> {
+    fn from(i: &'a x86::Instruction) -> Self {
+        Self {
+            opcode: i.opcode,
+            operands: &i.operands,
+            lock: i.lock,
+        }
+    }
+}
+impl Parts<'_> {
+    fn instruction(self) -> x86::Instruction {
+        x86::Instruction {
+            opcode: self.opcode,
+            operands: self.operands.to_vec(),
+            lock: self.lock,
+        }
     }
 }
 
@@ -865,34 +891,65 @@ impl ProgramAssembler {
         program: Program,
         resolver: &mut BinaryInputResolver<'_>,
     ) {
+        for item in program.items {
+            self.push_item_with_binary_inputs(item, resolver);
+        }
+    }
+    /// Push one item as the next of the program pushed so far, with
+    /// explicit `.incbin` resolution as [`Self::push_with_binary_inputs`].
+    pub fn push_item_with_binary_inputs(
+        &mut self,
+        item: Item,
+        resolver: &mut BinaryInputResolver<'_>,
+    ) {
         if self.error.is_some() {
             return;
         }
         let items = &mut self.items;
-        for item in program.items {
-            let line = self.next_line;
-            self.next_line += 1;
-            match item {
-                Item::Text(source) => {
-                    if let Err(e) = if items.arm.is_some() {
-                        arm::parse(items, &source, line)
-                    } else {
-                        items.parse(&source, line, resolver)
-                    } {
-                        self.error = Some(e);
-                        return;
-                    }
+        let line = self.next_line;
+        self.next_line += 1;
+        let result = match item {
+            Item::Text(source) => {
+                if items.arm.is_some() {
+                    arm::parse(items, &source, line)
+                } else {
+                    items.parse(&source, line, resolver)
                 }
-                Item::X86Source(source) => {
-                    if let Err(e) = items.scoped_source(&source, line, resolver) {
-                        self.error = Some(e);
-                        return;
-                    }
-                }
-                Item::X86Instruction(i) => items.x86_instruction(&i, line),
-                item => items.item(item, line),
             }
+            Item::X86Source(source) => items.scoped_source(&source, line, resolver),
+            Item::X86Instruction(i) => {
+                items.x86_instruction(&i, line);
+                Ok(())
+            }
+            item => {
+                items.item(item, line);
+                Ok(())
+            }
+        };
+        if let Err(e) = result {
+            self.error = Some(e);
         }
+    }
+    /// Push an x86 instruction by its parts as the next item, as
+    /// [`Self::push_item_with_binary_inputs`] would push it as
+    /// [`Item::X86Instruction`], without building it.
+    pub fn push_x86_instruction(
+        &mut self,
+        opcode: x86::Opcode,
+        operands: &[x86::Operand],
+        lock: bool,
+    ) {
+        if self.error.is_some() {
+            return;
+        }
+        let line = self.next_line;
+        self.next_line += 1;
+        let parts = Parts {
+            opcode,
+            operands,
+            lock,
+        };
+        self.items.x86_parts(parts, None, line);
     }
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         match self.error {
@@ -1218,17 +1275,30 @@ impl Items {
         self.push(entry);
     }
     fn x86_instruction(&mut self, source: &x86::Instruction, line: usize) {
+        self.x86_parts(source.into(), Some(source), line);
+    }
+    /// [`Self::x86_instruction`] of `parts`, which `instruction` holds if
+    /// given.
+    fn x86_parts(&mut self, parts: Parts<'_>, instruction: Option<&x86::Instruction>, line: usize) {
         // An instruction of the same key passed the feature check under the
         // same target features. A scoped source can only narrow them, so only
         // there does a cached instruction need its promotion and check again.
         let concrete = match self.metrics {
-            None => Concrete::of(source),
+            None => Concrete::of(parts),
             Some(_) => None,
         };
         let scoped = self.source_features.is_some();
-        if !scoped && self.cached(concrete.as_ref(), source, line) {
+        if !scoped && self.cached(concrete.as_ref(), parts, line) {
             return;
         }
+        let owned;
+        let source = match instruction {
+            Some(i) => i,
+            None => {
+                owned = parts.instruction();
+                &owned
+            }
+        };
         let promoted = promoted_instruction(source);
         let i = promoted.as_ref();
         self.check_features(i, line);
@@ -1241,7 +1311,7 @@ impl Items {
             });
             return;
         }
-        if scoped && self.cached(concrete.as_ref(), source, line) {
+        if scoped && self.cached(concrete.as_ref(), parts, line) {
             return;
         }
         let start = index32(self.encoded.len());
@@ -1250,7 +1320,7 @@ impl Items {
                 let end = index32(self.encoded.len());
                 if let Some(key) = concrete {
                     self.encodings.insert(key, (start, end));
-                    if let (Some(key), Some(template)) = (Concrete::classified(source), template) {
+                    if let (Some(key), Some(template)) = (Concrete::classified(parts), template) {
                         self.templates.insert(key, template);
                     }
                 }
@@ -1266,7 +1336,7 @@ impl Items {
     }
     /// Append the cached encoding of `source`, if there is one, from its key
     /// or else its classified key with its constants patched in.
-    fn cached(&mut self, key: Option<&Concrete>, source: &x86::Instruction, line: usize) -> bool {
+    fn cached(&mut self, key: Option<&Concrete>, source: Parts<'_>, line: usize) -> bool {
         let Some(key) = key else {
             return false;
         };
@@ -1295,7 +1365,8 @@ impl Items {
             self.encoded[offset..offset + width].copy_from_slice(&constant.to_le_bytes()[..width]);
         }
         if cfg!(debug_assertions) {
-            let i = promoted_instruction(source);
+            let source = source.instruction();
+            let i = promoted_instruction(&source);
             let encoding = encode::encode(&i, false).map(|e| e.bytes.into_vec());
             assert_eq!(
                 encoding.as_deref(),
