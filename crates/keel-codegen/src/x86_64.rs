@@ -1092,9 +1092,9 @@ impl<'a> FunctionCompiler<'a> {
         let (alloc, f80_homes) =
             plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?;
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
-        let system = plan::SystemSlots::plan(func, features, spills.end);
+        let system = plan::SystemSlots::plan(func, present, features, spills.end);
         let inline_asm_plans =
-            plan::plan_inline_asm(module, func, &shape, features).map_err(err)?;
+            plan::plan_inline_asm(module, func, present, &shape, features).map_err(err)?;
         let asm_bytes = inline_asm_plans
             .values()
             .map(|p| p.bytes)

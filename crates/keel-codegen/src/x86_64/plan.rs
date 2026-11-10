@@ -191,7 +191,10 @@ pub(super) fn check_guaranteed_tails(
     named: &sysv::Placement,
     present: crate::kinds::InstKinds,
 ) -> Result<(), String> {
-    for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
+    if !present.return_call {
+        return Ok(());
+    }
+    for (_, inst) in func.layout_insts() {
         let (args, sig) = match func.inst_data(inst) {
             InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
             InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
@@ -275,10 +278,9 @@ impl CallArea {
         let f80_fma = func.layout_insts().any(|(_, i)| matches!(*func.inst_data(i), InstData::Fma { args } if func.value_type(func.resolve(args[0])) == Type::F80));
         let (mut outgoing, mut staging, mut needs_sret_save) =
             (if f80_fma { 48 } else { 0 }, 0, false);
-        for (_, inst) in func
-            .layout_insts()
-            .filter(|_| present.call || present.return_call)
-        {
+        // Only calls and tail calls need outgoing stack or staging.
+        let call_insts = (present.call || present.return_call).then(|| func.layout_insts());
+        for (_, inst) in call_insts.into_iter().flatten() {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::CallIndirect { sig, args, .. }
@@ -331,18 +333,19 @@ impl CallArea {
             *offset += 8;
             *offset - 8
         };
-        let scalar_result = func
-            .layout_insts()
-            .any(|(_, inst)| match func.inst_data(inst) {
-                InstData::Call { func: callee, .. } => {
-                    sysv::scalar_memory_result(&func.callee(*callee).sig)
-                }
-                InstData::CallIndirect { sig, .. } => {
-                    sysv::scalar_memory_result(func.signature(*sig))
-                }
-                _ => false,
-            })
-            .then(|| slot8(&mut offset));
+        let scalar_result = (present.call
+            && func
+                .layout_insts()
+                .any(|(_, inst)| match func.inst_data(inst) {
+                    InstData::Call { func: callee, .. } => {
+                        sysv::scalar_memory_result(&func.callee(*callee).sig)
+                    }
+                    InstData::CallIndirect { sig, .. } => {
+                        sysv::scalar_memory_result(func.signature(*sig))
+                    }
+                    _ => false,
+                }))
+        .then(|| slot8(&mut offset));
         let sret_save = needs_sret_save.then(|| slot8(&mut offset));
         let sret_ptr = (named.locs.contains(&ArgLoc::SretMemory)
             || sysv::scalar_memory_result(&func.sig))
@@ -607,7 +610,16 @@ pub(super) struct SystemSlots {
 }
 
 impl SystemSlots {
-    pub fn plan(func: &Function, features: keel_asm_ir::x86::Features, offset: usize) -> Self {
+    pub fn plan(
+        func: &Function,
+        present: crate::kinds::InstKinds,
+        features: keel_asm_ir::x86::Features,
+        offset: usize,
+    ) -> Self {
+        // `present.intrinsic` also covers FLAGS regions.
+        let intrinsic = |want: fn(&InstData) -> bool| {
+            present.intrinsic && func.layout_insts().any(|(_, i)| want(func.inst_data(i)))
+        };
         let mxcsr_save = (!features.sse41
             && func.layout_insts().any(|(_, i)| {
                 matches!(
@@ -620,35 +632,31 @@ impl SystemSlots {
             }))
         .then_some(offset);
         let offset = offset + if mxcsr_save.is_some() { 4 } else { 0 };
-        let mxcsr_access = func
-            .layout_insts()
-            .any(|(_, i)| {
-                matches!(
-                    func.inst_data(i),
-                    InstData::Intrinsic {
-                        id: Intrinsic::X86SseReadMxcsr | Intrinsic::X86SseSwapMxcsr,
-                        ..
-                    }
-                )
-            })
-            .then_some(offset.next_multiple_of(4));
+        let mxcsr_access = intrinsic(|data| {
+            matches!(
+                data,
+                InstData::Intrinsic {
+                    id: Intrinsic::X86SseReadMxcsr | Intrinsic::X86SseSwapMxcsr,
+                    ..
+                }
+            )
+        })
+        .then_some(offset.next_multiple_of(4));
         let offset = mxcsr_access.map_or(offset, |slot| slot + 8);
-        let x87_state = func
-            .layout_insts()
-            .any(|(_, i)| {
-                matches!(
-                    func.inst_data(i),
-                    InstData::Intrinsic {
-                        id: Intrinsic::X86X87ReadCwNowait
-                            | Intrinsic::X86X87ReadSwNowait
-                            | Intrinsic::X86X87ReadCwWait
-                            | Intrinsic::X86X87ReadSwWait
-                            | Intrinsic::X86X87ExchangeCw,
-                        ..
-                    }
-                )
-            })
-            .then_some(offset.next_multiple_of(2));
+        let x87_state = intrinsic(|data| {
+            matches!(
+                data,
+                InstData::Intrinsic {
+                    id: Intrinsic::X86X87ReadCwNowait
+                        | Intrinsic::X86X87ReadSwNowait
+                        | Intrinsic::X86X87ReadCwWait
+                        | Intrinsic::X86X87ReadSwWait
+                        | Intrinsic::X86X87ExchangeCw,
+                    ..
+                }
+            )
+        })
+        .then_some(offset.next_multiple_of(2));
         let offset = x87_state.map_or(offset, |slot| slot + 4);
         let cx16_save = func
             .layout_insts()
@@ -665,12 +673,14 @@ impl SystemSlots {
             })
             .then_some(offset.next_multiple_of(8));
         let offset = cx16_save.map_or(offset, |slot| slot + 8);
-        let string_io_home = func.layout_insts().any(|(_, i)| {
-            matches!(func.inst_data(i), InstData::Intrinsic { id, .. } if id.x86_string_port_io().is_some())
-        }).then_some(offset.next_multiple_of(8));
+        let string_io_home = intrinsic(|data| {
+            matches!(data, InstData::Intrinsic { id, .. } if id.x86_string_port_io().is_some())
+        })
+        .then_some(offset.next_multiple_of(8));
         let offset = string_io_home.map_or(offset, |home| home + string_port_io::FRAME_BYTES);
-        let rflags_bytes = func
-            .layout_insts()
+        let rflags_bytes = (present.intrinsic.then(|| func.layout_insts()))
+            .into_iter()
+            .flatten()
             .filter_map(|(_, i)| match func.inst_data(i) {
                 InstData::X86RflagsRegion { plan, .. } => {
                     Some(8 * (1 + plan.captures.len() + plan.observations))
@@ -698,11 +708,15 @@ impl SystemSlots {
 pub(super) fn plan_inline_asm(
     module: &keel_ir::Module,
     func: &Function,
+    present: crate::kinds::InstKinds,
     shape: &VectorShape,
     features: keel_asm_ir::x86::Features,
 ) -> Result<HashMap<Inst, inline_asm::Plan>, String> {
     let mut function_index = None;
     let mut inline_asm_plans = HashMap::default();
+    if !present.inline_asm {
+        return Ok(inline_asm_plans);
+    }
     for (_, inst) in func.layout_insts() {
         if matches!(func.inst_data(inst), InstData::InlineAsm { .. }) {
             let function_index = *function_index.get_or_insert_with(|| {

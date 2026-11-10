@@ -205,6 +205,10 @@ fn validate(id: Intrinsic, s: &Storage, prefix: &str, p: &Program) -> Result<(),
 }
 impl FunctionCompiler<'_> {
     pub(super) fn prepare_string_port_io(&mut self) -> Result<(), String> {
+        // The frame plan reserves this home exactly when such an intrinsic exists.
+        if self.string_io_home.is_none() {
+            return Ok(());
+        }
         for (_, inst) in self.func.layout_insts() {
             let InstData::Intrinsic { id, args } = self.func.inst_data(inst) else {
                 continue;
