@@ -3749,8 +3749,7 @@ impl<'a> Parser<'a> {
         };
         let (ty, sugar) = self.type_suffix(ty, sugar, &mut attrs)?;
         let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty));
-        let mut named_attrs = Attrs::default();
-        Self::merge_declarator_attrs(&mut named_attrs, attrs, owner, &ty);
+        let named_attrs = Self::layer_attrs(attrs, owner, &ty);
         if !matches!(ty.unatomic(), Ty::Ptr(_)) {
             // Qualifiers apply to the pointer only when it is the object.
             is_const = false;
@@ -3792,10 +3791,15 @@ impl<'a> Parser<'a> {
 
     fn merge_declarator_attrs(
         named: &mut Attrs,
-        mut layer: Attrs,
+        layer: Attrs,
         owner: Option<&'a FuncTy<'a>>,
         declared: &Ty<'a>,
     ) {
+        named.merge(Self::layer_attrs(layer, owner, declared));
+    }
+
+    /// A layer's attributes as the declarator `declared` receives them.
+    fn layer_attrs(mut layer: Attrs, owner: Option<&'a FuncTy<'a>>, declared: &Ty<'a>) -> Attrs {
         // GNU noreturn can qualify a function type, including the returned
         // function of a factory. Only that promise uses function-node identity.
         // Policies, returns_twice and nothrow are declaration attributes here:
@@ -3806,7 +3810,7 @@ impl<'a> Parser<'a> {
         if !is_named {
             layer.noreturn = false;
         }
-        named.merge(layer);
+        layer
     }
 
     /// After `(` in a declarator: a nested declarator, or parameters?
