@@ -39,6 +39,7 @@ pub(crate) struct InstKinds {
     /// `swiden_low` or `uwiden_low`.
     pub widen_low: bool,
     pub fma: bool,
+    pub aggregate_va_arg: bool,
 }
 
 impl InstKinds {
@@ -90,7 +91,10 @@ fn visit(
     });
     match data {
         InstData::StackAddr { slot } => slots.address(*slot),
-        InstData::AggregateVaArg { home, .. } => slots.va_arg_home(*home),
+        InstData::AggregateVaArg { home, .. } => {
+            kinds.aggregate_va_arg = true;
+            slots.va_arg_home(*home);
+        }
         InstData::InlineAsm { .. } => kinds.inline_asm = true,
         InstData::LandingPad { .. } => kinds.landing_pad = true,
         InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {

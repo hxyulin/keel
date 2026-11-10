@@ -1052,7 +1052,17 @@ impl<'a> FunctionCompiler<'a> {
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let features = pipeline.selector.x86_features();
-        let shape = plan::VectorShape::of(func);
+        let err = |message: String| CodegenError {
+            func: func.name.clone(),
+            message,
+        };
+        plan::preflight(func, features).map_err(err)?;
+        let named = sysv::signature_arg_locs(&func.sig, &param_kinds(&func.sig));
+        // One walk finds which (mostly rare) instruction kinds occur, so the
+        // checks and covers below only scan functions that can match.
+        let facts = crate::kinds::FunctionFacts::new(func);
+        let present = facts.kinds;
+        let shape = plan::VectorShape::of(func, &facts);
         let saved_pool = pools
             .callee_saved
             .iter()
@@ -1075,16 +1085,6 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             pools
         };
-        let err = |message: String| CodegenError {
-            func: func.name.clone(),
-            message,
-        };
-        plan::preflight(func, features).map_err(err)?;
-        let named = sysv::signature_arg_locs(&func.sig, &param_kinds(&func.sig));
-        // One walk finds which (mostly rare) instruction kinds occur, so the
-        // checks and covers below only scan functions that can match.
-        let facts = crate::kinds::FunctionFacts::new(func);
-        let present = facts.kinds;
         plan::check_guaranteed_tails(func, &named, present).map_err(err)?;
         let calls = plan::CallArea::plan(func, &facts, &named, shape.frame_align);
         let covers = plan::Covers::select(func, pipeline, &facts);

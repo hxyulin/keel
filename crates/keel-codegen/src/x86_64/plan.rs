@@ -1,5 +1,5 @@
 //! The phases of [`FunctionCompiler::new`], in the order it runs them:
-//! vector shape, preflight checks, the call area at the bottom of the
+//! preflight checks, vector shape, the call area at the bottom of the
 //! frame, selection and its covers, allocation, spill homes, the fixed
 //! system slots, inline assembly plans, and the frame size.
 use super::*;
@@ -17,7 +17,7 @@ pub(super) struct VectorShape {
 }
 
 impl VectorShape {
-    pub fn of(func: &Function) -> Self {
+    pub fn of(func: &Function, facts: &crate::kinds::FunctionFacts<'_>) -> Self {
         let abi_align = |sig: &keel_ir::Signature| {
             sig.params
                 .iter()
@@ -52,32 +52,39 @@ impl VectorShape {
             .chain(func.signatures().map(|(_, s)| abi_align(s)))
             .max()
             .unwrap_or(16);
-        // One walk takes the widest vector value and the strictest
-        // alignment of an argument or `va_arg` aggregate.
+        // The strictest alignment of an argument or `va_arg` aggregate.
+        for &inst in &facts.calls {
+            let args = func.inst_data(inst).call_args().expect("a call");
+            for i in 0..args.len() {
+                if let Some(layout) = args.abi(i).and_then(|p| p.layout()) {
+                    abi_align = abi_align.max(layout.align() as usize);
+                }
+            }
+        }
+        if facts.kinds.aggregate_va_arg {
+            for (_, inst) in func.layout_insts() {
+                if let InstData::AggregateVaArg { layout, .. } = func.inst_data(inst) {
+                    abi_align = abi_align.max(layout.align() as usize);
+                }
+            }
+        }
+        // The widest vector parameter or result. Each is in the value table:
+        // when nothing there is wider than the floor, the walk cannot raise it.
         let vector_bytes = |value: Value| {
             func.value_type(func.resolve(value))
                 .vector()
                 .map_or(0, |v| v.bytes())
         };
         let mut simd_bytes = wrapper_bytes.max(16);
-        for block in func.blocks() {
-            for &param in func.block_params(block) {
-                simd_bytes = simd_bytes.max(vector_bytes(param));
-            }
-            for &inst in func.block_insts(block) {
-                let d = func.inst_data(inst);
-                if let Some(args) = d.call_args() {
-                    for i in 0..args.len() {
-                        if let Some(layout) = args.abi(i).and_then(|p| p.layout()) {
-                            abi_align = abi_align.max(layout.align() as usize);
-                        }
+        if (0..func.num_values()).any(|i| vector_bytes(Value::new(i)) > simd_bytes) {
+            for block in func.blocks() {
+                for &param in func.block_params(block) {
+                    simd_bytes = simd_bytes.max(vector_bytes(param));
+                }
+                for &inst in func.block_insts(block) {
+                    for &result in func.inst_results(inst) {
+                        simd_bytes = simd_bytes.max(vector_bytes(result));
                     }
-                }
-                if let InstData::AggregateVaArg { layout, .. } = d {
-                    abi_align = abi_align.max(layout.align() as usize);
-                }
-                for &result in func.inst_results(inst) {
-                    simd_bytes = simd_bytes.max(vector_bytes(result));
                 }
             }
         }
