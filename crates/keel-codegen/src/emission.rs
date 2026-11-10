@@ -82,6 +82,15 @@ pub(crate) enum Output {
     Program(keel_asm_ir::Program),
 }
 
+/// Where a backend hands each finished function's output. Whatever has not
+/// been handed over when the module ends is returned as its [`Output`].
+pub(crate) enum Sink<'a> {
+    /// Keep the whole module's output.
+    None,
+    Program(&'a mut dyn FnMut(keel_asm_ir::Program)),
+    Text(&'a mut dyn FnMut(&str)),
+}
+
 pub(crate) struct OutputOptions<'exec, 'a> {
     pub structured: bool,
     pub parallel: Option<&'exec crate::parallel::Execution<'exec, 'a>>,
@@ -91,7 +100,7 @@ pub(crate) fn compile(
     module: &Module,
     request: &crate::Request<'_>,
     structured: bool,
-    sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    sink: Sink<'_>,
 ) -> Result<Output, CodegenError> {
     compile_with_executor(module, request, structured, sink, None)
 }
@@ -100,7 +109,7 @@ pub(crate) fn compile_with_executor<'module>(
     module: &'module Module,
     request: &crate::Request<'module>,
     structured: bool,
-    sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    sink: Sink<'_>,
     parallel: Option<&crate::parallel::Execution<'_, 'module>>,
 ) -> Result<Output, CodegenError> {
     let crate::Request {

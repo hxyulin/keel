@@ -141,7 +141,7 @@ pub fn program_chunks<'module>(
         module,
         &request,
         true,
-        Some(sink),
+        crate::emission::Sink::Program(sink),
         Some(&execution),
     )? {
         crate::emission::Output::Program(program) => sink(program),

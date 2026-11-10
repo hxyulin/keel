@@ -261,7 +261,8 @@ let object = keel_asm::assemble_program_for(target, &program)?;
   `OptimizeOptions`; `optimize` and `run_passes` are shorthands.
 - `CodegenPipeline`: plug in an `InstructionSelector` or `RegisterAllocator`.
 - `keel_codegen::Request`: one target, pipeline, emission policy and optional
-  register pool; `text`, `program` and `program_chunks` compile with it.
+  register pool; `text`, `text_chunks`, `program` and `program_chunks`
+  compile with it.
 - `keel_asm::ObjectAssembler::for_target`: incremental objects for any native
   target; `assemble_program_for` and `assemble_source_for` assemble one input.
 

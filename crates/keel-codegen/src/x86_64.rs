@@ -291,7 +291,7 @@ pub(crate) fn compile_output<'module>(
     pipeline: &crate::CodegenPipeline<'_>,
     emission: crate::EmissionOptions,
     output: crate::emission::OutputOptions<'_, 'module>,
-    mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    mut sink: crate::emission::Sink<'_>,
 ) -> Result<Output, CodegenError> {
     let crate::emission::OutputOptions {
         structured,
@@ -417,8 +417,7 @@ pub(crate) fn compile_output<'module>(
                 scope_marks,
                 frame_register,
             });
-            if let (Some(sink), Output::Structured(program)) = (&mut sink, &mut out) {
-                sink(std::mem::take(program));
+            if out.flush(&mut sink) {
                 validated_items = 0;
             }
         }
@@ -492,8 +491,7 @@ pub(crate) fn compile_output<'module>(
                 out.append(body);
                 out.validate_sources(&mut source_validator, &mut validated_items)?;
                 frames.push(frame);
-                if let (Some(sink), Output::Structured(program)) = (&mut sink, &mut out) {
-                    sink(std::mem::take(program));
+                if out.flush(&mut sink) {
                     validated_items = 0;
                 }
             }

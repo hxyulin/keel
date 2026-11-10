@@ -1393,12 +1393,57 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         profiling::scope!("object-write");
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let source = with_codegen_report(opts, target, || request.text(&module))?;
+        let written = stream_output(opts, |sink| {
+            with_codegen_report(opts, target, || request.text_chunks(&module, sink))
+        });
         // The process exits once the text is written, and the system takes
         // the module's memory back faster than freeing its every allocation.
         std::mem::forget(module);
-        write_output(opts, &source)
+        written
     }
+}
+
+/// Writes the text that `produce` hands its sink piece by piece: to stdout
+/// without `-o`, otherwise to the output file. A regular file is replaced
+/// whole, and only if `produce` succeeds. A path that exists but is not a
+/// regular file, such as `/dev/null`, is written in place.
+fn stream_output(
+    opts: &Options,
+    produce: impl FnOnce(&mut dyn FnMut(&str)) -> Result<(), String>,
+) -> Result<(), String> {
+    use std::io::Write;
+    let mut produced = Ok(());
+    let write = |out: &mut dyn Write| {
+        // Writing sqlite3.c's -O0 assembly in 64 KiB pieces retired about
+        // 0.5% more instructions than in 1 MiB pieces.
+        let mut out = std::io::BufWriter::with_capacity(1 << 20, out);
+        let mut failed = Ok(());
+        produced = produce(&mut |text| {
+            if failed.is_ok() {
+                failed = out.write_all(text.as_bytes());
+            }
+        });
+        failed?;
+        if produced.is_err() {
+            return Err(std::io::Error::other("code generation failed"));
+        }
+        out.flush()
+    };
+    let written = match &opts.output {
+        None => write(&mut std::io::stdout().lock()),
+        Some(path) if std::fs::metadata(path).is_ok_and(|m| !m.is_file()) => {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .and_then(|mut file| write(&mut file))
+        }
+        Some(path) => keel_util::fs::replace(std::path::Path::new(path), None, |file| write(file)),
+    };
+    produced?;
+    written.map_err(|e| match &opts.output {
+        Some(path) => format!("{path}: {e}"),
+        None => format!("stdout: {e}"),
+    })
 }
 
 /// Runs code generation, collecting and writing the backend counters when

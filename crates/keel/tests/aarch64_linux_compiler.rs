@@ -79,13 +79,32 @@ fn cross_target_c_and_ir_emit_elf_with_debug() {
         .arg(&wide)
         .arg("-o")
         .arg(dir.join("wide.o")));
+    // The text of the function before the error is already written; the old
+    // output must survive, with no temporary file left beside it.
+    let failing = dir.join("failing.keel");
+    std::fs::write(
+        &failing,
+        format!(
+            "func @first() {{\nentry:\n return\n}}\n{}",
+            std::fs::read_to_string(&wide).unwrap()
+        ),
+    )
+    .unwrap();
+    let out_dir = dir.join("failing-output");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let assembly = out_dir.join("failing.s");
+    std::fs::write(&assembly, "old").unwrap();
     let unsupported = keel()
         .args(["compile", "--target", "aarch64-apple-darwin"])
-        .arg(&wide)
+        .arg(&failing)
+        .arg("-o")
+        .arg(&assembly)
         .output()
         .unwrap();
     assert!(!unsupported.status.success());
     assert!(String::from_utf8_lossy(&unsupported.stderr).contains("variadic i128 arguments"));
+    assert_eq!(std::fs::read_to_string(&assembly).unwrap(), "old");
+    assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
 #[test]

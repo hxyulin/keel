@@ -225,7 +225,7 @@ pub(crate) fn compile_output<'module>(
     pools: &'module Pools<'module>,
     pipeline: &crate::CodegenPipeline<'_>,
     output: crate::emission::OutputOptions<'_, 'module>,
-    mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
+    mut sink: crate::emission::Sink<'_>,
     linux: bool,
     emission: crate::EmissionOptions,
 ) -> Result<Output, CodegenError> {

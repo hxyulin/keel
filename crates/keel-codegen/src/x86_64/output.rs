@@ -133,6 +133,23 @@ impl Output {
             }
         }
     }
+    /// Hand everything so far to an incremental consumer. True when a
+    /// structured program was handed over, so its items start again at 0.
+    pub(super) fn flush(&mut self, sink: &mut crate::emission::Sink<'_>) -> bool {
+        use crate::emission::Sink;
+        match (sink, self) {
+            (Sink::Program(sink), Self::Structured(program)) => {
+                sink(std::mem::take(program));
+                true
+            }
+            (Sink::Text(sink), Self::Text(text, _)) => {
+                sink(text);
+                text.clear();
+                false
+            }
+            _ => false,
+        }
+    }
     /// Continue `module`'s text in place instead of building the function in
     /// its own string and copying it over. Gives where the function begins.
     /// Structured functions keep their own program until [`Self::end_function`].

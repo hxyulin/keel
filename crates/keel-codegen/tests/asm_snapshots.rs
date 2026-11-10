@@ -63,9 +63,22 @@ fn render(path: &Path, cwd: &str) -> BTreeMap<PathBuf, String> {
                 allocator: &AllocationTier::Full,
             };
             let text = match module {
-                Ok(module) => keel_codegen::compile_with_pipeline(module, target, &pipeline)
-                    .map(|asm| asm.replace(cwd, "\"<cwd>\""))
-                    .unwrap_or_else(|e| format!("error: {e}\n")),
+                Ok(module) => {
+                    let text = keel_codegen::compile_with_pipeline(module, target, &pipeline);
+                    let mut streamed = String::new();
+                    let chunks = keel_codegen::Request::new(target, pipeline)
+                        .text_chunks(module, &mut |chunk| streamed.push_str(chunk));
+                    assert_eq!(chunks.is_ok(), text.is_ok(), "{}", path.display());
+                    if let Ok(text) = &text {
+                        assert!(
+                            streamed == *text,
+                            "{}: streamed text differs",
+                            path.display()
+                        );
+                    }
+                    text.map(|asm| asm.replace(cwd, "\"<cwd>\""))
+                        .unwrap_or_else(|e| format!("error: {e}\n"))
+                }
                 Err(e) => format!("optimization error: {e}\n"),
             };
             out.insert(path.with_file_name(format!("{stem}.{name}.{suffix}")), text);

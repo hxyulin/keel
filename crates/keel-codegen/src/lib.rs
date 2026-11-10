@@ -435,10 +435,31 @@ impl<'a> Request<'a> {
     /// Returns target, operand or IR validation errors.
     pub fn text(&self, module: &Module) -> Result<String, CodegenError> {
         profiling::scope!("codegen", self.target.triple());
-        match emission::compile(module, self, false, None)? {
+        match emission::compile(module, self, false, emission::Sink::None)? {
             emission::Output::Text(text) => Ok(text),
             _ => unreachable!("text emission requested"),
         }
+    }
+
+    /// [`Self::text`] in pieces: `sink` receives consecutive parts of the
+    /// same text, at least one per function, so the caller can write the
+    /// assembly out as it is produced instead of holding all of it. The
+    /// pieces joined are exactly [`Self::text`].
+    ///
+    /// # Errors
+    /// Returns target, operand or IR validation errors. Pieces already given
+    /// to `sink` before an error are not taken back.
+    pub fn text_chunks(
+        &self,
+        module: &Module,
+        sink: &mut dyn FnMut(&str),
+    ) -> Result<(), CodegenError> {
+        profiling::scope!("codegen", self.target.triple());
+        match emission::compile(module, self, false, emission::Sink::Text(&mut *sink))? {
+            emission::Output::Text(text) => sink(&text),
+            _ => unreachable!("text emission requested"),
+        }
+        Ok(())
     }
 
     /// Compile to a shared assembly program. Both backends emit typed
@@ -448,7 +469,7 @@ impl<'a> Request<'a> {
     /// # Errors
     /// Returns target, operand or IR validation errors.
     pub fn program(&self, module: &Module) -> Result<keel_asm_ir::Program, CodegenError> {
-        match emission::compile(module, self, true, None)? {
+        match emission::compile(module, self, true, emission::Sink::None)? {
             emission::Output::Program(program) => Ok(program),
             _ => unreachable!("structured emission requested"),
         }
@@ -466,7 +487,7 @@ impl<'a> Request<'a> {
         module: &Module,
         sink: &mut dyn FnMut(keel_asm_ir::Program),
     ) -> Result<(), CodegenError> {
-        match emission::compile(module, self, true, Some(&mut *sink))? {
+        match emission::compile(module, self, true, emission::Sink::Program(&mut *sink))? {
             emission::Output::Program(program) => sink(program),
             _ => unreachable!("structured emission requested"),
         }

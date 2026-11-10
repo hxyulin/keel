@@ -224,10 +224,16 @@ impl Output {
             _ => unreachable!("structured output cannot be implicitly serialized"),
         }
     }
-    /// Hand everything structured so far to an incremental consumer.
-    pub(super) fn flush(&mut self, sink: &mut Option<&mut dyn FnMut(Program)>) {
-        if let (Some(sink), Self::Structured(program)) = (sink, self) {
-            sink(std::mem::take(program));
+    /// Hand everything so far to an incremental consumer.
+    pub(super) fn flush(&mut self, sink: &mut crate::emission::Sink<'_>) {
+        use crate::emission::Sink;
+        match (sink, self) {
+            (Sink::Program(sink), Self::Structured(program)) => sink(std::mem::take(program)),
+            (Sink::Text(sink), Self::Text(text) | Self::ElfText(text)) => {
+                sink(text);
+                text.clear();
+            }
+            _ => {}
         }
     }
     /// Relaxes the function's branches; text before `start` is not its own.
