@@ -213,7 +213,14 @@ floating reads can lower to register-pair loads after allocation. Spilled
 results, observable reads and source-location boundaries retain separate loads.
 Both rotate their generated scalar tail despite its multiple guarded entries.
 Ordinary loop rotation keeps its existing admission rules.
-Neither pass is scheduled by default. Select either before strength reduction and
+Full (`-O3`) instead runs `auto-loop-batch` on AArch64 only. It selects the
+scalar schedule for literal unsigned i64 trip counts of at least 32 elements
+whose byte count fits u64. This admits four complete batches before a tail.
+The threshold is conservative policy, not a universal speed guarantee.
+Short counts, unknown counts and bounds known only through runtime guards stay
+scalar under this automatic rule. Other targets and tiers do not enable it.
+Both explicit passes remain opt-in and retain their existing admission rules,
+including support for unknown counts. Select either before strength reduction and
 loop rotation, after stack promotion and scalar cleanup.
 
 The opt-in `loop-dot` pass handles read-only floating dot products on the native

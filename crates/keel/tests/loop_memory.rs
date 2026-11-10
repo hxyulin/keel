@@ -181,3 +181,110 @@ int main(void) {
         run(&mut Command::new(dir.join("oracle")));
     }
 }
+
+#[test]
+fn default_batch_selection_preserves_short_and_unknown_loops() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-float-batches");
+    fs::create_dir_all(&dir).unwrap();
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        for (ty, name) in [("float", "fabsf"), ("double", "fabs")] {
+            for bound in ["1", "7", "31", "32", "33", "n"] {
+                fs::write(dir.join("kernel.c"),format!("{ty} {name}({ty}); {ty} f(const {ty} *p,unsigned long n) {{ {ty} s=0; for(unsigned long i=0;i<{bound};++i) s+={name}(p[i]); return s; }}")).unwrap();
+                let emit = |flags: &[&str]| {
+                    let output = Command::new(env!("CARGO_BIN_EXE_keel"))
+                        .current_dir(&dir)
+                        .args([
+                            "cc",
+                            "--target",
+                            target,
+                            "--emit-ir",
+                            "--verify-each",
+                            "kernel.c",
+                        ])
+                        .args(flags)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    output.stdout
+                };
+                let normal = emit(&["-O3"]);
+                let disabled = emit(&["-O3", "--opt-disable", "auto-loop-batch"]);
+                assert_eq!(
+                    normal != disabled,
+                    target.starts_with("aarch64") && matches!(bound, "32" | "33"),
+                    "{target} {ty} {bound}"
+                );
+                if bound == "32" {
+                    assert_eq!(
+                        emit(&["-O3", "-fno-vectorize"]),
+                        emit(&["-O3", "-fno-vectorize", "--opt-disable", "auto-loop-batch"])
+                    );
+                    for level in ["-O0", "-O1", "-O2", "-Os"] {
+                        assert_eq!(
+                            emit(&[level]),
+                            emit(&[level, "--opt-disable", "auto-loop-batch"])
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn automatic_literal_batches_match_the_native_strict_driver() {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return;
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-batch-native");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("driver.c"),
+        include_str!("../../../suite/c/fastmath/ordered_driver.c"),
+    )
+    .unwrap();
+    run(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "-c",
+        "driver.c",
+        "-o",
+        "driver.o",
+    ]));
+    for n in [31, 32, 33] {
+        let n = n.to_string();
+        let kernels = include_str!("../../../suite/c/fastmath/ordered.c")
+            .replace("i < n", &format!("i < {n}"));
+        fs::write(dir.join("kernels.c"), kernels).unwrap();
+        for disabled in [false, true] {
+            let mut cc = Command::new(env!("CARGO_BIN_EXE_keel"));
+            cc.current_dir(&dir).args([
+                "cc",
+                "-O3",
+                "--verify-each",
+                "--emit-object",
+                "kernels.c",
+                "-o",
+                "kernels.o",
+            ]);
+            if disabled {
+                cc.args(["--opt-disable", "auto-loop-batch"]);
+            }
+            run(&mut cc);
+            run(Command::new("clang").current_dir(&dir).args([
+                "driver.o",
+                "kernels.o",
+                "-o",
+                "oracle",
+            ]));
+            for kind in ["0", "1", "2", "3"] {
+                run(Command::new(dir.join("oracle")).args([kind, &n, "1"]));
+            }
+        }
+    }
+}

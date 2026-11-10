@@ -404,3 +404,78 @@ fn scalar_batch_schedule_preserves_order_without_packed_values() {
         }
     }
 }
+
+fn automatic(src: &str, target: VectorTarget) -> Module {
+    let mut m = keel_ir::parse(src).unwrap();
+    keel_opt::run_passes_for_target(&mut m, &["auto-loop-batch"], target).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    m
+}
+fn literal_sum(ty: &str, absolute: bool, n: u64) -> String {
+    sum_source(ty, absolute)
+        .replace(
+            " v4 = iconst.i64 0",
+            &format!(" v99 = iconst.i64 {}\n v4 = iconst.i64 0", n as i64),
+        )
+        .replace("icmp.ult v5,v2", "icmp.ult v5,v99")
+}
+#[test]
+fn automatic_batching_requires_a_long_literal_aarch64_trip_count() {
+    for ty in ["f32", "f64"] {
+        for absolute in [false, true] {
+            for n in [0, 1, 7, 17, 31, 32, 33, 64] {
+                let src = literal_sum(ty, absolute, n);
+                let original = keel_ir::parse(&src).unwrap();
+                let m = automatic(&src, VectorTarget::Aarch64Neon);
+                assert_eq!(
+                    m.to_string() != original.to_string(),
+                    n >= 32,
+                    "{ty}, abs={absolute}, n={n}"
+                );
+                let values: Vec<_> = (0..n)
+                    .map(|i| {
+                        if i % 3 == 0 {
+                            16777216.0
+                        } else if i % 3 == 1 {
+                            1.0
+                        } else {
+                            -16777216.0
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    execute(&m, &values, &values, -0.0),
+                    execute(&original, &values, &values, -0.0)
+                );
+            }
+            let dynamic = sum_source(ty, absolute);
+            assert_eq!(
+                automatic(&dynamic, VectorTarget::Aarch64Neon).to_string(),
+                keel_ir::parse(&dynamic).unwrap().to_string()
+            );
+            let long = literal_sum(ty, absolute, 32);
+            for target in [VectorTarget::Portable, VectorTarget::X86Sse2] {
+                assert_eq!(
+                    automatic(&long, target).to_string(),
+                    keel_ir::parse(&long).unwrap().to_string()
+                );
+            }
+            let overflowing = literal_sum(ty, absolute, u64::MAX);
+            assert_eq!(
+                automatic(&overflowing, VectorTarget::Aarch64Neon).to_string(),
+                keel_ir::parse(&overflowing).unwrap().to_string()
+            );
+        }
+    }
+    assert!(keel_opt::DEFAULT_PIPELINE.contains(&"auto-loop-batch"));
+    assert!(
+        !keel_opt::OptimizationTier::Balanced
+            .pipeline()
+            .contains(&"auto-loop-batch")
+    );
+    assert!(
+        !keel_opt::OptimizationTier::Size
+            .pipeline()
+            .contains(&"auto-loop-batch")
+    );
+}

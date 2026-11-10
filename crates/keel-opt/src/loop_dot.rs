@@ -47,7 +47,7 @@ impl crate::Pass for LoopDot {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        run(f, context, false, false)
+        run(f, context, Mode::Dot)
     }
 }
 
@@ -66,7 +66,7 @@ impl crate::Pass for LoopBatch {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        run(f, context, true, false)
+        run(f, context, Mode::Packed)
     }
 }
 
@@ -85,15 +85,40 @@ impl crate::Pass for LoopBatchScalar {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, true, true)
+        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, Mode::Scalar)
     }
 }
-fn run(
-    f: &mut Function,
-    context: &crate::OptimizationContext,
-    batching: bool,
-    scalar: bool,
-) -> bool {
+pub(crate) struct AutoLoopBatch;
+impl crate::Pass for AutoLoopBatch {
+    fn name(&self) -> &'static str {
+        "auto-loop-batch"
+    }
+    fn description(&self) -> &'static str {
+        "batch proven long literal floating reductions on AArch64"
+    }
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Vectorize
+    }
+    fn deterministic(&self) -> bool {
+        true
+    }
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, Mode::Automatic)
+    }
+}
+#[derive(Clone, Copy)]
+enum Mode {
+    Dot,
+    Packed,
+    Scalar,
+    Automatic,
+}
+// Four complete eight-element groups amortize setup conservatively. This is
+// an admission policy, not a promise of speedup for every surrounding program.
+const AUTOMATIC_MIN_TRIP_COUNT: u64 = 32;
+fn run(f: &mut Function, context: &crate::OptimizationContext, mode: Mode) -> bool {
+    let batching = !matches!(mode, Mode::Dot);
+    let scalar = matches!(mode, Mode::Scalar | Mode::Automatic);
     if context.layout != Some(keel_ir::DataLayout::NATIVE64)
         || context.target == crate::VectorTarget::Portable
         || f.debug_return.is_some()
@@ -106,6 +131,21 @@ fn run(
     let mut changed = false;
     for header in f.blocks().collect::<Vec<_>>() {
         if let Some(c) = analyze(f, header, batching) {
+            if matches!(mode, Mode::Automatic)
+                && !int_const(f, c.bound).is_some_and(|n| {
+                    let n = n as u64;
+                    n >= AUTOMATIC_MIN_TRIP_COUNT
+                        && n.checked_mul(u64::from(
+                            c.shape
+                                .lane_type()
+                                .bytes()
+                                .expect("floating lane has a size"),
+                        ))
+                        .is_some()
+                })
+            {
+                continue;
+            }
             transform(f, c, scalar);
             if batching {
                 crate::loop_rotate::rotate_batched_tail(f, header);
@@ -158,7 +198,7 @@ fn analyze(f: &Function, header: Block, batching: bool) -> Option<Candidate> {
     }
     let dom = &analysis.as_ref()?.dom;
     let bound = f.resolve(counted.bound);
-    if !invariant(f, dom, shape_loop.pre, bound) {
+    if int_const(f, bound).is_none() && !invariant(f, dom, shape_loop.pre, bound) {
         return None;
     }
     let D::Jump { dest: initial } = f.inst_data(shape_loop.entry) else {
@@ -347,6 +387,9 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
     };
     let gate = f.create_block();
     let guard = f.create_block();
+    // C commonly defines a literal bound inside the header. Materialize it in
+    // the new entry rather than using a value that does not dominate it.
+    let bound = int_const(f, c.bound).map_or(c.bound, |n| integer(f, gate, n));
     let body = f.create_block();
     let groups_left = f.append_block_param(body, Type::I64);
     let sum = f.append_block_param(body, c.shape.lane_type());
@@ -368,7 +411,7 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
         .bytes()
         .expect("floating lane has a size");
     let group = integer(f, gate, group_size);
-    let enough = cmp(f, gate, IntCC::Uge, c.bound, group);
+    let enough = cmp(f, gate, IntCC::Uge, bound, group);
     f.append_inst(
         gate,
         D::Brif {
@@ -386,9 +429,9 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
         },
     );
     let shift = integer(f, guard, i64::from(bytes.trailing_zeros()));
-    let length = bin(f, guard, B::Shl, c.bound, shift);
+    let length = bin(f, guard, B::Shl, bound, shift);
     let recovered = bin(f, guard, B::Ushr, length, shift);
-    let mut safe = cmp(f, guard, IntCC::Eq, recovered, c.bound);
+    let mut safe = cmp(f, guard, IntCC::Eq, recovered, bound);
     // A vector load may not span a modular pointer wrap. The scalar fallback
     // retains the original address arithmetic on ranges that fail this guard.
     for stream in &c.streams {
@@ -406,7 +449,7 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
         safe = bin(f, guard, B::And, safe, nowrap);
     }
     let group_shift = integer(f, guard, i64::from(group_size.trailing_zeros()));
-    let groups = bin(f, guard, B::Ushr, c.bound, group_shift);
+    let groups = bin(f, guard, B::Ushr, bound, group_shift);
     let end = bin(f, guard, B::Shl, groups, group_shift);
     let mut initial = vec![groups, c.seed];
     initial.extend(c.streams.iter().map(|stream| stream.base));

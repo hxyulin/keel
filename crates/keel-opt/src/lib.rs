@@ -405,6 +405,7 @@ pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
 );
 pub(crate) static LOAD_REUSE: &dyn Pass = &load_reuse::LoadReuse;
 pub(crate) static FAST_LOOP_DOT: &dyn Pass = &loop_dot::FastLoopDot;
+pub(crate) static AUTO_LOOP_BATCH: &dyn Pass = &loop_dot::AutoLoopBatch;
 pub(crate) static LOOP_BATCH_SCALAR: &dyn Pass = &loop_dot::LoopBatchScalar;
 pub(crate) static LOOP_BATCH: &dyn Pass = &loop_dot::LoopBatch;
 pub(crate) static LOOP_DOT: &dyn Pass = &loop_dot::LoopDot;
@@ -485,6 +486,7 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_DOT,
     LOOP_BATCH,
     LOOP_BATCH_SCALAR,
+    AUTO_LOOP_BATCH,
     FAST_LOOP_DOT,
     LOOP_VECTORIZE,
     LOOP_REDUCE,
@@ -812,12 +814,13 @@ const FULL_ROUND: [&str; 18] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 33] = [
+const FULL_EPILOGUE: [&str; 34] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
     "dce",
     "simplify-cfg",
+    "auto-loop-batch",
     "loop-strength-reduce",
     "canonicalize",
     "instcombine",
