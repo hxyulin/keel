@@ -241,6 +241,7 @@ fn preprocess_inner<const TRACK: bool>(
         in_condition: false,
         macros: HashMap::default(),
         expansion_scratch: Vec::new(),
+        expansion_stack: Vec::new(),
         undefined: HashSet::default(),
         search_dirs: Vec::new(),
         framework_dirs: Vec::new(),
@@ -305,7 +306,10 @@ struct Preprocessor<'a, const TRACK: bool> {
     stream_chunk: usize,
     in_condition: bool,
     macros: HashMap<&'a str, &'a Macro<'a>>,
+    /// The output buffer of the next expansion.
     expansion_scratch: Vec<Token<'a>>,
+    /// The replacement stack of the next expansion.
+    expansion_stack: Vec<Token<'a>>,
     undefined: HashSet<&'a str>,
     search_dirs: Vec<PathBuf>,
     framework_dirs: Vec<PathBuf>,
@@ -1004,10 +1008,14 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if pending.is_empty() {
             return Ok(());
         }
-        let mut expanded = self.expand(std::mem::take(pending), 0)?;
+        let mut expanded = self.expand(pending, 0)?;
         self.emit(&expanded);
-        expanded.clear();
-        *pending = expanded;
+        pending.clear();
+        // The next expansion reuses a small output buffer.
+        if expanded.capacity() <= 4096 {
+            expanded.clear();
+            self.expansion_scratch = expanded;
+        }
         Ok(())
     }
     fn file(
@@ -1276,7 +1284,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 {
                     args.to_vec()
                 } else {
-                    self.expand(args.to_vec(), 0)?
+                    self.expand(args, 0)?
                 };
                 let (name, quoted) =
                     header(&expanded).ok_or_else(|| directive.error("expected header name"))?;
@@ -1296,7 +1304,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 }
             }
             "line" => {
-                let expanded = self.expand(args.to_vec(), 0)?;
+                let expanded = self.expand(args, 0)?;
                 let n = expanded
                     .first()
                     .and_then(|t| t.text.parse::<u32>().ok())
@@ -1616,50 +1624,74 @@ fn query_builtin(name: &str) -> bool {
     )
 }
 
-// Unconsumed tokens are stored backwards: replacing the prefix pops the
-// invocation and pushes its replacement without shifting the remaining file.
-// Rescanning still sees replacement tokens adjacent to the original suffix.
-struct ExpansionInput<'a>(Vec<Token<'a>>);
-impl<'a> ExpansionInput<'a> {
+/// The tokens an expansion has yet to consume: replacement tokens awaiting
+/// rescanning, stored last first so that replacing a prefix pops the
+/// invocation and pushes its replacement, then the unread original tokens.
+struct ExpansionInput<'t, 'a> {
+    stack: Vec<Token<'a>>,
+    rest: &'t [Token<'a>],
+}
+impl<'a> ExpansionInput<'_, 'a> {
     fn len(&self) -> usize {
-        self.0.len()
+        self.stack.len() + self.rest.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.stack.is_empty() && self.rest.is_empty()
     }
     fn get(&self, index: usize) -> Option<&Token<'a>> {
-        self.0
-            .len()
-            .checked_sub(index + 1)
-            .and_then(|i| self.0.get(i))
+        match self.stack.len().checked_sub(index + 1) {
+            Some(i) => Some(&self.stack[i]),
+            None => self.rest.get(index - self.stack.len()),
+        }
     }
     fn iter(&self) -> impl Iterator<Item = &Token<'a>> {
-        self.0.iter().rev()
+        self.stack.iter().rev().chain(self.rest)
+    }
+    /// The tokens at `range`, in order.
+    fn range(&self, range: Range<usize>) -> impl Iterator<Item = &Token<'a>> {
+        self.iter().skip(range.start).take(range.len())
+    }
+    /// Appends the tokens at `range` to `out`, in order.
+    fn copy_range(&self, range: Range<usize>, out: &mut Vec<Token<'a>>) {
+        let n = self.stack.len();
+        if range.start < n {
+            out.extend(
+                self.stack[n - range.end.min(n)..n - range.start]
+                    .iter()
+                    .rev(),
+            );
+        }
+        if range.end > n {
+            out.extend_from_slice(&self.rest[range.start.max(n) - n..range.end - n]);
+        }
+    }
+    fn collect_range(&self, range: Range<usize>) -> Vec<Token<'a>> {
+        let mut out = Vec::with_capacity(range.len());
+        self.copy_range(range, &mut out);
+        out
     }
     fn pop(&mut self) -> Option<Token<'a>> {
-        self.0.pop()
-    }
-    /// The tokens at `range`, last first.
-    fn reversed(&self, range: Range<usize>) -> &[Token<'a>] {
-        let n = self.0.len();
-        &self.0[n - range.end..n - range.start]
+        self.stack.pop().or_else(|| {
+            let (first, rest) = self.rest.split_first()?;
+            self.rest = rest;
+            Some(*first)
+        })
     }
     fn replace<R>(&mut self, end: usize, replacement: R)
     where
         R: IntoIterator<Item = Token<'a>>,
         R::IntoIter: DoubleEndedIterator,
     {
-        self.0.truncate(self.0.len() - end);
-        self.0.extend(replacement.into_iter().rev());
+        let popped = end.min(self.stack.len());
+        self.stack.truncate(self.stack.len() - popped);
+        self.rest = &self.rest[end - popped..];
+        self.stack.extend(replacement.into_iter().rev());
     }
 }
-impl<'a> std::ops::Index<usize> for ExpansionInput<'a> {
+impl<'a> std::ops::Index<usize> for ExpansionInput<'_, 'a> {
     type Output = Token<'a>;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[self.0.len() - 1 - index]
-    }
-}
-impl std::ops::IndexMut<usize> for ExpansionInput<'_> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        let position = self.0.len() - 1 - index;
-        &mut self.0[position]
+        self.get(index).unwrap()
     }
 }
 
@@ -1668,90 +1700,114 @@ impl std::ops::IndexMut<usize> for ExpansionInput<'_> {
 type Arguments = (Vec<Range<usize>>, usize);
 
 /// The arguments of the invocation whose `(` is at `open`.
-fn arguments(ts: &ExpansionInput<'_>, open: usize) -> Result<Arguments, Diagnostic> {
+fn arguments(ts: &ExpansionInput<'_, '_>, open: usize) -> Result<Arguments, Diagnostic> {
     let mut args = Vec::new();
     let mut start = open + 1;
     let mut depth = 0;
-    for (i, t) in ts.iter().enumerate().skip(open + 1) {
-        match t.text {
-            "(" => depth += 1,
-            ")" if depth == 0 => {
-                args.push(start..i);
-                return Ok((args, i + 1));
+    let n = ts.stack.len();
+    let stacked = ts.stack.iter().rev().enumerate();
+    let original = ts.rest.iter().enumerate().map(|(i, t)| (i + n, t));
+    let end = stacked
+        .chain(original)
+        .skip(open + 1)
+        .try_for_each(|(i, t)| {
+            match t.text {
+                "(" => depth += 1,
+                ")" if depth == 0 => {
+                    args.push(start..i);
+                    return Err(i + 1);
+                }
+                ")" => depth -= 1,
+                "," if depth == 0 => {
+                    args.push(start..i);
+                    start = i + 1;
+                }
+                _ => {}
             }
-            ")" => depth -= 1,
-            "," if depth == 0 => {
-                args.push(start..i);
-                start = i + 1;
-            }
-            _ => {}
-        }
+            Ok(())
+        });
+    match end {
+        Err(end) => Ok((args, end)),
+        Ok(()) => Err(ts[open].error("unterminated macro invocation")),
     }
-    Err(ts[open].error("unterminated macro invocation"))
 }
 
 impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
-    fn expand(
-        &mut self,
-        mut ts: Vec<Token<'a>>,
-        depth: usize,
-    ) -> Result<Vec<Token<'a>>, Diagnostic> {
-        ts.reverse();
-        self.expand_reversed(ts, depth)
+    /// `None` if `t` expands to itself, otherwise its macro definition, if
+    /// any; a builtin has none.
+    #[inline(always)]
+    fn candidate(&self, t: &Token<'a>) -> Option<Option<&'a Macro<'a>>> {
+        let name = t.text;
+        let first = name.as_bytes().first().copied().unwrap_or(0);
+        if !(first.is_ascii_alphabetic() || first == b'_' || first >= 128)
+            || (t.hide.contains(&name) && !(self.in_condition && name == "defined"))
+        {
+            return None;
+        }
+        let macro_definition = self.macros.get(name).copied();
+        // Every builtin name except `defined` starts with '_'.
+        let special = || {
+            (self.in_condition && name == "defined")
+                || (first == b'_'
+                    && (matches!(
+                        name,
+                        "__LINE__"
+                            | "__FILE__"
+                            | "__BASE_FILE__"
+                            | "__FILE_NAME__"
+                            | "__INCLUDE_LEVEL__"
+                            | "__COUNTER__"
+                            | "__has_include"
+                            | "__has_include_next"
+                            | "_Pragma"
+                    ) || query_builtin(name)))
+        };
+        (macro_definition.is_some() || special()).then_some(macro_definition)
     }
-    /// Expands the tokens of `reversed`, which holds them last first.
-    fn expand_reversed(
-        &mut self,
-        reversed: Vec<Token<'a>>,
-        depth: usize,
-    ) -> Result<Vec<Token<'a>>, Diagnostic> {
+    fn expand(&mut self, ts: &[Token<'a>], depth: usize) -> Result<Vec<Token<'a>>, Diagnostic> {
         if depth > 200 {
             return Err(self.error("macro argument nesting exceeds 200"));
         }
-        let mut input = ExpansionInput(reversed);
+        let mut input = ExpansionInput {
+            stack: std::mem::take(&mut self.expansion_stack),
+            rest: ts,
+        };
         let mut out = std::mem::take(&mut self.expansion_scratch);
         out.reserve(input.len());
         // Bound macro invocations and the tokens they add, not the input:
         // a large array initializer has many tokens and no macros.
         let mut steps = 0;
         let limit = input.len().saturating_add(1_000_000);
-        while !input.0.is_empty() {
+        while !input.is_empty() {
             if steps > 1_000_000 || input.len().saturating_add(out.len()) > limit {
                 return Err(input[0].error("macro expansion limit exceeded"));
             }
-            let current = &input[0];
-            let name = current.text;
-            let first = name.as_bytes().first().copied().unwrap_or(0);
-            if !(first.is_ascii_alphabetic() || first == b'_' || first >= 128)
-                || (current.hide.contains(&name) && !(self.in_condition && name == "defined"))
-            {
-                out.push(input.pop().unwrap());
-                continue;
-            }
-            let macro_definition = self.macros.get(name).copied();
-            // Every builtin name except `defined` starts with '_'.
-            let special = || {
-                (self.in_condition && name == "defined")
-                    || (first == b'_'
-                        && (matches!(
-                            name,
-                            "__LINE__"
-                                | "__FILE__"
-                                | "__BASE_FILE__"
-                                | "__FILE_NAME__"
-                                | "__INCLUDE_LEVEL__"
-                                | "__COUNTER__"
-                                | "__has_include"
-                                | "__has_include_next"
-                                | "_Pragma"
-                        ) || query_builtin(name)))
+            let macro_definition = if input.stack.is_empty() {
+                // Copy original tokens up to the next candidate in one run.
+                let mut candidate = None;
+                let run = (input.rest.iter())
+                    .position(|t| {
+                        candidate = self.candidate(t);
+                        candidate.is_some()
+                    })
+                    .unwrap_or(input.rest.len());
+                out.extend_from_slice(&input.rest[..run]);
+                input.rest = &input.rest[run..];
+                match candidate {
+                    Some(m) => m,
+                    None => continue,
+                }
+            } else {
+                match self.candidate(input.stack.last().unwrap()) {
+                    Some(m) => m,
+                    None => {
+                        out.push(input.stack.pop().unwrap());
+                        continue;
+                    }
+                }
             };
-            if macro_definition.is_none() && !special() {
-                out.push(input.pop().unwrap());
-                continue;
-            }
             steps += 1;
-            let t = *current;
+            let t = input[0];
             let name = t.text;
             if name == "defined" && self.in_condition {
                 let mut end = 1;
@@ -1804,8 +1860,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 None
             };
             if let Some(value) = builtin {
-                input[0].text = self.arena.alloc_str(&value);
-                out.push(input.pop().unwrap());
+                let mut t = input.pop().unwrap();
+                t.text = self.arena.alloc_str(&value);
+                out.push(t);
                 continue;
             }
             if (matches!(name, "__has_include" | "__has_include_next") || query_builtin(name))
@@ -1818,9 +1875,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if args.len() != 1 {
                     return Err(t.error("expected one argument to preprocessing builtin"));
                 }
-                let arg = input.reversed(args[0].clone());
+                let arg = input.collect_range(args[0].clone());
                 let value = if matches!(name, "__has_include" | "__has_include_next") {
-                    let expanded = self.expand_reversed(arg.to_vec(), depth + 1)?;
+                    let expanded = self.expand(&arg, depth + 1)?;
                     let (h, q) = header(&expanded)
                         .ok_or_else(|| t.error("expected header name in __has_include"))?;
                     (self
@@ -1845,8 +1902,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 if args.len() != 1 {
                     return Err(t.error("expected one _Pragma argument"));
                 }
-                let expanded =
-                    self.expand_reversed(input.reversed(args[0].clone()).to_vec(), depth + 1)?;
+                let arg = input.collect_range(args[0].clone());
+                let expanded = self.expand(&arg, depth + 1)?;
                 let value = if expanded.len() == 1 {
                     unquote(expanded[0].text)
                 } else {
@@ -1865,7 +1922,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 out.push(input.pop().unwrap());
                 continue;
             };
-            let (end, mut replacement, hide) = if let Some(params) = &m.params {
+            let (end, replacement, hide) = if let Some(params) = &m.params {
                 if !input.get(1).is_some_and(|t| t.text == "(") {
                     out.push(input.pop().unwrap());
                     continue;
@@ -1901,8 +1958,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             .iter()
                             .position(|p| p == &m.body[j + 1].text)
                             .unwrap();
-                        let arg = input.reversed(args[p].clone());
-                        body.push(b.with_text(self.arena, quote(&spelling(arg.iter().rev()))));
+                        let arg = input.range(args[p].clone());
+                        body.push(b.with_text(self.arena, quote(&spelling(arg))));
                         j += 2;
                         continue;
                     }
@@ -1917,8 +1974,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     {
                         if !omitted {
                             body.push(*b);
-                            let arg = input.reversed(args.last().unwrap().clone());
-                            body.extend(self.expand_reversed(arg.to_vec(), depth + 1)?);
+                            let arg = input.collect_range(args.last().unwrap().clone());
+                            body.extend(self.expand(&arg, depth + 1)?);
                         }
                         j += 3;
                         continue;
@@ -1930,7 +1987,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         // never operators in this replacement list.
                         let start = body.len();
                         if paste {
-                            body.extend(input.reversed(args[p].clone()).iter().rev());
+                            input.copy_range(args[p].clone(), &mut body);
                             if body.len() == start {
                                 body.push(b.with_text(self.arena, ""));
                             }
@@ -1939,8 +1996,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                                 expanded.resize_with(params.len(), || None);
                             }
                             if expanded[p].is_none() {
-                                let arg = input.reversed(args[p].clone()).to_vec();
-                                expanded[p] = Some(self.expand_reversed(arg, depth + 1)?);
+                                let arg = input.collect_range(args[p].clone());
+                                expanded[p] = Some(self.expand(&arg, depth + 1)?);
                             }
                             body.extend_from_slice(expanded[p].as_deref().unwrap_or_default());
                         }
@@ -1956,37 +2013,35 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     j += 1;
                 }
                 let hide = hide_intersection(self.arena, t.hide, input[end - 1].hide);
-                (end, self.paste(body, &operators)?, hide)
+                (end, Some(self.paste(body, &operators)?), hide)
+            } else if m.has_paste {
+                let operators: Vec<usize> = (m.body.iter().enumerate())
+                    .filter_map(|(i, t)| (t.text == "##").then_some(i))
+                    .collect();
+                (1, Some(self.paste(m.body.to_vec(), &operators)?), t.hide)
             } else {
-                (
-                    1,
-                    if m.has_paste {
-                        let operators: Vec<usize> = (m.body.iter().enumerate())
-                            .filter_map(|(i, t)| (t.text == "##").then_some(i))
-                            .collect();
-                        self.paste(m.body.to_vec(), &operators)?
-                    } else {
-                        m.body.to_vec()
-                    },
-                    t.hide,
-                )
+                (1, None, t.hide)
             };
             let hide = hide_insert(self.arena, hide, name);
-            for r in &mut replacement {
-                r.hide = hide_union(self.arena, r.hide, hide);
-                r.file = t.file;
-                r.line = t.line;
-                r.col = t.col;
+            let arena = self.arena;
+            let relocate = |r: &Token<'a>| Token {
+                hide: hide_union(arena, r.hide, hide),
+                file: t.file,
+                line: t.line,
+                col: t.col,
+                ..*r
+            };
+            let replacement = replacement.as_deref().unwrap_or(m.body);
+            input.replace(end, replacement.iter().map(relocate));
+            if !replacement.is_empty() {
+                input.stack.last_mut().unwrap().space = t.space;
             }
-            if let Some(first) = replacement.first_mut() {
-                first.space = t.space;
-            }
-            input.replace(end, replacement);
         }
-        // Recycle small drained inputs across conditions/arguments. Retaining
-        // an entire source-sized buffer here would raise per-TU peak memory.
-        if input.0.capacity() <= 4096 && input.0.capacity() >= self.expansion_scratch.capacity() {
-            self.expansion_scratch = input.0;
+        // Recycle a small drained stack across conditions/arguments. Retaining
+        // a large buffer here would raise per-TU peak memory.
+        let stack = input.stack;
+        if stack.capacity() <= 4096 && stack.capacity() >= self.expansion_stack.capacity() {
+            self.expansion_stack = stack;
         }
         Ok(out)
     }
@@ -2044,7 +2099,7 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return Err(self.error("expected #if expression"));
         }
         self.in_condition = true;
-        let expanded = self.expand(ts.to_vec(), 0);
+        let expanded = self.expand(ts, 0);
         self.in_condition = false;
         let mut tokens = expanded?;
         for t in &mut tokens {
