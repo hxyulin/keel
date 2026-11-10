@@ -72,8 +72,8 @@ returning archive bytes without filesystem access, or
 `archive::write(&[Input], archive::Target, &Path)`. `archive::Target` is the
 shared `keel_asm_ir::Target`; `build` rejects wasm32. The library also permits an
 empty indexed archive. `write` validates/builds first, writes a create-new
-sibling temporary file, syncs and closes it, renames it over the destination,
-then syncs the directory. Read, validation, write and installation errors
+sibling temporary file, closes it and renames it over the destination without
+flushing it to disk. Read, validation, write and installation errors
 preserve existing outputs; a temporary file is removed after failed
 installation. Every linker and driver output that is replaced this way uses
 `keel_util::fs::replace`.
