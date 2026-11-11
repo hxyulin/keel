@@ -290,3 +290,69 @@ fn readonly_leaf_instruction_block_and_edge_caps_are_exact() {
         );
     }
 }
+
+#[test]
+fn full_large_caller_wrapper_allowance_keeps_slow_calls_and_stops_at_its_budget() {
+    let mut source = QUICKJS.to_owned();
+    source.push_str("\nfunc @large(ptr) {\nblock0(v0: ptr):\n");
+    for i in 1..=8192 {
+        source.push_str(&format!(" v{i} = iconst.i64 0\n"));
+    }
+    for i in 9000..9096 {
+        source.push_str(&format!(" v{i} = call @js_poll_interrupts(v0)\n"));
+    }
+    source.push_str(" return\n}\n");
+    let mut module = keel_ir::parse(&source).unwrap();
+    let report = run(&mut module, "inline-cheap-reserve");
+    let sites: Vec<_> = report
+        .invocations
+        .iter()
+        .flat_map(|p| &p.inline_sites)
+        .filter(|s| s.caller == "large" && s.callee == "js_poll_interrupts")
+        .collect();
+    let expanded = sites.iter().filter(|s| s.outcome == "inlined").count();
+    assert!(expanded > 0 && expanded < 96, "{sites:?}");
+    assert!(
+        sites
+            .iter()
+            .any(|s| s.outcome == "recursive_wrapper_caller_size")
+    );
+    let calls = direct_calls(&module, "large");
+    assert!(calls.iter().any(|(name, _)| name == "js_poll_interrupts"));
+    assert!(calls.iter().any(|(name, _)| name == "__js_poll_interrupts"));
+    assert_eq!(
+        outcome(
+            &source,
+            "inline-noninterposable",
+            "large",
+            "js_poll_interrupts"
+        ),
+        "recursive_wrapper_caller_size"
+    );
+}
+
+#[test]
+fn full_large_wrapper_stack_allowance_does_not_admit_larger_snapshots() {
+    for (layout, expected) in [("[2 x i64]", 8), ("[4 x i64]", 0)] {
+        let mut source = QUICKJS.replace("[2 x i64]", layout);
+        source.push_str(&format!(
+            "\nfunc @large(ptr,ptr byval {layout}) {{\nblock0(v0: ptr,v1: ptr):\n"
+        ));
+        for i in 2..=8194 {
+            source.push_str(&format!(" v{i} = iconst.i64 0\n"));
+        }
+        for _ in 0..16 {
+            source.push_str(" call @JS_FreeValue(v0,v1)\n");
+        }
+        source.push_str(" return\n}\n");
+        let mut module = keel_ir::parse(&source).unwrap();
+        let report = run(&mut module, "inline-cheap-reserve");
+        let expanded = report
+            .invocations
+            .iter()
+            .flat_map(|p| &p.inline_sites)
+            .filter(|s| s.caller == "large" && s.callee == "JS_FreeValue" && s.outcome == "inlined")
+            .count();
+        assert_eq!(expanded, expected, "{layout}");
+    }
+}

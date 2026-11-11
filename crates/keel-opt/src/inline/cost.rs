@@ -49,9 +49,14 @@ pub(super) fn cheap_helper(f: &Function, cost: usize, stack: u64) -> bool {
 }
 
 // Contracting a recursive wrapper still adds branches, stack snapshots and
-// live values to its caller. Keep that exception out of very large functions;
+// live values to its caller. Large callers need a separate bounded allowance;
 // ordinary profitable inlining and read-only leaf admission remain available.
 pub(super) const MAX_SCC_CALLER_INSTRUCTIONS: usize = 8192;
+// Full can expand a bounded set of cheap wrappers in an oversized caller.
+// Charge these before cleanup, independently in each inlining round.
+pub(super) const LARGE_WRAPPER_GROWTH: usize = 384;
+pub(super) const LARGE_WRAPPER_STACK: u64 = 128;
+pub(super) const LARGE_WRAPPER_SITE_STACK: u64 = 16;
 
 pub(super) const MAX_INSTS: usize = 64;
 pub(super) const MAX_BLOCKS: usize = 8;

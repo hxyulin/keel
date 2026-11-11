@@ -819,7 +819,7 @@ const FULL_ROUND: [&str; 18] = [
 
 const FULL_EPILOGUE: [&str; 34] = [
     "load-reuse",
-    "stack-promote",
+    "stack-promote-large",
     "phi-simplify",
     "dce",
     "simplify-cfg",

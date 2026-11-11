@@ -1,8 +1,9 @@
 //! Freezes templates and call sites, orders the sites and applies budgets.
 use super::clone::{inline_call, two_functions};
 use super::cost::{
-    CHEAP_SITE_GROWTH, CallerLedger, MAX_MODULE_GROWTH, MAX_SCC_CALLER_INSTRUCTIONS, ModuleLedger,
-    SiteCost, Verdict, budget_verdict, charge, cheap_helper, code_insts, code_size, inline_cost,
+    CHEAP_SITE_GROWTH, CallerLedger, LARGE_WRAPPER_GROWTH, LARGE_WRAPPER_SITE_STACK,
+    LARGE_WRAPPER_STACK, MAX_MODULE_GROWTH, MAX_SCC_CALLER_INSTRUCTIONS, ModuleLedger, SiteCost,
+    Verdict, budget_verdict, charge, cheap_helper, code_insts, code_size, inline_cost,
     profitability_reason, small_scc_wrapper, tiny_priority_leaf,
 };
 use super::eligibility::eligibility_reason;
@@ -263,6 +264,8 @@ pub(super) fn run_observed_policy_budgeted(
         .map(|caller| !wrappers.is_empty() && code_size(caller) > MAX_SCC_CALLER_INSTRUCTIONS)
         .collect();
     let mut ledgers = vec![CallerLedger::default(); module.functions.len()];
+    // Keep the large-caller exception within its own per-round growth budget.
+    let mut wrapper_growth = vec![(0usize, 0u64); module.functions.len()];
     // Priority sites, then the remaining alwaysinline sites, then ordinary
     // ones. Only sites denied solely by module growth enter the separate retry
     // queue; cloned calls never enter it.
@@ -404,6 +407,17 @@ pub(super) fn run_observed_policy_budgeted(
             .then(|| specialized.get(t, template(&frozen, &module.functions, t), caller, call))
             .flatten()
         });
+        let bounded_wrapper = cheap_reserve
+            && large_scc_caller
+            && wrappers.contains(&decl.name)
+            && templates.get(&decl.name).is_some_and(|&t| {
+                let callee = template(&frozen, &module.functions, t);
+                let (cost, stack) = inline_cost(callee);
+                cheap_helper(callee, cost, stack)
+                    && stack <= LARGE_WRAPPER_SITE_STACK
+                    && wrapper_growth[index].0 + cost <= LARGE_WRAPPER_GROWTH
+                    && wrapper_growth[index].1 + stack <= LARGE_WRAPPER_STACK
+            });
         let reason = if caller.sig.returns_twice || caller.personality.is_some() {
             Some((
                 "unsupported caller",
@@ -432,7 +446,7 @@ pub(super) fn run_observed_policy_budgeted(
             Some(("noinline policy", "noinline"))
         } else if recursive_bodies.contains(&caller.name) {
             Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
-        } else if large_scc_caller && wrappers.contains(&decl.name) {
+        } else if large_scc_caller && wrappers.contains(&decl.name) && !bounded_wrapper {
             Some((
                 "recursive wrapper caller size",
                 "recursive_wrapper_caller_size",
@@ -546,7 +560,7 @@ pub(super) fn run_observed_policy_budgeted(
             insts: cost,
             stack: stack_cost,
             operands: args.len() + caller.inst_results(call).len(),
-            recursive_caller_stack: recursive[index].then(|| {
+            recursive_caller_stack: (recursive[index] && !bounded_wrapper).then(|| {
                 caller
                     .stack_slots()
                     .map(|(_, s)| u64::from(s.size))
@@ -599,6 +613,10 @@ pub(super) fn run_observed_policy_budgeted(
                     "inlined"
                 },
             ));
+        }
+        if bounded_wrapper {
+            wrapper_growth[index].0 += cost;
+            wrapper_growth[index].1 += stack_cost;
         }
         let before = use_cheap.then(|| code_size(caller));
         if !live_templates && templates.get(&caller.name) == Some(&index) && frozen[index].is_none()

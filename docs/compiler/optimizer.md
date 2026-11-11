@@ -670,7 +670,7 @@ A start of the slot uninitializes it, so a load after a start needs a store
 after that start. An end changes nothing.
 Promoted fields become block parameters, and a store is removed only when no
 overlapping read stays in memory. Limits are 256 blocks, 8192 instructions and
-64 fields. Size uses `stack-promote-large`: up to 8192 laid-out
+64 fields. Full and Size use `stack-promote-large`: up to 8192 laid-out
 blocks and 262144 instructions. Functions outside the smaller limits consider
 at most 32 eligible fields, ordered by access count with ties in instruction
 order. Escaped and overlapping fields do not consume that candidate budget.
@@ -685,7 +685,7 @@ runtime gates.
 Both policies also admit a suffix after the entry block's last memory
 barrier when later loads derive from incoming pointer parameters: fresh reads
 after the barrier seed the SSA values. Follow the pass with
-`phi-simplify,dce`. Full retains the smaller policy.
+`phi-simplify,dce`.
 
 `stack-promote` also promotes integer and pointer fields of an object passed
 to an entry-block initializer call. It seeds them from memory after the last

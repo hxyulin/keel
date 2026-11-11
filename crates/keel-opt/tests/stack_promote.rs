@@ -196,16 +196,20 @@ fn debugger_homes_and_aliased_load_definitions_are_preserved() {
     assert_eq!(memory(f), 4);
 }
 #[test]
-fn full_only_default_admission() {
+fn full_and_size_use_pruned_large_promotion() {
     for tier in [
         keel_opt::OptimizationTier::None,
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Basic,
         keel_opt::OptimizationTier::Full,
+        keel_opt::OptimizationTier::Size,
     ] {
         assert_eq!(
-            tier.pipeline().contains(&"stack-promote"),
-            tier == keel_opt::OptimizationTier::Full
+            tier.pipeline().contains(&"stack-promote-large"),
+            matches!(
+                tier,
+                keel_opt::OptimizationTier::Full | keel_opt::OptimizationTier::Size
+            )
         );
     }
 }

@@ -246,6 +246,17 @@ never refunds charges, and cloned IR never enlarges the allowance. Caller
 instruction, site-count and stack-growth ledgers still reset per invocation;
 the recursive caller frame check observes slots from earlier rounds.
 
+Full's `inline-cheap-reserve` has a separate allowance for cheap recursive
+wrappers in callers initially larger than 8,192 instructions. A wrapper must
+have at most eight acyclic blocks, a predicate, at most one direct slow call,
+and at most 48 lowered instructions. Each site can add at most 16 stack bytes.
+Each caller gets at most 384 added instructions and 128 stack bytes per round
+for these sites. Existing binding, legality and ordinary growth checks still
+apply. The slow call remains out of line. This bounded allowance replaces the
+1,024-byte recursive-frame check for these sites only; other recursive calls
+retain that check. Other inlining policies keep the large-caller exclusion.
+
+
 `keel_opt::inline_with_report` returns `InlineReport { changed, skipped }` with
 caller, callee, original instruction handle and reason for skipped explicit
 `alwaysinline` sites (unsupported callee/caller/site, recursion, unavailable
