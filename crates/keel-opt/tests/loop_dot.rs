@@ -479,3 +479,57 @@ fn automatic_batching_requires_a_long_literal_native_trip_count() {
             .contains(&"auto-loop-batch")
     );
 }
+
+#[test]
+fn dominating_guards_select_only_proven_long_batches() {
+    for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+        for ty in ["f32", "f64"] {
+            for (comparison, edges, selected) in [
+                ("icmp.uge v2,v90", "block4,block99", true),
+                ("icmp.ult v2,v90", "block99,block4", true),
+                ("icmp.ule v90,v2", "block4,block99", true),
+                ("icmp.sge v2,v90", "block4,block99", true),
+                ("icmp.ult v2,v90", "block4,block99", false),
+            ] {
+                let src=sum_source(ty,true).replace(" jump block1(v4,v3)",&format!(" v90 = iconst.i64 32\n v91 = {comparison}\n brif v91,{edges}\nblock4:\n jump block1(v4,v3)")).replace("block3:\n return v6", "block3:\n return v6\nblock99:\n return v3");
+                let original = keel_ir::parse(&src).unwrap();
+                let transformed = automatic(&src, target);
+                assert_eq!(
+                    transformed.to_string() != original.to_string(),
+                    selected,
+                    "{comparison} {edges}"
+                );
+                if selected {
+                    assert!(!transformed.to_string().contains("ptrtoint"));
+                }
+                for n in [0, 1, 7, 31, 32, 33, 64] {
+                    let values: Vec<_> = (0..n)
+                        .map(|i| {
+                            if i % 3 == 0 {
+                                16777216.0
+                            } else if i % 3 == 1 {
+                                1.0
+                            } else {
+                                -16777216.0
+                            }
+                        })
+                        .collect();
+                    assert_eq!(
+                        execute(&transformed, &values, &values, -0.0),
+                        execute(&original, &values, &values, -0.0),
+                        "{ty} {n}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_guard_on_only_one_incoming_path_does_not_admit_batching() {
+    let src=sum_source("f64",false).replace(" jump block1(v4,v3)"," v90 = iconst.i64 32\n v92 = iconst.i64 1\n v93 = and v2,v92\n brif v93,block8,block4\nblock8:\n v91 = icmp.uge v2,v90\n brif v91,block4,block99\nblock4:\n jump block1(v4,v3)").replace("block3:\n return v6","block3:\n return v6\nblock99:\n return v3");
+    let original = keel_ir::parse(&src).unwrap();
+    for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+        assert_eq!(automatic(&src, target).to_string(), original.to_string());
+    }
+}

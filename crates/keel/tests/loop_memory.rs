@@ -188,8 +188,13 @@ fn default_batch_selection_preserves_short_and_unknown_loops() {
     fs::create_dir_all(&dir).unwrap();
     for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
         for (ty, name) in [("float", "fabsf"), ("double", "fabs")] {
-            for bound in ["1", "7", "31", "32", "33", "n"] {
-                fs::write(dir.join("kernel.c"),format!("{ty} {name}({ty}); {ty} f(const {ty} *p,unsigned long n) {{ {ty} s=0; for(unsigned long i=0;i<{bound};++i) s+={name}(p[i]); return s; }}")).unwrap();
+            for bound in ["1", "7", "31", "32", "33", "n", "guarded"] {
+                let (guard, loop_bound) = if bound == "guarded" {
+                    ("if(n<32)return 0;", "n")
+                } else {
+                    ("", bound)
+                };
+                fs::write(dir.join("kernel.c"),format!("{ty} {name}({ty}); {ty} f(const {ty} *p,unsigned long n) {{ {guard} {ty} s=0; for(unsigned long i=0;i<{loop_bound};++i) s+={name}(p[i]); return s; }}")).unwrap();
                 let emit = |flags: &[&str]| {
                     let output = Command::new(env!("CARGO_BIN_EXE_keel"))
                         .current_dir(&dir)
@@ -215,10 +220,10 @@ fn default_batch_selection_preserves_short_and_unknown_loops() {
                 let disabled = emit(&["-O3", "--opt-disable", "auto-loop-batch"]);
                 assert_eq!(
                     normal != disabled,
-                    matches!(bound, "32" | "33"),
+                    matches!(bound, "32" | "33" | "guarded"),
                     "{target} {ty} {bound}"
                 );
-                if bound == "32" {
+                if matches!(bound, "32" | "guarded") {
                     assert_eq!(
                         emit(&["-O3", "-fno-vectorize"]),
                         emit(&["-O3", "-fno-vectorize", "--opt-disable", "auto-loop-batch"])
@@ -246,48 +251,65 @@ fn automatic_literal_batches_match_the_native_strict_driver() {
     }
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-batch-native");
     fs::create_dir_all(&dir).unwrap();
-    for n in [31, 32, 33, 64, 257] {
-        let n = n.to_string();
-        // Fixed-bound kernels must use the same count in the guard-page oracle.
-        let driver = include_str!("../../../suite/c/fastmath/ordered_driver.c")
-            .replace("{0,1,7,8,9,15,16,17,31,32,33}", &format!("{{{n}}}"));
-        fs::write(dir.join("driver.c"), driver).unwrap();
-        run(Command::new("clang").current_dir(&dir).args([
-            "-O2",
-            "-fno-fast-math",
-            "-ffp-contract=off",
-            "-c",
-            "driver.c",
-            "-o",
-            "driver.o",
-        ]));
-        let kernels = include_str!("../../../suite/c/fastmath/ordered.c")
-            .replace("i < n", &format!("i < {n}"));
-        fs::write(dir.join("kernels.c"), kernels).unwrap();
-        for disabled in [false, true] {
-            let mut cc = Command::new(env!("CARGO_BIN_EXE_keel"));
-            cc.current_dir(&dir).args([
-                "cc",
-                "-O3",
-                "--verify-each",
-                "--emit-object",
-                "kernels.c",
-                "-o",
-                "kernels.o",
-            ]);
-            if disabled {
-                cc.args(["--opt-disable", "auto-loop-batch"]);
+    for guarded in [false, true] {
+        for n in [31, 32, 33, 64, 257] {
+            let n = n.to_string();
+            // Fixed-bound kernels must use the same count in the guard-page oracle.
+            let mut driver = include_str!("../../../suite/c/fastmath/ordered_driver.c")
+                .replace("{0,1,7,8,9,15,16,17,31,32,33}", &format!("{{{n}}}"));
+            if guarded {
+                driver = driver
+                    .replace(
+                        "volatile double s = 0;",
+                        "if(n<32)return 0; volatile double s = 0;",
+                    )
+                    .replace(
+                        "volatile float s = 0;",
+                        "if(n<32)return 0; volatile float s = 0;",
+                    );
             }
-            run(&mut cc);
+            fs::write(dir.join("driver.c"), driver).unwrap();
             run(Command::new("clang").current_dir(&dir).args([
-                "driver.o",
-                "kernels.o",
+                "-O2",
+                "-fno-fast-math",
+                "-ffp-contract=off",
+                "-c",
+                "driver.c",
                 "-o",
-                "oracle",
+                "driver.o",
             ]));
-            run(Command::new(dir.join("oracle")).arg("check"));
-            for kind in ["0", "1", "2", "3"] {
-                run(Command::new(dir.join("oracle")).args([kind, &n, "1"]));
+            let source = include_str!("../../../suite/c/fastmath/ordered.c");
+            let kernels = if guarded {
+                source.replace("  for (", "  if(n<32)return s;\n  for (")
+            } else {
+                source.replace("i < n", &format!("i < {n}"))
+            };
+            fs::write(dir.join("kernels.c"), kernels).unwrap();
+            for disabled in [false, true] {
+                let mut cc = Command::new(env!("CARGO_BIN_EXE_keel"));
+                cc.current_dir(&dir).args([
+                    "cc",
+                    "-O3",
+                    "--verify-each",
+                    "--emit-object",
+                    "kernels.c",
+                    "-o",
+                    "kernels.o",
+                ]);
+                if disabled {
+                    cc.args(["--opt-disable", "auto-loop-batch"]);
+                }
+                run(&mut cc);
+                run(Command::new("clang").current_dir(&dir).args([
+                    "driver.o",
+                    "kernels.o",
+                    "-o",
+                    "oracle",
+                ]));
+                run(Command::new(dir.join("oracle")).arg("check"));
+                for kind in ["0", "1", "2", "3"] {
+                    run(Command::new(dir.join("oracle")).args([kind, &n, "1"]));
+                }
             }
         }
     }

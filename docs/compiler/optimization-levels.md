@@ -50,8 +50,8 @@ constant memory copies and fills of at most 128 bytes into loads and stores;
 Balanced, Size and Full expand at most 32 bytes; None leaves them unchanged.
 
 On AArch64 and x86-64, Full also batches ordered floating sums and absolute-value sums
-when their literal trip count is at least 32 and their byte count fits u64.
-Unknown and shorter counts stay scalar under this rule. The batched scalar
+when a literal count or existing dominating guards prove at least 32 trips.
+Literal byte counts must fit u64. Unproven and shorter counts stay scalar. The batched scalar
 schedule retains floating addition order; see [SIMD IR](simd-ir.md).
 
 These are Keel policies, not the GCC or Clang pass lists, and more effort does

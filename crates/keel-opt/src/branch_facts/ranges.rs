@@ -448,6 +448,40 @@ fn run_mode(f: &mut Function, checked_only: bool, known: Vec<(u128, u128)>) -> b
     changed
 }
 
+/// Query a value at a block using only dominating, uniquely entered edges.
+pub(super) fn unsigned_at(f: &Function, at: keel_ir::Block, value: Value) -> Option<(u64, u64)> {
+    const DOMINATOR_LIMIT: usize = 128;
+    let analysis = crate::analysis::get(f);
+    if !analysis.dom.is_reachable(at) {
+        return None;
+    }
+    let mut path = Vec::new();
+    let mut block = Some(at);
+    while let Some(b) = block {
+        if path.len() == DOMINATOR_LIMIT {
+            return None;
+        }
+        path.push(b);
+        block = analysis.dom.idom(b);
+    }
+    let mut ranges = Ranges::default();
+    for b in path.into_iter().rev() {
+        if Some(b) != f.entry_block()
+            && let [pred] = analysis.cfg.preds(b)
+            && let Some(&i) = f.block_insts(*pred).last()
+            && let InstData::Brif { cond, dests } = f.inst_data(i)
+            && dests[0].block != dests[1].block
+        {
+            ranges.on_edge(f, *cond, dests[0].block == b);
+        }
+    }
+    let bounds = ranges.bounds(f, value, &mut 16)?.unsigned;
+    Some((
+        u64::try_from(bounds.lo).ok()?,
+        u64::try_from(bounds.hi).ok()?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

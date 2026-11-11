@@ -57,13 +57,10 @@
 	.cfi_def_cfa_register 6
 .Lk_copysign_f64_block0:
 	# v2 = fcopysign v0, v1
-	movq	rax, xmm0
-	movq	rcx, xmm1
-	btr	rax, 63
-	shr	rcx, 63
-	shl	rcx, 63
-	or	rax, rcx
-	movq	xmm0, rax
+	movaps	xmm15, xmm1
+	andpd	xmm15, xmmword ptr [rip + ".Lk_copysign_f64_sign64"]
+	andpd	xmm0, xmmword ptr [rip + ".Lk_copysign_f64_fabs64"]
+	orpd	xmm0, xmm15
 	# return v2
 	mov	rsp, rbp
 	pop	rbp
@@ -71,6 +68,14 @@
 .Lk_copysign_f64_end:
 	.cfi_endproc
 	.size "k_copysign_f64", .-"k_copysign_f64"
+	.p2align	4
+.Lk_copysign_f64_fabs64:
+	.byte	255, 255, 255, 255, 255, 255, 255, 127
+	.byte	255, 255, 255, 255, 255, 255, 255, 127
+	.p2align	4
+.Lk_copysign_f64_sign64:
+	.byte	0, 0, 0, 0, 0, 0, 0, 128
+	.byte	0, 0, 0, 0, 0, 0, 0, 128
 	.section	".text","ax",@progbits
 	.globl "k_copysign_f32"
 	.p2align	4
@@ -85,13 +90,10 @@
 	.cfi_def_cfa_register 6
 .Lk_copysign_f32_block0:
 	# v2 = fcopysign v0, v1
-	movd	eax, xmm0
-	movd	ecx, xmm1
-	btr	eax, 31
-	shr	ecx, 31
-	shl	ecx, 31
-	or	eax, ecx
-	movd	xmm0, eax
+	movaps	xmm15, xmm1
+	andps	xmm15, xmmword ptr [rip + ".Lk_copysign_f32_sign32"]
+	andps	xmm0, xmmword ptr [rip + ".Lk_copysign_f32_fabs32"]
+	orps	xmm0, xmm15
 	# return v2
 	mov	rsp, rbp
 	pop	rbp
@@ -99,6 +101,14 @@
 .Lk_copysign_f32_end:
 	.cfi_endproc
 	.size "k_copysign_f32", .-"k_copysign_f32"
+	.p2align	4
+.Lk_copysign_f32_fabs32:
+	.byte	255, 255, 255, 127, 255, 255, 255, 127
+	.byte	255, 255, 255, 127, 255, 255, 255, 127
+	.p2align	4
+.Lk_copysign_f32_sign32:
+	.byte	0, 0, 0, 128, 0, 0, 0, 128
+	.byte	0, 0, 0, 128, 0, 0, 0, 128
 	.section	".text","ax",@progbits
 	.globl "k_const_fma"
 	.p2align	4

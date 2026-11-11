@@ -94,3 +94,12 @@ pub fn run_ranges(f: &mut Function) -> bool {
 pub(crate) fn run_checked_ranges(f: &mut Function, known: Vec<(u128, u128)>) -> bool {
     ranges::run_checked(f, known)
 }
+
+/// Scoped unsigned bounds without changing the function or enabling range folds.
+pub(crate) fn unsigned_at(
+    f: &Function,
+    at: keel_ir::Block,
+    value: keel_ir::Value,
+) -> Option<(u64, u64)> {
+    ranges::unsigned_at(f, at, value)
+}

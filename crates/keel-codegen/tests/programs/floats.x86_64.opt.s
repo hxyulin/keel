@@ -494,9 +494,8 @@
 	# v12 = ptradd v10, v2
 	add	rsi, 8
 	# v13 = fneg v0
-	movq	rax, xmm0
-	btc	rax, 63
-	movq	xmm1, rax
+	movaps	xmm1, xmm0
+	xorpd	xmm1, xmmword ptr [rip + ".Lunary_sign64"]
 	# store v13, v12
 	movsd	qword ptr [rsi], xmm1
 	# v14 = ptradd v12, v2
@@ -515,6 +514,10 @@
 .Lunary_fabs64:
 	.byte	255, 255, 255, 255, 255, 255, 255, 127
 	.byte	255, 255, 255, 255, 255, 255, 255, 127
+	.p2align	4
+.Lunary_sign64:
+	.byte	0, 0, 0, 0, 0, 0, 0, 128
+	.byte	0, 0, 0, 0, 0, 0, 0, 128
 	.section	".text","ax",@progbits
 	.globl "unary32"
 	.p2align	4
@@ -611,9 +614,8 @@
 	# v7 = ptradd v5, v3
 	add	rsi, 4
 	# v8 = fneg v0
-	movd	eax, xmm0
-	btc	eax, 31
-	movd	xmm2, eax
+	movaps	xmm2, xmm0
+	xorps	xmm2, xmmword ptr [rip + ".Lunary32_sign32"]
 	# store v8, v7
 	movss	dword ptr [rsi], xmm2
 	# v9 = ptradd v7, v3
@@ -628,6 +630,10 @@
 .Lunary32_end:
 	.cfi_endproc
 	.size "unary32", .-"unary32"
+	.p2align	4
+.Lunary32_sign32:
+	.byte	0, 0, 0, 128, 0, 0, 0, 128
+	.byte	0, 0, 0, 128, 0, 0, 0, 128
 	.section	".text","ax",@progbits
 	.globl "minmax"
 	.p2align	4

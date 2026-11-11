@@ -33,6 +33,14 @@ fn fixture() -> keel_ir::Module {
             "func @abs{bits}(f{bits},ptr) -> f{bits} weak_odr {{\nentry(v0:f{bits},v1:ptr):\n v2 = fabs v0\n store v0,v1\n v3 = fabs v2\n return v3\n}}\n"
         );
     }
+    for bits in [32, 64] {
+        source += &format!(
+            "func @neg{bits}(f{bits},ptr) -> f{bits} weak_odr {{\nentry(v0:f{bits},v1:ptr):\n v2 = fneg v0\n store v0,v1\n return v2\n}}\n"
+        );
+        source += &format!(
+            "func @copy{bits}(f{bits},f{bits},ptr,ptr) -> f{bits} weak_odr {{\nentry(v0:f{bits},v1:f{bits},v2:ptr,v3:ptr):\n v4 = fcopysign v0,v1\n store v0,v2\n store v1,v3\n return v4\n}}\n"
+        );
+    }
     let module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     module
@@ -124,6 +132,8 @@ fn native_fabs_preserves_bits_and_mxcsr_with_live_inputs_and_spills() {
 #include <xmmintrin.h>
 extern float abs32(float, float *);
 extern double abs64(double, double *);
+extern float neg32(float,float*),copy32(float,float,float*,float*);
+extern double neg64(double,double*),copy64(double,double,double*,double*);
 int main(void) {
  const uint64_t d[]={0,1,0x000fffffffffffffULL,0x0010000000000000ULL,0x3ff0000000000000ULL,0x7fefffffffffffffULL,0x7ff0000000000000ULL,0x7ff8000000001234ULL,0x7ff0000000001234ULL};
  const uint32_t f[]={0,1,0x007fffff,0x00800000,0x3f800000,0x7f7fffff,0x7f800000,0x7fc01234,0x7f801234};
@@ -135,12 +145,28 @@ int main(void) {
    memcpy(&x,&bits,8);_mm_setcsr(state);double y=abs64(x,&out);
    unsigned flags=_mm_getcsr();memcpy(&got,&y,8);memcpy(&kept,&out,8);
    if(got!=d[i]||kept!=bits||flags!=state)return 1;
+   _mm_setcsr(state);y=neg64(x,&out);flags=_mm_getcsr();memcpy(&got,&y,8);memcpy(&kept,&out,8);
+   if(got!=(bits^0x8000000000000000ULL)||kept!=bits||flags!=state)return 3;
+   for(unsigned j=0;j<sizeof(d)/sizeof(d[0]);++j)for(int donor_sign=0;donor_sign<2;++donor_sign) {
+    uint64_t db=d[j]|((uint64_t)donor_sign<<63),ka,kb;double donor,oa,ob;
+    memcpy(&donor,&db,8);_mm_setcsr(state);y=copy64(x,donor,&oa,&ob);flags=_mm_getcsr();
+    memcpy(&got,&y,8);memcpy(&ka,&oa,8);memcpy(&kb,&ob,8);
+    if(got!=(d[i]|((uint64_t)donor_sign<<63))||ka!=bits||kb!=db||flags!=state)return 5;
+   }
   }
   for(unsigned i=0;i<sizeof(f)/sizeof(f[0]);++i) {
    uint32_t bits=f[i]|((uint32_t)sign<<31),got,kept; float x,out;
    memcpy(&x,&bits,4);_mm_setcsr(state);float y=abs32(x,&out);
    unsigned flags=_mm_getcsr();memcpy(&got,&y,4);memcpy(&kept,&out,4);
    if(got!=f[i]||kept!=bits||flags!=state)return 2;
+   _mm_setcsr(state);y=neg32(x,&out);flags=_mm_getcsr();memcpy(&got,&y,4);memcpy(&kept,&out,4);
+   if(got!=(bits^0x80000000U)||kept!=bits||flags!=state)return 4;
+   for(unsigned j=0;j<sizeof(f)/sizeof(f[0]);++j)for(int donor_sign=0;donor_sign<2;++donor_sign) {
+    uint32_t db=f[j]|((uint32_t)donor_sign<<31),ka,kb;float donor,oa,ob;
+    memcpy(&donor,&db,4);_mm_setcsr(state);y=copy32(x,donor,&oa,&ob);flags=_mm_getcsr();
+    memcpy(&got,&y,4);memcpy(&ka,&oa,4);memcpy(&kb,&ob,4);
+    if(got!=(f[i]|((uint32_t)donor_sign<<31))||ka!=bits||kb!=db||flags!=state)return 6;
+   }
   }
  }
  _mm_setcsr(saved);return 0;

@@ -977,8 +977,8 @@ struct FunctionCompiler<'a> {
     next_block: Option<Block>,
     out: Output,
     uses_trap: bool,
-    /// Scalar absolute-value masks referenced by this function (f32, f64).
-    fabs_masks: u8,
+    /// Scalar magnitude/sign masks referenced by this function (f32, f64).
+    float_masks: u8,
     /// Whether to emit `.loc` directives.
     debug: bool,
     unwind_tables: crate::UnwindTables,
@@ -1201,7 +1201,7 @@ impl<'a> FunctionCompiler<'a> {
             feature_error: None,
             out: Output::new(structured),
             uses_trap: false,
-            fabs_masks: 0,
+            float_masks: 0,
             debug: false,
             unwind_tables: crate::UnwindTables::All,
             function_sections: false,
@@ -1372,12 +1372,14 @@ impl<'a> FunctionCompiler<'a> {
         // Keep masks with their function, including function sections and COMDATs.
         // They follow the size and unwind range and are never executed.
         for (flag, suffix, bits) in [
-            (1, "32", 0x7fff_ffff_7fff_ffffu64),
-            (2, "64", 0x7fff_ffff_ffff_ffffu64),
+            (1, "fabs32", 0x7fff_ffff_7fff_ffffu64),
+            (2, "fabs64", 0x7fff_ffff_ffff_ffffu64),
+            (4, "sign32", 0x8000_0000_8000_0000u64),
+            (8, "sign64", 0x8000_0000_0000_0000u64),
         ] {
-            if self.fabs_masks & flag != 0 {
+            if self.float_masks & flag != 0 {
                 self.out.align(4);
-                self.out.label(format!(".L{name}_fabs{suffix}"));
+                self.out.label(format!(".L{name}_{suffix}"));
                 self.out.bytes(&bits.to_le_bytes());
                 self.out.bytes(&bits.to_le_bytes());
             }
@@ -3487,6 +3489,20 @@ impl<'a> FunctionCompiler<'a> {
         self.out.label(done);
     }
 
+    /// A 16-byte mask kept with the current function. `sign` selects sign-only
+    /// bits; otherwise every magnitude bit is set.
+    fn float_mask(&mut self, ty: Type, sign: bool) -> Memory {
+        let (flag, suffix) = match (ty == Type::F32, sign) {
+            (true, false) => (1, "fabs32"),
+            (false, false) => (2, "fabs64"),
+            (true, true) => (4, "sign32"),
+            (false, true) => (8, "sign64"),
+        };
+        self.float_masks |= flag;
+        let label = format!(".L{}_{suffix}", self.func.name);
+        sized(symbol_memory(rip(), &label, Modifier::None), 128)
+    }
+
     /// Float negation, absolute value and copysign flip or clear the sign
     /// bit; the rest are SSE instructions (`roundsd` is SSE4.1).
     fn float_unary(&mut self, inst: Inst, op: UnaryOp, arg: Value, d: u8) {
@@ -3503,29 +3519,21 @@ impl<'a> FunctionCompiler<'a> {
             Opcode::Movq
         };
         match op {
-            UnaryOp::Fabs if self.goal != crate::CodegenGoal::Size => {
-                let (flag, suffix, opcode) = if ty == Type::F32 {
-                    (1, "32", Opcode::Andps)
-                } else {
-                    (2, "64", Opcode::Andpd)
+            UnaryOp::Fabs | UnaryOp::Fneg if self.goal != crate::CodegenGoal::Size => {
+                let mask = self.float_mask(ty, op == UnaryOp::Fneg);
+                let (legacy, avx) = match (ty == Type::F32, op == UnaryOp::Fneg) {
+                    (true, false) => (Opcode::Andps, Opcode::Vandps),
+                    (false, false) => (Opcode::Andpd, Opcode::Vandpd),
+                    (true, true) => (Opcode::Xorps, Opcode::Vxorps),
+                    (false, true) => (Opcode::Xorpd, Opcode::Vxorpd),
                 };
-                self.fabs_masks |= flag;
-                let label = format!(".L{}_fabs{suffix}", self.func.name);
-                let mask = sized(symbol_memory(rip(), &label, Modifier::None), 128);
                 if self.features.avx {
-                    self.emit(
-                        if ty == Type::F32 {
-                            Opcode::Vandps
-                        } else {
-                            Opcode::Vandpd
-                        },
-                        [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(mask)],
-                    );
+                    self.emit(avx, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(mask)]);
                 } else {
                     if d != a {
                         self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
                     }
-                    self.emit(opcode, [asm_arg(xmm(d)), asm_arg(mask)]);
+                    self.emit(legacy, [asm_arg(xmm(d)), asm_arg(mask)]);
                 }
             }
             UnaryOp::Fneg | UnaryOp::Fabs => {
@@ -3590,6 +3598,32 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(opcode, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(xmm(b))]);
                 return;
             }
+        }
+
+        if op == BinaryOp::Fcopysign && self.goal != crate::CodegenGoal::Size {
+            let magnitude = self.float_mask(ty, false);
+            let sign = self.float_mask(ty, true);
+            let (and, or, vand, vor) = if ty == Type::F32 {
+                (Opcode::Andps, Opcode::Orps, Opcode::Vandps, Opcode::Vorps)
+            } else {
+                (Opcode::Andpd, Opcode::Orpd, Opcode::Vandpd, Opcode::Vorpd)
+            };
+            // Stage the donor sign before overwriting either source, including
+            // a destination coalesced with the donor or a spilled source.
+            if self.features.avx {
+                self.emit(vand, [asm_arg(xmm(FS2)), asm_arg(xmm(b)), asm_arg(sign)]);
+                self.emit(vand, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(magnitude)]);
+                self.emit(vor, [asm_arg(xmm(d)), asm_arg(xmm(d)), asm_arg(xmm(FS2))]);
+            } else {
+                self.emit(Opcode::Movaps, [asm_arg(xmm(FS2)), asm_arg(xmm(b))]);
+                self.emit(and, [asm_arg(xmm(FS2)), asm_arg(sign)]);
+                if d != a {
+                    self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
+                }
+                self.emit(and, [asm_arg(xmm(d)), asm_arg(magnitude)]);
+                self.emit(or, [asm_arg(xmm(d)), asm_arg(xmm(FS2))]);
+            }
+            return;
         }
 
         // Two-address, computed in xmm13 unless d is free to overwrite.

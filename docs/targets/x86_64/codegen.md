@@ -57,12 +57,15 @@ write the allocated destination directly, including when it aliases the second
 source, which removes two-address copies. Packed arithmetic keeps the written
 source order; only AND, OR and XOR sources may swap to reach a shorter VEX2
 encoding. There is no FMA contraction or reassociation, and min/max, NaN
-handling, negation, copysign, rounding and saturating conversions keep their
+handling, rounding and saturating conversions keep their
 SSE paths. Scalar upper XMM lanes are not IR values.
 
 Scalar f32/f64 absolute values use ANDPS/ANDPD with an aligned, RIP-relative
-sign-clear mask. With AVX they use the three-operand VANDPS/VANDPD form.
-Each function emits at most one 16-byte mask per precision, after its code and
+sign-clear mask. Negation uses XORPS/XORPD with a sign-only mask. Copysign
+masks the donor sign before writing the result, then combines it with the
+magnitude bits. AVX uses three-operand VANDPS/VANDPD, VXORPS/VXORPD and
+VORPS/VORPD. Each function emits at most one 16-byte mask per precision and
+mask kind, after its code and
 unwind range in the same section, so function-section and COMDAT retention
 keep code and masks together. The operations preserve NaN payload bits and do
 not alter MXCSR status flags, including with DAZ and FTZ enabled. The Size goal

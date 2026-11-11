@@ -214,11 +214,17 @@ results, observable reads and source-location boundaries retain separate loads.
 Both rotate their generated scalar tail despite its multiple guarded entries.
 Ordinary loop rotation keeps its existing admission rules.
 Full (`-O3`) instead runs `auto-loop-batch` on AArch64 and x86-64. It selects the
-scalar schedule for literal unsigned i64 trip counts of at least 32 elements
-whose byte count fits u64. This admits four complete batches before a tail.
+scalar schedule for unsigned i64 trip counts proven to be at least 32 elements.
+A literal count must have a byte count that fits u64. Existing dominating
+conditional edges may also establish the lower bound. The scoped query walks
+at most 128 dominator blocks and caps each expression lookup at 16 definitions. This admits four complete batches before a tail.
 The threshold is conservative policy, not a universal speed guarantee.
-Short counts, unknown counts and bounds known only through runtime guards stay
-scalar under this automatic rule. Other targets and tiers do not enable it.
+Short counts and counts without a proven lower bound stay scalar. Guards on
+only one incoming path supply no fact after a merge. Newly admitted guarded
+scalar batches omit byte-range and pointer-wrap checks because every read has
+its original scalar width and modular address. Packed batches retain those
+checks. Existing literal and explicit scalar batches retain their measured
+guard layout; deleting it can regress runtime through layout changes. Other targets and tiers do not enable it.
 Both explicit passes remain opt-in and retain their safety restrictions,
 including support for unknown counts. Select either before strength reduction and
 loop rotation, after stack promotion and scalar cleanup.

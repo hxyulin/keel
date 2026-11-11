@@ -132,7 +132,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
 | `fast-loop-dot` | Full-tier SIMD dot, sum-of-squares and squared-distance accumulation, only in `fast_math` functions |
-| `auto-loop-batch` | Full-tier native scalar batching for literal trip counts of at least 32, with representable byte counts |
+| `auto-loop-batch` | Full-tier native scalar batching for literal or dominating-guard lower bounds of at least 32 trips |
 | `loop-batch-scalar` (opt-in) | Experimental native scalar load schedule for ordered floating batches |
 | `loop-batch` (opt-in) | Batch contiguous floating sums and absolute values in scalar addition order |
 | `loop-dot` (opt-in) | Batch floating dot products while preserving scalar addition order; see [SIMD IR](simd-ir.md) |
@@ -737,6 +737,12 @@ functions per module are tiled. Functions with stack slots, source locations,
 special frame attributes, or a disabled vectorization policy decline.
 Modules with assembly decline. Other targets, Balanced, and Size do not run
 this transform. This is a bounded loop-nest recipe, not a general tiler.
+
+General loop interchange still needs loop-carried dependence and alias proofs.
+For example, changing column reductions to row traversal preserves each
+output's floating addition order, but changes when output stores happen.
+If output overlaps input, later reads can observe different values. Such a
+transform needs a nonoverlap proof or an alias-checked scalar fallback.
 
 ## Module cleanup
 

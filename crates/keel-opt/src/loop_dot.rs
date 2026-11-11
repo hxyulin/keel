@@ -94,7 +94,7 @@ impl crate::Pass for AutoLoopBatch {
         "auto-loop-batch"
     }
     fn description(&self) -> &'static str {
-        "batch proven long literal floating reductions"
+        "batch floating reductions with proven long trip counts"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Vectorize
@@ -131,22 +131,15 @@ fn run(f: &mut Function, context: &crate::OptimizationContext, mode: Mode) -> bo
     let mut changed = false;
     for header in f.blocks().collect::<Vec<_>>() {
         if let Some(c) = analyze(f, header, batching) {
-            if matches!(mode, Mode::Automatic)
-                && !int_const(f, c.bound).is_some_and(|n| {
-                    let n = n as u64;
-                    n >= AUTOMATIC_MIN_TRIP_COUNT
-                        && n.checked_mul(u64::from(
-                            c.shape
-                                .lane_type()
-                                .bytes()
-                                .expect("floating lane has a size"),
-                        ))
-                        .is_some()
-                })
-            {
-                continue;
-            }
-            transform(f, c, scalar);
+            let minimum = if matches!(mode, Mode::Automatic) {
+                let Some(minimum) = automatic_minimum(f, &c) else {
+                    continue;
+                };
+                minimum
+            } else {
+                0
+            };
+            transform(f, c, scalar, minimum);
             if batching {
                 crate::loop_rotate::rotate_batched_tail(f, header);
             }
@@ -154,6 +147,18 @@ fn run(f: &mut Function, context: &crate::OptimizationContext, mode: Mode) -> bo
         }
     }
     changed
+}
+
+fn automatic_minimum(f: &Function, c: &Candidate) -> Option<u64> {
+    let minimum = if let Some(n) = int_const(f, c.bound) {
+        let n = n as u64;
+        n.checked_mul(u64::from(c.shape.lane_type().bytes()?))?;
+        n
+    } else {
+        let pre = f.inst_block(c.entry);
+        crate::branch_facts::unsigned_at(f, pre, c.bound)?.0
+    };
+    (minimum >= AUTOMATIC_MIN_TRIP_COUNT).then_some(minimum)
 }
 
 struct Stream {
@@ -376,7 +381,7 @@ fn integer(f: &mut Function, block: Block, n: i64) -> Value {
 fn cmp(f: &mut Function, block: Block, cond: IntCC, a: Value, b: Value) -> Value {
     emit(f, block, D::Icmp { cond, args: [a, b] })
 }
-fn transform(f: &mut Function, c: Candidate, scalar: bool) {
+fn transform(f: &mut Function, c: Candidate, scalar: bool, minimum: u64) {
     let relaxed = f.attrs.fast_math && !matches!(c.product, Product::Sum | Product::Absolute);
     // Four independent recurrences amortize loop control without exhausting
     // the baseline register banks. Strict left folds retain eight elements.
@@ -410,44 +415,66 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
         .lane_type()
         .bytes()
         .expect("floating lane has a size");
-    let group = integer(f, gate, group_size);
-    let enough = cmp(f, gate, IntCC::Uge, bound, group);
-    f.append_inst(
-        gate,
-        D::Brif {
-            cond: enough,
-            dests: Box::new([
-                BlockCall {
+    if minimum >= group_size as u64 && int_const(f, c.bound).is_none() {
+        f.append_inst(
+            gate,
+            D::Jump {
+                dest: BlockCall {
                     block: guard,
                     args: vec![],
                 },
-                BlockCall {
-                    block: c.header,
-                    args: vec![c.zero, c.seed],
-                },
-            ]),
-        },
-    );
-    let shift = integer(f, guard, i64::from(bytes.trailing_zeros()));
-    let length = bin(f, guard, B::Shl, bound, shift);
-    let recovered = bin(f, guard, B::Ushr, length, shift);
-    let mut safe = cmp(f, guard, IntCC::Eq, recovered, bound);
-    // A vector load may not span a modular pointer wrap. The scalar fallback
-    // retains the original address arithmetic on ranges that fail this guard.
-    for stream in &c.streams {
-        let pointer = emit(
-            f,
-            guard,
-            D::Convert {
-                op: ConvertOp::PtrToInt,
-                ty: Type::I64,
-                arg: stream.base,
             },
         );
-        let end = bin(f, guard, B::Iadd, pointer, length);
-        let nowrap = cmp(f, guard, IntCC::Uge, end, pointer);
-        safe = bin(f, guard, B::And, safe, nowrap);
+    } else {
+        let group = integer(f, gate, group_size);
+        let enough = cmp(f, gate, IntCC::Uge, bound, group);
+        f.append_inst(
+            gate,
+            D::Brif {
+                cond: enough,
+                dests: Box::new([
+                    BlockCall {
+                        block: guard,
+                        args: vec![],
+                    },
+                    BlockCall {
+                        block: c.header,
+                        args: vec![c.zero, c.seed],
+                    },
+                ]),
+            },
+        );
     }
+    // Scalar reads have exactly the original modular addresses and widths.
+    // Only packed loads need a nonwrapping byte range to avoid widening a read
+    // across address-space wrap. Reordering remains limited to notrap/trap_ub.
+    // Preserve the measured layout of existing literal and explicit batches.
+    // Only newly admitted guarded scalar loops take the check-free path.
+    let guarded_scalar =
+        scalar && minimum >= AUTOMATIC_MIN_TRIP_COUNT && int_const(f, c.bound).is_none();
+    let safe = if guarded_scalar {
+        None
+    } else {
+        let shift = integer(f, guard, i64::from(bytes.trailing_zeros()));
+        let length = bin(f, guard, B::Shl, bound, shift);
+        let recovered = bin(f, guard, B::Ushr, length, shift);
+        let mut safe = cmp(f, guard, IntCC::Eq, recovered, bound);
+        for stream in &c.streams {
+            let pointer = emit(
+                f,
+                guard,
+                D::Convert {
+                    op: ConvertOp::PtrToInt,
+                    ty: Type::I64,
+                    arg: stream.base,
+                },
+            );
+            let end = bin(f, guard, B::Iadd, pointer, length);
+            let nowrap = cmp(f, guard, IntCC::Uge, end, pointer);
+            safe = bin(f, guard, B::And, safe, nowrap);
+        }
+        Some(safe)
+    };
     let group_shift = integer(f, guard, i64::from(group_size.trailing_zeros()));
     let groups = bin(f, guard, B::Ushr, bound, group_shift);
     let end = bin(f, guard, B::Shl, groups, group_shift);
@@ -472,22 +499,34 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool) {
         );
         initial.extend(accumulators.iter().map(|_| zero));
     }
-    f.append_inst(
-        guard,
-        D::Brif {
-            cond: safe,
-            dests: Box::new([
-                BlockCall {
+    if let Some(safe) = safe {
+        f.append_inst(
+            guard,
+            D::Brif {
+                cond: safe,
+                dests: Box::new([
+                    BlockCall {
+                        block: body,
+                        args: initial,
+                    },
+                    BlockCall {
+                        block: c.header,
+                        args: vec![c.zero, c.seed],
+                    },
+                ]),
+            },
+        );
+    } else {
+        f.append_inst(
+            guard,
+            D::Jump {
+                dest: BlockCall {
                     block: body,
                     args: initial,
                 },
-                BlockCall {
-                    block: c.header,
-                    args: vec![c.zero, c.seed],
-                },
-            ]),
-        },
-    );
+            },
+        );
+    }
     let mut products = Vec::new();
     if scalar {
         let addresses: Vec<_> = (0..group_size)
