@@ -490,3 +490,103 @@ fn column_tiles_preserve_native_order_footprints_and_aliasing() {
     ]));
     run(&mut Command::new(dir.join("spilled-oracle")));
 }
+
+#[test]
+fn strict_absolute_maps_and_scalar_products_keep_native_bits_and_footprints() {
+    if !cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )) {
+        eprintln!("SKIP: strict floating oracle requires AArch64 macOS or x86-64 Linux");
+        return;
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("strict-float-maps-products");
+    fs::create_dir_all(&dir).unwrap();
+    let mut kernels = String::from("double fabs(double); float fabsf(float);\n");
+    for (suffix, ty, abs) in [("d", "double", "fabs"), ("f", "float", "fabsf")] {
+        kernels.push_str(&format!("void map_{suffix}(const {ty} *a,{ty} *out,unsigned long n) {{for(unsigned long i=0;i<n;++i)out[i]={abs}(a[i]);}}\n{ty} dot_{suffix}(const {ty} *a,const {ty} *b,unsigned long n) {{{ty} s=0;for(unsigned long i=0;i<n;++i)s+=a[i]*b[i];return s;}}\n{ty} square_{suffix}(const {ty} *a,unsigned long n) {{{ty} s=0;for(unsigned long i=0;i<n;++i)s+=a[i]*a[i];return s;}}\n"));
+    }
+    fs::write(dir.join("kernels.c"), kernels).unwrap();
+    fs::write(dir.join("driver.c"), r#"
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#define TEST(S,T,U,MASK,...) \
+extern void map_##S(const T*,T*,unsigned long); \
+extern T dot_##S(const T*,const T*,unsigned long); \
+extern T square_##S(const T*,unsigned long); \
+static int test_##S(void) { \
+ U edges[]={__VA_ARGS__}; size_t page=(size_t)sysconf(_SC_PAGESIZE); \
+ unsigned char *p=mmap(0,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0); \
+ unsigned char *q=mmap(0,page*2,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0); \
+ if(p==MAP_FAILED||q==MAP_FAILED)return 10; \
+ if(mprotect(p+page,page,PROT_NONE)||mprotect(q+page,page,PROT_NONE))return 11; \
+ unsigned sizes[]={0,1,7,8,9,15,16,17,31,32,33,65}; \
+ for(unsigned z=0;z<sizeof sizes/sizeof *sizes;++z) { \
+  unsigned n=sizes[z]; T *a=(T*)(p+page)-n,*out=(T*)(q+page)-n; \
+  for(unsigned i=0;i<n;i++)memcpy(a+i,edges+i%(sizeof edges/sizeof *edges),sizeof(T)); \
+  map_##S(a,out,n); \
+  for(unsigned i=0;i<n;i++){U x,y;memcpy(&x,a+i,sizeof x);memcpy(&y,out+i,sizeof y);if(y!=(x&MASK))return 12;} \
+  /* Exact alias and both partial-overlap directions must match scalar stores. */ \
+  for(int delta=-1;delta<=1;++delta) { \
+   T actual[68],expected[68];for(unsigned i=0;i<68;++i)memcpy(actual+i,edges+i%(sizeof edges/sizeof *edges),sizeof(T)); \
+   memcpy(expected,actual,sizeof actual); \
+   for(unsigned i=0;i<n;i++){U x;memcpy(&x,expected+1+i,sizeof x);x&=MASK;memcpy(expected+1+delta+i,&x,sizeof x);} \
+   map_##S(actual+1,actual+1+delta,n);if(memcmp(actual,expected,sizeof actual))return 13; \
+  } \
+  T b[66]; for(unsigned i=0;i<n;++i){a[i]=(i%3==0?(T)16777216:i%3==1?(T)1:(T)-16777216);b[i]=(T)0.25;} \
+  volatile T sum=0,square=0;for(unsigned i=0;i<n;++i){volatile T product=a[i]*b[i],sq=a[i]*a[i];sum=sum+product;square=square+sq;} \
+  T d=dot_##S(a,b,n),s=square_##S(a,n),ref=sum,rs=square; \
+  if(memcmp(&d,&ref,sizeof d)||memcmp(&s,&rs,sizeof s))return 14; \
+ } \
+ munmap(p,page*2);munmap(q,page*2);return 0; }
+TEST(d,double,uint64_t,UINT64_C(0x7fffffffffffffff),UINT64_C(0x8000000000000000),UINT64_C(0x7ff0000000000042),UINT64_C(0xfff8000000000042),UINT64_C(1),UINT64_C(0xfff0000000000000),UINT64_C(0x3ff0000000000000))
+TEST(f,float,uint32_t,UINT32_C(0x7fffffff),UINT32_C(0x80000000),UINT32_C(0x7f800042),UINT32_C(0xffc00042),UINT32_C(1),UINT32_C(0xff800000),UINT32_C(0x3f800000))
+int main(void){int d=test_d();return d?d:test_f();}
+"#).unwrap();
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        run(Command::new(env!("CARGO_BIN_EXE_keel")).current_dir(&dir).args([
+            "cc", "--target", target, "--verify-each", "-p",
+            "simplify-cfg,canonicalize,stack-promote,instcombine,dce,loop-vectorize,loop-batch-scalar",
+            "--emit-ir", "kernels.c", "-o", "kernels.ir",
+        ]));
+        let ir = fs::read_to_string(dir.join("kernels.ir")).unwrap();
+        assert!(ir.contains("vfabs"), "{target}: {ir}");
+        assert!(
+            !ir.contains("vfmul"),
+            "{target}: scalar product schedule: {ir}"
+        );
+        run(Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args([
+                "compile",
+                "--target",
+                target,
+                "-O3",
+                "--verify-each",
+                "--emit-object",
+                "kernels.ir",
+                "-o",
+                "kernels.o",
+            ]));
+        let native = if cfg!(target_os = "macos") {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
+        if target == native {
+            run(Command::new("clang").current_dir(&dir).args([
+                "-O2",
+                "-fno-fast-math",
+                "-ffp-contract=off",
+                "driver.c",
+                "kernels.o",
+                "-o",
+                "oracle",
+            ]));
+            run(&mut Command::new(dir.join("oracle")));
+        }
+    }
+}

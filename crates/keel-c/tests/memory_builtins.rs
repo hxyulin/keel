@@ -2,6 +2,8 @@
 mod absolute;
 #[path = "memory_builtins/checked_memory_safe.rs"]
 mod checked_memory_safe;
+#[path = "memory_builtins/copysign.rs"]
+mod copysign;
 #[path = "memory_builtins/memcmp_builtin_equality.rs"]
 mod memcmp_builtin_equality;
 #[path = "memory_builtins/memory.rs"]

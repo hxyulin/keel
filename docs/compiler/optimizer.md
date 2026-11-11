@@ -502,6 +502,9 @@ handle markers see the registry's `Barrier` effect. Functions with debugger-visi
 excluded, because a debugger can edit a home between source locations.
 Alignment, `notrap` and `trap_ub` never establish alias freedom.
 `loop-vectorize` may reorder accesses whose fault is undefined behavior.
+Strict floating maps admit lane-wise add, subtract, multiply, divide and absolute
+value without reassociation. Absolute-value maps use the existing range and
+alias guards, including the scalar fallback for partial overlap.
 The `instcombine` byte-load rule may combine two such reads over their exact
 byte footprint; it neither reads extra bytes nor crosses another memory access.
 
@@ -734,7 +737,8 @@ Recognition rejects unmatched effects, volatile or observably faulting
 accesses, nonzero seeds, source metadata, stack objects and special frame or
 ABI contracts. Modules with assembly decline. At most four functions are
 transformed per invocation. This is a bounded column-sum recipe, not general
-loop interchange. It remains opt-in because the wrapper and changed fallback
+loop interchange. A leading dimension guard currently prevents recognition, even when it proves
+the helper's size range. It remains opt-in because the wrapper and changed fallback
 layout can slow small matrices; no optimization tier schedules it.
 
 ## Guarded matrix tiling

@@ -208,7 +208,13 @@ reassociated, even in `fast_math` functions. Input and accumulator types must
 match. Integer-to-float and f32-to-f64 reductions are not admitted. Calls,
 stores, observable loads, other recurrences and debugger metadata stay scalar.
 The experimental `loop-batch-scalar` variant uses eight scalar
-loads and scalar absolute values, without vector extraction. On AArch64, adjacent proven
+loads and scalar absolute values, without vector extraction. It also admits
+strict dot products and squares, preserving each multiply and the original
+addition order. The scalar product schedule forms each product before loading
+the next pair on x86 to limit live source registers; AArch64 groups the reads.
+Repeated reads of the same square stream share one load. These product recipes
+remain opt-in; `auto-loop-batch` still admits only sums and absolute-value sums.
+On AArch64, adjacent proven
 floating reads can lower to register-pair loads after allocation. Spilled
 results, observable reads and source-location boundaries retain separate loads.
 Both rotate their generated scalar tail despite its multiple guarded entries.

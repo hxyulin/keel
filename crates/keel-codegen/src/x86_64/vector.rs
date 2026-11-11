@@ -282,7 +282,8 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
                 arg,
             } => func.value_type(*arg) == Type::Vector(VectorType::I64x2),
             InstData::VectorUnary {
-                op: UnaryOp::Fsqrt, ..
+                op: UnaryOp::Fsqrt | UnaryOp::Fabs,
+                ..
             } => true,
             _ => false,
         }

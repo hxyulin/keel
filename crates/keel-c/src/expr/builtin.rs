@@ -71,6 +71,14 @@ impl<'a> Parser<'a> {
                 self.builtin_call(Builtin::Abs, &[ty], ty, loc)
             }
             "fabs" | "fabsf" | "fabsl" => self.fabs(base, loc),
+            "copysign" | "copysignf" => {
+                let ty = if base == "copysignf" {
+                    Ty::Float
+                } else {
+                    Ty::Double
+                };
+                self.builtin_call(Builtin::Copysign, &[ty, ty], ty, loc)
+            }
             "bswap16" => self.builtin_call(
                 Builtin::Bswap,
                 &[Ty::Int(IntKind::UShort)],

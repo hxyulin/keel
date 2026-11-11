@@ -956,3 +956,32 @@ mod x86_avx512_vl_widen;
 
 #[path = "vector_x86/x86_avx512_vl_narrow.rs"]
 mod x86_avx512_vl_narrow;
+
+#[test]
+fn packed_absolute_uses_one_mask_operation_with_live_sources_and_spills() {
+    for (shape, and) in [("f32x4", "andps"), ("f64x2", "andpd")] {
+        let source = format!(
+            "func @absolute(ptr,ptr) {{\nblock0(v0:ptr,v1:ptr):\n v2 = load.{shape} align 1 v0\n v3 = vfabs v2\n store align 1 v3,v1\n v4 = iconst.i64 16\n v5 = ptradd v1,v4\n store align 1 v2,v5\n return\n}}"
+        );
+        for level in [CpuLevel::V1, CpuLevel::V3] {
+            for selection in [SelectionTier::Baseline, SelectionTier::Full] {
+                for pools in [&keel_codegen::x86_64::REGISTERS, &SPILLED] {
+                    let (text, _) = compile_with_pools(
+                        &source,
+                        selection,
+                        AllocationTier::Full,
+                        pools,
+                        Features::for_level(level),
+                    );
+                    let mnemonic = if level == CpuLevel::V3 {
+                        format!("\tv{and}\t")
+                    } else {
+                        format!("\t{and}\t")
+                    };
+                    assert_eq!(text.matches(&mnemonic).count(), 1, "{text}");
+                    assert!(!text.contains("\tbtr\t"), "{text}");
+                }
+            }
+        }
+    }
+}

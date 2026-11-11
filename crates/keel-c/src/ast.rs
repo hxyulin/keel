@@ -198,6 +198,8 @@ pub enum Builtin {
     Memory(Intrinsic),
     Bswap,
     Fabs,
+    /// Copy the sign bit without floating-point arithmetic.
+    Copysign,
     /// Signed integer absolute value; MIN retains its wrapped bit pattern.
     Abs,
     /// The sign bit of a float, as an `int`: 1 for -0.0 and negative NaNs

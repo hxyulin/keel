@@ -130,7 +130,12 @@ fn run(f: &mut Function, context: &crate::OptimizationContext, mode: Mode) -> bo
     }
     let mut changed = false;
     for header in f.blocks().collect::<Vec<_>>() {
-        if let Some(c) = analyze(f, header, batching) {
+        if let Some(mut c) = analyze(f, header, batching).or_else(|| {
+            // Product schedules are experimental and require the explicit scalar pass.
+            matches!(mode, Mode::Scalar)
+                .then(|| analyze(f, header, false))
+                .flatten()
+        }) {
             let minimum = if matches!(mode, Mode::Automatic) {
                 let Some(minimum) = automatic_minimum(f, &c) else {
                     continue;
@@ -139,7 +144,21 @@ fn run(f: &mut Function, context: &crate::OptimizationContext, mode: Mode) -> bo
             } else {
                 0
             };
-            transform(f, c, scalar, minimum);
+            // C can load a square input twice before load reuse runs.
+            if matches!(mode, Mode::Scalar)
+                && matches!(c.product, Product::Multiply)
+                && c.streams[0].base == c.streams[1].base
+            {
+                c.product = Product::Square;
+                c.streams.truncate(1);
+            }
+            transform(
+                f,
+                c,
+                scalar,
+                minimum,
+                context.target == crate::VectorTarget::X86Sse2,
+            );
             if batching {
                 crate::loop_rotate::rotate_batched_tail(f, header);
             }
@@ -381,8 +400,9 @@ fn integer(f: &mut Function, block: Block, n: i64) -> Value {
 fn cmp(f: &mut Function, block: Block, cond: IntCC, a: Value, b: Value) -> Value {
     emit(f, block, D::Icmp { cond, args: [a, b] })
 }
-fn transform(f: &mut Function, c: Candidate, scalar: bool, minimum: u64) {
-    let relaxed = f.attrs.fast_math && !matches!(c.product, Product::Sum | Product::Absolute);
+fn transform(f: &mut Function, c: Candidate, scalar: bool, minimum: u64, x86: bool) {
+    let relaxed =
+        !scalar && f.attrs.fast_math && !matches!(c.product, Product::Sum | Product::Absolute);
     // Four independent recurrences amortize loop control without exhausting
     // the baseline register banks. Strict left folds retain eight elements.
     let group_size: i64 = if relaxed {
@@ -529,15 +549,19 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool, minimum: u64) {
     }
     let mut products = Vec::new();
     if scalar {
-        let addresses: Vec<_> = (0..group_size)
-            .map(|lane| {
-                let delta = integer(f, body, lane * i64::from(bytes));
-                bin(f, body, B::Ptradd, pointers[0], delta)
+        let addresses: Vec<Vec<_>> = pointers
+            .iter()
+            .map(|&pointer| {
+                (0..group_size)
+                    .map(|lane| {
+                        let delta = integer(f, body, lane * i64::from(bytes));
+                        bin(f, body, B::Ptradd, pointer, delta)
+                    })
+                    .collect()
             })
             .collect();
-        for addr in addresses {
-            let stream = &c.streams[0];
-            let input = emit(
+        let load = |f: &mut Function, addr, stream: &Stream| {
+            emit(
                 f,
                 body,
                 D::Load {
@@ -548,8 +572,46 @@ fn transform(f: &mut Function, c: Candidate, scalar: bool, minimum: u64) {
                         ..stream.flags
                     },
                 },
-            );
-            products.push(input);
+            )
+        };
+        let product = |f: &mut Function, inputs: &[Value]| {
+            let a = inputs[0];
+            match c.product {
+                Product::Sum | Product::Absolute => a,
+                Product::Multiply => bin(f, body, B::Fmul, a, inputs[1]),
+                Product::Square => bin(f, body, B::Fmul, a, a),
+                Product::SquaredDifference => {
+                    let d = bin(f, body, B::Fsub, a, inputs[1]);
+                    bin(f, body, B::Fmul, d, d)
+                }
+            }
+        };
+        if x86 && !matches!(c.product, Product::Sum | Product::Absolute) {
+            // Form each product before reading the next pair. Sixteen live
+            // source lanes spill in the baseline x86 floating register bank.
+            for lane in 0..group_size as usize {
+                let inputs: Vec<_> = addresses
+                    .iter()
+                    .zip(&c.streams)
+                    .map(|(addresses, stream)| load(f, addresses[lane], stream))
+                    .collect();
+                products.push(product(f, &inputs));
+            }
+        } else {
+            let inputs: Vec<Vec<_>> = addresses
+                .into_iter()
+                .zip(&c.streams)
+                .map(|(addresses, stream)| {
+                    addresses
+                        .into_iter()
+                        .map(|addr| load(f, addr, stream))
+                        .collect()
+                })
+                .collect();
+            for lane in 0..group_size as usize {
+                let lane_inputs: Vec<_> = inputs.iter().map(|stream| stream[lane]).collect();
+                products.push(product(f, &lane_inputs));
+            }
         }
         if matches!(c.product, Product::Absolute) {
             for input in &mut products {

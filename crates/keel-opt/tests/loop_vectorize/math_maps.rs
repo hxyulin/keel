@@ -106,3 +106,31 @@ fn packed_arithmetic_chains_unroll_with_guarded_tails_and_respect_policy() {
         }
     }
 }
+
+#[test]
+fn strict_absolute_maps_keep_alias_fallback_and_tails() {
+    for ty in [Type::F32, Type::F64] {
+        let source =
+            kernel(ty, Type::I64, "fadd", false).replace("v17 = fadd v15,v16", "v17 = fabs v15");
+        // Drop the now-unused second stream before recognition.
+        let source = source
+            .replace(" v14 = ptradd v2,v11\n", "")
+            .replace(&format!(" v16 = load.{ty} trap_ub v14\n"), "");
+        let original = keel_ir::parse(&source).unwrap();
+        for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+            let optimized = optimize(&source, target);
+            assert!(optimized.to_string().contains("vfabs"), "{optimized}");
+            for n in [0, 1, 7, 8, 15, 16, 17, 37] {
+                for overlap in [None, Some(0), Some(1)] {
+                    assert_eq!(
+                        execute(&optimized, ty, n, overlap),
+                        execute(&original, ty, n, overlap)
+                    );
+                }
+            }
+            let mut twice = optimized.clone();
+            keel_opt::run_passes_for_target(&mut twice, &["loop-vectorize"], target).unwrap();
+            assert_eq!(twice.to_string(), optimized.to_string());
+        }
+    }
+}

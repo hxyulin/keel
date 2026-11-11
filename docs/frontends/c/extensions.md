@@ -10,14 +10,16 @@ Hosted native C compilation recognizes direct calls to canonical external
 `memcpy`, `memmove` and `memset` declarations as memory intrinsics, and calls to
 `sqrt`, `sqrtf` and `sqrtl` as the IR `fsqrt` operation.
 `abs`, `labs` and `llabs` become integer compare/negate/select operations;
-`fabs`, `fabsf` and `fabsl` become the IR `fabs` operation. The library
+`fabs`, `fabsf` and `fabsl` become the IR `fabs` operation.
+`copysign`, `copysignf` and `copysignl` become the IR `fcopysign` operation.
+The library
 API's `compile` and `compile_with_binding` entry points use this hosted policy.
 `compile_with_policies` accepts `LibraryBuiltins` for explicit control. The bounded
 Wasm profile remains freestanding and does not recognize ordinary library calls.
 
 Recognition uses declaration identity and types after parsing the complete
 translation unit. All declarations must retain the canonical native LP64
-prototype, including pointer qualifiers and `unsigned long` size. `sqrtl` and `fabsl` are
+prototype, including pointer qualifiers and `unsigned long` size. `sqrtl`, `fabsl` and `copysignl` are
 recognized only on Darwin, where `long double` is `double`. Typedef aliases
 and top-level parameter `restrict` do not prevent recognition. Definitions,
 static or weak bindings, renamed linker symbols, multiple C names for one linker
@@ -35,7 +37,9 @@ Taking a function's address still produces the library function's address.
 are `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
 `-fno-builtin-sqrt`, `-fno-builtin-sqrtf`, `-fno-builtin-sqrtl`,
 `-fno-builtin-abs`, `-fno-builtin-labs`, `-fno-builtin-llabs`,
-`-fno-builtin-fabs`, `-fno-builtin-fabsf` and `-fno-builtin-fabsl`.
+`-fno-builtin-fabs`, `-fno-builtin-fabsf`, `-fno-builtin-fabsl`,
+`-fno-builtin-copysign`, `-fno-builtin-copysignf` and
+`-fno-builtin-copysignl`.
 `-ffreestanding` sets `__STDC_HOSTED__` to zero and disables ordinary recognition;
 `-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
 reenables global recognition without changing `__STDC_HOSTED__`. Later global
@@ -47,6 +51,11 @@ Absolute-value arguments are evaluated once. Integer absolute value is defined
 for representable magnitudes; the signed minimum has no positive value in its
 return type. Floating absolute value clears the sign, including for negative
 zero, without requiring fast math or disabling errno preservation.
+
+Copy-sign operations preserve the magnitude bits of the first argument and the
+sign bit of the second, including signed zeros and NaN payloads. Explicit
+`__builtin_copysign` and `__builtin_copysignf` keep these semantics when ordinary
+builtin recognition is disabled. Both arguments are evaluated once.
 
 Arguments are evaluated once even for zero-length operations. Small fixed-size
 intrinsics may become direct loads/stores; larger or dynamic operations can call

@@ -17,6 +17,12 @@ pub enum LibraryBuiltin {
     Fabsf,
     /// Absolute value of a `long double` with the `double` format.
     Fabsl,
+    /// Copy the sign of a `double`.
+    Copysign,
+    /// Copy the sign of a `float`.
+    Copysignf,
+    /// Copy the sign of a `long double` with the `double` format.
+    Copysignl,
     /// Copy bytes between nonoverlapping regions.
     Memcpy,
     /// Copy bytes while allowing overlap.
@@ -33,13 +39,16 @@ pub enum LibraryBuiltin {
 
 impl LibraryBuiltin {
     /// Every operation, in the order of their `-fno-builtin-` names.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 15] = [
         Self::Abs,
         Self::Labs,
         Self::Llabs,
         Self::Fabs,
         Self::Fabsf,
         Self::Fabsl,
+        Self::Copysign,
+        Self::Copysignf,
+        Self::Copysignl,
         Self::Memcpy,
         Self::Memmove,
         Self::Memset,
@@ -57,6 +66,9 @@ impl LibraryBuiltin {
             Self::Fabs => "fabs",
             Self::Fabsf => "fabsf",
             Self::Fabsl => "fabsl",
+            Self::Copysign => "copysign",
+            Self::Copysignf => "copysignf",
+            Self::Copysignl => "copysignl",
             Self::Memcpy => "memcpy",
             Self::Memmove => "memmove",
             Self::Memset => "memset",
@@ -96,15 +108,22 @@ impl LibraryBuiltin {
                 Self::Abs => Ty::Int(IntKind::Int),
                 Self::Labs => Ty::Int(IntKind::Long),
                 Self::Llabs => Ty::Int(IntKind::LLong),
-                Self::Fabsf | Self::Sqrtf => Ty::Float,
+                Self::Fabsf | Self::Sqrtf | Self::Copysignf => Ty::Float,
                 _ => Ty::Double,
+            };
+            let arity = if matches!(self, Self::Copysign | Self::Copysignf | Self::Copysignl) {
+                2
+            } else {
+                1
             };
             return f.has_prototype()
                 && !f.variadic
                 && !f.microsoft_x64
                 && f.ret == scalar
-                && f.params == [scalar]
-                && f.param_quals == [&[] as &[u8]];
+                && f.params.len() == arity
+                && f.params.iter().all(|ty| *ty == scalar)
+                && f.param_quals.len() == arity
+                && f.param_quals.iter().all(|q| q.is_empty());
         }
         const COPY_QUALIFIERS: &[&[u8]] = &[&[0], &[1], &[]];
         const FILL_QUALIFIERS: &[&[u8]] = &[&[0], &[], &[]];

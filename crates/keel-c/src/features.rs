@@ -163,6 +163,8 @@ fn builtin(name: &str, target: Target) -> bool {
             | "labs"
             | "llabs"
             | "fabs"
+            | "copysign"
+            | "copysignf"
             | "fabsf"
             | "fabsl"
             | "bswap16"

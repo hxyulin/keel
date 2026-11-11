@@ -386,6 +386,12 @@ impl Analyze<'_> {
                 self.c.stream_bytes = bytes;
                 self.address(addr)?;
             }
+            D::Unary {
+                op: keel_ir::UnaryOp::Fabs,
+                arg,
+            } => {
+                self.expression_width(arg, depth + 1, shape)?;
+            }
             // Native packed square root preserves each lane's arithmetic.
             // Restrict the new recipe to explicit fast-math functions so strict
             // compilation retains its existing scheduling and generated code.
@@ -2041,10 +2047,10 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
                     }
                 }
                 D::Unary {
-                    op: keel_ir::UnaryOp::Fsqrt,
+                    op: op @ (keel_ir::UnaryOp::Fsqrt | keel_ir::UnaryOp::Fabs),
                     arg,
                 } if result.is_some_and(|v| c.vectors.contains(&v)) => D::VectorUnary {
-                    op: keel_ir::UnaryOp::Fsqrt,
+                    op,
                     arg: mapping[&f.resolve(arg)],
                 },
                 D::Binary { op, args } if result.is_some_and(|v| c.vectors.contains(&v)) => {

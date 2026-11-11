@@ -45,6 +45,29 @@ impl FunctionCompiler<'_> {
                 self.def_done(result, d);
             }
             InstData::VectorUnary {
+                op: UnaryOp::Fabs,
+                arg,
+            } => {
+                let d = self.def_freg(result);
+                let a = self.use_freg(arg, FS0);
+                let ty = self.ty(arg).vector().unwrap().lane_type();
+                let mask = self.float_mask(ty, false);
+                let (legacy, avx) = if ty == Type::F32 {
+                    (Opcode::Andps, Opcode::Vandps)
+                } else {
+                    (Opcode::Andpd, Opcode::Vandpd)
+                };
+                if self.features.avx {
+                    self.emit(avx, [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(mask)]);
+                } else {
+                    if d != a {
+                        self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
+                    }
+                    self.emit(legacy, [asm_arg(xmm(d)), asm_arg(mask)]);
+                }
+                self.def_done(result, d);
+            }
+            InstData::VectorUnary {
                 op: UnaryOp::Fsqrt,
                 arg,
             } => {

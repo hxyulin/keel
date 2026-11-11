@@ -112,7 +112,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 && !global.incompatible_return
                 && (!matches!(
                     operation,
-                    crate::LibraryBuiltin::Sqrtl | crate::LibraryBuiltin::Fabsl
+                    crate::LibraryBuiltin::Sqrtl
+                        | crate::LibraryBuiltin::Fabsl
+                        | crate::LibraryBuiltin::Copysignl
                 ) || self.g.p.target == keel_ir::Target::Aarch64AppleDarwin)
             {
                 return match operation.intrinsic() {
@@ -124,6 +126,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                         crate::LibraryBuiltin::Fabs
                         | crate::LibraryBuiltin::Fabsf
                         | crate::LibraryBuiltin::Fabsl => self.builtin(Builtin::Fabs, args, e),
+                        crate::LibraryBuiltin::Copysign
+                        | crate::LibraryBuiltin::Copysignf
+                        | crate::LibraryBuiltin::Copysignl => {
+                            self.builtin(Builtin::Copysign, args, e)
+                        }
                         _ => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
                     },
                 };

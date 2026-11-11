@@ -533,3 +533,47 @@ fn a_guard_on_only_one_incoming_path_does_not_admit_batching() {
         assert_eq!(automatic(&src, target).to_string(), original.to_string());
     }
 }
+
+#[test]
+fn explicit_scalar_product_batches_keep_order_and_automatic_policy() {
+    for ty in ["f32", "f64"] {
+        for square in [false, true] {
+            let src = if square {
+                source(ty)
+                    .replace(
+                        &format!(" v12 = ptradd v1,v9\n v13 = load.{ty} trap_ub v12\n"),
+                        "",
+                    )
+                    .replace("fmul v11,v13", "fmul v11,v11")
+            } else {
+                source(ty)
+            };
+            let original = keel_ir::parse(&src).unwrap();
+            for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+                let mut m = original.clone();
+                keel_opt::run_passes_for_target(&mut m, &["loop-batch-scalar"], target).unwrap();
+                keel_ir::verify_module(&m).unwrap();
+                assert_ne!(m.to_string(), original.to_string());
+                assert!(!m.to_string().contains("vfmul"));
+                for n in [0, 1, 7, 8, 9, 31, 32, 33, 65] {
+                    let a: Vec<_> = (0..n)
+                        .map(|i| match i % 4 {
+                            0 => 16777216.,
+                            1 => 1.,
+                            2 => -16777216.,
+                            _ => -0.,
+                        })
+                        .collect();
+                    let b = vec![1.; n];
+                    for seed in [0., -0., 3.] {
+                        assert_eq!(execute(&m, &a, &b, seed), execute(&original, &a, &b, seed));
+                    }
+                }
+                let mut automatic = original.clone();
+                keel_opt::run_passes_for_target(&mut automatic, &["auto-loop-batch"], target)
+                    .unwrap();
+                assert_eq!(automatic.to_string(), original.to_string());
+            }
+        }
+    }
+}
