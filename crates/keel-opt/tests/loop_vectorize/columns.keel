@@ -1,0 +1,37 @@
+func @columns(ptr, ptr, i64) cc(c) {
+block0(v0: ptr, v1: ptr, v2: i64):
+    v3 = iconst.i64 0
+    jump block1(v3)
+block1(v4: i64):
+    v6 = icmp.ugt v2, v4
+    brif v6, block2, block4
+block2:
+    v7 = fconst.f64 0.0
+    v8 = iconst.i64 0
+    jump block5(v8, v7)
+block4:
+    return
+block5(v9: i64, v12: f64):
+    v11 = icmp.ugt v2, v9
+    brif v11, block6, block8
+block6:
+    v14 = imul v2, v9
+    v16 = iadd v4, v14
+    v32 = iconst.i64 3
+    v18 = shl v16, v32
+    v19 = ptradd v0, v18
+    v20 = load.f64 trap_ub v19
+    v21 = fadd v12, v20
+    v22 = iconst.i64 1
+    v23 = iadd v9, v22
+    jump block5(v23, v21)
+block8:
+    v33 = iconst.i64 3
+    v28 = shl v4, v33
+    v29 = ptradd v1, v28
+    store trap_ub v12, v29
+    v30 = iconst.i64 1
+    v31 = iadd v4, v30
+    jump block1(v31)
+}
+

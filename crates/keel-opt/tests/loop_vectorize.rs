@@ -947,3 +947,5 @@ fn short_maps_branch_to_scalar_before_pointer_safety_checks() {
         }
     }
 }
+#[path = "loop_vectorize/columns.rs"]
+mod columns;

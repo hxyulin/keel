@@ -26,6 +26,7 @@ mod constant_args;
 mod constant_data;
 mod counted_loop;
 mod devirtualize;
+mod loop_columns;
 mod loop_matmul;
 mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
@@ -446,6 +447,7 @@ pub(crate) static UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::UnusedFunctions
 pub(crate) static COMPACT_UNUSED_FUNCTIONS: &dyn Pass = &module_cleanup::CompactUnusedFunctions;
 pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
     &private_aggregate::PrivateAggregateCleanup;
+pub(crate) static LOOP_COLUMNS: &dyn Pass = &loop_columns::LoopColumns;
 pub(crate) static LOOP_MATMUL: &dyn Pass = &loop_matmul::LoopMatmul;
 pub(crate) static DEVIRTUALIZE: &dyn Pass = &devirtualize::Devirtualize;
 pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize;
@@ -511,6 +513,7 @@ pub static PASSES: &[&dyn Pass] = &[
     INLINE_SIZE,
     DEVIRTUALIZE,
     LOOP_MATMUL,
+    LOOP_COLUMNS,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

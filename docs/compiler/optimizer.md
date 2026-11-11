@@ -143,6 +143,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `loop-matmul` | Guarded four-column tiling of bounded wrapping i32 matrix products on AArch64 |
+| `loop-column-reduce` (opt-in) | Alias-checked register tiles for square f32/f64 column sums on native 64-bit targets |
 | `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
@@ -711,6 +712,30 @@ nonzero-addend entries, unsupported targets, volatile loads and modules with
 assembly decline. At most eight sites per function are versioned. Call-site
 contracts and function mutation policies are preserved. Balanced and Size do
 not run this pass.
+
+## Ordered column-reduction tiles
+
+The opt-in `loop-column-reduce` pass recognizes a complete square f32/f64
+column sum with three ordinary arguments: input pointer, output pointer and
+unsigned i64 dimension. Each output starts at positive zero and folds
+`input[row*n + column]` in increasing row order. Input and accumulator types
+must match. Run the pass after scalar stack promotion and combining, before
+loop strength reduction or rotation.
+
+The guarded helper runs only for `128 <= n <= 1048576`, nonwrapping matrix
+and output byte ranges, and disjoint input/output ranges. The upper limit
+keeps dimension products and byte lengths representable. It holds four
+128-bit accumulators, covering eight f64 or sixteen f32 columns per tile.
+Each lane retains the original row order; completed tiles are stored once.
+Remaining columns use scalar folds. The helper never reads output memory.
+
+The original graph handles small dimensions, overlap and failed range checks.
+Recognition rejects unmatched effects, volatile or observably faulting
+accesses, nonzero seeds, source metadata, stack objects and special frame or
+ABI contracts. Modules with assembly decline. At most four functions are
+transformed per invocation. This is a bounded column-sum recipe, not general
+loop interchange. It remains opt-in because the wrapper and changed fallback
+layout can slow small matrices; no optimization tier schedules it.
 
 ## Guarded matrix tiling
 

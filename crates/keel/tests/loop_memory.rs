@@ -314,3 +314,179 @@ fn automatic_literal_batches_match_the_native_strict_driver() {
         }
     }
 }
+
+#[test]
+fn column_tiles_preserve_native_order_footprints_and_aliasing() {
+    if !cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )) {
+        eprintln!("SKIP: column-reduction oracle requires AArch64 macOS or x86-64 Linux");
+        return;
+    }
+    let pipeline = format!(
+        "simplify-cfg,canonicalize,stack-promote,instcombine,dce,loop-column-reduce,{}",
+        keel_opt::DEFAULT_PIPELINE.join(",")
+    );
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("column-tiles");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("columns.c"),
+        include_str!("../../../suite/c/fastmath/columns.c"),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("driver.c"),
+        include_str!("../../../suite/c/fastmath/columns_driver.c"),
+    )
+    .unwrap();
+    run(Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args([
+            "cc",
+            "-O3",
+            "-p",
+            &pipeline,
+            "--verify-each",
+            "--emit-object",
+            "--opt-disable",
+            "loop-column-reduce",
+            "-Dcol64=baseline64",
+            "-Dcol32=baseline32",
+            "columns.c",
+            "-o",
+            "baseline.o",
+        ]));
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        run(Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args([
+                "cc",
+                "-O3",
+                "-p",
+                &pipeline,
+                "--verify-each",
+                "--target",
+                target,
+                "--emit-object",
+                "columns.c",
+                "-o",
+                "cross.o",
+            ]));
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args(["cc", "-O3", "-p", &pipeline, "--emit-ir", "columns.c"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout)
+            .matches("func @__keel_columns_")
+            .count(),
+        2,
+        "transform did not reach both C kernels"
+    );
+    let disabled = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args([
+            "cc",
+            "-O3",
+            "-p",
+            &pipeline,
+            "-fno-vectorize",
+            "--emit-ir",
+            "columns.c",
+        ])
+        .output()
+        .unwrap();
+    assert!(disabled.status.success());
+    assert!(!String::from_utf8_lossy(&disabled.stdout).contains("__keel_columns_"));
+    let normal = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args(["cc", "-O3", "--emit-ir", "columns.c"])
+        .output()
+        .unwrap();
+    assert!(normal.status.success());
+    assert!(
+        !String::from_utf8_lossy(&normal.stdout).contains("__keel_columns_"),
+        "column tiling remains opt-in"
+    );
+    run(Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args([
+            "cc",
+            "-O3",
+            "-p",
+            &pipeline,
+            "--verify-each",
+            "--emit-object",
+            "columns.c",
+            "-o",
+            "fast.o",
+        ]));
+    let text = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args(["cc", "-O3", "-p", &pipeline, "columns.c"])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let assembly = std::str::from_utf8(&text.stdout).unwrap();
+    let parsed = if cfg!(target_arch = "x86_64") {
+        keel_asm::x86::assemble_object(assembly).unwrap()
+    } else {
+        keel_asm::assemble_object(assembly).unwrap()
+    };
+    assert_eq!(fs::read(dir.join("fast.o")).unwrap(), parsed);
+    run(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "driver.c",
+        "baseline.o",
+        "fast.o",
+        "-o",
+        "oracle",
+    ]));
+    run(&mut Command::new(dir.join("oracle")));
+    // Exercise the helper's four vector recurrences through stack-only allocation.
+    let module = keel_ir::parse(std::str::from_utf8(&out.stdout).unwrap()).unwrap();
+    let pools = keel_codegen::Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let pipeline = keel_codegen::CodegenPipeline {
+        selector: &keel_codegen::SelectionTier::Full,
+        allocator: &keel_codegen::regalloc::AllocationTier::Full,
+    };
+    let target = if cfg!(target_arch = "x86_64") {
+        keel_codegen::Target::X86_64LinuxGnu
+    } else {
+        keel_codegen::Target::Aarch64AppleDarwin
+    };
+    let request = keel_codegen::Request::new(target, pipeline).pools(&pools);
+    let program = request.program(&module).unwrap();
+    let object = if cfg!(target_arch = "x86_64") {
+        keel_asm::x86::assemble_program_object(&program).unwrap()
+    } else {
+        keel_asm::assemble_program_object(&program, Default::default()).unwrap()
+    };
+    fs::write(dir.join("spilled.o"), object).unwrap();
+    run(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-fast-math",
+        "-ffp-contract=off",
+        "driver.c",
+        "baseline.o",
+        "spilled.o",
+        "-o",
+        "spilled-oracle",
+    ]));
+    run(&mut Command::new(dir.join("spilled-oracle")));
+}

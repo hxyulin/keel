@@ -112,5 +112,62 @@ class OrderedPlacementTests(unittest.TestCase):
         self.assertTrue(result.endswith('_sum64:\nret\n'))
 
 
+
+@unittest.skipUnless(shutil.which('clang'), 'Clang required')
+class ColumnDriverTests(unittest.TestCase):
+    def exercise(self, transform):
+        source = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            baseline = work / 'baseline.o'
+            subprocess.run(['clang', '-O3', '-fno-fast-math', '-ffp-contract=off',
+                            '-Dcol64=baseline64', '-Dcol32=baseline32', '-c',
+                            str(source / 'columns.c'), '-o', str(baseline)],
+                           check=True, capture_output=True)
+            kernel = work / 'columns.c'
+            kernel.write_text(transform((source / 'columns.c').read_text()))
+            binary = work / 'check'
+            subprocess.run(['clang', '-O3', '-fno-fast-math', '-ffp-contract=off',
+                            str(source / 'columns_driver.c'), str(kernel), str(baseline),
+                            '-o', str(binary)], check=True, capture_output=True)
+            return subprocess.run([str(binary), 'check'], capture_output=True, text=True)
+
+    def test_scalar_passes(self):
+        result = self.exercise(lambda s: s)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_changed_value_fails(self):
+        result = self.exercise(lambda s: s.replace('s+=a[r*n+c]', 's+=0', 1))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('differ', result.stderr)
+
+    def test_overread_fails(self):
+        result = self.exercise(lambda s: s.replace('double s=0;', 'volatile double extra=a[n*n]; double s=0;', 1))
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_reordered_alias_stores_fail(self):
+        def rewrite(s):
+            start = s.index('void col64(')
+            end = s.index('void col32(')
+            return s[:start] + '''void col64(const double *a,double *out,unsigned long n) {
+              for(unsigned long c=0;c<n;c++)out[c]=0;
+              for(unsigned long r=0;r<n;r++)for(unsigned long c=0;c<n;c++)out[c]+=a[r*n+c];
+            }
+            ''' + s[end:]
+        result = self.exercise(rewrite)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('overlap fallback differs', result.stderr)
+
+    def test_quoted_function_padding_on_both_targets(self):
+        from columns import padded
+        for linux, symbol in [(True, 'col64'), (False, '_col64')]:
+            original = f'.globl "{symbol}"\n.p2align 4\n"{symbol}":\n.L{symbol}_begin:\n ret\n'
+            self.assertEqual(padded(original, 0, linux), original)
+            self.assertIn('.space ', padded(original, 1, linux))
+            self.assertIn(f'"{symbol}":', padded(original, 1, linux))
+            private=original.split("\n",1)[1]
+            self.assertIn(".space ",padded(private,1,linux))
+
+
 if __name__ == '__main__':
     unittest.main()

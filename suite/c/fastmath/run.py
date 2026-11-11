@@ -13,7 +13,13 @@ import subprocess
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--ordered', action='store_true', help='strict ordered sums and AArch64 assembly references')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--columns', action='store_true', help='strict alias-checked column reductions')
+    parser.add_argument('--dimensions', type=int, nargs='+', default=[128, 512, 1024])
+    parser.add_argument('--matrix-elements', type=int, default=16777216)
+    parser.add_argument('--cpu', type=int, default=8)
+    parser.add_argument('--controller-cpu', type=int, default=0)
+    modes.add_argument('--ordered', action='store_true', help='strict ordered sums and AArch64 assembly references')
     parser.add_argument('--placements', type=int, default=4)
     parser.add_argument('--keel', required=True, type=Path)
     parser.add_argument('--clang', default='clang')
@@ -22,6 +28,10 @@ def main():
     parser.add_argument('--iterations', type=int, default=1000)
     parser.add_argument('--rounds', type=int, default=5)
     args = parser.parse_args()
+    if args.columns:
+        from columns import run_columns
+        run_columns(args)
+        return
     if args.ordered:
         from ordered import run_ordered
         run_ordered(args)

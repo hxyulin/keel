@@ -579,6 +579,34 @@ they do not replace the application acceptance gate. Short-call results include
 the common caller, startup and input checking costs. Use more rounds and inspect
 the control spread before interpreting small differences.
 
+## Column-reduction screen
+
+The column mode compares the same compiler with and without the opt-in
+`loop-column-reduce` pass. Both sides receive identical scalar preparation
+and then the Full pipeline. A shared strict driver checks f32/f64 results
+against a volatile left fold and the disabled pass, including NaN bits,
+subnormals, signed zero, guard-page tails, partial overlap and exactly adjacent
+ranges. Independent runner tests reject changed values, overreads and a
+row-order rewrite that corrupts overlapping inputs.
+
+```sh
+cargo build --release -p keel
+python3 suite/c/fastmath/run.py --columns --keel target/release/keel \
+  --out target/column-profile --dimensions 64 127 128 129 512 1024 \
+  --matrix-elements 16777216 --rounds 5 --placements 4
+```
+
+The native hosts are AArch64 macOS (`time -l` whole-process counters) and
+x86-64 Linux (`perf stat` user cycles/instructions). Linux accepts `--cpu`
+and `--controller-cpu`, defaulting to separate CPUs 8 and 0. Each call visits
+`n*n` elements. Each timed image runs at most 100000 calls and approximately
+`--matrix-elements` elements, with at least one call. Four placements pad
+functions consistently; shuffled mirrored blocks include a copied baseline
+image as the control. Reports retain source/compiler hashes, commands,
+assembly, objects, raw samples and placement ratios. These are kernel screens,
+not the application acceptance gate. Short cases include common startup and
+oracle work; inspect control spread before interpreting small differences.
+
 ## Fast-math kernel baselines
 
 `suite/c/fastmath/run.py` compares nine single-precision kernels:
