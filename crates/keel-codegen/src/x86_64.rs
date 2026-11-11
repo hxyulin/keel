@@ -977,6 +977,8 @@ struct FunctionCompiler<'a> {
     next_block: Option<Block>,
     out: Output,
     uses_trap: bool,
+    /// Scalar absolute-value masks referenced by this function (f32, f64).
+    fabs_masks: u8,
     /// Whether to emit `.loc` directives.
     debug: bool,
     unwind_tables: crate::UnwindTables,
@@ -1199,6 +1201,7 @@ impl<'a> FunctionCompiler<'a> {
             feature_error: None,
             out: Output::new(structured),
             uses_trap: false,
+            fabs_masks: 0,
             debug: false,
             unwind_tables: crate::UnwindTables::All,
             function_sections: false,
@@ -1366,6 +1369,19 @@ impl<'a> FunctionCompiler<'a> {
             name: symbol.clone(),
             expression: Expression::difference(".", symbol),
         });
+        // Keep masks with their function, including function sections and COMDATs.
+        // They follow the size and unwind range and are never executed.
+        for (flag, suffix, bits) in [
+            (1, "32", 0x7fff_ffff_7fff_ffffu64),
+            (2, "64", 0x7fff_ffff_ffff_ffffu64),
+        ] {
+            if self.fabs_masks & flag != 0 {
+                self.out.align(4);
+                self.out.label(format!(".L{name}_fabs{suffix}"));
+                self.out.bytes(&bits.to_le_bytes());
+                self.out.bytes(&bits.to_le_bytes());
+            }
+        }
         if let Some(message) = self.feature_error {
             return Err(CodegenError {
                 func: name.clone(),
@@ -3487,6 +3503,31 @@ impl<'a> FunctionCompiler<'a> {
             Opcode::Movq
         };
         match op {
+            UnaryOp::Fabs if self.goal != crate::CodegenGoal::Size => {
+                let (flag, suffix, opcode) = if ty == Type::F32 {
+                    (1, "32", Opcode::Andps)
+                } else {
+                    (2, "64", Opcode::Andpd)
+                };
+                self.fabs_masks |= flag;
+                let label = format!(".L{}_fabs{suffix}", self.func.name);
+                let mask = sized(symbol_memory(rip(), &label, Modifier::None), 128);
+                if self.features.avx {
+                    self.emit(
+                        if ty == Type::F32 {
+                            Opcode::Vandps
+                        } else {
+                            Opcode::Vandpd
+                        },
+                        [asm_arg(xmm(d)), asm_arg(xmm(a)), asm_arg(mask)],
+                    );
+                } else {
+                    if d != a {
+                        self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(a))]);
+                    }
+                    self.emit(opcode, [asm_arg(xmm(d)), asm_arg(mask)]);
+                }
+            }
             UnaryOp::Fneg | UnaryOp::Fabs => {
                 let bit_op = if op == UnaryOp::Fneg {
                     Opcode::Btc

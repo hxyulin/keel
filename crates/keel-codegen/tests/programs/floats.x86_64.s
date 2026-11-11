@@ -509,9 +509,7 @@
 	# v14 = ptradd v12, v2
 	add	rsi, 8
 	# v15 = fabs v0
-	movq	rax, xmm0
-	btr	rax, 63
-	movq	xmm0, rax
+	andpd	xmm0, xmmword ptr [rip + ".Lunary_fabs64"]
 	# store v15, v14
 	movsd	qword ptr [rsi], xmm0
 	# return
@@ -521,6 +519,10 @@
 .Lunary_end:
 	.cfi_endproc
 	.size "unary", .-"unary"
+	.p2align	4
+.Lunary_fabs64:
+	.byte	255, 255, 255, 255, 255, 255, 255, 127
+	.byte	255, 255, 255, 255, 255, 255, 255, 127
 	.section	".text","ax",@progbits
 	.globl "unary32"
 	.p2align	4

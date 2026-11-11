@@ -10,6 +10,8 @@ mod x86_c_leaf;
 mod x86_compare_select;
 #[path = "x86_scalar_selection/x86_constant_division.rs"]
 mod x86_constant_division;
+#[path = "x86_scalar_selection/x86_fabs.rs"]
+mod x86_fabs;
 #[path = "x86_scalar_selection/x86_indexed_memory.rs"]
 mod x86_indexed_memory;
 #[path = "x86_scalar_selection/x86_lea.rs"]
