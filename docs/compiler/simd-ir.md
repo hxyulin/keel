@@ -207,19 +207,19 @@ values precede scalar additions in input order; additions are never
 reassociated, even in `fast_math` functions. Input and accumulator types must
 match. Integer-to-float and f32-to-f64 reductions are not admitted. Calls,
 stores, observable loads, other recurrences and debugger metadata stay scalar.
-The experimental AArch64-only `loop-batch-scalar` variant uses eight scalar
-loads and scalar absolute values, without vector extraction. Adjacent proven
+The experimental `loop-batch-scalar` variant uses eight scalar
+loads and scalar absolute values, without vector extraction. On AArch64, adjacent proven
 floating reads can lower to register-pair loads after allocation. Spilled
 results, observable reads and source-location boundaries retain separate loads.
 Both rotate their generated scalar tail despite its multiple guarded entries.
 Ordinary loop rotation keeps its existing admission rules.
-Full (`-O3`) instead runs `auto-loop-batch` on AArch64 only. It selects the
+Full (`-O3`) instead runs `auto-loop-batch` on AArch64 and x86-64. It selects the
 scalar schedule for literal unsigned i64 trip counts of at least 32 elements
 whose byte count fits u64. This admits four complete batches before a tail.
 The threshold is conservative policy, not a universal speed guarantee.
 Short counts, unknown counts and bounds known only through runtime guards stay
 scalar under this automatic rule. Other targets and tiers do not enable it.
-Both explicit passes remain opt-in and retain their existing admission rules,
+Both explicit passes remain opt-in and retain their safety restrictions,
 including support for unknown counts. Select either before strength reduction and
 loop rotation, after stack promotion and scalar cleanup.
 

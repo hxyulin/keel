@@ -215,7 +215,7 @@ fn default_batch_selection_preserves_short_and_unknown_loops() {
                 let disabled = emit(&["-O3", "--opt-disable", "auto-loop-batch"]);
                 assert_eq!(
                     normal != disabled,
-                    target.starts_with("aarch64") && matches!(bound, "32" | "33"),
+                    matches!(bound, "32" | "33"),
                     "{target} {ty} {bound}"
                 );
                 if bound == "32" {
@@ -237,27 +237,30 @@ fn default_batch_selection_preserves_short_and_unknown_loops() {
 
 #[test]
 fn automatic_literal_batches_match_the_native_strict_driver() {
-    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    if !cfg!(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )) {
+        eprintln!("SKIP: automatic batch oracle requires AArch64 macOS or x86-64 Linux");
         return;
     }
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("automatic-batch-native");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("driver.c"),
-        include_str!("../../../suite/c/fastmath/ordered_driver.c"),
-    )
-    .unwrap();
-    run(Command::new("clang").current_dir(&dir).args([
-        "-O2",
-        "-fno-fast-math",
-        "-ffp-contract=off",
-        "-c",
-        "driver.c",
-        "-o",
-        "driver.o",
-    ]));
-    for n in [31, 32, 33] {
+    for n in [31, 32, 33, 64, 257] {
         let n = n.to_string();
+        // Fixed-bound kernels must use the same count in the guard-page oracle.
+        let driver = include_str!("../../../suite/c/fastmath/ordered_driver.c")
+            .replace("{0,1,7,8,9,15,16,17,31,32,33}", &format!("{{{n}}}"));
+        fs::write(dir.join("driver.c"), driver).unwrap();
+        run(Command::new("clang").current_dir(&dir).args([
+            "-O2",
+            "-fno-fast-math",
+            "-ffp-contract=off",
+            "-c",
+            "driver.c",
+            "-o",
+            "driver.o",
+        ]));
         let kernels = include_str!("../../../suite/c/fastmath/ordered.c")
             .replace("i < n", &format!("i < {n}"));
         fs::write(dir.join("kernels.c"), kernels).unwrap();
@@ -282,6 +285,7 @@ fn automatic_literal_batches_match_the_native_strict_driver() {
                 "-o",
                 "oracle",
             ]));
+            run(Command::new(dir.join("oracle")).arg("check"));
             for kind in ["0", "1", "2", "3"] {
                 run(Command::new(dir.join("oracle")).args([kind, &n, "1"]));
             }

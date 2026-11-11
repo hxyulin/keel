@@ -132,8 +132,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
 | `fast-loop-dot` | Full-tier SIMD dot, sum-of-squares and squared-distance accumulation, only in `fast_math` functions |
-| `auto-loop-batch` | Full-tier AArch64 scalar batching for literal trip counts of at least 32, with representable byte counts |
-| `loop-batch-scalar` (opt-in) | Experimental AArch64 scalar load schedule for ordered floating batches |
+| `auto-loop-batch` | Full-tier native scalar batching for literal trip counts of at least 32, with representable byte counts |
+| `loop-batch-scalar` (opt-in) | Experimental native scalar load schedule for ordered floating batches |
 | `loop-batch` (opt-in) | Batch contiguous floating sums and absolute values in scalar addition order |
 | `loop-dot` (opt-in) | Batch floating dot products while preserving scalar addition order; see [SIMD IR](simd-ir.md) |
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |

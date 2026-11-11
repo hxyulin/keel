@@ -76,7 +76,7 @@ impl crate::Pass for LoopBatchScalar {
         "loop-batch-scalar"
     }
     fn description(&self) -> &'static str {
-        "experiment with ordered AArch64 scalar load batches"
+        "experiment with ordered scalar load batches"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Vectorize
@@ -85,7 +85,7 @@ impl crate::Pass for LoopBatchScalar {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, Mode::Scalar)
+        run(f, context, Mode::Scalar)
     }
 }
 pub(crate) struct AutoLoopBatch;
@@ -94,7 +94,7 @@ impl crate::Pass for AutoLoopBatch {
         "auto-loop-batch"
     }
     fn description(&self) -> &'static str {
-        "batch proven long literal floating reductions on AArch64"
+        "batch proven long literal floating reductions"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Vectorize
@@ -103,7 +103,7 @@ impl crate::Pass for AutoLoopBatch {
         true
     }
     fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
-        context.target == crate::VectorTarget::Aarch64Neon && run(f, context, Mode::Automatic)
+        run(f, context, Mode::Automatic)
     }
 }
 #[derive(Clone, Copy)]

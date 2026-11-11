@@ -49,9 +49,9 @@ runs scalar CFG and combining cleanup without inlining. Fast and Basic expand
 constant memory copies and fills of at most 128 bytes into loads and stores;
 Balanced, Size and Full expand at most 32 bytes; None leaves them unchanged.
 
-On AArch64, Full also batches ordered floating sums and absolute-value sums
+On AArch64 and x86-64, Full also batches ordered floating sums and absolute-value sums
 when their literal trip count is at least 32 and their byte count fits u64.
-Unknown and shorter counts stay scalar under this rule. The scalar-pair
+Unknown and shorter counts stay scalar under this rule. The batched scalar
 schedule retains floating addition order; see [SIMD IR](simd-ir.md).
 
 These are Keel policies, not the GCC or Clang pass lists, and more effort does
