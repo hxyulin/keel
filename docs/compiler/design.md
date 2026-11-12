@@ -80,6 +80,11 @@ it without depending on the IR.
   Operand and control-flow validity remain verifier checks. Use
   `inst_data_mut` for partial edits; it has the same metadata invalidation
   rules but requires the caller to preserve the result signature.
+- **Edges.** `replace_branch_dest` and `remove_branch_arg` identify an edge by
+  its position, so duplicate switch destinations remain distinct. They reject
+  invalid indices before editing and use the ordinary metadata and CFG
+  invalidation rules. Compound block-parameter edits may temporarily disagree
+  with incoming edges; verify after updating every affected edge.
 - **Editing.** Instructions are inserted at an `InsertPoint` (end of a block
   or before an instruction), moved and removed; blocks and block parameters
   can be removed. Removed entities keep their handles and nothing is

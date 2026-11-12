@@ -111,9 +111,7 @@ pub fn run(func: &mut Function) -> bool {
             }
             func.remove_block_param(block, index);
             for &(branch, edge) in incoming(block) {
-                func.inst_data_mut(branch).branch_dests_mut()[edge]
-                    .args
-                    .remove(index);
+                func.remove_branch_arg(branch, edge, index);
             }
             // The parameter's users now pass `value`.
             let mut node = users.head[param.index()];

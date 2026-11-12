@@ -1615,6 +1615,41 @@ impl Function {
         *self.inst_data_mut(inst) = data;
     }
 
+    /// Replaces one branch destination, including its arguments.
+    ///
+    /// Edge indices use [`InstData::branch_dests`] order, including duplicate
+    /// destinations. Drops instruction facts and call contracts. The verifier
+    /// checks argument types and arity after a compound CFG edit is complete.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if `edge` does not exist.
+    pub fn replace_branch_dest(&mut self, inst: Inst, edge: usize, dest: BlockCall) {
+        assert!(
+            edge < self.inst_data(inst).branch_dests().len(),
+            "invalid branch edge"
+        );
+        self.inst_data_mut(inst).branch_dests_mut()[edge] = dest;
+    }
+
+    /// Removes one argument from one branch edge during a block-parameter edit.
+    ///
+    /// Drops instruction facts and call contracts. The caller must update the
+    /// target parameter and every incoming edge before verifying the function.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if the edge or argument does not exist.
+    pub fn remove_branch_arg(&mut self, inst: Inst, edge: usize, arg: usize) {
+        assert!(
+            arg < self.inst_data(inst).branch_dests()[edge].args.len(),
+            "invalid branch argument"
+        );
+        self.inst_data_mut(inst).branch_dests_mut()[edge]
+            .args
+            .remove(arg);
+    }
+
     /// Mutable access to an instruction, for rewriting operands or
     /// replacing it with another instruction **with the same result
     /// types** (e.g. folding an `iadd` to an `iconst`).
@@ -3342,6 +3377,71 @@ block3:
             .is_err()
         );
         assert_eq!(func.fingerprint(), before);
+    }
+
+    #[test]
+    fn edge_edits_distinguish_duplicate_targets_and_invalidate_cfg() {
+        let mut module = crate::parse(
+            "func @f(i64) -> i64 {
+entry(v0:i64):
+ switch v0,exit(v0),[0:exit(v0)]
+exit(v1:i64):
+ return v1
+}
+",
+        )
+        .unwrap();
+        let func = &mut module.functions[0];
+        let entry = func.entry_block().unwrap();
+        let term = func.block_insts(entry)[0];
+        let other = func.create_block();
+        func.append_inst(
+            other,
+            InstData::Return {
+                args: vec![func.block_params(entry)[0]],
+            },
+        );
+        let stamp = func.cfg_stamp();
+        func.replace_branch_dest(
+            term,
+            1,
+            BlockCall {
+                block: other,
+                args: vec![],
+            },
+        );
+        assert_ne!(func.cfg_stamp(), stamp);
+        assert_ne!(func.inst_data(term).branch_dests()[0].block, other);
+        assert_eq!(func.inst_data(term).branch_dests()[1].block, other);
+        verify(func).unwrap();
+        let before = func.fingerprint();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                func.replace_branch_dest(
+                    term,
+                    2,
+                    BlockCall {
+                        block: other,
+                        args: vec![],
+                    },
+                );
+            }))
+            .is_err()
+        );
+        assert_eq!(func.fingerprint(), before);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                func.remove_branch_arg(term, 0, 1);
+            }))
+            .is_err()
+        );
+        assert_eq!(func.fingerprint(), before);
+        let exit = func.inst_data(term).branch_dests()[0].block;
+        let param = func.block_params(exit)[0];
+        func.replace_all_uses(param, func.block_params(entry)[0]);
+        func.remove_block_param(exit, 0);
+        func.remove_branch_arg(term, 0, 0);
+        verify(func).unwrap();
     }
 
     #[test]

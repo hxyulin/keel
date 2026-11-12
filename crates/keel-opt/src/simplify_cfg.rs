@@ -147,7 +147,7 @@ pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
             if let Some(target) = forwarding_target(func, dest)
                 && !(invoke && !target.args.is_empty())
             {
-                func.inst_data_mut(term).branch_dests_mut()[i] = target;
+                func.replace_branch_dest(term, i, target);
                 changed = true;
             }
         }
