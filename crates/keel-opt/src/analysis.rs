@@ -1,5 +1,8 @@
-//! A per-thread cache of each function's CFG, dominator tree and natural
-//! loops, shared by the passes of one pipeline.
+//! Pipeline-owned CFG, dominator and natural-loop analyses.
+//!
+//! A scoped weak reference makes the active pipeline's cache available to
+//! existing pass kernels. Nested pipelines have independent caches and restore
+//! their caller's cache on exit. Standalone kernels compute fresh analyses.
 //!
 //! Most passes ask for these analyses, and most runs between two requests
 //! for the same function leave its CFG alone. An entry is found by the
@@ -18,7 +21,7 @@ use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopInfo;
 use keel_ir::{Block, EntityRef, Function};
 use std::cell::{Cell, OnceCell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 pub(crate) struct Analysis {
     pub cfg: ControlFlowGraph,
@@ -105,14 +108,47 @@ impl Analysis {
     }
 }
 
+type Cache = RefCell<FxHashMap<usize, Rc<Analysis>>>;
+
 thread_local! {
-    static CACHE: RefCell<FxHashMap<usize, Rc<Analysis>>> = RefCell::default();
+    static ACTIVE: RefCell<Weak<Cache>> = RefCell::default();
+}
+
+/// Owns analyses for one pipeline invocation, including error and unwind exits.
+/// The thread-local reference is weak: it cannot retain a completed session.
+pub(crate) struct Session {
+    _cache: Rc<Cache>,
+    previous: Weak<Cache>,
+}
+
+impl Session {
+    pub(crate) fn new() -> Self {
+        let cache = Rc::new(Cache::default());
+        let previous = ACTIVE.with(|active| active.replace(Rc::downgrade(&cache)));
+        Self {
+            _cache: cache,
+            previous,
+        }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        ACTIVE.with(|active| active.replace(std::mem::take(&mut self.previous)));
+    }
+}
+
+fn active_cache() -> Option<Rc<Cache>> {
+    ACTIVE.with(|active| active.borrow().upgrade())
 }
 
 /// The CFG and dominator tree of `func` as it is now.
 pub(crate) fn get(func: &Function) -> Rc<Analysis> {
     let key = func as *const Function as usize;
-    let cached = CACHE.with(|cache| cache.borrow().get(&key).cloned());
+    let cache = active_cache();
+    let cached = cache
+        .as_ref()
+        .and_then(|cache| cache.borrow().get(&key).cloned());
     if let Some(analysis) = cached {
         if analysis.stamp.get() == func.cfg_stamp() || analysis.matches(func) {
             #[cfg(feature = "audit-analysis")]
@@ -124,7 +160,9 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
             return analysis;
         }
         // Release the stale arrays to the dominator pool before recomputing.
-        CACHE.with(|cache| cache.borrow_mut().remove(&key));
+        if let Some(cache) = &cache {
+            cache.borrow_mut().remove(&key);
+        }
         drop(analysis);
     }
     let mut cfg = ControlFlowGraph::compute(func);
@@ -139,7 +177,9 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
         num_blocks: func.num_blocks(),
         layout: func.blocks().collect(),
     });
-    CACHE.with(|cache| cache.borrow_mut().insert(key, analysis.clone()));
+    if let Some(cache) = cache {
+        cache.borrow_mut().insert(key, analysis.clone());
+    }
     analysis
 }
 
@@ -149,7 +189,10 @@ pub(crate) fn get(func: &Function) -> Rc<Analysis> {
 #[cfg(debug_assertions)]
 pub(crate) fn debug_check_stamp(func: &Function) {
     let key = func as *const Function as usize;
-    let cached = CACHE.with(|cache| cache.borrow().get(&key).cloned());
+    let cache = active_cache();
+    let cached = cache
+        .as_ref()
+        .and_then(|cache| cache.borrow().get(&key).cloned());
     if let Some(analysis) = cached {
         assert!(
             analysis.stamp.get() != func.cfg_stamp() || analysis.matches(func),
@@ -160,17 +203,19 @@ pub(crate) fn debug_check_stamp(func: &Function) {
 
 /// Release an analysis owned by a temporary function before its storage dies.
 pub(crate) fn forget(func: &Function) {
-    CACHE.with(|cache| {
+    if let Some(cache) = active_cache() {
         cache
             .borrow_mut()
-            .remove(&(func as *const Function as usize))
-    });
+            .remove(&(func as *const Function as usize));
+    }
 }
 
-/// Drops every cached analysis; the pipeline ends with this.
-pub(crate) fn clear() {
-    let entries = CACHE.with(|cache| std::mem::take(&mut *cache.borrow_mut()));
-    drop(entries);
+/// Clears the active session between cache regression cases.
+#[cfg(test)]
+fn clear() {
+    if let Some(cache) = active_cache() {
+        cache.borrow_mut().clear();
+    }
 }
 
 #[cfg(test)]
@@ -179,8 +224,34 @@ mod tests {
     use keel_ir::{BlockCall, InsertPoint, InstData, Signature};
 
     #[test]
+    fn sessions_isolate_nested_work_and_restore_after_unwind() {
+        let function = loop_function();
+        let outer = Session::new();
+        let cached = get(&function);
+        let weak = Rc::downgrade(&outer._cache);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _inner = Session::new();
+                let inner = get(&function);
+                assert!(!Rc::ptr_eq(&cached, &inner));
+                assert!(Rc::ptr_eq(&inner, &get(&function)));
+                panic!("end nested session");
+            }))
+            .is_err()
+        );
+        assert!(Rc::ptr_eq(&cached, &get(&function)));
+        drop(outer);
+        assert!(weak.upgrade().is_none());
+        assert!(active_cache().is_none());
+        // Standalone kernels do not leave a cache behind.
+        let fresh = get(&function);
+        assert!(!Rc::ptr_eq(&fresh, &get(&function)));
+        assert!(fresh.same_as_fresh(&function));
+    }
+
+    #[test]
     fn appended_terminator_invalidates_cached_cfg() {
-        clear();
+        let _session = Session::new();
         let mut function = Function::new("append", Signature::new(&[], &[]));
         let entry = function.create_block();
         let exit = function.create_block();
@@ -220,7 +291,7 @@ mod tests {
     #[test]
     fn duplicate_switch_targets_preserve_order_and_cache_validity() {
         for width in [2, 8, 9, 256] {
-            clear();
+            let _session = Session::new();
             let mut function = switch_function(width);
             let left = function.blocks().nth(1).unwrap();
             let term = *function.block_insts(left).last().unwrap();
@@ -274,7 +345,7 @@ mod tests {
 
     #[test]
     fn unchanged_and_argument_only_edits_reuse_cfg_and_lazy_loops() {
-        clear();
+        let _session = Session::new();
         let mut function = loop_function();
         let before = get(&function);
         let body = function.blocks().nth(1).unwrap();
@@ -302,7 +373,7 @@ mod tests {
 
     #[test]
     fn successor_and_layout_edits_replace_cached_analyses() {
-        clear();
+        let _session = Session::new();
         let mut function = loop_function();
         let before = get(&function);
         let body = function.blocks().nth(1).unwrap();
@@ -336,7 +407,7 @@ mod tests {
 
     #[test]
     fn replacement_at_same_address_only_reuses_equivalent_cfg() {
-        clear();
+        let _session = Session::new();
         let mut slot = Box::new(loop_function());
         let before = get(&slot);
         before.loops(&slot);
@@ -359,7 +430,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "cached CFG inputs changed without a new stamp")]
     fn stamp_check_rejects_an_entry_whose_cfg_differs() {
-        clear();
+        let _session = Session::new();
         let mut function = Function::new("stale", Signature::new(&[], &[]));
         function.create_block();
         let stale = get(&function);

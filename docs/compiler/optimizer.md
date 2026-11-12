@@ -62,9 +62,12 @@ invocations stay in a partial report when their verification fails, and
 skipped invocations keep pipeline order with zero timings. All exits release
 analysis and scratch caches.
 
-A thread-local cache reuses CFG, dominator and loop-depth analyses while the
-function's CFG stamp is unchanged, or when block count, layout and ordered
-successors still match. Debug builds check, after each pass run, that a cached
+Each pipeline invocation owns a scoped cache of CFG, dominator and loop-depth
+analyses. Pass kernels reach it through a thread-local weak reference; nested
+pipelines use independent caches and restore the outer session even on unwind.
+Standalone kernels compute fresh analyses and retain no cache. Entries are
+reused while the function's CFG stamp is unchanged, or when block count,
+layout and ordered successors still match. Debug builds check, after each pass run, that a cached
 entry carrying the function's stamp still matches its CFG.
 The `keel-opt/audit-analysis` feature also recomputes and compares the
 analyses on each hit; use `cargo test -p keel-opt --features audit-analysis`

@@ -23,14 +23,7 @@ pub fn optimize_wasm32_basic(module: &mut Module) -> Result<(), OptError> {
             errors,
         })
     }
-    // Clear thread-local analysis even when verification fails mid-pipeline.
-    struct Clear;
-    impl Drop for Clear {
-        fn drop(&mut self) {
-            crate::analysis::clear();
-        }
-    }
-    let _clear = Clear;
+    let _analyses = crate::analysis::Session::new();
     verify(module, "wasm32-input")?;
     // No caller-selected passes, native restoration, or fixed-point expansion.
     for (name, run) in BASIC {

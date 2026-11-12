@@ -1231,12 +1231,11 @@ fn name_key(name: &str) -> u64 {
     h.finish()
 }
 
-/// Drops cached analyses when a pipeline ends, however it ends.
-struct ClearAnalyses;
+/// Releases reusable scratch when a pipeline ends, however it ends.
+struct ClearScratch;
 
-impl Drop for ClearAnalyses {
+impl Drop for ClearScratch {
     fn drop(&mut self) {
-        analysis::clear();
         scratch::clear();
     }
 }
@@ -1268,7 +1267,8 @@ fn execute_pipeline(
     // pass run instead of once per pipeline entry.
     let mut prints: Vec<Option<(u64, u64)>> = Vec::new();
     profiling::scope!("optimization");
-    let _clear = ClearAnalyses;
+    let _clear = ClearScratch;
+    let _analyses = analysis::Session::new();
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
     let uses_inline_budget = passes.iter().any(|pass| pass.uses_inline_budget());
