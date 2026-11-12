@@ -70,7 +70,7 @@ pub fn run(f: &mut Function) -> bool {
                 .or_else(|| facts.get(&inverse(&key)).map(|b| !b))
         {
             let dest = dests[usize::from(!taken)].clone();
-            *f.inst_data_mut(i) = InstData::Jump { dest };
+            f.replace_inst(i, InstData::Jump { dest });
             changed = true;
         }
         for &child in children[block].iter().rev() {

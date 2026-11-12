@@ -1583,6 +1583,38 @@ impl Function {
         self.insts[inst].block == NO_BLOCK
     }
 
+    /// Replaces instruction data while preserving its result handles and types.
+    ///
+    /// Drops call contracts and result facts, as [`Self::inst_data_mut`] does.
+    /// Source locations and instruction placement are preserved. This checks
+    /// the result signature; the verifier still checks operands and control flow.
+    ///
+    /// # Panics
+    ///
+    /// Panics before mutation if the replacement changes the result signature.
+    pub fn replace_inst(&mut self, inst: Inst, data: InstData) {
+        let results = self.inst_results(inst);
+        let mut count = 0;
+        self.for_each_result_type(&data, |ty| {
+            assert!(
+                count < results.len(),
+                "replacement adds instruction results"
+            );
+            assert_eq!(
+                self.value_type(results[count]),
+                ty,
+                "replacement changes result type"
+            );
+            count += 1;
+        });
+        assert_eq!(
+            count,
+            results.len(),
+            "replacement removes instruction results"
+        );
+        *self.inst_data_mut(inst) = data;
+    }
+
     /// Mutable access to an instruction, for rewriting operands or
     /// replacing it with another instruction **with the same result
     /// types** (e.g. folding an `iadd` to an `iconst`).
@@ -3249,6 +3281,67 @@ block3:
         assert_eq!(func.inst_index(inst), 0);
         assert_eq!(func.inst_index(first), 1);
         assert_eq!(func.block_params(blocks[0]), &lists[0].0[..]);
+    }
+
+    #[test]
+    fn checked_replacement_matches_raw_edit_and_preserves_results() {
+        let mut checked = build_sum();
+        let mut raw = checked.clone();
+        let inst = checked
+            .layout_insts()
+            .find_map(|(_, inst)| {
+                matches!(
+                    checked.inst_data(inst),
+                    InstData::Iconst { ty: Type::I64, .. }
+                )
+                .then_some(inst)
+            })
+            .unwrap();
+        let results = checked.inst_results(inst).to_vec();
+        let stamp = checked.cfg_stamp();
+        let data = InstData::iconst(Type::I64, 42);
+        checked.replace_inst(inst, data.clone());
+        *raw.inst_data_mut(inst) = data;
+        assert_eq!(checked.inst_results(inst), results);
+        assert_eq!(checked.cfg_stamp(), stamp);
+        assert_eq!(checked.fingerprint(), raw.fingerprint());
+        verify(&checked).unwrap();
+    }
+
+    #[test]
+    fn checked_replacement_rejects_signature_changes_before_mutation() {
+        let mut func = build_sum();
+        let inst = func
+            .layout_insts()
+            .find_map(|(_, inst)| {
+                matches!(func.inst_data(inst), InstData::Iconst { ty: Type::I64, .. })
+                    .then_some(inst)
+            })
+            .unwrap();
+        let before = func.fingerprint();
+        for data in [
+            InstData::iconst(Type::I32, 0),
+            InstData::Return { args: vec![] },
+        ] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    func.replace_inst(inst, data);
+                }))
+                .is_err()
+            );
+            assert_eq!(func.fingerprint(), before);
+        }
+        let term = *func
+            .block_insts(func.entry_block().unwrap())
+            .last()
+            .unwrap();
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                func.replace_inst(term, InstData::iconst(Type::I64, 0));
+            }))
+            .is_err()
+        );
+        assert_eq!(func.fingerprint(), before);
     }
 
     #[test]

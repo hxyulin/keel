@@ -74,6 +74,12 @@ it without depending on the IR.
   resolve. Dead code removal is mark-and-sweep from pinned instructions. Use
   counts are computed by a pass when it needs them. All mutation goes through
   methods, so use-lists can be added later without touching passes.
+- **Replacement.** `Function::replace_inst` replaces instruction data while
+  keeping result handles, placement and source location. It checks result count
+  and types before mutation, then drops call contracts and result facts.
+  Operand and control-flow validity remain verifier checks. Use
+  `inst_data_mut` for partial edits; it has the same metadata invalidation
+  rules but requires the caller to preserve the result signature.
 - **Editing.** Instructions are inserted at an `InsertPoint` (end of a block
   or before an instruction), moved and removed; blocks and block parameters
   can be removed. Removed entities keep their handles and nothing is

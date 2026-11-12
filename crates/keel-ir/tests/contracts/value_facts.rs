@@ -132,3 +132,22 @@ fn malformed_result_facts_are_rejected() {
         assert!(invalid, "{source}");
     }
 }
+
+#[test]
+fn checked_replacement_drops_facts_only_after_signature_validation() {
+    let mut module = parsed(SOURCE);
+    let function = &mut module.functions[0];
+    let (_, load) = function.layout_insts().next().unwrap();
+    let before = function.fingerprint();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            function.replace_inst(load, InstData::iconst(keel_ir::Type::I64, 0));
+        }))
+        .is_err()
+    );
+    assert_eq!(function.fingerprint(), before);
+    let data = function.inst_data(load).clone();
+    function.replace_inst(load, data);
+    assert!(function.inst_facts(load).is_none());
+    keel_ir::verify_module(&module).unwrap();
+}
