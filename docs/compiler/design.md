@@ -72,8 +72,10 @@ it without depending on the IR.
 - Function-local arenas indexed by `u32` handles (`Value`, `Inst`, `Block`).
 - **No use-lists.** "Replace all uses" records a value alias that readers
   resolve. Dead code removal is mark-and-sweep from pinned instructions. Use
-  counts are computed by a pass when it needs them. All mutation goes through
-  methods, so use-lists can be added later without touching passes.
+  counts are computed by a pass when it needs them. Recording an alias does
+  not scan users; resolving a value follows its alias chain. Operand edits
+  through `inst_data_mut` are not tracked individually. Persistent use-lists
+  would first require those edits to maintain the lists.
 - **Replacement.** `Function::replace_inst` replaces instruction data while
   keeping result handles, placement and source location. It checks result count
   and types before mutation, then drops call contracts and result facts.
@@ -103,6 +105,24 @@ with one block compaction; DCE and noreturn cleanup use it. A function takes
 a CFG stamp only when one is read. `InstData` is 48 bytes: `brif`
 destinations, `switch` case values and call ABI descriptors are boxed, and
 indirect-call arguments and `invoke` stay inline.
+
+Derived data follows its inputs, not just the function's identity. CFG stamps
+cover possible changes to blocks, layout and branch destinations; they do not
+version arbitrary operands or result facts. CFG analyses can reuse an entry
+when those structural inputs still match. A use count or def-use graph is a
+snapshot of operands and aliases instead: a rewriting pass must update or
+rebuild it before relying on it again. The pass manager separately versions
+whole functions from pass change reports for deterministic-pass skipping.
+
+Keep storage changes separate from these editing contracts. Contiguous block
+lists support scans, while insertion shifts a block suffix; batch removal
+avoids repeating that work. A linked layout changes that tradeoff, and
+persistent use-lists add work to operand edits. Neither is required by SSA
+block arguments or typed handles. A storage replacement must preserve handle
+and compaction contracts for frontends, the interpreter and code generators,
+as well as the optimizer. Evaluate compiler instruction counts and peak memory
+with identical generated output before adopting one; the measurement gates
+are in [Performance changes](../development/performance.md).
 
 When an optimizer pipeline finishes, `Function::compact` drops the removed
 instructions of every function and renumbers the rest in their old order.
