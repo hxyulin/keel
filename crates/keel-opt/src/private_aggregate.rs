@@ -28,25 +28,38 @@ impl crate::Pass for PrivateAggregateCleanup {
     fn run(&self, _: &mut Function, _: &crate::OptimizationContext) -> bool {
         false
     }
+    fn cleanup_passes(&self) -> &'static [&'static dyn crate::Pass] {
+        CLEANUP
+    }
     fn run_module(
         &self,
         module: &mut Module,
         context: &mut crate::ModuleContext<'_>,
     ) -> Option<bool> {
-        context.whole_module(module, run_with_cleanup)
+        context.whole_module(module, |module| run(module) != 0)
     }
 }
+
+const CLEANUP: &[&dyn crate::Pass] = &[
+    &crate::BuiltinPass::new(
+        "stack-forward",
+        "forward stack values without pointer reinterpretation",
+        |f, _| crate::stack_forward::run(f),
+    ),
+    crate::STACK_PROMOTE,
+    crate::CANONICALIZE,
+    crate::INSTCOMBINE,
+    crate::DCE,
+];
 
 pub fn run_with_cleanup(module: &mut Module) -> bool {
     if run(module) == 0 {
         return false;
     }
     for f in &mut module.functions {
-        crate::stack_forward::run(f);
-        crate::stack_promote::run(f);
-        crate::canonicalize::run(f);
-        crate::instcombine::run(f);
-        crate::dce::run(f);
+        for pass in CLEANUP {
+            pass.run(f, &crate::OptimizationContext::default());
+        }
     }
     true
 }

@@ -18,6 +18,18 @@ rustdoc.
 `run_passes_for_target_with_report` and `run_pipeline` are shorthands for it.
 `PASSES` lists the registered passes, each a named static in `lib.rs`.
 
+Module passes can declare conditional cleanup through `Pass::cleanup_passes`.
+The manager runs that sequence only after the module pass reports a change.
+Each cleanup invocation uses the ordinary verification, reporting, disabling
+and bisection controls, inherits its parent's enabled functions, and shares
+its parent's pipeline index in reports.
+Sequences must be acyclic and cannot charge an inlining allowance. The
+`private-aggregate-cleanup` pass declares stack forwarding, promotion,
+canonicalization, instruction combining and dead-code removal this way.
+This cleanup retains layout-independent stack forwarding.
+Unchanged modules receive no cleanup. Its direct `run_with_cleanup` helper
+retains the kernel-only behavior for callers outside a pipeline.
+
 A function pass receives the `OptimizationContext`: the vector target and
 capabilities, the pointer `DataLayout` and whether the function is canonical on
 entry. `OptimizationContext::new` gives the native vector targets
@@ -67,8 +79,8 @@ analyses. Pass kernels reach it through a thread-local weak reference; nested
 pipelines use independent caches and restore the outer session even on unwind.
 Standalone kernels compute fresh analyses and retain no cache. Entries are
 reused while the function's CFG stamp is unchanged, or when block count,
-layout and ordered successors still match. Debug builds check, after each pass run, that a cached
-entry carrying the function's stamp still matches its CFG.
+layout and ordered successors still match. Debug builds check, after each pass
+run, that a cached entry carrying the function's stamp still matches its CFG.
 The `keel-opt/audit-analysis` feature also recomputes and compares the
 analyses on each hit; use `cargo test -p keel-opt --features audit-analysis`
 when changing CFG mutation or analysis code.

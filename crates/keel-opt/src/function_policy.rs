@@ -27,6 +27,9 @@ impl Pass for ScopedPass<'_> {
     fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
         self.pass.run_module(module, context)
     }
+    fn cleanup_passes(&self) -> &'static [&'static dyn Pass] {
+        self.pass.cleanup_passes()
+    }
     fn deterministic(&self) -> bool {
         self.pass.deterministic()
     }

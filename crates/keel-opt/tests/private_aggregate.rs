@@ -298,3 +298,189 @@ fn source_order_eligibility_accounts_for_scalar_banks_and_sret() {
         check(&signature(&params), expected);
     }
 }
+
+#[test]
+fn conditional_cleanup_is_reported_and_obeys_controls() {
+    use keel_opt::{OptimizationReport, OptimizeOptions, Pipeline};
+    let passes = [keel_opt::find_pass("private-aggregate-cleanup").unwrap()];
+    let mut module = parse(SOURCE).unwrap();
+    let mut report = OptimizationReport::default();
+    Pipeline::new(&passes)
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
+    let mut names: Vec<_> = report.invocations.iter().map(|item| item.pass).collect();
+    names.dedup();
+    assert_eq!(
+        names,
+        [
+            "private-aggregate-cleanup",
+            "stack-forward",
+            "stack-promote",
+            "canonicalize",
+            "instcombine",
+            "dce"
+        ]
+    );
+    assert!(
+        report
+            .invocations
+            .iter()
+            .all(|item| item.pipeline_index == 0 && item.verification_enabled)
+    );
+
+    let mut module = parse(SOURCE).unwrap();
+    let mut report = OptimizationReport::default();
+    Pipeline::new(&passes)
+        .options(OptimizeOptions {
+            disabled: vec!["dce".into()],
+            ..Default::default()
+        })
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
+    assert!(!report.invocations.iter().any(|item| item.pass == "dce"));
+
+    let mut module = parse(SOURCE).unwrap();
+    let mut report = OptimizationReport::default();
+    Pipeline::new(&passes)
+        .options(OptimizeOptions {
+            bisect_limit: Some(1),
+            ..Default::default()
+        })
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
+    assert_eq!(report.invocations.len(), 1);
+    assert_eq!(report.invocations[0].pass, "private-aggregate-cleanup");
+    verify_module(&module).unwrap();
+
+    let mut module = parse(
+        "func @plain() {
+entry:
+ return
+}
+",
+    )
+    .unwrap();
+    let mut report = OptimizationReport::default();
+    Pipeline::new(&passes)
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
+    assert_eq!(report.invocations.len(), 1);
+    assert!(!report.invocations[0].changed);
+}
+
+#[test]
+#[should_panic(expected = "cyclic cleanup sequence")]
+fn cyclic_cleanup_is_rejected_before_running_the_parent() {
+    struct Cycle;
+    impl keel_opt::Pass for Cycle {
+        fn name(&self) -> &'static str {
+            "cycle"
+        }
+        fn description(&self) -> &'static str {
+            "invalid cleanup graph"
+        }
+        fn run(&self, _: &mut keel_ir::Function, _: &keel_opt::OptimizationContext) -> bool {
+            panic!("invalid pipeline ran a pass")
+        }
+        fn cleanup_passes(&self) -> &'static [&'static dyn keel_opt::Pass] {
+            &[&Cycle]
+        }
+    }
+    let passes: &[&dyn keel_opt::Pass] = &[&Cycle];
+    let mut module = keel_ir::Module::default();
+    keel_opt::Pipeline::new(passes).run(&mut module).unwrap();
+}
+
+#[test]
+fn function_policy_wrappers_preserve_conditional_cleanup() {
+    use keel_opt::{OptimizationReport, Pipeline};
+    let passes = [keel_opt::find_pass("private-aggregate-cleanup").unwrap()];
+    let mut module = parse(SOURCE).unwrap();
+    for function in &mut module.functions {
+        // Trigger scoped scheduling while retaining this custom pass list.
+        function.attrs.optimize =
+            keel_ir::FunctionOptimization::new([keel_ir::OptimizationOption::Options(
+                "no-unroll-loops".into(),
+            )]);
+    }
+    module.sync_function_attrs();
+    verify_module(&module).unwrap();
+    let mut report = OptimizationReport::default();
+    Pipeline::new(&passes)
+        .report(&mut report)
+        .run(&mut module)
+        .unwrap();
+    assert!(report.invocations.iter().any(|item| item.pass == "dce"));
+    verify_module(&module).unwrap();
+}
+
+#[test]
+fn cleanup_inherits_parent_scope_and_custom_children_can_be_disabled() {
+    use keel_opt::{ModuleContext, OptimizationContext, OptimizeOptions, Pass, Pipeline};
+    struct Mark;
+    impl Pass for Mark {
+        fn name(&self) -> &'static str {
+            "mark-cleanup"
+        }
+        fn description(&self) -> &'static str {
+            "mark enabled functions"
+        }
+        fn run(&self, function: &mut keel_ir::Function, _: &OptimizationContext) -> bool {
+            function.attrs.fast_math = true;
+            true
+        }
+    }
+    struct Parent;
+    impl Pass for Parent {
+        fn name(&self) -> &'static str {
+            "selected-parent"
+        }
+        fn description(&self) -> &'static str {
+            "select one function"
+        }
+        fn enabled_for(&self, function: &keel_ir::Function) -> bool {
+            function.name == "selected"
+        }
+        fn run(&self, _: &mut keel_ir::Function, _: &OptimizationContext) -> bool {
+            false
+        }
+        fn run_module(&self, _: &mut keel_ir::Module, _: &mut ModuleContext<'_>) -> Option<bool> {
+            Some(true)
+        }
+        fn cleanup_passes(&self) -> &'static [&'static dyn Pass] {
+            &[&Mark]
+        }
+    }
+    let passes: &[&dyn Pass] = &[&Parent];
+    let source = "func @selected() {
+entry:
+ return
+}
+func @protected() {
+entry:
+ return
+}
+";
+    let mut module = parse(source).unwrap();
+    Pipeline::new(passes).run(&mut module).unwrap();
+    assert!(module.functions[0].attrs.fast_math);
+    assert!(!module.functions[1].attrs.fast_math);
+    let mut module = parse(source).unwrap();
+    Pipeline::new(passes)
+        .options(OptimizeOptions {
+            disabled: vec!["mark-cleanup".into()],
+            ..Default::default()
+        })
+        .run(&mut module)
+        .unwrap();
+    assert!(
+        module
+            .functions
+            .iter()
+            .all(|function| !function.attrs.fast_math)
+    );
+}

@@ -86,7 +86,7 @@ impl InlineSite {
 
 #[derive(Debug)]
 pub struct PassObservation {
-    /// Pipeline index; repeated passes retain distinct identities.
+    /// Pipeline index; conditional cleanup shares its parent's index.
     pub pipeline_index: usize,
     pub pass: &'static str,
     pub target: crate::VectorTarget,

@@ -128,6 +128,16 @@ pub trait Pass: Sync {
         None
     }
 
+    /// Cleanup passes run only after this module pass reports a change.
+    ///
+    /// The manager applies ordinary reporting, verification, disabling and
+    /// bisection to each cleanup invocation. Cleanup sequences must be acyclic
+    /// and must not use the module-wide inlining allowance. Function passes do
+    /// not schedule cleanup through this hook.
+    fn cleanup_passes(&self) -> &'static [&'static dyn Pass] {
+        &[]
+    }
+
     /// Whether the function is scheduled for this invocation. Checked before
     /// canonical restoration so protected bodies remain unchanged.
     fn enabled_for(&self, _function: &Function) -> bool {
@@ -1044,6 +1054,7 @@ impl<'a> Pipeline<'a> {
     /// from before the run are invalid afterwards; instructions keep their
     /// printed names ([`Function::inst_name`]).
     pub fn run(mut self, module: &mut Module) -> Result<(), OptError> {
+        validate_cleanup(&self.passes, &[]);
         if module.special_entry_contract().is_some() {
             return Ok(());
         }
@@ -1063,9 +1074,12 @@ impl<'a> Pipeline<'a> {
         if math_changed {
             module.sync_function_attrs();
         }
-        if let Some(name) = self.options.disabled.iter().find(|&name| {
-            find_pass(name).is_none() && !self.passes.iter().any(|pass| pass.name() == name)
-        }) {
+        if let Some(name) = self
+            .options
+            .disabled
+            .iter()
+            .find(|&name| find_pass(name).is_none() && !contains_pass(&self.passes, name))
+        {
             return Err(OptError::UnknownPass(name.clone()));
         }
         let mut stderr = std::io::stderr();
@@ -1240,13 +1254,50 @@ impl Drop for ClearScratch {
     }
 }
 
+/// Validates cleanup graphs before any invocation can mutate the module.
+fn validate_cleanup(passes: &[&dyn Pass], parents: &[&dyn Pass]) {
+    for &pass in passes {
+        assert!(
+            !parents.iter().any(|&parent| std::ptr::eq(parent, pass)),
+            "cyclic cleanup sequence"
+        );
+        assert!(
+            parents.is_empty() || !pass.uses_inline_budget(),
+            "cleanup cannot charge an inlining allowance"
+        );
+        if !pass.cleanup_passes().is_empty() {
+            let mut nested = parents.to_vec();
+            nested.push(pass);
+            validate_cleanup(pass.cleanup_passes(), &nested);
+        }
+    }
+}
+
+fn contains_pass(passes: &[&dyn Pass], name: &str) -> bool {
+    passes
+        .iter()
+        .any(|pass| pass.name() == name || contains_pass(pass.cleanup_passes(), name))
+}
+
 /// One mutation/verification state machine; observation only measures its boundaries.
 fn execute_pipeline(
     module: &mut Module,
     passes: &[&dyn Pass],
     context: OptimizationContext,
+    report: Option<&mut OptimizationReport>,
+    trace: &mut Trace<'_, '_>,
+) -> Result<(), OptError> {
+    execute_sequence(module, passes, context, report, trace, None, None)
+}
+
+fn execute_sequence(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    context: OptimizationContext,
     mut report: Option<&mut OptimizationReport>,
     trace: &mut Trace<'_, '_>,
+    parent_index: Option<usize>,
+    scope: Option<&dyn Fn(&Function) -> bool>,
 ) -> Result<(), OptError> {
     // Preserve opaque entry/return bodies until target-specific lowering can
     // establish their register, frame and control-flow contracts.
@@ -1279,7 +1330,8 @@ fn execute_pipeline(
     } else {
         InlineBudget::default()
     };
-    for (pipeline_index, &pass) in passes.iter().enumerate() {
+    for (index, &pass) in passes.iter().enumerate() {
+        let pipeline_index = parent_index.unwrap_or(index);
         if trace.exhausted() {
             break;
         }
@@ -1303,7 +1355,7 @@ fn execute_pipeline(
         let module_changed = pass.run_module(
             module,
             &mut ModuleContext {
-                enabled: &|f| pass.enabled_for(f),
+                enabled: &|f| pass.enabled_for(f) && scope.is_none_or(|enabled| enabled(f)),
                 sites: inline_sites.as_mut(),
                 changed: &mut versions.changed,
                 budget: &mut inline_budget,
@@ -1393,11 +1445,26 @@ fn execute_pipeline(
                 });
             }
             result?;
+            if changed && !pass.cleanup_passes().is_empty() {
+                execute_sequence(
+                    module,
+                    pass.cleanup_passes(),
+                    context,
+                    report.as_deref_mut(),
+                    trace,
+                    Some(pipeline_index),
+                    Some(&|f| pass.enabled_for(f) && scope.is_none_or(|enabled| enabled(f))),
+                )?;
+                versions.changed = vec![true; module.functions.len()];
+                versions.module_changed(&mut canonical);
+                prints.resize(module.functions.len(), None);
+                prints.fill(None);
+            }
             continue;
         }
         let slot = versions.slot(pass);
         for (index, func) in module.functions.iter_mut().enumerate() {
-            if !pass.enabled_for(func) {
+            if !pass.enabled_for(func) || scope.is_some_and(|enabled| !enabled(func)) {
                 continue;
             }
             let before = reporting.then(|| IrCounts::function(func));
