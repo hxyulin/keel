@@ -341,8 +341,9 @@ shapes use ordinary code generation.
 The supported operations are integer constants, add/subtract/multiply,
 AND/OR/XOR, negation, complement, shifts, pointer addition, comparisons,
 select, integer extension/truncation, pointer/integer conversions, scalar
-loads/stores, fixed stack addresses, branches, block arguments, switches and
-returns. Variable shift counts may have any supported integer width and are
+loads/stores, fixed stack addresses, branches, block arguments, switches,
+explicit traps and returns. Explicit traps emit `brk #1`, matching ordinary
+lowering. Variable shift counts may have any supported integer width and are
 masked to the operand width. Loads and stores keep their original byte widths,
 including unaligned accesses. Lifetime markers do not share or move fixed
 slots.

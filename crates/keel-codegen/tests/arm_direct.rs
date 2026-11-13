@@ -261,3 +261,40 @@ fn native_symbol_switch_and_division_boundaries_match_c_and_trap() {
         assert_eq!(out.status.signal(), Some(5), "{trap}: {:?}", out.status);
     }
 }
+
+#[test]
+fn native_explicit_traps_and_nontrapping_nonleaf_paths_match_c() {
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Target::Aarch64AppleDarwin
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Target::Aarch64LinuxGnu
+    } else {
+        keel_test_support::skip!("requires native AArch64 host");
+    };
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip!(keel_test_support::NO_CLANG);
+    };
+    let module = keel_ir::parse(include_str!("compile_speed/trap.keel")).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let program = request(target).program(&module).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-direct-explicit-traps");
+    fs::write(
+        dir.join("program.o"),
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+    )
+    .unwrap();
+    fs::write(dir.join("oracle.c"), include_str!("compile_speed/trap.c")).unwrap();
+    let output = clang
+        .command()
+        .current_dir(dir.path())
+        .args(["-O2", "oracle.c", "program.o", "-o", "oracle"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(dir.join("oracle")).output().unwrap();
+    assert!(output.status.success(), "exit {:?}", output.status);
+}

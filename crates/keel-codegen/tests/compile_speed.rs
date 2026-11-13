@@ -81,7 +81,8 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
           v7=isub v5,v6\n\
           return v7\n\
          }}\n\
-         func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n"
+         func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n{}",
+        include_str!("compile_speed/trap.keel")
     );
     let module = parse(&source);
     for target in [
@@ -97,7 +98,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
             assert!(direct_count(&program) > 0);
             assert_eq!(
                 report.counters[backend_profile::Counter::DirectFunctions as usize],
-                5
+                8
             );
             let bytes = keel_asm::assemble_program_for(target, &program).unwrap();
             assert_eq!(
@@ -171,6 +172,25 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
             a.section_by_name(section).unwrap().data().unwrap(),
             b.section_by_name(section).unwrap().data().unwrap()
         );
+        let text = a.section_by_name(section).unwrap().data().unwrap();
+        if target == Target::X86_64LinuxGnu {
+            // Two explicit traps and the dispatch division guards use UD2.
+            assert!(
+                text.windows(2)
+                    .filter(|bytes| *bytes == [0x0f, 0x0b])
+                    .count()
+                    >= 2
+            );
+        } else {
+            assert!(
+                text.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|bytes| **bytes == [0x20, 0x00, 0x20, 0xd4])
+                    .count()
+                    >= 2
+            );
+        }
     }
 }
 #[test]
@@ -181,7 +201,7 @@ fn unsupported_functions_and_debug_use_ordinary_lowering() {
         "func @f(ptr byval {i64})->i64 {\nblock0(v0:ptr):\n v1=iconst.i64 1\n return v1\n}\n".to_owned(),
         "func @f()->i64 {\n ss0=stack_slot 16, align 32\nblock0:\n v0=iconst.i64 1\n return v0\n}\n".to_owned(),
         format!("file f0 = \"debug.c\"\n{LEAF}"),
-        "func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n v2=rotr v0,v1\n return v2\n}\n".to_owned(),
+        "func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n brif v0,block1,block2\nblock1:\n trap\nblock2:\n v2=rotr v0,v1\n return v2\n}\n".to_owned(),
     ];
     for source in cases {
         let module = parse(&source);

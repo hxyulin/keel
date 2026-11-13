@@ -579,6 +579,7 @@ fn encode(
                     }
                     edge(func, base, &dests[0], &mut bytes, &mut branches);
                 }
+                InstData::Trap => bytes.extend_from_slice(&[0x0f, 0x0b]),
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     if func.sig.returns.len() <= 1 {
                         if let Some(&arg) = args.first() {

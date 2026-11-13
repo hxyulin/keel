@@ -507,7 +507,8 @@ stack slots may require up to 16-byte alignment. The frame keeps their base
 16-byte aligned. Bodies may use integer constants, add/subtract/multiply,
 negation/complement, AND/OR/XOR, signed and unsigned shifts, division/remainder, comparisons,
 select, scalar loads/stores, integer extensions/truncation, pointer/integer
-casts, pointer addition, stack addresses, branches and returns. Normal fixed
+casts, pointer addition, stack addresses, branches, explicit traps and returns.
+Explicit traps emit `UD2`, matching ordinary lowering. Normal fixed
 scalar calls support register and stack arguments and scalar results,
 including direct, indirect and recursive calls. Every value keeps its stack home
 across calls. The maximum outgoing stack area is reserved below every value

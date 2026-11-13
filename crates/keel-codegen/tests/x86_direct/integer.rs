@@ -119,6 +119,15 @@ fn switches_reuse_existing_sparse_narrow_and_edge_oracles() {
     );
 }
 
+#[test]
+fn explicit_traps_and_nontrapping_nonleaf_paths_match_c() {
+    execute(
+        "explicit-traps",
+        include_str!("../compile_speed/trap.keel"),
+        include_str!("../compile_speed/trap.c"),
+    );
+}
+
 const SYMBOLS: &str = "decl data @outside\ndecl @callback(i64)->i64\ndata @defined = align 8 { i64 37 }\nfunc @function_address()->ptr {\nblock0:\n v0=symbol_addr @callback\n return v0\n}\nfunc @selected(i64)->i64 {\nblock0(v0:i64):\n v1=iconst.i64 3\n switch v0,block3,[-1:block1,0x123456789:block2]\nblock1:\n v2=symbol_addr @defined\n v3=load.i64 v2\n v4=sdiv v3,v1\n return v4\nblock2:\n v5=symbol_addr @outside\n v6=load.i64 v5\n v7=srem v6,v1\n return v7\nblock3:\n v8=symbol_addr @callback\n v9=call_indirect v8(v0):(i64)->i64\n return v9\n}\n";
 #[test]
 fn symbol_addresses_mix_with_switches_division_and_indirect_calls() {

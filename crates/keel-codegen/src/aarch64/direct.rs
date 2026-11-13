@@ -700,6 +700,7 @@ fn encode<'a>(
                         home_base,
                     )?;
                 }
+                InstData::Trap => word(&mut bytes, 0xd4200020),
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     for ((&value, ret), &location) in args
                         .iter()

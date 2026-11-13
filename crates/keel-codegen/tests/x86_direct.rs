@@ -143,7 +143,7 @@ fn scalar_leaves_share_stream_text_chunks_and_unwind_bytes() {
 fn unsupported_debug_and_abi_shapes_fall_back_transactionally() {
     let cases = [
         "func @f(f64)->f64 {\nblock0(v0:f64):\n return v0\n}\n",
-        "func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n v2=rotl v0,v1\n return v2\n}\n",
+        "func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n brif v0,block1,block2\nblock1:\n trap\nblock2:\n v2=rotl v0,v1\n return v2\n}\n",
         "func @f(ptr byval {i64})->i64 {\nblock0(v0:ptr):\n v1=iconst.i64 1\n return v1\n}\n",
         "func @f()->i64 {\n ss0=stack_slot 4096,align 32\nblock0:\n v0=iconst.i64 1\n return v0\n}\n",
         "file f0 = \"source.c\"\nfunc @f(i32)->i32 {\nblock0(v0:i32):\n return v0\n}\n",
