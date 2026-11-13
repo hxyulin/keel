@@ -121,7 +121,7 @@ fn unsupported_call_shapes_fall_back() {
     let cases = [
         "decl @f(i64,...)->i64\nfunc @caller()->i64 {\nblock0:\n v0=iconst.i64 1\n v1=call @f(v0)\n return v1\n}\n",
         "decl @f()->i64 returns_twice\nfunc @caller()->i64 {\nblock0:\n v0=call @f()\n return v0\n}\n",
-        "decl @f(i64,i64,i64,i64,i64,i64,i64)->i64\nfunc @caller()->i64 {\nblock0:\n v0=iconst.i64 1\n v1=call @f(v0,v0,v0,v0,v0,v0,v0)\n return v1\n}\n",
+        "decl @f(ptr byval {i64})->i64\nfunc @caller()->i64 {\n ss0=stack_slot 8,align 8\nblock0:\n v0=stack_addr ss0\n v1=call @f(v0)\n return v1\n}\n",
     ];
     for source in cases {
         let module = parse(source);

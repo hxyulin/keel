@@ -1,8 +1,10 @@
 //! Compile-speed lowering for bounded scalar functions. Every value has an
-//! eight-byte stack home. x9/x10/x11 are scratches; no liveness or allocation runs.
+//! eight-byte stack home. x9–x11 compute values; x12 forms stack addresses.
+//! No liveness or allocation runs.
 //! Eligibility is transactional: unsupported input leaves the output untouched
 //! and uses the ordinary backend. All offsets are local to the encoded body.
-use super::{Cfi, Directive, Expression, Function, Output, Sink, Type};
+use super::{Cfi, Directive, Expression, Function, Output, Sink, Type, abi};
+use crate::regalloc::Loc;
 use keel_asm_ir::{PageKind, SymbolicInstruction};
 use keel_ir::{
     ArgExt, BinaryOp, BlockCall, CallArgs, CallConv, ConvertOp, EntityRef, InstData, IntCC,
@@ -18,25 +20,102 @@ fn patch(out: &mut [u8], position: usize, bits: u32) {
 fn home(func: &Function, value: Value) -> u32 {
     func.resolve(value).index() as u32
 }
+fn address(out: &mut Vec<u8>, register: u32, offset: u32) {
+    let mut high = offset >> 12;
+    let low = offset & 4095;
+    let mut base = 31;
+    while high != 0 {
+        let part = high.min(4095);
+        word(out, 0x91400000 | part << 10 | base << 5 | register);
+        base = register;
+        high -= part;
+    }
+    if low != 0 || base == 31 {
+        word(out, 0x91000000 | low << 10 | base << 5 | register);
+    }
+}
+fn memory(out: &mut Vec<u8>, register: u32, offset: u32, width: u32, write: bool) {
+    let scale = width / 8;
+    let opcode = match (write, width) {
+        (false, 8) => 0x39400000,
+        (false, 16) => 0x79400000,
+        (false, 32) => 0xb9400000,
+        (false, 64) => 0xf9400000,
+        (true, 8) => 0x39000000,
+        (true, 16) => 0x79000000,
+        (true, 32) => 0xb9000000,
+        (true, 64) => 0xf9000000,
+        _ => unreachable!("checked scalar width"),
+    };
+    if offset.is_multiple_of(scale) && offset / scale <= 4095 {
+        word(out, opcode | (offset / scale) << 10 | 31 << 5 | register);
+    } else {
+        // x12 is never an ABI argument or an SSA scratch. In particular x9
+        // keeps an indirect call target while outgoing stack arguments stage.
+        address(out, 12, offset);
+        word(out, opcode | 12 << 5 | register);
+    }
+}
 fn load(out: &mut Vec<u8>, register: u32, slot: u32) {
-    word(out, 0xf94003e0 | slot << 10 | register);
+    memory(out, register, slot * 8, 64, false);
 }
 fn store(out: &mut Vec<u8>, register: u32, slot: u32) {
-    word(out, 0xf90003e0 | slot << 10 | register);
+    memory(out, register, slot * 8, 64, true);
 }
-fn edge(func: &Function, dest: &BlockCall, out: &mut Vec<u8>, branches: &mut Vec<(usize, usize)>) {
+fn edge(
+    func: &Function,
+    dest: &BlockCall,
+    out: &mut Vec<u8>,
+    branches: &mut Vec<(usize, usize)>,
+    home_base: u32,
+) {
     // Stage every source before assigning any block parameter, including cycles.
-    let temporary = func.num_values() as u32;
+    let temporary = home_base + func.num_values() as u32;
     for (index, &value) in dest.args.iter().enumerate() {
-        load(out, 9, home(func, value));
+        load(out, 9, home_base + home(func, value));
         store(out, 9, temporary + index as u32);
     }
     for (index, &value) in func.block_params(dest.block).iter().enumerate() {
         load(out, 9, temporary + index as u32);
-        store(out, 9, home(func, value));
+        store(out, 9, home_base + home(func, value));
     }
     branches.push((out.len(), dest.block.index()));
     word(out, 0x14000000);
+}
+#[derive(Clone, Copy)]
+struct CfaStep {
+    at: usize,
+    offset: u32,
+}
+struct Epilogue {
+    restore_lr: Option<usize>,
+    steps: [Option<CfaStep>; 2],
+    end: usize,
+}
+fn adjust(out: &mut Vec<u8>, frame: u32, subtract: bool) -> [Option<CfaStep>; 2] {
+    let high = frame & !4095;
+    let low = frame & 4095;
+    let opcode = if subtract { 0xd10003ff } else { 0x910003ff };
+    let mut steps = [None, None];
+    let mut consumed = 0;
+    if high != 0 {
+        word(out, opcode | 1 << 22 | (high >> 12) << 10);
+        consumed = high;
+        steps[0] = Some(CfaStep {
+            at: out.len(),
+            offset: if subtract { consumed } else { frame - consumed },
+        });
+    }
+    if low != 0 || high == 0 {
+        word(out, opcode | low << 10);
+        consumed += low;
+        let index = usize::from(high != 0);
+        steps[index] = Some(CfaStep {
+            at: out.len(),
+            offset: if subtract { consumed } else { frame - consumed },
+        });
+    }
+    steps
 }
 enum Site<'a> {
     Call(&'a str),
@@ -45,8 +124,9 @@ enum Site<'a> {
 struct Code<'a> {
     bytes: Vec<u8>,
     frame: u32,
-    /// Offsets of the ADD sp before each RET, for precise unwind transitions.
-    epilogues: Vec<usize>,
+    prologue: [Option<CfaStep>; 2],
+    saved_lr_at: Option<usize>,
+    epilogues: Vec<Epilogue>,
     saved_lr: Option<u32>,
     sites: Vec<(usize, Site<'a>)>,
 }
@@ -76,7 +156,6 @@ fn result(out: &mut Vec<u8>, dst: u32, width: u32) {
 fn scalar_signature(sig: &Signature, linux: bool) -> bool {
     !sig.variadic
         && !sig.returns_twice
-        && sig.params.len() <= 8
         && sig.returns.len() <= 1
         && sig
             .params
@@ -90,26 +169,54 @@ fn scalar_signature(sig: &Signature, linux: bool) -> bool {
                 .first()
                 .is_some_and(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None))
 }
+fn placements(sig: &Signature, linux: bool, locations: &mut Vec<abi::ArgLoc>) -> Option<u32> {
+    if sig.params.len().checked_mul(8)? > super::MAX_FRAME_SIZE {
+        return None;
+    }
+    Some(abi::arg_locs_into_for(
+        sig.params
+            .iter()
+            .map(|p| abi::ArgKind::of(p.ty, &p.purpose)),
+        sig.params.len(),
+        linux,
+        locations,
+    ))
+}
 fn arguments(
     bytes: &mut Vec<u8>,
     func: &Function,
     sig: &Signature,
     args: &CallArgs,
     linux: bool,
+    locations: &mut Vec<abi::ArgLoc>,
+    home_base: u32,
 ) -> Option<()> {
     if !scalar_signature(sig, linux) || args.has_explicit_abi() || args.len() != sig.params.len() {
         return None;
     }
-    for (index, (&value, param)) in args.iter().zip(&sig.params).enumerate() {
+    placements(sig, linux, locations)?;
+    for ((&value, param), location) in args.iter().zip(&sig.params).zip(locations.iter()) {
         if func.value_type(value) != param.ty {
             return None;
         }
-        load(bytes, index as u32, home(func, value));
-        if param.ext == ArgExt::Sext && matches!(param.ty, Type::I8 | Type::I16) {
-            word(
-                bytes,
-                0x13000000 | (bits(param.ty)? - 1) << 10 | (index as u32) << 5 | index as u32,
-            );
+        match location {
+            abi::ArgLoc::Value(abi::Slot::Reg(Loc::Reg(register))) => {
+                let register = u32::from(*register);
+                load(bytes, register, home_base + home(func, value));
+                if param.ext == ArgExt::Sext && matches!(param.ty, Type::I8 | Type::I16) {
+                    word(
+                        bytes,
+                        0x13000000 | (bits(param.ty)? - 1) << 10 | register << 5 | register,
+                    );
+                }
+            }
+            abi::ArgLoc::Value(abi::Slot::Stack(offset)) => {
+                load(bytes, 10, home_base + home(func, value));
+                // Darwin packs named scalar arguments; AAPCS64 reserves eight
+                // bytes per slot. In both cases write only the declared width.
+                memory(bytes, 10, *offset, bits(param.ty)?, true);
+            }
+            _ => return None,
         }
     }
     Some(())
@@ -168,18 +275,46 @@ fn encode<'a>(
     {
         return None;
     }
-    let has_calls = func.layout_insts().any(|(_, inst)| {
-        matches!(
-            func.inst_data(inst),
-            InstData::Call { .. } | InstData::CallIndirect { .. }
-        )
-    });
+    let mut has_calls = false;
+    let mut outgoing = 0;
+    let mut locations = Vec::new();
+    for (_, inst) in func.layout_insts() {
+        let signature = match func.inst_data(inst) {
+            InstData::Call { func: callee, args } => {
+                if args.has_explicit_abi() {
+                    return None;
+                }
+                Some(&func.callee(*callee).sig)
+            }
+            InstData::CallIndirect { sig, args, .. } => {
+                if args.has_explicit_abi() {
+                    return None;
+                }
+                Some(func.signature(*sig))
+            }
+            _ => None,
+        };
+        if let Some(signature) = signature {
+            if !scalar_signature(signature, linux) {
+                return None;
+            }
+            has_calls = true;
+            outgoing = outgoing.max(placements(signature, linux, &mut locations)?);
+        }
+    }
+    let outgoing = outgoing.checked_add(15)? & !15;
+    let home_base = outgoing / 8;
+    let value_home = |value| home_base + home(func, value);
     let extra = func
         .blocks()
         .map(|b| func.block_params(b).len())
         .max()
         .unwrap_or(0);
-    let mut frame = func.num_values().checked_add(extra)?.checked_mul(8)?;
+    let mut frame = func
+        .num_values()
+        .checked_add(extra)?
+        .checked_mul(8)?
+        .checked_add(outgoing as usize)?;
     let mut stack = vec![0; func.num_stack_slots()];
     for (slot, data) in func.stack_slots() {
         let align = data.align as usize;
@@ -199,21 +334,37 @@ fn encode<'a>(
         None
     };
     frame = frame.checked_add(15)? & !15;
-    if frame > 4080 {
+    if frame > super::MAX_FRAME_SIZE {
         return None;
     }
     let frame = frame as u32;
     let mut bytes = Vec::with_capacity(func.num_values() * 24 + 64);
     let mut epilogues = Vec::new();
     let mut sites = Vec::new();
-    word(&mut bytes, 0xd10003ff | frame << 10);
+    let prologue = adjust(&mut bytes, frame, true);
     if let Some(save) = saved_lr {
         store(&mut bytes, 30, save / 8);
     }
+    let saved_lr_at = saved_lr.map(|_| bytes.len());
+    placements(&func.sig, linux, &mut locations)?;
     let entry = func.entry_block()?;
-    for (index, &value) in func.block_params(entry).iter().enumerate() {
-        normalize(&mut bytes, index as u32, bits(func.value_type(value))?);
-        store(&mut bytes, index as u32, home(func, value));
+    for (&value, location) in func.block_params(entry).iter().zip(&locations) {
+        let register = match location {
+            abi::ArgLoc::Value(abi::Slot::Reg(Loc::Reg(register))) => u32::from(*register),
+            abi::ArgLoc::Value(abi::Slot::Stack(offset)) => {
+                memory(
+                    &mut bytes,
+                    9,
+                    frame.checked_add(*offset)?,
+                    bits(func.value_type(value))?,
+                    false,
+                );
+                9
+            }
+            _ => return None,
+        };
+        normalize(&mut bytes, register, bits(func.value_type(value))?);
+        store(&mut bytes, register, value_home(value));
     }
     let mut offsets = vec![0; func.num_blocks()];
     let mut branches = Vec::new();
@@ -226,7 +377,7 @@ fn encode<'a>(
             let dst = func
                 .inst_results(inst)
                 .first()
-                .map_or(0, |&v| home(func, v));
+                .map_or(0, |&v| value_home(v));
             match func.inst_data(inst) {
                 InstData::Iconst { ty, imm } if ty.is_int() => {
                     let width = bits(*ty)?;
@@ -263,8 +414,8 @@ fn encode<'a>(
                         BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => 0,
                         _ => return None,
                     };
-                    load(&mut bytes, 9, home(func, args[0]));
-                    load(&mut bytes, 10, home(func, args[1]));
+                    load(&mut bytes, 9, value_home(args[0]));
+                    load(&mut bytes, 10, value_home(args[1]));
                     if matches!(
                         op,
                         BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem
@@ -290,7 +441,7 @@ fn encode<'a>(
                         UnaryOp::Bnot => 0xaa2903e9,
                         _ => return None,
                     };
-                    load(&mut bytes, 9, home(func, *arg));
+                    load(&mut bytes, 9, value_home(*arg));
                     word(&mut bytes, opcode);
                     result(&mut bytes, dst, width);
                 }
@@ -307,7 +458,7 @@ fn encode<'a>(
                     ) {
                         return None;
                     }
-                    load(&mut bytes, 9, home(func, *arg));
+                    load(&mut bytes, 9, value_home(*arg));
                     if *op == ConvertOp::Sext {
                         signed(&mut bytes, 9, from);
                     }
@@ -327,8 +478,8 @@ fn encode<'a>(
                         IntCC::Sgt => 12,
                         IntCC::Sge => 10,
                     };
-                    load(&mut bytes, 9, home(func, args[0]));
-                    load(&mut bytes, 10, home(func, args[1]));
+                    load(&mut bytes, 9, value_home(args[0]));
+                    load(&mut bytes, 10, value_home(args[1]));
                     if matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge) {
                         signed(&mut bytes, 9, width);
                         signed(&mut bytes, 10, width);
@@ -340,9 +491,9 @@ fn encode<'a>(
                 InstData::Select { args } => {
                     bits(func.value_type(args[0]))?;
                     let width = bits(func.value_type(args[1]))?;
-                    load(&mut bytes, 11, home(func, args[0]));
-                    load(&mut bytes, 9, home(func, args[1]));
-                    load(&mut bytes, 10, home(func, args[2]));
+                    load(&mut bytes, 11, value_home(args[0]));
+                    load(&mut bytes, 9, value_home(args[1]));
+                    load(&mut bytes, 10, value_home(args[2]));
                     word(&mut bytes, 0xf100017f);
                     word(&mut bytes, 0x9a8a1129);
                     result(&mut bytes, dst, width);
@@ -355,7 +506,7 @@ fn encode<'a>(
                         64 => 0xf9400129,
                         _ => return None,
                     };
-                    load(&mut bytes, 9, home(func, *addr));
+                    load(&mut bytes, 9, value_home(*addr));
                     word(&mut bytes, opcode);
                     store(&mut bytes, 9, dst);
                 }
@@ -367,8 +518,8 @@ fn encode<'a>(
                         64 => 0xf900012a,
                         _ => return None,
                     };
-                    load(&mut bytes, 9, home(func, *addr));
-                    load(&mut bytes, 10, home(func, *value));
+                    load(&mut bytes, 9, value_home(*addr));
+                    load(&mut bytes, 10, value_home(*value));
                     word(&mut bytes, opcode);
                 }
                 InstData::SymbolAddr { symbol } => {
@@ -398,14 +549,14 @@ fn encode<'a>(
                     store(&mut bytes, 9, dst);
                 }
                 InstData::StackAddr { slot } => {
-                    word(&mut bytes, 0x910003e9 | (stack[slot.index()] as u32) << 10);
+                    address(&mut bytes, 9, stack[slot.index()] as u32);
                     store(&mut bytes, 9, dst);
                 }
                 InstData::Intrinsic {
                     id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
                     ..
                 } => {}
-                InstData::Jump { dest } => edge(func, dest, &mut bytes, &mut branches),
+                InstData::Jump { dest } => edge(func, dest, &mut bytes, &mut branches, home_base),
                 InstData::Switch { arg, dests, cases } => {
                     let ty = func.value_type(*arg);
                     if !ty.is_int() || dests.len() != cases.len() + 1 {
@@ -413,71 +564,94 @@ fn encode<'a>(
                     }
                     let width = bits(ty)?;
                     let mask = u64::MAX >> (64 - width);
-                    load(&mut bytes, 9, home(func, *arg));
+                    load(&mut bytes, 9, value_home(*arg));
                     for (value, dest) in cases.iter().zip(&dests[1..]) {
                         materialize(&mut bytes, 10, *value as u64 & mask);
                         word(&mut bytes, 0xeb0a013f);
                         let skip = bytes.len();
                         word(&mut bytes, 0x54000001);
-                        edge(func, dest, &mut bytes, &mut branches);
+                        edge(func, dest, &mut bytes, &mut branches, home_base);
                         let distance = (bytes.len() - skip) / 4;
                         if distance >= 1 << 18 {
                             return None;
                         }
                         patch(&mut bytes, skip, 0x54000001 | (distance as u32) << 5);
                     }
-                    edge(func, &dests[0], &mut bytes, &mut branches);
+                    edge(func, &dests[0], &mut bytes, &mut branches, home_base);
                 }
                 InstData::Brif { cond, dests } => {
                     bits(func.value_type(*cond))?;
-                    load(&mut bytes, 9, home(func, *cond));
+                    load(&mut bytes, 9, value_home(*cond));
                     let position = bytes.len();
                     word(&mut bytes, 0xb4000009);
-                    edge(func, &dests[0], &mut bytes, &mut branches);
+                    edge(func, &dests[0], &mut bytes, &mut branches, home_base);
                     let distance = (bytes.len() - position) / 4;
                     if distance >= 1 << 18 {
                         return None;
                     }
                     patch(&mut bytes, position, 0xb4000009 | (distance as u32) << 5);
-                    edge(func, &dests[1], &mut bytes, &mut branches);
+                    edge(func, &dests[1], &mut bytes, &mut branches, home_base);
                 }
                 InstData::Call { func: callee, args } => {
                     let callee = func.callee(*callee);
                     if func.inst_results(inst).len() != callee.sig.returns.len() {
                         return None;
                     }
-                    arguments(&mut bytes, func, &callee.sig, args, linux)?;
+                    arguments(
+                        &mut bytes,
+                        func,
+                        &callee.sig,
+                        args,
+                        linux,
+                        &mut locations,
+                        home_base,
+                    )?;
                     sites.push((bytes.len(), Site::Call(callee.name.as_str())));
                     word(&mut bytes, 0x94000000);
                     call_result(&mut bytes, &callee.sig, dst)?;
                 }
                 InstData::CallIndirect { sig, callee, args } => {
                     // Keep the target out of x0-x7 while staging all ABI arguments.
-                    load(&mut bytes, 9, home(func, *callee));
+                    load(&mut bytes, 9, value_home(*callee));
                     let signature = func.signature(*sig);
                     if func.value_type(*callee) != Type::Ptr
                         || func.inst_results(inst).len() != signature.returns.len()
                     {
                         return None;
                     }
-                    arguments(&mut bytes, func, signature, args, linux)?;
+                    arguments(
+                        &mut bytes,
+                        func,
+                        signature,
+                        args,
+                        linux,
+                        &mut locations,
+                        home_base,
+                    )?;
                     word(&mut bytes, 0xd63f0120);
                     call_result(&mut bytes, signature, dst)?;
                 }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     if let Some(&value) = args.first() {
                         let ret = &func.sig.returns[0];
-                        load(&mut bytes, 0, home(func, value));
+                        load(&mut bytes, 0, value_home(value));
                         if ret.ext == ArgExt::Sext && matches!(ret.ty, Type::I8 | Type::I16) {
                             word(&mut bytes, 0x13000000 | (bits(ret.ty)? - 1) << 10);
                         }
                     }
-                    if let Some(save) = saved_lr {
+                    let restore_lr = if let Some(save) = saved_lr {
                         load(&mut bytes, 30, save / 8);
-                    }
-                    epilogues.push(bytes.len());
-                    word(&mut bytes, 0x910003ff | frame << 10);
+                        Some(bytes.len())
+                    } else {
+                        None
+                    };
+                    let steps = adjust(&mut bytes, frame, false);
                     word(&mut bytes, 0xd65f03c0);
+                    epilogues.push(Epilogue {
+                        restore_lr,
+                        steps,
+                        end: bytes.len(),
+                    });
                 }
                 _ => return None,
             }
@@ -497,6 +671,8 @@ fn encode<'a>(
     Some(Code {
         bytes,
         frame,
+        prologue,
+        saved_lr_at,
         epilogues,
         saved_lr,
         sites,
@@ -543,10 +719,15 @@ pub(super) fn emit(
     let saved_lr = code.saved_lr;
     let frame = code.frame;
     let lr_rule = saved_lr.map(|save| i64::from(save) - i64::from(frame));
-    let events = std::iter::once((4, Cfi::DefCfaOffset(frame.into())))
-        .chain(lr_rule.map(|offset| {
+    let cfa = |step: CfaStep| (step.at, Cfi::DefCfaOffset(step.offset.into()));
+    let events = code
+        .prologue
+        .into_iter()
+        .flatten()
+        .map(cfa)
+        .chain(code.saved_lr_at.zip(lr_rule).map(|(at, offset)| {
             (
-                8,
+                at,
                 Cfi::Offset {
                     register: 30,
                     offset,
@@ -555,12 +736,13 @@ pub(super) fn emit(
         }))
         .chain(code.epilogues.into_iter().flat_map(move |epilogue| {
             [
-                saved_lr.map(|_| (epilogue, Cfi::Restore(30))),
-                Some((epilogue + 4, Cfi::DefCfaOffset(0))),
-                Some((epilogue + 8, Cfi::DefCfaOffset(frame.into()))),
+                epilogue.restore_lr.map(|at| (at, Cfi::Restore(30))),
+                epilogue.steps[0].map(cfa),
+                epilogue.steps[1].map(cfa),
+                Some((epilogue.end, Cfi::DefCfaOffset(frame.into()))),
                 lr_rule.map(|offset| {
                     (
-                        epilogue + 8,
+                        epilogue.end,
                         Cfi::Offset {
                             register: 30,
                             offset,

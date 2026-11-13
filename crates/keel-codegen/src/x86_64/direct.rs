@@ -22,8 +22,8 @@ fn width(ty: Type) -> Option<u32> {
 fn integer(ty: Type) -> bool {
     matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64)
 }
-fn home(func: &Function, value: Value) -> u32 {
-    (func.resolve(value).index() * 8) as u32
+fn home(func: &Function, base: u32, value: Value) -> u32 {
+    base + (func.resolve(value).index() * 8) as u32
 }
 fn stack(out: &mut Vec<u8>, opcode: u8, reg: u8, offset: u32) {
     out.extend_from_slice(&[
@@ -58,20 +58,26 @@ fn signed(out: &mut Vec<u8>, reg: u8, bits: u32) {
         _ => unreachable!(),
     }
 }
-fn result(func: &Function, out: &mut Vec<u8>, value: Value) -> Option<()> {
+fn result(func: &Function, base: u32, out: &mut Vec<u8>, value: Value) -> Option<()> {
     normalize(out, 0, width(func.value_type(value))?);
-    store(out, 0, home(func, value));
+    store(out, 0, home(func, base, value));
     Some(())
 }
-fn edge(func: &Function, dest: &BlockCall, out: &mut Vec<u8>, branches: &mut Vec<(usize, usize)>) {
-    let temporary = (func.num_values() * 8) as u32;
+fn edge(
+    func: &Function,
+    base: u32,
+    dest: &BlockCall,
+    out: &mut Vec<u8>,
+    branches: &mut Vec<(usize, usize)>,
+) {
+    let temporary = base + (func.num_values() * 8) as u32;
     for (i, &value) in dest.args.iter().enumerate() {
-        load(out, 0, home(func, value));
+        load(out, 0, home(func, base, value));
         store(out, 0, temporary + i as u32 * 8);
     }
     for (i, &value) in func.block_params(dest.block).iter().enumerate() {
         load(out, 0, temporary + i as u32 * 8);
-        store(out, 0, home(func, value));
+        store(out, 0, home(func, base, value));
     }
     out.push(0xe9);
     branches.push((out.len(), dest.block.index()));
@@ -115,7 +121,6 @@ struct Code {
 fn scalar_signature(sig: &Signature) -> bool {
     !sig.variadic
         && !sig.returns_twice
-        && sig.params.len() <= 6
         && sig.returns.len() <= 1
         && sig.x86_vector_abi.is_none()
         && sig
@@ -124,20 +129,31 @@ fn scalar_signature(sig: &Signature) -> bool {
             .chain(&sig.returns)
             .all(|p| width(p.ty).is_some() && p.purpose == Purpose::Normal)
 }
-fn arguments(func: &Function, args: &CallArgs, sig: &Signature, bytes: &mut Vec<u8>) -> Option<()> {
+fn arguments(
+    func: &Function,
+    base: u32,
+    args: &CallArgs,
+    sig: &Signature,
+    bytes: &mut Vec<u8>,
+) -> Option<()> {
     if !scalar_signature(sig) || args.has_explicit_abi() || args.len() != sig.params.len() {
         return None;
     }
-    for ((&value, param), reg) in args.iter().zip(&sig.params).zip([7, 6, 2, 1, 8, 9]) {
+    for (index, (&value, param)) in args.iter().zip(&sig.params).enumerate() {
         if func.value_type(value) != param.ty {
             return None;
         }
-        load(bytes, 0, home(func, value));
+        load(bytes, 0, home(func, base, value));
         if param.ext == ArgExt::Sext {
             signed(bytes, 0, width(param.ty)?);
         }
-        // All values already have canonical homes. rax is outside the argument bank.
-        bytes.extend_from_slice(&[0x48 | (reg >> 3), 0x89, 0xc0 | (reg & 7)]);
+        // Outgoing slots are below every SSA home and edge-copy temporary.
+        // rax is outside the argument bank, so argument copies cannot cycle.
+        if let Some(&reg) = [7, 6, 2, 1, 8, 9].get(index) {
+            bytes.extend_from_slice(&[0x48 | (reg >> 3), 0x89, 0xc0 | (reg & 7)]);
+        } else {
+            store(bytes, 0, u32::try_from((index - 6).checked_mul(8)?).ok()?);
+        }
     }
     Some(())
 }
@@ -149,13 +165,26 @@ fn encode(
     if !scalar_signature(&func.sig) || func.personality.is_some() || !func.debug_vars.is_empty() {
         return None;
     }
+    let mut outgoing = 0usize;
+    for (_, inst) in func.layout_insts() {
+        let sig = match func.inst_data(inst) {
+            InstData::Call { func: callee, .. } => &func.callee(*callee).sig,
+            InstData::CallIndirect { sig, .. } => func.signature(*sig),
+            _ => continue,
+        };
+        if !scalar_signature(sig) {
+            return None;
+        }
+        outgoing = outgoing.max(sig.params.len().saturating_sub(6).checked_mul(8)?);
+    }
+    let base = u32::try_from(outgoing).ok()?;
     let entry = func.entry_block()?;
     let extra = func
         .blocks()
         .map(|b| func.block_params(b).len())
         .max()
         .unwrap_or(0);
-    let mut used = func.num_values().checked_add(extra)?.checked_mul(8)?;
+    let mut used = outgoing.checked_add(func.num_values().checked_add(extra)?.checked_mul(8)?)?;
     let mut slots = vec![0; func.num_stack_slots()];
     for (slot, data) in func.stack_slots() {
         if data.align == 0 || !data.align.is_power_of_two() || data.align > 16 {
@@ -167,7 +196,11 @@ fn encode(
     }
     // Entry rsp is 8 mod 16. Allocating 8 mod 16 makes fixed slots 16-aligned.
     let frame = (used.checked_add(8)?.checked_add(15)? & !15).checked_sub(8)?;
-    if frame > 4088 {
+    if frame > i32::MAX as usize / 2 {
+        return None;
+    }
+    let incoming = func.sig.params.len().saturating_sub(6).checked_mul(8)?;
+    if frame.checked_add(8)?.checked_add(incoming)? > i32::MAX as usize {
         return None;
     }
     let frame = frame as u32;
@@ -177,16 +210,24 @@ fn encode(
     let mut traps = Vec::new();
     bytes.extend_from_slice(&[0x48, 0x81, 0xec]);
     bytes.extend_from_slice(&frame.to_le_bytes());
-    for ((&value, param), reg) in func
+    for (index, (&value, param)) in func
         .block_params(entry)
         .iter()
         .zip(&func.sig.params)
-        .zip([7, 6, 2, 1, 8, 9])
+        .enumerate()
     {
-        // rax is not an argument register, so normalizing cannot clobber later arguments.
-        bytes.extend_from_slice(&[0x48 | ((reg >> 3) << 2), 0x89, 0xc0 | ((reg & 7) << 3)]);
+        // rsp+frame is the original return address; scalar stack arguments
+        // begin eight bytes above it, in slots owned by the caller.
+        if let Some(&reg) = [7, 6, 2, 1, 8, 9].get(index) {
+            bytes.extend_from_slice(&[0x48 | ((reg >> 3) << 2), 0x89, 0xc0 | ((reg & 7) << 3)]);
+        } else {
+            let offset = (frame as usize)
+                .checked_add(8)?
+                .checked_add((index - 6).checked_mul(8)?)?;
+            load(&mut bytes, 0, u32::try_from(offset).ok()?);
+        }
         normalize(&mut bytes, 0, width(param.ty)?);
-        store(&mut bytes, 0, home(func, value));
+        store(&mut bytes, 0, home(func, base, value));
     }
     let mut offsets = vec![0; func.num_blocks()];
     let mut branches = Vec::new();
@@ -208,7 +249,7 @@ fn encode(
                     let immediate = (*imm as u64) & (u64::MAX >> (64 - bits));
                     bytes.extend_from_slice(&[0x48, 0xb8]);
                     bytes.extend_from_slice(&immediate.to_le_bytes());
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::Binary { op, args } => {
                     let ty = func.value_type(args[0]);
@@ -217,8 +258,8 @@ fn encode(
                     if !integer(ty) && *op != BinaryOp::Ptradd {
                         return None;
                     }
-                    load(&mut bytes, 0, home(func, args[0]));
-                    load(&mut bytes, 1, home(func, args[1]));
+                    load(&mut bytes, 0, home(func, base, args[0]));
+                    load(&mut bytes, 1, home(func, base, args[1]));
                     match op {
                         BinaryOp::Iadd | BinaryOp::Ptradd => {
                             bytes.extend_from_slice(&[0x48, 0x01, 0xc8])
@@ -290,10 +331,10 @@ fn encode(
                         }
                         _ => return None,
                     }
-                    result(func, &mut bytes, dst?)?;
+                    result(func, base, &mut bytes, dst?)?;
                 }
                 InstData::Unary { op, arg } if integer(func.value_type(*arg)) => {
-                    load(&mut bytes, 0, home(func, *arg));
+                    load(&mut bytes, 0, home(func, base, *arg));
                     bytes.extend_from_slice(&[
                         0x48,
                         0xf7,
@@ -303,12 +344,12 @@ fn encode(
                             _ => return None,
                         },
                     ]);
-                    result(func, &mut bytes, dst?)?;
+                    result(func, base, &mut bytes, dst?)?;
                 }
                 InstData::Convert { op, ty, arg } => {
                     let source = width(func.value_type(*arg))?;
                     width(*ty)?;
-                    load(&mut bytes, 0, home(func, *arg));
+                    load(&mut bytes, 0, home(func, base, *arg));
                     match op {
                         ConvertOp::Sext => signed(&mut bytes, 0, source),
                         ConvertOp::Uext
@@ -317,13 +358,13 @@ fn encode(
                         | ConvertOp::IntToPtr => {}
                         _ => return None,
                     }
-                    result(func, &mut bytes, dst?)?;
+                    result(func, base, &mut bytes, dst?)?;
                 }
                 InstData::Icmp { cond, args } => {
                     let ty = func.value_type(args[0]);
                     let bits = width(ty)?;
-                    load(&mut bytes, 0, home(func, args[0]));
-                    load(&mut bytes, 1, home(func, args[1]));
+                    load(&mut bytes, 0, home(func, base, args[0]));
+                    load(&mut bytes, 1, home(func, base, args[1]));
                     if matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge) {
                         signed(&mut bytes, 0, bits);
                         signed(&mut bytes, 1, bits);
@@ -351,33 +392,33 @@ fn encode(
                         0xb6,
                         0xc0,
                     ]);
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::Select { args } => {
                     width(func.value_type(args[1]))?;
-                    load(&mut bytes, 0, home(func, args[0]));
-                    load(&mut bytes, 1, home(func, args[1]));
-                    load(&mut bytes, 2, home(func, args[2]));
+                    load(&mut bytes, 0, home(func, base, args[0]));
+                    load(&mut bytes, 1, home(func, base, args[1]));
+                    load(&mut bytes, 2, home(func, base, args[2]));
                     bytes.extend_from_slice(&[
                         0x48, 0x85, 0xc0, 0x48, 0x0f, 0x44, 0xca, 0x48, 0x89, 0xc8,
                     ]);
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::Load { ty, addr, .. } => {
                     let bits = width(*ty)?;
-                    load(&mut bytes, 0, home(func, *addr));
+                    load(&mut bytes, 0, home(func, base, *addr));
                     bytes.extend_from_slice(match bits {
                         8 => &[0x0f, 0xb6, 0x00][..],
                         16 => &[0x0f, 0xb7, 0x00][..],
                         32 => &[0x8b, 0x00][..],
                         _ => &[0x48, 0x8b, 0x00][..],
                     });
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::Store { value, addr, .. } => {
                     let bits = width(func.value_type(*value))?;
-                    load(&mut bytes, 0, home(func, *addr));
-                    load(&mut bytes, 1, home(func, *value));
+                    load(&mut bytes, 0, home(func, base, *addr));
+                    load(&mut bytes, 1, home(func, base, *value));
                     bytes.extend_from_slice(match bits {
                         8 => &[0x88, 0x08][..],
                         16 => &[0x66, 0x89, 0x08][..],
@@ -404,19 +445,19 @@ fn encode(
                         operation,
                     });
                     bytes.resize(bytes.len() + length, 0);
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::StackAddr { slot } => {
                     bytes.extend_from_slice(&[0x48, 0x8d, 0x84, 0x24]);
                     bytes.extend_from_slice(&slots[slot.index()].to_le_bytes());
-                    store(&mut bytes, 0, home(func, dst?));
+                    store(&mut bytes, 0, home(func, base, dst?));
                 }
                 InstData::Call { func: callee, args } => {
                     let sig = &func.callee(*callee).sig;
                     if values.len() != sig.returns.len() {
                         return None;
                     }
-                    arguments(func, args, sig, &mut bytes)?;
+                    arguments(func, base, args, sig, &mut bytes)?;
                     sites.push(Site {
                         offset: bytes.len(),
                         operation: Symbolic::Call(*callee),
@@ -424,7 +465,7 @@ fn encode(
                     // Publishing replaces exactly these five bytes with a symbolic CALL.
                     bytes.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
                     if let Some(value) = dst {
-                        result(func, &mut bytes, value)?;
+                        result(func, base, &mut bytes, value)?;
                     }
                 }
                 InstData::CallIndirect { sig, callee, args } => {
@@ -432,28 +473,28 @@ fn encode(
                     if func.value_type(*callee) != Type::Ptr || values.len() != sig.returns.len() {
                         return None;
                     }
-                    arguments(func, args, sig, &mut bytes)?;
-                    load(&mut bytes, 10, home(func, *callee));
+                    arguments(func, base, args, sig, &mut bytes)?;
+                    load(&mut bytes, 10, home(func, base, *callee));
                     bytes.extend_from_slice(&[0x41, 0xff, 0xd2]);
                     if let Some(value) = dst {
-                        result(func, &mut bytes, value)?;
+                        result(func, base, &mut bytes, value)?;
                     }
                 }
                 InstData::Intrinsic {
                     id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
                     ..
                 } => {}
-                InstData::Jump { dest } => edge(func, dest, &mut bytes, &mut branches),
+                InstData::Jump { dest } => edge(func, base, dest, &mut bytes, &mut branches),
                 InstData::Brif { cond, dests } => {
                     width(func.value_type(*cond))?;
-                    load(&mut bytes, 0, home(func, *cond));
+                    load(&mut bytes, 0, home(func, base, *cond));
                     bytes.extend_from_slice(&[0x48, 0x85, 0xc0, 0x0f, 0x84]);
                     let position = bytes.len();
                     bytes.extend_from_slice(&[0; 4]);
-                    edge(func, &dests[0], &mut bytes, &mut branches);
+                    edge(func, base, &dests[0], &mut bytes, &mut branches);
                     let target = bytes.len();
                     displacement(&mut bytes, position, target)?;
-                    edge(func, &dests[1], &mut bytes, &mut branches);
+                    edge(func, base, &dests[1], &mut bytes, &mut branches);
                 }
                 InstData::Switch { arg, dests, cases } => {
                     let ty = func.value_type(*arg);
@@ -461,22 +502,22 @@ fn encode(
                         return None;
                     }
                     let mask = u64::MAX >> (64 - width(ty)?);
-                    load(&mut bytes, 0, home(func, *arg));
+                    load(&mut bytes, 0, home(func, base, *arg));
                     for (case, dest) in cases.iter().zip(&dests[1..]) {
                         bytes.extend_from_slice(&[0x48, 0xb9]);
                         bytes.extend_from_slice(&((*case as u64 & mask).to_le_bytes()));
                         bytes.extend_from_slice(&[0x48, 0x39, 0xc8, 0x0f, 0x85]);
                         let next = bytes.len();
                         bytes.extend_from_slice(&[0; 4]);
-                        edge(func, dest, &mut bytes, &mut branches);
+                        edge(func, base, dest, &mut bytes, &mut branches);
                         let target = bytes.len();
                         displacement(&mut bytes, next, target)?;
                     }
-                    edge(func, &dests[0], &mut bytes, &mut branches);
+                    edge(func, base, &dests[0], &mut bytes, &mut branches);
                 }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     if let Some(&arg) = args.first() {
-                        load(&mut bytes, 0, home(func, arg));
+                        load(&mut bytes, 0, home(func, base, arg));
                         if func.sig.returns[0].ext == ArgExt::Sext {
                             signed(&mut bytes, 0, width(func.value_type(arg))?);
                         }

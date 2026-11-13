@@ -498,16 +498,21 @@ RAX, RCX and RDX are scratch registers; R10 holds indirect call targets. Signed 
 when needed; shifts mask the count by the value's width even when the count
 has another integer type. No register cache or optional combining runs.
 
-The supported boundary is up to six normal-purpose i8/i16/i32/i64/pointer
-arguments, a void or scalar return, and a frame of at most 4,088 bytes. Fixed
+The supported boundary is normal-purpose i8/i16/i32/i64/pointer arguments,
+a void or scalar return, and a frame within the ordinary backend
+`i32::MAX / 2` byte limit. Incoming displacements are also checked against the
+signed 32-bit address range. The first six scalar arguments use GPRs; later
+arguments use eight-byte stack slots. Fixed
 stack slots may require up to 16-byte alignment. The frame keeps their base
 16-byte aligned. Bodies may use integer constants, add/subtract/multiply,
 negation/complement, AND/OR/XOR, signed and unsigned shifts, division/remainder, comparisons,
 select, scalar loads/stores, integer extensions/truncation, pointer/integer
 casts, pointer addition, stack addresses, branches and returns. Normal fixed
-scalar calls support up to six register arguments and at most one scalar result,
+scalar calls support register and stack arguments and at most one scalar result,
 including direct, indirect and recursive calls. Every value keeps its stack home
-across calls. The frame is 16-byte aligned at each call, and outgoing narrow
+across calls. The maximum outgoing stack area is reserved below every value
+home, edge-copy temporary and fixed slot, so argument stores cannot destroy
+staged values or an indirect target. The frame is 16-byte aligned at each call, and outgoing narrow
 arguments follow the signature extension attributes. Sources are
 staged before block parameters are written, including cyclic edge copies.
 Lifetime markers do not reuse fixed-slot storage.

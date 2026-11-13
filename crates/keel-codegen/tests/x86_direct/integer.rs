@@ -4,14 +4,17 @@ use keel_codegen::{Request, backend_profile};
 use object::{Object, ObjectSection, ObjectSymbol};
 use std::fmt::Write;
 
-fn execute(name: &str, source: &str, oracle: &str) {
+pub(super) fn execute(name: &str, source: &str, oracle: &str) {
+    execute_count(name, source, oracle, None);
+}
+pub(super) fn execute_count(name: &str, source: &str, oracle: &str, expected: Option<usize>) {
     let module = parse(source);
     let req = request();
     let (program, report) = backend_profile::capture(|| req.program(&module));
     let program = program.unwrap();
     assert_eq!(
         report.counters[backend_profile::Counter::DirectFunctions as usize],
-        module.functions.len() as u64
+        expected.unwrap_or(module.functions.len()) as u64
     );
     let object = keel_asm::assemble_program_for(req.target, &program).unwrap();
     assert_eq!(

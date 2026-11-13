@@ -51,6 +51,17 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
           v8=urem v6,v7\n\
           return v8\n\
          }}\n\
+         decl @stack_external(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64\n\
+         func @stack_scalar(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64 {{\n\
+          ss0=stack_slot 8192,align 16\n\
+          ss1=stack_slot 8,align 8\n\
+         block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):\n\
+          v10=stack_addr ss1\n\
+          store v9,v10\n\
+          v11=load.i64 v10\n\
+          v12=call @stack_external(v0,v1,v2,v3,v4,v5,v6,v7,v8,v11)\n\
+          return v12\n\
+         }}\n\
          func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n"
     );
     let module = parse(&source);
@@ -67,7 +78,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
             assert!(direct_count(&program) > 0);
             assert_eq!(
                 report.counters[backend_profile::Counter::DirectFunctions as usize],
-                2
+                3
             );
             let bytes = keel_asm::assemble_program_for(target, &program).unwrap();
             assert_eq!(
@@ -149,9 +160,9 @@ fn unsupported_functions_and_debug_use_ordinary_lowering() {
         "func @f(f64)->f64 {\nblock0(v0:f64):\n return v0\n}\n".to_owned(),
         "decl @callee(i64,...)->i64\nfunc @f(i64)->i64 {\nblock0(v0:i64):\n v1=call @callee(v0)\n return v1\n}\n".to_owned(),
         "func @f(ptr byval {i64})->i64 {\nblock0(v0:ptr):\n v1=iconst.i64 1\n return v1\n}\n".to_owned(),
-        "func @f()->i64 {\n ss0=stack_slot 4096, align 16\nblock0:\n v0=iconst.i64 1\n return v0\n}\n".to_owned(),
+        "func @f()->i64 {\n ss0=stack_slot 16, align 32\nblock0:\n v0=iconst.i64 1\n return v0\n}\n".to_owned(),
         format!("file f0 = \"debug.c\"\n{LEAF}"),
-        "func @f()->i64 {\nblock0:\n".to_owned()+ &(0..520).map(|i|format!(" v{i}=iconst.i64 {i}\n")).collect::<String>()+" return v519\n}\n",
+        "func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n v2=rotr v0,v1\n return v2\n}\n".to_owned(),
     ];
     for source in cases {
         let module = parse(&source);
