@@ -5,6 +5,48 @@ use keel_ir::{
     StackSlot, Symbol, Type,
 };
 
+/// Bound each direct-index table to 32 KiB for the current four-byte handles.
+/// Callees with large dead handle arenas retain sparse storage.
+const DENSE_HANDLE_LIMIT: usize = 4096;
+
+/// Block and value cloning both remap dense, function-local entity handles.
+/// Neither map is iterated, so its representation does not order emitted IR.
+enum CloneMap<K, V> {
+    Dense(Vec<Option<V>>),
+    Sparse(FxHashMap<K, V>),
+}
+
+impl<K: EntityRef + std::hash::Hash, V: Copy> CloneMap<K, V> {
+    fn new(bound: usize) -> Self {
+        if bound <= DENSE_HANDLE_LIMIT {
+            Self::Dense(vec![None; bound])
+        } else {
+            Self::Sparse(FxHashMap::default())
+        }
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        match self {
+            Self::Dense(values) => values[key.index()] = Some(value),
+            Self::Sparse(values) => {
+                values.insert(key, value);
+            }
+        }
+    }
+}
+
+impl<K: EntityRef + std::hash::Hash, V> std::ops::Index<&K> for CloneMap<K, V> {
+    type Output = V;
+    fn index(&self, key: &K) -> &V {
+        match self {
+            Self::Dense(values) => values[key.index()]
+                .as_ref()
+                .expect("callee entity has a clone"),
+            Self::Sparse(values) => &values[key],
+        }
+    }
+}
+
 pub(super) fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
     let mut offset = 0;
     std::iter::from_fn(move || {
@@ -184,8 +226,8 @@ pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) 
     }
     let analysis = crate::analysis::get(callee);
     let dom = &analysis.dom;
-    let mut blocks = FxHashMap::default();
-    let mut values = FxHashMap::default();
+    let mut blocks = CloneMap::new(callee.num_blocks());
+    let mut values = CloneMap::new(callee.num_values());
     for &old in dom.rpo() {
         let new = caller.create_block();
         blocks.insert(old, new);
@@ -295,6 +337,55 @@ mod byval_tests {
 
     use crate::inline::cost::{byval_copy_cost, code_size, inline_cost};
     use crate::inline::run_with_report;
+    #[test]
+    fn dense_and_sparse_clone_maps_preserve_values_across_dead_arenas() {
+        use keel_ir_interp::{Interpreter, Outcome, Val};
+        for padded in [false, true] {
+            let mut module = keel_ir::parse(
+                "func @callee(i64) -> i64 {
+entry(v0:i64):
+ v1 = iconst.i64 1
+ v2 = iadd v0,v1
+ return v2
+}
+func @root(i64) -> i64 {
+entry(v0:i64):
+ v1 = call @callee(v0)
+ return v1
+}
+",
+            )
+            .unwrap();
+            if padded {
+                let callee = &mut module.functions[0];
+                let entry = callee.entry_block().unwrap();
+                let term = *callee.block_insts(entry).last().unwrap();
+                for _ in 0..DENSE_HANDLE_LIMIT {
+                    let dead = callee
+                        .insert_inst(InsertPoint::Before(term), InstData::iconst(Type::I64, 0));
+                    callee.remove_inst(dead);
+                }
+                let dead: Vec<_> = (0..DENSE_HANDLE_LIMIT)
+                    .map(|_| callee.create_block())
+                    .collect();
+                callee.remove_blocks(&dead);
+            }
+            keel_ir::verify_module(&module).unwrap();
+            let (caller, callee) = two_functions(&mut module.functions, 1, 0);
+            let call = caller.block_insts(caller.entry_block().unwrap())[0];
+            inline_call(caller, call, callee);
+            keel_ir::verify(caller).unwrap();
+            for input in [0u64, 7, u64::MAX] {
+                let result = Interpreter::for_function(caller)
+                    .call("root", &[Val::int(Type::I64, input as i128)]);
+                let Outcome::Return(values) = result else {
+                    panic!("cloned function did not return: {result:?}");
+                };
+                assert_eq!(values[0].as_u128(), Some(input.wrapping_add(1) as u128));
+            }
+        }
+    }
+
     #[test]
     fn copy_cost_matches_real_emitted_ir_for_every_supported_size() {
         for size in 1..=128 {

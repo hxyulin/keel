@@ -402,6 +402,12 @@ wrapper already contains them, and freeze templates before the ordinary sites.
 Template instruction and stack costs are cached within that invocation.
 Caller stack checks and growth ledgers still use the current caller state.
 
+Cloning remaps block and value handles through direct-index tables when their
+arena bounds are at most 4096, limiting each table to 32 KiB for current handle
+types. Larger arenas use sparse maps, including small live bodies with many
+dead handles. Neither map is iterated, so the representation does not change
+block creation, instruction order or printed identifiers.
+
 Full also runs `inline-guards` after its ordinary inlining rounds. For a bound
 void helper whose entry has a scalar guard and an empty return edge, it clones
 only the guard and retains the original call on the other edge. The caller gains
