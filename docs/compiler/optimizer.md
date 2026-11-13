@@ -833,6 +833,11 @@ loop-carried floating-point operation is reassociated.
 
 ### loop-rotate
 
+Use discovery scans the function once per admitted rotation, tracking only the
+at most eight header parameters and results that can be carried. The same scan
+finds exits requiring forwarded values. It does not build a set of unrelated
+values or change rotation admission and value ordering.
+
 `loop-rotate` copies a small header test to the unique latch while retaining the
 entry guard. A natural loop may contain up to four body blocks and distinct
 early exits. Header operations are restricted to integer constants, compares,

@@ -1,3 +1,4 @@
+mod support;
 fn source() -> &'static str {
     "func @scan(ptr,i64) -> i64 {
 block0(v0: ptr,v1: i64):
@@ -184,5 +185,45 @@ fn multiple_latches_body_cycles_and_unrepaired_liveouts_are_unchanged() {
             "{src}"
         );
         assert_eq!(before, m.to_string());
+    }
+}
+
+#[test]
+fn last_of_eight_header_candidates_reaches_the_exit_after_rotation() {
+    let src = "func @last(i64,i64,i64,i64) -> i8 {
+entry(v0:i64,v1:i64,v2:i64,v3:i64):
+ jump header(v0,v1,v2,v3)
+header(v4:i64,v5:i64,v6:i64,v7:i64):
+ v8 = iadd v4,v5
+ v9 = iadd v6,v7
+ v10 = iadd v8,v9
+ v11 = icmp.ne v10,v4
+ brif v11,body,exit
+body:
+ jump latch
+latch:
+ jump header(v5,v6,v7,v4)
+exit:
+ return v11
+}
+";
+    let before = keel_ir::parse(src).unwrap();
+    keel_ir::verify_module(&before).unwrap();
+    let mut after = before.clone();
+    assert!(
+        keel_opt::find_pass("loop-rotate")
+            .unwrap()
+            .run(&mut after.functions[0], &Default::default())
+    );
+    keel_ir::verify_module(&after).unwrap();
+    for args in [
+        [0, 0, 0, 0],
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+    ] {
+        assert_eq!(support::execute(&before.functions[0], &args), 0);
+        assert_eq!(support::execute(&after.functions[0], &args), 0);
     }
 }

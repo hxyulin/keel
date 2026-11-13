@@ -143,40 +143,46 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     }
     // Forward only values used beyond the old header. Forwarding a test result
     // used only by its branch would force compare materialization in codegen.
-    let mut outside_uses = FxHashSet::default();
-    for (b, i) in f.layout_insts() {
-        if b != h {
-            f.inst_data(i).for_each_operand(|v| {
-                outside_uses.insert(f.resolve(v));
-            });
-        }
-    }
     let mut carried = f.block_params(h).to_vec();
     carried.extend(hi[..hi.len() - 1].iter().map(|&i| f.first_result(i)));
-    carried.retain(|v| outside_uses.contains(v));
     if f.block_params(h).iter().any(|&v| f.resolve(v) != v) {
         return false;
     }
-    let set: FxHashSet<_> = carried.iter().copied().collect();
+    // At most four parameters and four header results can be carried. Record
+    // only their uses, rather than hashing every value used in the function.
+    // A candidate used outside the header is necessarily retained, so this
+    // same scan also discovers exits needing forwarded values.
+    let mut used = 0u16;
     let mut forwarded_exits = FxHashSet::default();
-    for (b, i) in f.layout_insts() {
-        if b != h && !region.contains(&b) {
-            let mut uses_header = false;
-            f.inst_data(i)
-                .for_each_operand(|v| uses_header |= set.contains(&f.resolve(v)));
-            if uses_header {
-                // Existing branch arguments already transport values to shared
-                // tails. Add new parameters only for direct header-value uses,
-                // and only when every predecessor can supply the current value.
-                if !exits.contains(&b)
-                    || cfg.preds(b).iter().any(|p| *p != h && !region.contains(p))
-                {
-                    return false;
+    for b in f.blocks() {
+        if b == h {
+            continue;
+        }
+        let mut uses_header = false;
+        for &i in f.block_insts(b) {
+            f.inst_data(i).for_each_operand(|v| {
+                let value = f.resolve(v);
+                if let Some(index) = carried.iter().position(|&candidate| candidate == value) {
+                    used |= 1 << index;
+                    uses_header = true;
                 }
-                forwarded_exits.insert(b);
+            });
+        }
+        if uses_header && !region.contains(&b) {
+            // Shared tails can receive existing arguments, but a direct use
+            // needs a current value from every predecessor.
+            if !exits.contains(&b) || cfg.preds(b).iter().any(|p| *p != h && !region.contains(p)) {
+                return false;
             }
+            forwarded_exits.insert(b);
         }
     }
+    let mut index = 0;
+    carried.retain(|_| {
+        let keep = used & (1 << index) != 0;
+        index += 1;
+        keep
+    });
     let body_map: FxHashMap<_, _> = carried
         .iter()
         .map(|&v| (v, f.append_block_param(body, f.value_type(v))))
