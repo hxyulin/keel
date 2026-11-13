@@ -1,0 +1,42 @@
+decl @probe10(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64
+func @copy_bytes(ptr,ptr,i64,i64)->i64 {
+block0(v0:ptr,v1:ptr,v2:i64,v3:i64):
+ v4=iconst.i64 81985529216486895
+ v5=xor v3,v4
+ intrinsic memcpy(v0,v1,v2)
+ v6=call @probe10(v3,v2,v3,v2,v3,v2,v3,v2,v3,v2)
+ v7=iadd v5,v6
+ return v7
+}
+func @move_bytes(ptr,ptr,i64,i64)->i64 {
+block0(v0:ptr,v1:ptr,v2:i64,v3:i64):
+ v4=iconst.i64 -81985529216486896
+ v5=xor v3,v4
+ intrinsic memmove(v0,v1,v2)
+ v6=iadd v5,v2
+ return v6
+}
+func @fill_bytes(ptr,i8,i64,i64)->i64 {
+block0(v0:ptr,v1:i8,v2:i64,v3:i64):
+ v4=iconst.i64 -1
+ v5=xor v3,v4
+ intrinsic memset(v0,v1,v2)
+ v6=iadd v5,v2
+ return v6
+}
+func @roundtrip(ptr,ptr,i64,i64)->i64 {
+ ss0=stack_slot 128,align 16
+block0(v0:ptr,v1:ptr,v2:i64,v3:i64):
+ v4=stack_addr ss0
+ v5=iconst.i64 1
+ v6=iadd v2,v5
+ v7=iconst.i8 0
+ intrinsic memset(v4,v7,v6)
+ intrinsic memcpy(v4,v1,v2)
+ v8=ptradd v4,v5
+ intrinsic memmove(v8,v4,v2)
+ intrinsic memcpy(v0,v4,v6)
+ v9=call @probe10(v3,v2,v3,v2,v3,v2,v3,v2,v3,v2)
+ v10=iadd v9,v3
+ return v10
+}

@@ -90,6 +90,7 @@ fn displacement(out: &mut [u8], position: usize, target: usize) -> Option<()> {
 }
 enum Symbolic {
     Call(FuncRef),
+    Memory(&'static str),
     Address {
         symbol: Symbol,
         model: CodeModel,
@@ -99,7 +100,7 @@ enum Symbolic {
 impl Symbolic {
     fn length(&self) -> usize {
         match self {
-            Self::Call(_) => 5,
+            Self::Call(_) | Self::Memory(_) => 5,
             Self::Address {
                 model: CodeModel::Small,
                 ..
@@ -480,6 +481,33 @@ fn encode(
                         result(func, base, &mut bytes, value)?;
                     }
                 }
+                InstData::Intrinsic { id, args }
+                    if matches!(
+                        id,
+                        Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset
+                    ) =>
+                {
+                    if args.len() != 3 || !values.is_empty() {
+                        return None;
+                    }
+                    for ((&value, &ty), reg) in args.iter().zip(id.info().params).zip([7, 6, 2]) {
+                        if func.value_type(value) != ty {
+                            return None;
+                        }
+                        load(&mut bytes, 0, home(func, base, value));
+                        bytes.extend_from_slice(&[0x48, 0x89, 0xc0 | reg]);
+                    }
+                    let name = match id {
+                        Intrinsic::Memcpy => "memcpy",
+                        Intrinsic::Memmove => "memmove",
+                        _ => "memset",
+                    };
+                    sites.push(Site {
+                        offset: bytes.len(),
+                        operation: Symbolic::Memory(name),
+                    });
+                    bytes.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
+                }
                 InstData::Intrinsic {
                     id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
                     ..
@@ -566,6 +594,11 @@ fn body(
             Symbolic::Call(callee) => {
                 let name = &func.callee(callee).name;
                 out.branch_to_function(Opcode::Call, name, !symbols.defines(name));
+            }
+            Symbolic::Memory(name) => {
+                // Ordinary intrinsic lowering always uses the helper's PLT binding,
+                // including when a module also defines a function with that name.
+                out.branch_to_function(Opcode::Call, name, true);
             }
             Symbolic::Address {
                 symbol,

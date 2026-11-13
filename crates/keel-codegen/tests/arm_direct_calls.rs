@@ -438,3 +438,96 @@ fn incoming_offsets_above_frame_limit_encode_without_truncation() {
         0
     );
 }
+
+#[test]
+fn memory_intrinsics_use_ordinary_helper_calls_and_match_native_bytes() {
+    let module = keel_ir::parse(include_str!("arm_direct_calls/memory.keel")).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        for unwind in [UnwindTables::All, UnwindTables::RequiredOnly] {
+            let req = request(target, unwind);
+            let (program, report) = backend_profile::capture(|| req.program(&module));
+            let program = program.unwrap();
+            assert_eq!(
+                report.counters[backend_profile::Counter::DirectFunctions as usize],
+                4
+            );
+            let calls = program
+                .items
+                .iter()
+                .filter_map(|item| {
+                    if let keel_asm_ir::Item::Branch { link: true, target } = item {
+                        Some(target.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let prefix = if target == Target::Aarch64AppleDarwin {
+                "_"
+            } else {
+                ""
+            };
+            let expected = ["memcpy", "memmove", "memset", "memset", "memcpy", "memmove"]
+                .map(|name| format!("{prefix}{name}"));
+            assert_eq!(calls, expected);
+            assert_eq!(
+                program
+                    .items
+                    .iter()
+                    .filter(|item| matches!(
+                        item,
+                        keel_asm_ir::Item::Directive(keel_asm_ir::Directive::Cfi(
+                            keel_asm_ir::Cfi::Offset { register: 30, .. }
+                        ))
+                    ))
+                    .count(),
+                if unwind == UnwindTables::All { 8 } else { 0 }
+            );
+            assert_eq!(
+                keel_asm::assemble_program_for(target, &program).unwrap(),
+                keel_asm::assemble_source_for(target, &req.text(&module).unwrap()).unwrap()
+            );
+        }
+    }
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Target::Aarch64AppleDarwin
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Target::Aarch64LinuxGnu
+    } else {
+        keel_test_support::skip!("requires native AArch64 host");
+    };
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip!(keel_test_support::NO_CLANG);
+    };
+    let program = request(target, UnwindTables::All).program(&module).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-direct-memory");
+    fs::write(
+        dir.join("memory.o"),
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("oracle.c"),
+        include_str!("arm_direct_calls/memory.c"),
+    )
+    .unwrap();
+    let out = clang
+        .command()
+        .current_dir(dir.path())
+        .args(["-O2", "oracle.c", "memory.o", "-o", "oracle"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = Command::new(dir.join("oracle")).output().unwrap();
+    assert!(
+        out.status.success(),
+        "exit {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

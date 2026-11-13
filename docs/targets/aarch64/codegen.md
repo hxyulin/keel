@@ -366,6 +366,13 @@ their target in x9 while staging arguments through x0–x7, x10 and x12, then us
 BLR. Calls with explicit operand ABI, aggregate, float or vector shapes use
 ordinary code generation.
 
+The `memcpy`, `memmove` and `memset` intrinsics use their ordinary libc
+helpers. They load the three arguments from stack homes into x0–x2 and retain
+normal LR and unwind handling, including functions whose only calls are memory
+intrinsics. The i8 memset value is zero-extended for the helper's int argument;
+only its low byte determines the fill. The IR intrinsics have no result, so the
+helper's pointer return is ignored. No copy or fill expansion runs here.
+
 Functions with calls save x30 in an aligned frame slot and restore it on every
 return. Unwind rules track both the saved and restored LR and every
 intermediate SP adjustment, including blocks laid out after an earlier return.

@@ -1,0 +1,27 @@
+func @copy_bytes(ptr,ptr,i64,i64)->i64 {
+block0(v0:ptr,v1:ptr,v2:i64,v3:i64):
+ intrinsic memcpy(v0,v1,v2)
+ v4=ptrtoint.i64 v0
+ v5=xor v4,v3
+ return v5
+}
+func @move_bytes(ptr,ptr,i64)->ptr {
+block0(v0:ptr,v1:ptr,v2:i64):
+ intrinsic memmove(v0,v1,v2)
+ return v0
+}
+func @fill_bytes(ptr,i8 sext,i64,i64)->i64 {
+block0(v0:ptr,v1:i8,v2:i64,v3:i64):
+ intrinsic memset(v0,v1,v2)
+ v4=iadd v2,v3
+ return v4
+}
+func @sequence_bytes(ptr,ptr,i8 sext,i64)->ptr {
+block0(v0:ptr,v1:ptr,v2:i8,v3:i64):
+ intrinsic memset(v0,v2,v3)
+ intrinsic memcpy(v0,v1,v3)
+ v4=iconst.i64 3
+ v5=ptradd v0,v4
+ intrinsic memmove(v5,v0,v3)
+ return v0
+}

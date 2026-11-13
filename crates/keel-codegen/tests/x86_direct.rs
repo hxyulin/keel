@@ -1,6 +1,8 @@
 //! Direct x86 leaves preserve scalar semantics and all output transports.
 #[path = "x86_direct/integer.rs"]
 mod integer;
+#[path = "x86_direct/memory.rs"]
+mod memory;
 #[path = "x86_direct/stack.rs"]
 mod stack;
 use keel_codegen::{

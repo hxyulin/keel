@@ -55,9 +55,16 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
          func @stack_scalar(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->i64 {{\n\
           ss0=stack_slot 8192,align 16\n\
           ss1=stack_slot 8,align 8\n\
+          ss2=stack_slot 8,align 8\n\
          block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):\n\
           v10=stack_addr ss1\n\
           store v9,v10\n\
+          v13=stack_addr ss2\n\
+          v14=iconst.i64 8\n\
+          v15=iconst.i8 -37\n\
+          intrinsic memset(v13,v15,v14)\n\
+          intrinsic memcpy(v10,v13,v14)\n\
+          intrinsic memmove(v13,v10,v14)\n\
           v11=load.i64 v10\n\
           v12=call @stack_external(v0,v1,v2,v3,v4,v5,v6,v7,v8,v11)\n\
           return v12\n\

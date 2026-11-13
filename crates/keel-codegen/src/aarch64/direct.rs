@@ -292,6 +292,13 @@ fn encode<'a>(
                 }
                 Some(func.signature(*sig))
             }
+            InstData::Intrinsic {
+                id: Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset,
+                ..
+            } => {
+                has_calls = true;
+                None
+            }
             _ => None,
         };
         if let Some(signature) = signature {
@@ -551,6 +558,27 @@ fn encode<'a>(
                 InstData::StackAddr { slot } => {
                     address(&mut bytes, 9, stack[slot.index()] as u32);
                     store(&mut bytes, 9, dst);
+                }
+                InstData::Intrinsic {
+                    id: id @ (Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset),
+                    args,
+                } => {
+                    let info = id.info();
+                    if args.len() != info.params.len() || !func.inst_results(inst).is_empty() {
+                        return None;
+                    }
+                    for (register, (&value, &ty)) in args.iter().zip(info.params).enumerate() {
+                        if func.value_type(value) != ty {
+                            return None;
+                        }
+                        load(&mut bytes, register as u32, value_home(value));
+                    }
+                    // libc memset takes int, while IR supplies an i8 bit pattern.
+                    if *id == Intrinsic::Memset {
+                        normalize(&mut bytes, 1, 8);
+                    }
+                    sites.push((bytes.len(), Site::Call(info.name)));
+                    word(&mut bytes, 0x94000000);
                 }
                 InstData::Intrinsic {
                     id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,

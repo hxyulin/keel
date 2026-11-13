@@ -517,6 +517,12 @@ arguments follow the signature extension attributes. Sources are
 staged before block parameters are written, including cyclic edge copies.
 Lifetime markers do not reuse fixed-slot storage.
 
+`memcpy`, `memmove` and `memset` use their ordinary runtime helpers. Their
+three scalar operands use the normal argument registers, and every value
+keeps its home across the helper call. These intrinsics use PLT calls even
+when the module defines the helper, matching ordinary intrinsic lowering.
+`memcmp` retains ordinary lowering.
+
 Unsupported instructions and ABI shapes, variadic/returns-twice
 functions, personalities, and modules with debug source files fall back per
 function. No bytes are published until eligibility and branch displacements
