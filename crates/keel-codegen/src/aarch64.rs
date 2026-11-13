@@ -120,6 +120,7 @@ mod absolute;
 mod absolute_diff;
 mod compare_neon;
 mod constant_plan;
+mod direct;
 #[cfg(feature = "experimental-dispatch")]
 mod dispatch_tail;
 mod extended_add;
@@ -147,6 +148,69 @@ use native::Piece::{Class, Hex, Number, Reg as R, Text};
 use native::{Address, Arg, Reg};
 use output::Name;
 pub(crate) use output::Output;
+
+fn function_entry(func: &Function, out: &mut Output, linux: bool, function_sections: bool) {
+    let name = &func.name;
+    let symbol = |name: &str| {
+        if linux {
+            name.to_owned()
+        } else {
+            format!("_{name}")
+        }
+    };
+    if linux {
+        out.directive(Directive::ElfSection {
+            name: crate::emission::elf_text_section(&func.attrs, name, function_sections),
+            flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
+            nobits: false,
+        });
+    } else if let Some(section) = func.attrs.section {
+        let (segment, name) = section.as_str().split_once(',').unwrap();
+        out.section(
+            segment,
+            name,
+            if name == "__text" {
+                SectionKind::Data
+            } else {
+                SectionKind::Code
+            },
+        );
+    } else {
+        out.section("__TEXT", "__text", SectionKind::Data);
+    }
+    if func.attrs.retain && !linux {
+        out.directive(Directive::NoDeadStrip(Format::MachO.symbol(name)));
+    }
+    // On ELF `.weak` alone makes the symbol global; Mach-O needs `.globl`
+    // before `.weak_definition`.
+    let elf_weak = linux && (func.attrs.weak || func.weak_odr);
+    if !func.local && !elf_weak {
+        out.directive(Directive::Global(symbol(name)));
+    }
+    if func.hidden {
+        out.directive(if linux {
+            Directive::ElfHidden(name.clone())
+        } else {
+            Directive::PrivateExtern(["_", name].concat())
+        });
+    }
+    if func.attrs.weak || func.weak_odr {
+        out.directive(if linux {
+            Directive::ElfWeak(name.clone())
+        } else {
+            Directive::WeakDefinition(["_", name].concat())
+        });
+    }
+    out.align(func.attrs.align.unwrap_or(4).max(4).trailing_zeros());
+    out.label(symbol(name));
+    if linux {
+        out.directive(Directive::ElfType {
+            name: name.clone(),
+            function: true,
+        });
+    }
+    out.label([if linux { ".L" } else { "L" }, name, "_begin"].concat());
+}
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -302,20 +366,21 @@ pub(crate) fn compile_output<'module>(
         }
     }
     let symbols = std::sync::Arc::new(crate::symbols::Symbols::new(module));
-    let (leaf_summaries, mut prepared_leaves) = if linux {
-        (
-            leaf_calls::Summaries::default(),
-            leaf_calls::Prepared::default(),
-        )
-    } else {
-        leaf_calls::prepare(
-            &symbols,
-            pools,
-            pipeline,
-            structured,
-            emission.unwind_tables,
-        )?
-    };
+    let (leaf_summaries, mut prepared_leaves) =
+        if linux || emission.backend_mode == crate::BackendMode::CompileSpeed {
+            (
+                leaf_calls::Summaries::default(),
+                leaf_calls::Prepared::default(),
+            )
+        } else {
+            leaf_calls::prepare(
+                &symbols,
+                pools,
+                pipeline,
+                structured,
+                emission.unwind_tables,
+            )?
+        };
     let mut frames = Vec::new();
     if parallel.is_none() {
         for (index, original) in module.functions.iter().enumerate() {
@@ -330,6 +395,18 @@ pub(crate) fn compile_output<'module>(
                 continue;
             }
             let _function_profile = crate::backend_profile::function(&original.name);
+            if emission.backend_mode == crate::BackendMode::CompileSpeed
+                && !debug
+                && direct::emit(original, &mut out, linux, emission)
+            {
+                frames.push(FrameDebug {
+                    frame_register: None,
+                    slots: Vec::new(),
+                    scope_marks: Vec::new(),
+                });
+                out.flush(&mut sink);
+                continue;
+            }
             let lowered = vector::lower(original);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let request = crate::Request::new(target, *pipeline)
@@ -379,6 +456,19 @@ pub(crate) fn compile_output<'module>(
                 allocator: worker_pipeline.allocator,
             };
             let _function_profile = crate::backend_profile::function(&original.name);
+            if emission.backend_mode == crate::BackendMode::CompileSpeed
+                && !debug
+                && direct::emit(original, &mut out, linux, emission)
+            {
+                return Ok(Some((
+                    out,
+                    FrameDebug {
+                        frame_register: None,
+                        slots: Vec::new(),
+                        scope_marks: Vec::new(),
+                    },
+                )));
+            }
             let lowered = vector::lower(original);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let request = crate::Request::new(target, *pipeline)
@@ -1233,61 +1323,10 @@ impl<'a> FunctionCompiler<'a> {
         backend_scope!(Lowering);
         let func = self.func;
         let name = &func.name;
-        if self.linux {
-            out.directive(Directive::ElfSection {
-                name: crate::emission::elf_text_section(&func.attrs, name, self.function_sections),
-                flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
-                nobits: false,
-            });
-        } else if let Some(section) = func.attrs.section {
-            let (segment, name) = section.as_str().split_once(',').unwrap();
-            out.section(
-                segment,
-                name,
-                if name == "__text" {
-                    SectionKind::Data
-                } else {
-                    SectionKind::Code
-                },
-            );
-        } else {
-            out.section("__TEXT", "__text", SectionKind::Data);
-        }
-        if func.attrs.retain && !self.linux {
-            out.directive(Directive::NoDeadStrip(Format::MachO.symbol(name)));
-        }
+        function_entry(func, out, self.linux, self.function_sections);
         #[cfg(feature = "backend-profile")]
         let entry_profile =
             crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
-        // On ELF `.weak` alone makes the symbol global; Mach-O needs `.globl`
-        // before `.weak_definition`.
-        let elf_weak = self.linux && (func.attrs.weak || func.weak_odr);
-        if !func.local && !elf_weak {
-            out.directive(Directive::Global(self.symbol(name)));
-        }
-        if func.hidden {
-            out.directive(if self.linux {
-                Directive::ElfHidden(name.clone())
-            } else {
-                Directive::PrivateExtern(["_", name].concat())
-            });
-        }
-        if func.attrs.weak || func.weak_odr {
-            out.directive(if self.linux {
-                Directive::ElfWeak(name.clone())
-            } else {
-                Directive::WeakDefinition(["_", name].concat())
-            });
-        }
-        out.align(func.attrs.align.unwrap_or(4).max(4).trailing_zeros());
-        out.label(self.symbol(name));
-        if self.linux {
-            out.directive(Directive::ElfType {
-                name: name.clone(),
-                function: true,
-            });
-        }
-        out.label([if self.linux { ".L" } else { "L" }, name, "_begin"].concat());
         let start = self.out.begin_function(out);
         self.allocation_comment();
 

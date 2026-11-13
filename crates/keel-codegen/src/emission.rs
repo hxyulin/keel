@@ -25,10 +25,25 @@ pub enum CodegenGoal {
     Size,
 }
 
+/// Native emission strategy, independent of IR optimization.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BackendMode {
+    /// Run ordinary instruction selection and register allocation.
+    #[default]
+    Standard,
+    /// Directly encode supported AArch64 scalar leaves, with a stack home per
+    /// value. Unsupported functions and other targets use the ordinary backend.
+    /// Debug functions retain the ordinary lowering and metadata.
+    CompileSpeed,
+}
+
 /// Emission policies independent of optimization, selection and allocation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EmissionOptions {
+    /// Choose direct compile-speed emission or the ordinary backend.
+    pub backend_mode: BackendMode,
     /// Target code-size policy, independent of the IR pass pipeline.
     pub goal: CodegenGoal,
     /// Compiler-generated unwind metadata. Defaults to all functions.

@@ -4,6 +4,7 @@ use keel_opt::OptimizationTier;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Level {
+    Speed,
     O0,
     O1,
     O2,
@@ -23,9 +24,19 @@ impl Level {
         })
     }
 
+    pub(crate) fn from_mode(mode: &str) -> Option<Self> {
+        Some(match mode {
+            "speed" => Self::Speed,
+            "no-opt" => Self::O0,
+            "balanced" => Self::O2,
+            "full" => Self::O3,
+            _ => return None,
+        })
+    }
+
     pub(crate) fn optimization(self) -> OptimizationTier {
         match self {
-            Self::O0 => OptimizationTier::None,
+            Self::Speed | Self::O0 => OptimizationTier::None,
             Self::O1 => OptimizationTier::Fast,
             Self::O2 => OptimizationTier::Balanced,
             Self::O3 => OptimizationTier::Full,
@@ -35,6 +46,7 @@ impl Level {
 
     pub(crate) fn selection(self) -> SelectionTier {
         match self {
+            Self::Speed => SelectionTier::Baseline,
             Self::O0 => SelectionTier::Covers,
             Self::O1 => SelectionTier::Trees,
             Self::O2 | Self::O3 | Self::Size => SelectionTier::Full,
@@ -47,7 +59,7 @@ impl Level {
 
     pub(crate) fn allocation(self) -> AllocationTier {
         match self {
-            Self::O1 => AllocationTier::Fast,
+            Self::Speed | Self::O1 => AllocationTier::Fast,
             Self::O0 => AllocationTier::Full,
             Self::Size => AllocationTier::Compact,
             Self::O2 | Self::O3 => AllocationTier::Bounded,

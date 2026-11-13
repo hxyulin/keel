@@ -214,3 +214,103 @@ fn size_preset_controls_codegen_independently_of_pass_and_stage_overrides() {
 
 #[path = "optimization_levels/call_sites.rs"]
 mod call_sites;
+
+#[test]
+fn named_modes_reach_native_emission_and_preserve_numbered_presets() {
+    let dir = keel_test_support::TempDir::new("named-modes");
+    fs::write(
+        dir.join("input.c"),
+        "long f(long x,long y) { return (x ^ -1L) * y; }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("input.keel"),"func @f(i64,i64)->i64 {\nblock0(v0:i64,v1:i64):\n v2=iconst.i64 -1\n v3=xor v0,v2\n v4=imul v3,v1\n return v4\n}\n").unwrap();
+    for target in [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+    ] {
+        for (mode, level) in [("no-opt", "-O0"), ("balanced", "-O2"), ("full", "-O3")] {
+            let named = successful(
+                dir.path(),
+                &[
+                    "cc",
+                    "input.c",
+                    "--target",
+                    target,
+                    "--mode",
+                    mode,
+                    "--emit-ir",
+                ],
+            );
+            let numbered = successful(
+                dir.path(),
+                &["cc", "input.c", "--target", target, level, "--emit-ir"],
+            );
+            assert_eq!(named, numbered, "{target}/{mode}");
+        }
+        let report = format!("{target}.json");
+        successful(
+            dir.path(),
+            &[
+                "compile",
+                "input.keel",
+                "--mode",
+                "speed",
+                "--target",
+                target,
+                "--emit-object",
+                "--codegen-report",
+                &report,
+                "-o",
+                "one.o",
+            ],
+        );
+        let bytes = fs::read(dir.join("one.o")).unwrap();
+        successful(
+            dir.path(),
+            &[
+                "compile",
+                "input.keel",
+                "--mode",
+                "speed",
+                "--target",
+                target,
+                "--codegen-threads",
+                "3",
+                "--emit-object",
+                "-o",
+                "three.o",
+            ],
+        );
+        assert_eq!(bytes, fs::read(dir.join("three.o")).unwrap());
+        let report: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(report)).unwrap()).unwrap();
+        assert_eq!(
+            report["counters"]["direct_functions"].as_u64(),
+            Some(u64::from(target.starts_with("aarch64")))
+        );
+    }
+    // Changing presets also turns direct emission off, independent of IR tier overrides.
+    let standard = successful(dir.path(), &["compile", "input.keel", "-O0"]);
+    let reset = successful(
+        dir.path(),
+        &["compile", "input.keel", "--mode", "speed", "-O0"],
+    );
+    assert_eq!(standard, reset);
+    let bad = invoke(dir.path(), &["compile", "input.keel", "--mode", "unknown"]);
+    assert!(!bad.status.success());
+    let wasm = invoke(
+        dir.path(),
+        &[
+            "compile",
+            "input.keel",
+            "--emit-wasm",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--mode",
+            "speed",
+        ],
+    );
+    assert!(!wasm.status.success());
+    assert!(String::from_utf8_lossy(&wasm.stderr).contains("--mode"));
+}

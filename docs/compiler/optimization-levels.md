@@ -7,6 +7,27 @@ With no optimization option, `cc` and `compile` use `-O0` and `opt` uses the
 is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 `cc -O` runs. `-Og`, `-Oz`, `-Ofast` and unknown levels are rejected.
 
+`--mode` selects four presets:
+
+| Mode | Equivalent level | Policy |
+|---|---|---|
+| `speed` | Compile-speed preset | No optional IR optimization. Direct AArch64 scalar leaf emission where supported; Baseline selection and Fast allocation for fallback functions. |
+| `no-opt` | `-O0` | Default native preset, with no optional IR optimization and ordinary code generation. |
+| `balanced` | `-O2` | Bounded optimization effort for runtime performance. |
+| `full` | `-O3` | Full semantics-preserving optimization pipeline. |
+
+For example, `keel cc --mode speed --emit-object input.c -o input.o` selects
+compilation latency over generated-code performance. Speed gives every value
+a stack home and skips general selection and allocation for supported functions.
+Unsupported functions use the ordinary backend in the same object. Debug functions
+and x86-64 use ordinary code generation. Unwind, linkage, sections and target
+validation retain their normal contracts. See [AArch64 direct emission](../targets/aarch64/codegen.md#direct-emission).
+`--codegen-report` counts supported functions as `direct_functions`.
+
+Full does not imply fast-math, extra CPU features, experimental passes or
+unbounded optimization. More optimization effort does not guarantee better
+runtime performance for every program. Existing `-O1` and `-Os` remain available.
+
 | Flag | IR policy | Selection | Allocation | Intended use |
 |---|---|---|---|---|
 | `-O0` | None | Covers | Full | Inspect unoptimized IR and debug. |
@@ -62,11 +83,12 @@ Full allocator: IR transformations and allocation effort are separate choices.
 
 ## Overrides and preprocessing
 
-The last `-O` level wins. `--opt-tier none|fast|basic|balanced|full|size` and
-`-O` options change the IR tier in command-line order. `-p pass,pass,...`
+The last `--mode` or `-O` preset wins, including the backend strategy. `--opt-tier none|fast|basic|balanced|full|size` and
+preset options change the IR tier in command-line order. `-p pass,pass,...`
 overrides the tier's pass list regardless of order. `--isel-tier`/`--isel`
 and `--regalloc` override the preset's corresponding stage regardless of order;
-repeated explicit stage options use the last value. An explicit
+repeated explicit stage options use the last value. In speed mode these stage
+overrides apply to fallback functions; direct emission has no selector or allocator. An explicit
 `--opt-tier fast` does not select the Fast allocator. Tuning, CPU feature
 policy, verification and [code models](../targets/x86_64/codegen.md#code-models)
 are independent. Library callers use `keel_opt::OptimizationTier`.

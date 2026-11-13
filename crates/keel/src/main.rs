@@ -1,9 +1,9 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
-//! keel cc [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
-//! keel opt [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
+//! keel compile [--code-model pic|small|kernel] [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]   IR to assembly
+//! keel cc [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]  C to assembly
+//! keel opt [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> -o <output.o>                 assembly to native object
 //! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics [--target <triple>] [--cpu-level <v1|v2|v3>] [--target-features <features>] <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -44,9 +44,9 @@ mod wasm;
 mod x86_options;
 
 const USAGE: &str = "usage:
-  keel compile [--code-model pic|small|kernel] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
-  keel cc [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
-  keel opt [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
+  keel compile [--code-model pic|small|kernel] [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [--internalize <symbol,..>] <input.keel>... [-o <output.s>]
+  keel cc [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [-g] [--code-model pic|small|kernel] [--link-intent executable|shared] [-fsemantic-interposition|-fno-semantic-interposition] [-fbuiltin|-fno-builtin] [-fno-builtin-function] [-fhosted|-ffreestanding] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--cpu-level <v1|v2|v3>] [--target-features <features>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] [-flto [--internalize <symbol,..>]] <input.c|input.i>... [-o <output>]
+  keel opt [--mode speed|no-opt|balanced|full] [-O0|-O1|-O2|-O3|-Os] [-ffast-math|-fno-fast-math] [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] [--internalize <symbol,..>] <input.keel>... [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc|opt [--opt-disable <pass,pass,..>] [--opt-bisect-limit <n>] [--opt-bisect-verbose] [--print-changed [--opt-function <name>]] <input>
   keel compile|cc [--codegen-report <new-report.json>] <input> [-o <output>]
@@ -65,6 +65,8 @@ const USAGE: &str = "usage:
 
   Every subcommand targets the host unless --target is given.
   --target also accepts aarch64-unknown-linux-gnu (Linux AAPCS64/ELF) and the aliases x86_64-linux-gnu and aarch64-linux-gnu.
+  --mode speed uses direct emission where supported and fast fallback, with no optional IR optimization.
+  --mode no-opt (default), balanced and full select -O0, -O2 and -O3.
   -O0 disables optional IR optimization; -O1 favors compile time.
   -O2 balances optimization effort; -O3 uses the full pipeline; -O retains -O3 behavior.
   -Os favors size: less optional inlining/expansion and smaller native layout/epilogues.
@@ -251,6 +253,11 @@ impl Options {
         if self.optimization_level == Some(optimization::Level::Size) {
             emission.goal = keel_codegen::CodegenGoal::Size;
         }
+        emission.backend_mode = if self.optimization_level == Some(optimization::Level::Speed) {
+            keel_codegen::BackendMode::CompileSpeed
+        } else {
+            keel_codegen::BackendMode::Standard
+        };
         emission.unwind_tables = self.unwind.policy();
         emission.x86_code_model = self.x86_code_model;
         emission.function_sections = self.function_sections;
@@ -640,6 +647,15 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-O" => {
                 let level = optimization::Level::parse(raw).expect("normalized optimization flag");
+                opts.optimization = level.optimization();
+                opts.optimization_level = Some(level);
+                optimize_preset = Some(level);
+            }
+            "--mode" => {
+                let level = args
+                    .next()
+                    .and_then(|value| optimization::Level::from_mode(value))
+                    .ok_or("`--mode` needs speed, no-opt, balanced or full")?;
                 opts.optimization = level.optimization();
                 opts.optimization_level = Some(level);
                 optimize_preset = Some(level);
@@ -1044,6 +1060,7 @@ const COMPILE_FLAGS: &[&str] = &[
     "-o",
     "--internalize",
     "-O",
+    "--mode",
     "-p",
     "-g",
     "-funwind-tables",
@@ -1105,6 +1122,7 @@ const CC_FLAGS: &[&str] = &[
     "-flto",
     "--internalize",
     "-O",
+    "--mode",
     "-p",
     "-g",
     "-funwind-tables",
@@ -1183,6 +1201,7 @@ const OPT_FLAGS: &[&str] = &[
     "-p",
     "--opt-tier",
     "-O",
+    "--mode",
     "--target",
     "--cpu-level",
     "--target-features",
@@ -1750,6 +1769,7 @@ mod tests {
             &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
             &[
                 "-O",
+                "--mode",
                 "-p",
                 "--opt-tier",
                 "--isel-tier",
@@ -1762,6 +1782,50 @@ mod tests {
                 "--no-verify-each",
             ],
         )
+    }
+
+    #[test]
+    fn named_modes_select_presets_and_last_preset_wins() {
+        use keel_codegen::{BackendMode, SelectionOptions, regalloc::AllocationTier};
+        for (mode, level) in [("no-opt", "-O0"), ("balanced", "-O2"), ("full", "-O3")] {
+            let named = options(&["--mode", mode]).unwrap();
+            let numbered = options(&[level]).unwrap();
+            assert_eq!(named.optimization, numbered.optimization);
+            assert_eq!(named.selection, numbered.selection);
+            assert_eq!(named.allocation, numbered.allocation);
+            assert_eq!(named.emission_options(), numbered.emission_options());
+            assert!(!named.fast_math);
+        }
+        let speed = options(&["--mode", "speed"]).unwrap();
+        assert_eq!(speed.optimization, keel_opt::OptimizationTier::None);
+        assert_eq!(speed.selection, SelectionOptions::BASELINE);
+        assert_eq!(speed.allocation, AllocationTier::Fast);
+        assert_eq!(
+            speed.emission_options().backend_mode,
+            BackendMode::CompileSpeed
+        );
+        assert_eq!(
+            options(&["--mode", "speed", "-O0"])
+                .unwrap()
+                .emission_options()
+                .backend_mode,
+            BackendMode::Standard
+        );
+        assert_eq!(
+            options(&["-O3", "--mode", "speed"])
+                .unwrap()
+                .emission_options()
+                .backend_mode,
+            BackendMode::CompileSpeed
+        );
+        for args in [
+            ["--mode", "speed", "--regalloc", "full"],
+            ["--regalloc", "full", "--mode", "speed"],
+        ] {
+            assert_eq!(options(&args).unwrap().allocation, AllocationTier::Full);
+        }
+        assert!(options(&["--mode"]).is_err());
+        assert!(options(&["--mode", "unknown"]).is_err());
     }
 
     #[test]

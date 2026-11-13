@@ -85,6 +85,7 @@ impl Stage {
 /// rematerialization. They are not dynamic execution counts. Spilled values
 /// that an x86-64 instruction reads or writes in place as a memory operand
 /// are not counted. The two slot counters are frame bytes, not instructions.
+/// `DirectFunctions` counts functions, independently of the location helpers.
 #[derive(Clone, Copy, Debug)]
 #[repr(usize)]
 pub enum Counter {
@@ -100,9 +101,11 @@ pub enum Counter {
     SlotBytes,
     /// The bytes those slots would take if no two shared storage.
     UnsharedSlotBytes,
+    /// Functions compiled by direct compile-speed emission.
+    DirectFunctions,
 }
 impl Counter {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::SpillStores,
         Self::Reloads,
         Self::RegisterMoves,
@@ -110,10 +113,12 @@ impl Counter {
         Self::RematStackAddresses,
         Self::SlotBytes,
         Self::UnsharedSlotBytes,
+        Self::DirectFunctions,
     ];
     pub fn name(self) -> &'static str {
         match self {
             Self::SpillStores => "spill_stores",
+            Self::DirectFunctions => "direct_functions",
             Self::Reloads => "reloads",
             Self::RegisterMoves => "register_moves",
             Self::RematConstants => "rematerialized_constants",
@@ -354,9 +359,9 @@ mod tests {
             let _function = function("second");
             count(Counter::SpillStores);
         });
-        assert_eq!(report.counters, [2, 2, 0, 0, 0, 0, 0]);
-        assert_eq!(report.functions[0].counters, [1, 1, 0, 0, 0, 0, 0]);
-        assert_eq!(report.functions[1].counters, [1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report.counters, [2, 2, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report.functions[0].counters, [1, 1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report.functions[1].counters, [1, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(capture(|| ()).1.counters, [0; Counter::ALL.len()]);
     }
 
@@ -376,8 +381,8 @@ mod tests {
         });
         let names: Vec<_> = report.functions.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["leaf", "other"]);
-        assert_eq!(report.functions[0].counters, [0, 0, 1, 0, 0, 0, 0]);
-        assert_eq!(report.counters, [0, 1, 1, 0, 0, 0, 0]);
+        assert_eq!(report.functions[0].counters, [0, 0, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(report.counters, [0, 1, 1, 0, 0, 0, 0, 0]);
         assert_eq!(
             report.functions[0].stages[Stage::Function as usize].calls,
             2

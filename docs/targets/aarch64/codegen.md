@@ -314,3 +314,30 @@ cargo test -p keel-codegen --test arm_constant_division
 cargo test -p keel-codegen --test vector_aarch64
 cargo test -p keel --test optimization_levels call_sites
 ```
+
+## Direct emission
+
+`EmissionOptions::backend_mode = BackendMode::CompileSpeed` and CLI
+`--mode speed` try a direct scalar leaf emitter before normal selection,
+liveness and allocation. Each SSA value has an eight-byte stack home; x9 and
+x10 are scratch registers. Constants use four fixed MOVZ/MOVK words. There is
+no register cache or optional instruction combining. The structured output
+carries encoded bytes, and assembly text renders those bytes with `.byte`.
+
+The supported boundary is normal-purpose i64/pointer arguments in x0–x7,
+one i64 return, and a frame of at most 4,080 bytes. Bodies may use i64
+constants, add/subtract/multiply, bitwise AND/OR/XOR, left and unsigned-right
+shifts, pointer addition, i64 loads/stores, all i64 comparisons, branches,
+block arguments and returns. Edge copies stage their sources before writing
+any destination, including cyclic copies. Branch displacements are patched
+within the completed function; out-of-range encodings fall back.
+
+Unsupported operations, other ABI shapes, variadic functions, returns-twice
+functions, personalities, explicit stack slots and modules with debug source files use the
+ordinary backend. Eligibility is per function and does not publish partial
+bytes. Private-call register-bank proofs are disabled in this mode so direct
+and fallback functions share the ordinary calling convention. No debug or
+unwind option is silently dropped. Encoded leaves retain normal symbol binding,
+visibility, alignment, section placement and optional unwind information,
+including CFA transitions at each return. `direct_functions` in the backend
+report records the number of functions that used direct emission.
