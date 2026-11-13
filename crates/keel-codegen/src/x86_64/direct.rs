@@ -1,10 +1,13 @@
 //! Bounded SysV scalar functions encoded without selection, liveness or allocation.
 //! Every value has a zero-extended eight-byte home. rax/rcx/rdx compute values;
 //! r10 holds indirect call targets. Failed eligibility publishes no partial output.
-use super::{Cfi, Directive, Expression, Function, Output, Sink};
+use super::{
+    Cfi, CodeModel, Directive, Expression, Function, Output, Sink, asm_arg, r32, r64, rip, sized,
+    symbol_address, symbol_memory,
+};
 use keel_ir::{
     ArgExt, BinaryOp, BlockCall, CallArgs, ConvertOp, EntityRef, FuncRef, InstData, IntCC,
-    Intrinsic, Purpose, Signature, Type, UnaryOp, Value,
+    Intrinsic, Purpose, Signature, Symbol, Type, UnaryOp, Value,
 };
 
 fn width(ty: Type) -> Option<u32> {
@@ -79,15 +82,35 @@ fn displacement(out: &mut [u8], position: usize, target: usize) -> Option<()> {
     out[position..position + 4].copy_from_slice(&delta.to_le_bytes());
     Some(())
 }
-struct CallSite {
+enum Symbolic {
+    Call(FuncRef),
+    Address {
+        symbol: Symbol,
+        model: CodeModel,
+        defined: bool,
+    },
+}
+impl Symbolic {
+    fn length(&self) -> usize {
+        match self {
+            Self::Call(_) => 5,
+            Self::Address {
+                model: CodeModel::Small,
+                ..
+            } => 5,
+            Self::Address { .. } => 7,
+        }
+    }
+}
+struct Site {
     offset: usize,
-    callee: FuncRef,
+    operation: Symbolic,
 }
 struct Code {
     bytes: Vec<u8>,
     frame: u32,
     epilogues: Vec<usize>,
-    calls: Vec<CallSite>,
+    sites: Vec<Site>,
 }
 fn scalar_signature(sig: &Signature) -> bool {
     !sig.variadic
@@ -118,7 +141,11 @@ fn arguments(func: &Function, args: &CallArgs, sig: &Signature, bytes: &mut Vec<
     }
     Some(())
 }
-fn encode(func: &Function) -> Option<Code> {
+fn encode(
+    func: &Function,
+    symbols: &crate::symbols::Symbols<'_>,
+    model: CodeModel,
+) -> Option<Code> {
     if !scalar_signature(&func.sig) || func.personality.is_some() || !func.debug_vars.is_empty() {
         return None;
     }
@@ -146,7 +173,8 @@ fn encode(func: &Function) -> Option<Code> {
     let frame = frame as u32;
     let mut bytes = Vec::with_capacity(func.num_values() * 32 + 64);
     let mut epilogues = Vec::new();
-    let mut calls = Vec::new();
+    let mut sites = Vec::new();
+    let mut traps = Vec::new();
     bytes.extend_from_slice(&[0x48, 0x81, 0xec]);
     bytes.extend_from_slice(&frame.to_le_bytes());
     for ((&value, param), reg) in func
@@ -217,6 +245,48 @@ fn encode(func: &Function) -> Option<Code> {
                                     _ => 0xf8,
                                 },
                             ]);
+                        }
+                        BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
+                            let signed_div = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
+                            let remainder = matches!(op, BinaryOp::Urem | BinaryOp::Srem);
+                            if signed_div {
+                                signed(&mut bytes, 0, bits);
+                                signed(&mut bytes, 1, bits);
+                            }
+                            bytes.extend_from_slice(&[0x48, 0x85, 0xc9, 0x0f, 0x84]);
+                            traps.push(bytes.len());
+                            bytes.extend_from_slice(&[0; 4]);
+                            let mut done = None;
+                            if signed_div {
+                                bytes.extend_from_slice(&[0x48, 0x83, 0xf9, 0xff, 0x0f, 0x85]);
+                                let divide = bytes.len();
+                                bytes.extend_from_slice(&[0; 4]);
+                                if remainder {
+                                    // A % -1 is zero, including MIN % -1, where IDIV would fault.
+                                    bytes.extend_from_slice(&[0x31, 0xd2, 0xe9]);
+                                    done = Some(bytes.len());
+                                    bytes.extend_from_slice(&[0; 4]);
+                                } else {
+                                    bytes.extend_from_slice(&[0x48, 0xba]);
+                                    let min = -(1i128 << (bits - 1));
+                                    bytes.extend_from_slice(&(min as i64).to_le_bytes());
+                                    bytes.extend_from_slice(&[0x48, 0x39, 0xd0, 0x0f, 0x84]);
+                                    traps.push(bytes.len());
+                                    bytes.extend_from_slice(&[0; 4]);
+                                }
+                                let target = bytes.len();
+                                displacement(&mut bytes, divide, target)?;
+                                bytes.extend_from_slice(&[0x48, 0x99, 0x48, 0xf7, 0xf9]);
+                            } else {
+                                bytes.extend_from_slice(&[0x31, 0xd2, 0x48, 0xf7, 0xf1]);
+                            }
+                            if let Some(done) = done {
+                                let target = bytes.len();
+                                displacement(&mut bytes, done, target)?;
+                            }
+                            if remainder {
+                                bytes.extend_from_slice(&[0x48, 0x89, 0xd0]);
+                            }
                         }
                         _ => return None,
                     }
@@ -315,6 +385,27 @@ fn encode(func: &Function) -> Option<Code> {
                         _ => &[0x48, 0x89, 0x08][..],
                     });
                 }
+                InstData::SymbolAddr { symbol } => {
+                    let name = func.symbol_name(*symbol);
+                    if symbols
+                        .data_object(name)
+                        .is_some_and(|data| data.thread_local)
+                    {
+                        return None;
+                    }
+                    let operation = Symbolic::Address {
+                        symbol: *symbol,
+                        model,
+                        defined: symbols.defines(name),
+                    };
+                    let length = operation.length();
+                    sites.push(Site {
+                        offset: bytes.len(),
+                        operation,
+                    });
+                    bytes.resize(bytes.len() + length, 0);
+                    store(&mut bytes, 0, home(func, dst?));
+                }
                 InstData::StackAddr { slot } => {
                     bytes.extend_from_slice(&[0x48, 0x8d, 0x84, 0x24]);
                     bytes.extend_from_slice(&slots[slot.index()].to_le_bytes());
@@ -326,9 +417,9 @@ fn encode(func: &Function) -> Option<Code> {
                         return None;
                     }
                     arguments(func, args, sig, &mut bytes)?;
-                    calls.push(CallSite {
+                    sites.push(Site {
                         offset: bytes.len(),
-                        callee: *callee,
+                        operation: Symbolic::Call(*callee),
                     });
                     // Publishing replaces exactly these five bytes with a symbolic CALL.
                     bytes.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
@@ -364,6 +455,25 @@ fn encode(func: &Function) -> Option<Code> {
                     displacement(&mut bytes, position, target)?;
                     edge(func, &dests[1], &mut bytes, &mut branches);
                 }
+                InstData::Switch { arg, dests, cases } => {
+                    let ty = func.value_type(*arg);
+                    if !integer(ty) || dests.len() != cases.len() + 1 {
+                        return None;
+                    }
+                    let mask = u64::MAX >> (64 - width(ty)?);
+                    load(&mut bytes, 0, home(func, *arg));
+                    for (case, dest) in cases.iter().zip(&dests[1..]) {
+                        bytes.extend_from_slice(&[0x48, 0xb9]);
+                        bytes.extend_from_slice(&((*case as u64 & mask).to_le_bytes()));
+                        bytes.extend_from_slice(&[0x48, 0x39, 0xc8, 0x0f, 0x85]);
+                        let next = bytes.len();
+                        bytes.extend_from_slice(&[0; 4]);
+                        edge(func, dest, &mut bytes, &mut branches);
+                        let target = bytes.len();
+                        displacement(&mut bytes, next, target)?;
+                    }
+                    edge(func, &dests[0], &mut bytes, &mut branches);
+                }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     if let Some(&arg) = args.first() {
                         load(&mut bytes, 0, home(func, arg));
@@ -380,6 +490,13 @@ fn encode(func: &Function) -> Option<Code> {
             }
         }
     }
+    if !traps.is_empty() {
+        let target = bytes.len();
+        bytes.extend_from_slice(&[0x0f, 0x0b]);
+        for position in traps {
+            displacement(&mut bytes, position, target)?;
+        }
+    }
     for (position, block) in branches {
         displacement(&mut bytes, position, offsets[block])?;
     }
@@ -387,7 +504,7 @@ fn encode(func: &Function) -> Option<Code> {
         bytes,
         frame,
         epilogues,
-        calls,
+        sites,
     })
 }
 
@@ -398,14 +515,60 @@ fn body(
     bytes: &[u8],
     position: &mut usize,
     end: usize,
-    calls: &mut std::iter::Peekable<std::slice::Iter<'_, CallSite>>,
+    sites: &mut std::iter::Peekable<std::slice::Iter<'_, Site>>,
 ) {
-    while calls.peek().is_some_and(|call| call.offset < end) {
-        let call = calls.next().expect("peeked call");
-        out.bytes(&bytes[*position..call.offset]);
-        let name = &func.callee(call.callee).name;
-        out.branch_to_function(keel_asm_ir::x86::Opcode::Call, name, !symbols.defines(name));
-        *position = call.offset + 5;
+    use keel_asm_ir::x86::{Modifier, Opcode};
+    while sites.peek().is_some_and(|site| site.offset < end) {
+        let site = sites.next().expect("peeked symbolic site");
+        out.bytes(&bytes[*position..site.offset]);
+        match site.operation {
+            Symbolic::Call(callee) => {
+                let name = &func.callee(callee).name;
+                out.branch_to_function(Opcode::Call, name, !symbols.defines(name));
+            }
+            Symbolic::Address {
+                symbol,
+                model,
+                defined,
+            } => {
+                let name = func.symbol_name(symbol);
+                match model {
+                    CodeModel::Small => out.instruction(
+                        Opcode::Mov,
+                        [
+                            asm_arg(r32(0)),
+                            asm_arg(symbol_address(name, Modifier::None)),
+                        ],
+                        false,
+                    ),
+                    CodeModel::Kernel => out.instruction(
+                        Opcode::Mov,
+                        [
+                            asm_arg(r64(0)),
+                            asm_arg(symbol_address(name, Modifier::None)),
+                        ],
+                        false,
+                    ),
+                    CodeModel::PositionIndependent if defined => out.instruction(
+                        Opcode::Lea,
+                        [
+                            asm_arg(r64(0)),
+                            asm_arg(symbol_memory(rip(), name, Modifier::None)),
+                        ],
+                        false,
+                    ),
+                    CodeModel::PositionIndependent => out.instruction(
+                        Opcode::Mov,
+                        [
+                            asm_arg(r64(0)),
+                            asm_arg(sized(symbol_memory(rip(), name, Modifier::GotPcRel), 64)),
+                        ],
+                        false,
+                    ),
+                }
+            }
+        }
+        *position = site.offset + site.operation.length();
     }
     out.bytes(&bytes[*position..end]);
     *position = end;
@@ -417,7 +580,7 @@ pub(super) fn emit(
     out: &mut Output,
     emission: crate::EmissionOptions,
 ) -> bool {
-    let Some(code) = encode(func) else {
+    let Some(code) = encode(func, symbols, emission.x86_code_model.unwrap_or_default()) else {
         return false;
     };
     super::function_entry(
@@ -439,7 +602,7 @@ pub(super) fn emit(
         out.directive(Directive::Cfi(Cfi::DefCfaOffset(u64::from(code.frame) + 8)));
     }
     let mut position = 7;
-    let mut calls = code.calls.iter().peekable();
+    let mut sites = code.sites.iter().peekable();
     for epilogue in code.epilogues {
         body(
             func,
@@ -448,7 +611,7 @@ pub(super) fn emit(
             &code.bytes,
             &mut position,
             epilogue + 7,
-            &mut calls,
+            &mut sites,
         );
         if unwind {
             out.directive(Directive::Cfi(Cfi::DefCfaOffset(8)));
@@ -466,7 +629,7 @@ pub(super) fn emit(
         &code.bytes,
         &mut position,
         code.bytes.len(),
-        &mut calls,
+        &mut sites,
     );
     out.label(format!(".L{}_end", func.name));
     if unwind {

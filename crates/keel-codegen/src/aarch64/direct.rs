@@ -3,6 +3,7 @@
 //! Eligibility is transactional: unsupported input leaves the output untouched
 //! and uses the ordinary backend. All offsets are local to the encoded body.
 use super::{Cfi, Directive, Expression, Function, Output, Sink, Type};
+use keel_asm_ir::{PageKind, SymbolicInstruction};
 use keel_ir::{
     ArgExt, BinaryOp, BlockCall, CallArgs, CallConv, ConvertOp, EntityRef, InstData, IntCC,
     Intrinsic, Purpose, Signature, UnaryOp, Value,
@@ -37,13 +38,17 @@ fn edge(func: &Function, dest: &BlockCall, out: &mut Vec<u8>, branches: &mut Vec
     branches.push((out.len(), dest.block.index()));
     word(out, 0x14000000);
 }
+enum Site<'a> {
+    Call(&'a str),
+    Address { target: &'a str, kind: PageKind },
+}
 struct Code<'a> {
     bytes: Vec<u8>,
     frame: u32,
     /// Offsets of the ADD sp before each RET, for precise unwind transitions.
     epilogues: Vec<usize>,
     saved_lr: Option<u32>,
-    calls: Vec<(usize, &'a str)>,
+    sites: Vec<(usize, Site<'a>)>,
 }
 fn bits(ty: Type) -> Option<u32> {
     Some(match ty {
@@ -116,7 +121,47 @@ fn call_result(bytes: &mut Vec<u8>, sig: &Signature, dst: u32) -> Option<()> {
     }
     Some(())
 }
-fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
+fn materialize(out: &mut Vec<u8>, register: u32, value: u64) {
+    for half in 0..4 {
+        word(
+            out,
+            (if half == 0 { 0xd2800000 } else { 0xf2800000 })
+                | register
+                | half << 21
+                | ((value >> (half * 16)) as u32 & 0xffff) << 5,
+        );
+    }
+}
+fn divide(out: &mut Vec<u8>, op: BinaryOp, width: u32) {
+    // Hardware division returns zero on zero; the IR traps instead.
+    word(out, 0xb500004a); // cbnz x10, +8
+    word(out, 0xd4200020); // brk #1
+    let is_signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
+    if is_signed {
+        signed(out, 9, width);
+        signed(out, 10, width);
+    }
+    if op == BinaryOp::Sdiv {
+        word(out, 0xb100055f); // cmn x10, #1
+        word(out, 0x54000101); // b.ne +32: only -1 can overflow
+        materialize(out, 11, (i64::MIN >> (64 - width)) as u64);
+        word(out, 0xeb0b013f); // cmp x9, x11
+        word(out, 0x54000041); // b.ne +8
+        word(out, 0xd4200020);
+    }
+    let opcode = if is_signed { 0x9aca0d20 } else { 0x9aca0920 };
+    if matches!(op, BinaryOp::Urem | BinaryOp::Srem) {
+        word(out, opcode | 11);
+        word(out, 0x9b0aa569); // msub x9, x11, x10, x9
+    } else {
+        word(out, opcode | 9);
+    }
+}
+fn encode<'a>(
+    func: &'a Function,
+    symbols: &crate::symbols::Symbols<'_>,
+    linux: bool,
+) -> Option<Code<'a>> {
     if !scalar_signature(&func.sig, linux)
         || func.personality.is_some()
         || !func.debug_vars.is_empty()
@@ -160,7 +205,7 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
     let frame = frame as u32;
     let mut bytes = Vec::with_capacity(func.num_values() * 24 + 64);
     let mut epilogues = Vec::new();
-    let mut calls = Vec::new();
+    let mut sites = Vec::new();
     word(&mut bytes, 0xd10003ff | frame << 10);
     if let Some(save) = saved_lr {
         store(&mut bytes, 30, save / 8);
@@ -185,14 +230,7 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
             match func.inst_data(inst) {
                 InstData::Iconst { ty, imm } if ty.is_int() => {
                     let width = bits(*ty)?;
-                    for half in 0..4 {
-                        word(
-                            &mut bytes,
-                            (if half == 0 { 0xd2800009 } else { 0xf2800009 })
-                                | half << 21
-                                | (((*imm as u64) >> (half * 16)) as u32 & 0xffff) << 5,
-                        );
-                    }
+                    materialize(&mut bytes, 9, *imm as u64);
                     result(&mut bytes, dst, width);
                 }
                 InstData::Binary { op, args } => {
@@ -222,10 +260,19 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
                         BinaryOp::Shl => 0x9aca2129,
                         BinaryOp::Ushr => 0x9aca2529,
                         BinaryOp::Sshr => 0x9aca2929,
+                        BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => 0,
                         _ => return None,
                     };
                     load(&mut bytes, 9, home(func, args[0]));
                     load(&mut bytes, 10, home(func, args[1]));
+                    if matches!(
+                        op,
+                        BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem
+                    ) {
+                        divide(&mut bytes, *op, width);
+                        result(&mut bytes, dst, width);
+                        continue;
+                    }
                     if matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr) && width < 64 {
                         // A64 masks variable X shifts to six bits; IR masks to its own width.
                         normalize(&mut bytes, 10, width.trailing_zeros());
@@ -324,6 +371,32 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
                     load(&mut bytes, 10, home(func, *value));
                     word(&mut bytes, opcode);
                 }
+                InstData::SymbolAddr { symbol } => {
+                    let target = func.symbol_name(*symbol);
+                    if symbols
+                        .data_object(target)
+                        .is_some_and(|data| data.thread_local)
+                    {
+                        return None;
+                    }
+                    let kind = if symbols.defines(target) && !symbols.exports_weak_odr(target) {
+                        PageKind::Direct
+                    } else {
+                        PageKind::Got
+                    };
+                    sites.push((bytes.len(), Site::Address { target, kind }));
+                    // Each symbolic instruction occupies one word in the final layout.
+                    word(&mut bytes, 0x90000009);
+                    word(
+                        &mut bytes,
+                        if kind == PageKind::Direct {
+                            0x91000129
+                        } else {
+                            0xf9400129
+                        },
+                    );
+                    store(&mut bytes, 9, dst);
+                }
                 InstData::StackAddr { slot } => {
                     word(&mut bytes, 0x910003e9 | (stack[slot.index()] as u32) << 10);
                     store(&mut bytes, 9, dst);
@@ -333,6 +406,28 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
                     ..
                 } => {}
                 InstData::Jump { dest } => edge(func, dest, &mut bytes, &mut branches),
+                InstData::Switch { arg, dests, cases } => {
+                    let ty = func.value_type(*arg);
+                    if !ty.is_int() || dests.len() != cases.len() + 1 {
+                        return None;
+                    }
+                    let width = bits(ty)?;
+                    let mask = u64::MAX >> (64 - width);
+                    load(&mut bytes, 9, home(func, *arg));
+                    for (value, dest) in cases.iter().zip(&dests[1..]) {
+                        materialize(&mut bytes, 10, *value as u64 & mask);
+                        word(&mut bytes, 0xeb0a013f);
+                        let skip = bytes.len();
+                        word(&mut bytes, 0x54000001);
+                        edge(func, dest, &mut bytes, &mut branches);
+                        let distance = (bytes.len() - skip) / 4;
+                        if distance >= 1 << 18 {
+                            return None;
+                        }
+                        patch(&mut bytes, skip, 0x54000001 | (distance as u32) << 5);
+                    }
+                    edge(func, &dests[0], &mut bytes, &mut branches);
+                }
                 InstData::Brif { cond, dests } => {
                     bits(func.value_type(*cond))?;
                     load(&mut bytes, 9, home(func, *cond));
@@ -352,7 +447,7 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
                         return None;
                     }
                     arguments(&mut bytes, func, &callee.sig, args, linux)?;
-                    calls.push((bytes.len(), callee.name.as_str()));
+                    sites.push((bytes.len(), Site::Call(callee.name.as_str())));
                     word(&mut bytes, 0x94000000);
                     call_result(&mut bytes, &callee.sig, dst)?;
                 }
@@ -404,7 +499,7 @@ fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
         frame,
         epilogues,
         saved_lr,
-        calls,
+        sites,
     })
 }
 
@@ -434,7 +529,7 @@ pub(super) fn emit(
             return false;
         }
     }
-    let Some(code) = encode(func, linux) else {
+    let Some(code) = encode(func, symbols, linux) else {
         return false;
     };
     super::function_entry(func, out, linux, emission.function_sections);
@@ -477,10 +572,10 @@ pub(super) fn emit(
             .flatten()
         }));
     let mut events = events.peekable();
-    let mut calls = code.calls.into_iter().peekable();
+    let mut sites = code.sites.into_iter().peekable();
     let mut position = 0;
     loop {
-        let boundary = match (events.peek(), calls.peek()) {
+        let boundary = match (events.peek(), sites.peek()) {
             (Some((a, _)), Some((b, _))) => *a.min(b),
             (Some((a, _)), None) => *a,
             (None, Some((b, _))) => *b,
@@ -494,17 +589,41 @@ pub(super) fn emit(
                 out.directive(Directive::Cfi(event));
             }
         }
-        if calls.peek().is_some_and(|(at, _)| *at == boundary) {
-            let (_, callee) = calls.next().unwrap();
-            out.branch_name(
-                true,
-                if linux {
-                    super::Name::Text(callee)
-                } else {
-                    super::Name::Symbol(callee)
-                },
-            );
-            position += 4;
+        if sites.peek().is_some_and(|(at, _)| *at == boundary) {
+            let (_, site) = sites.next().unwrap();
+            match site {
+                Site::Call(callee) => {
+                    out.branch_name(
+                        true,
+                        if linux {
+                            super::Name::Text(callee)
+                        } else {
+                            super::Name::Symbol(callee)
+                        },
+                    );
+                    position += 4;
+                }
+                Site::Address { target, kind } => {
+                    let target = if linux {
+                        target.to_owned()
+                    } else {
+                        format!("_{target}")
+                    };
+                    out.symbolic(SymbolicInstruction::PageAddress {
+                        register: 9,
+                        kind,
+                        target: target.clone(),
+                    });
+                    out.symbolic(SymbolicInstruction::PageOffset {
+                        register: 9,
+                        base: 9,
+                        load: kind != PageKind::Direct,
+                        kind,
+                        target,
+                    });
+                    position += 8;
+                }
+            }
         }
     }
     out.bytes(&code.bytes[position..]);

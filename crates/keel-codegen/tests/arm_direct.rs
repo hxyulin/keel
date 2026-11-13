@@ -141,3 +141,123 @@ fn unsupported_abis_and_frames_still_fall_back() {
         );
     }
 }
+
+fn control_fixtures() -> (keel_ir::Module, String) {
+    let mut source = include_str!("arm_direct/control.keel").to_owned();
+    let mut header = include_str!("arm_direct/control.c").to_owned();
+    let mut checks = String::from(
+        "int main(int argc,char**argv){if(argc>1){volatile uint64_t sink=0;switch(argv[1][0]){case 'z':sink=udiv64(17,0);break;case 'a':sink=sdiv8(128,255);break;case 'b':sink=sdiv16(32768,65535);break;case 'c':sink=sdiv32(UINT64_C(0x80000000),UINT32_MAX);break;case 'd':sink=sdiv64(UINT64_C(0x8000000000000000),UINT64_MAX);break;}return sink==17;}if(check_symbols_switches())return 9;\n",
+    );
+    for width in [8, 16, 32, 64] {
+        let ext = if width < 32 { " uext" } else { "" };
+        for op in ["udiv", "urem", "sdiv", "srem"] {
+            writeln!(source,"func @{op}{width}(i{width}{ext},i{width}{ext})->i64 {{\nblock0(v0:i{width},v1:i{width}):\n v2={op} v0,v1").unwrap();
+            if width < 64 {
+                source.push_str(" v3=uext.i64 v2\n return v3\n}\n");
+            } else {
+                source.push_str(" return v2\n}\n");
+            }
+            writeln!(
+                header,
+                "extern uint64_t {op}{width}(uint{width}_t,uint{width}_t);"
+            )
+            .unwrap();
+        }
+        writeln!(checks,"{{const uint64_t values[]={{0,1,2,7,127,128,255,32767,32768,65535,UINT64_C(0x80000000),UINT64_C(0x8000000000000000),UINT64_MAX}};for(unsigned i=0;i<13;i++)for(unsigned j=0;j<13;j++){{uint{width}_t a=values[i],b=values[j];if(!b)continue;if(udiv{width}(a,b)!=(uint{width}_t)(a/b)||urem{width}(a,b)!=(uint{width}_t)(a%b))return 10;int{width}_t sa=a,sb=b;int overflow=sa==INT{width}_MIN&&sb==-1;if(!overflow&&sdiv{width}(a,b)!=(uint{width}_t)(sa/sb))return 11;if(srem{width}(a,b)!=(overflow?0:(uint{width}_t)(sa%sb)))return 12;}}}}").unwrap();
+    }
+    checks.push_str("return 0;}\n");
+    header.push_str(&checks);
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    (module, header)
+}
+fn control_target(module: &mut keel_ir::Module, target: Target) {
+    if target == Target::Aarch64LinuxGnu {
+        // AArch64 ELF deliberately does not support weak_odr. The Mach-O arm
+        // retains the ODR definitions and checks their GOT/coalescing policy.
+        for data in &mut module.data {
+            data.weak_odr = false;
+        }
+    }
+}
+#[test]
+fn symbol_address_binding_matches_ordinary_policy_and_tls_falls_back() {
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        let (mut module, _) = control_fixtures();
+        control_target(&mut module, target);
+        let req = request(target);
+        let (result, report) = backend_profile::capture(|| req.program(&module));
+        let program = result.unwrap();
+        assert_eq!(
+            report.counters[backend_profile::Counter::DirectFunctions as usize],
+            module.functions.len() as u64
+        );
+        let ordinary = Request::new(target, req.pipeline).program(&module).unwrap();
+        let bindings = |program: &keel_asm_ir::Program| {
+            program
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    keel_asm_ir::Item::Symbolic(
+                        keel_asm_ir::SymbolicInstruction::PageAddress { kind, target, .. },
+                    ) => Some((target.clone(), *kind)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(bindings(&program), bindings(&ordinary));
+        assert_eq!(
+            keel_asm::assemble_program_for(target, &program).unwrap(),
+            keel_asm::assemble_source_for(target, &req.text(&module).unwrap()).unwrap()
+        );
+    }
+    let module=keel_ir::parse("data @tls=thread_local align 8 {i64 1}\nfunc @f()->ptr {\nblock0:\n v0=symbol_addr @tls\n return v0\n}\n").unwrap();
+    let (program, report) =
+        backend_profile::capture(|| request(Target::Aarch64AppleDarwin).program(&module));
+    program.unwrap();
+    assert_eq!(
+        report.counters[backend_profile::Counter::DirectFunctions as usize],
+        0
+    );
+}
+#[test]
+fn native_symbol_switch_and_division_boundaries_match_c_and_trap() {
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        Target::Aarch64AppleDarwin
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Target::Aarch64LinuxGnu
+    } else {
+        keel_test_support::skip!("requires native AArch64 host");
+    };
+    let Some(clang) = keel_test_support::clang() else {
+        keel_test_support::skip!(keel_test_support::NO_CLANG);
+    };
+    let (mut module, oracle) = control_fixtures();
+    control_target(&mut module, target);
+    let program = request(target).program(&module).unwrap();
+    let dir = keel_test_support::TempDir::new("arm-direct-control");
+    fs::write(
+        dir.join("program.o"),
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+    )
+    .unwrap();
+    fs::write(dir.join("oracle.c"), oracle).unwrap();
+    let out = clang
+        .command()
+        .current_dir(dir.path())
+        .args(["-O2", "oracle.c", "program.o", "-o", "oracle"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = Command::new(dir.join("oracle")).output().unwrap();
+    assert!(out.status.success(), "exit {:?}", out.status.code());
+    use std::os::unix::process::ExitStatusExt;
+    for trap in ["z", "a", "b", "c", "d"] {
+        let out = Command::new(dir.join("oracle")).arg(trap).output().unwrap();
+        assert_eq!(out.status.signal(), Some(5), "{trap}: {:?}", out.status);
+    }
+}

@@ -1,4 +1,4 @@
-//! Direct leaves share object, ABI, unwind and fallback contracts with normal codegen.
+//! Direct functions share object, ABI, unwind and fallback contracts with normal codegen.
 use keel_asm_ir::{Directive, Item, Program};
 use keel_codegen::{
     BackendMode, CodegenPipeline, EmissionOptions, Request, SelectionTier, Target, UnwindTables,
@@ -34,7 +34,25 @@ fn parse(source: &str) -> keel_ir::Module {
 }
 #[test]
 fn direct_objects_text_chunks_unwind_and_parallel_agree() {
-    let source = format!("{LEAF}func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n");
+    // Mix relocations with patched branches and trapping arithmetic. All output
+    // routes must agree on the byte offsets around symbolic address sequences.
+    let source = format!(
+        "data @divisor = local align 8 {{ b\"\\x03\", zero 7 }}\n\
+         {LEAF}\
+         func @dispatch(i64)->i64 {{\n\
+         block0(v0:i64):\n\
+          v1=symbol_addr @divisor\n\
+          v2=load.i64 v1\n\
+          switch v0,block1(v0,v2),[0:block2(v2,v2),7:block2(v0,v2)]\n\
+         block1(v3:i64,v4:i64):\n\
+          v5=sdiv v3,v4\n\
+          return v5\n\
+         block2(v6:i64,v7:i64):\n\
+          v8=urem v6,v7\n\
+          return v8\n\
+         }}\n\
+         func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n"
+    );
     let module = parse(&source);
     for target in [
         Target::Aarch64AppleDarwin,
@@ -49,7 +67,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
             assert!(direct_count(&program) > 0);
             assert_eq!(
                 report.counters[backend_profile::Counter::DirectFunctions as usize],
-                1
+                2
             );
             let bytes = keel_asm::assemble_program_for(target, &program).unwrap();
             assert_eq!(

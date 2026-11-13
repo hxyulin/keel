@@ -333,10 +333,21 @@ ABI contract. Unsupported ABI shapes use ordinary code generation.
 The supported operations are integer constants, add/subtract/multiply,
 AND/OR/XOR, negation, complement, shifts, pointer addition, comparisons,
 select, integer extension/truncation, pointer/integer conversions, scalar
-loads/stores, fixed stack addresses, branches, block arguments and returns.
+loads/stores, fixed stack addresses, branches, block arguments, switches and returns.
 Variable shift counts may have any supported integer width and are masked to
 the operand width. Loads and stores keep their original byte widths, including
 unaligned accesses. Lifetime markers do not share or move fixed slots.
+
+Symbol addresses use the ordinary backend's binding policy: non-coalescable
+module definitions use direct page relocations, while imports and exported
+weak-ODR definitions use the GOT. Thread-local addresses use ordinary code
+generation. A switch emits a linear comparison chain and stages edge arguments
+only on the selected edge; case values retain their operand-width bit patterns.
+
+Integer division and remainder use hardware division with explicit `brk #1`
+checks. Every zero divisor traps, and signed `MIN / -1` traps at the original
+integer width. Signed `MIN % -1` produces zero. Narrow signed operands extend
+before the operation, and results return to canonical stack homes.
 
 Normal scalar calls use the same bounded signature boundary: up to eight
 normal-purpose integer/pointer arguments, no variadic or returns-twice contract,
@@ -359,7 +370,7 @@ stack slots, is at most 4,080 bytes. Explicit slots may be aligned to at most
 including narrow cyclic copies. Branch displacements are patched within the
 completed function; out-of-range encodings use ordinary code generation.
 
-Division/remainder, other unsupported operations, variadic functions,
+Other unsupported operations, variadic functions,
 returns-twice functions, personalities, larger or more aligned frames and
 modules with debug source files use the ordinary backend. Eligibility is per
 function and does not publish partial bytes. Private-call register-bank proofs

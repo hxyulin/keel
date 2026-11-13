@@ -502,7 +502,7 @@ The supported boundary is up to six normal-purpose i8/i16/i32/i64/pointer
 arguments, a void or scalar return, and a frame of at most 4,088 bytes. Fixed
 stack slots may require up to 16-byte alignment. The frame keeps their base
 16-byte aligned. Bodies may use integer constants, add/subtract/multiply,
-negation/complement, AND/OR/XOR, signed and unsigned shifts, comparisons,
+negation/complement, AND/OR/XOR, signed and unsigned shifts, division/remainder, comparisons,
 select, scalar loads/stores, integer extensions/truncation, pointer/integer
 casts, pointer addition, stack addresses, branches and returns. Normal fixed
 scalar calls support up to six register arguments and at most one scalar result,
@@ -520,7 +520,17 @@ alignment and unwind options are preserved. CFA changes describe each stack
 adjustment and every return. Structured, streamed and source output carry the
 same encoded bytes. Symbolic direct calls replace fixed five-byte placeholders
 and use the ordinary symbol-binding and PLT policy, including weak definitions.
-Source represents other encoded instructions with `.byte`. Per-function target
+Source represents other encoded instructions with `.byte`. Non-TLS symbol
+addresses use the ordinary RIP-relative/GOT policy in PIC mode and the ordinary
+zero-extended or sign-extended 32-bit relocation in small/kernel mode. TLS
+addresses retain ordinary lowering. Symbolic address instructions replace fixed
+five- or seven-byte sites before branch displacements are published.
+
+Switches use a linear compare chain, with cases masked to the selector width
+and simultaneous block-argument copies on every edge. Integer division checks
+zero before DIV/IDIV. Signed division also traps on MIN/-1 at the original
+integer width; signed remainder returns zero for A%-1, including MIN%-1.
+These traps use UD2 as in ordinary lowering. Per-function target
 feature requests are still validated before direct emission, and the emitted
 subset requires only the baseline integer ISA. `direct_functions` reports
 how many functions used this path.
