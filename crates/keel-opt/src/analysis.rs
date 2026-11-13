@@ -250,6 +250,40 @@ mod tests {
     }
 
     #[test]
+    fn mandatory_inlining_restores_the_callers_session_on_success_and_error() {
+        let function = loop_function();
+        let source = "func @callee(i64) -> i64 alwaysinline local {
+entry(v0:i64):
+ return v0
+}
+func @root(i64) -> i64 {
+entry(v0:i64):
+ v1 = call @callee(v0)
+ v2 = call @callee(v1)
+ return v2
+}
+";
+        let mut module = keel_ir::parse(source).unwrap();
+        {
+            let _outer = Session::new();
+            let cached = get(&function);
+            crate::required_inline_asm(&mut module).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            assert!(Rc::ptr_eq(&cached, &get(&function)));
+            assert!(
+                crate::required_inline_asm_with_c_definitions(&mut module, &[], &["missing"])
+                    .is_err()
+            );
+            assert!(Rc::ptr_eq(&cached, &get(&function)));
+        }
+        assert!(active_cache().is_none());
+        let mut standalone = keel_ir::parse(source).unwrap();
+        crate::required_inline_asm(&mut standalone).unwrap();
+        assert!(active_cache().is_none());
+        assert_eq!(standalone.to_string(), module.to_string());
+    }
+
+    #[test]
     fn appended_terminator_invalidates_cached_cfg() {
         let _session = Session::new();
         let mut function = Function::new("append", Signature::new(&[], &[]));

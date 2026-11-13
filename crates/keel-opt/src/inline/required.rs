@@ -42,6 +42,9 @@ pub fn required_inline_asm_with_c_definitions(
     inline_only: &[&str],
     definitions: &[&str],
 ) -> Result<(), String> {
+    // This frontend phase runs before Pipeline. Reuse callee analyses across
+    // inline sites, and release them on success, diagnostics and unwind.
+    let _analyses = crate::analysis::Session::new();
     for name in definitions {
         let Some(function) = module.functions.iter().find(|f| f.name == *name) else {
             return Err(format!("C-owned mandatory definition @{name} is missing"));

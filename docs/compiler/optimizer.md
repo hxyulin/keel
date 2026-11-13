@@ -77,6 +77,7 @@ analysis and scratch caches.
 Each pipeline invocation owns a scoped cache of CFG, dominator and loop-depth
 analyses. Pass kernels reach it through a thread-local weak reference; nested
 pipelines use independent caches and restore the outer session even on unwind.
+Mandatory C inlining and the fixed Wasm pipeline also own sessions.
 Standalone kernels compute fresh analyses and retain no cache. Entries are
 reused while the function's CFG stamp is unchanged, or when block count,
 layout and ordered successors still match. Debug builds check, after each pass
