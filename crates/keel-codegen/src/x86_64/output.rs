@@ -383,6 +383,9 @@ impl Sink for Output {
             Self::Text(s, _) => {
                 use crate::text::write_decimal;
                 match &d {
+                    Directive::Cfi(keel_asm_ir::Cfi::Restore(register)) => {
+                        write_decimal(s, "\t.cfi_restore ", (*register).into()).unwrap();
+                    }
                     Directive::Cfi(keel_asm_ir::Cfi::Offset { register, offset }) => {
                         write_decimal(s, "\t.cfi_offset ", (*register).into()).unwrap();
                         write_decimal(s, ", ", (*offset).into()).unwrap();

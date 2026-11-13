@@ -397,7 +397,7 @@ pub(crate) fn compile_output<'module>(
             let _function_profile = crate::backend_profile::function(&original.name);
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &mut out, linux, emission)
+                && direct::emit(original, &symbols, &mut out, linux, emission)
             {
                 frames.push(FrameDebug {
                     frame_register: None,
@@ -458,7 +458,7 @@ pub(crate) fn compile_output<'module>(
             let _function_profile = crate::backend_profile::function(&original.name);
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &mut out, linux, emission)
+                && direct::emit(original, &symbols, &mut out, linux, emission)
             {
                 return Ok(Some((
                     out,

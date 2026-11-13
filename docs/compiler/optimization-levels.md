@@ -11,7 +11,7 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 
 | Mode | Equivalent level | Policy |
 |---|---|---|
-| `speed` | Compile-speed preset | No optional IR optimization. Direct AArch64/x86-64 scalar leaf emission where supported; Baseline selection and Fast allocation for fallback functions. |
+| `speed` | Compile-speed preset | No optional IR optimization. Direct AArch64/x86-64 scalar emission where supported; Baseline selection and Fast allocation for fallback functions. |
 | `no-opt` | `-O0` | Default native preset, with no optional IR optimization and ordinary code generation. |
 | `balanced` | `-O2` | Bounded optimization effort for runtime performance. |
 | `full` | `-O3` | Full semantics-preserving optimization pipeline. |
@@ -19,8 +19,9 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 For example, `keel cc --mode speed --emit-object input.c -o input.o` selects
 compilation latency over generated-code performance. Speed gives every value
 a stack home and skips general selection and allocation for supported functions.
-Unsupported functions use the ordinary backend in the same object. Modules with
-debug source files use ordinary code generation. Unwind, linkage, sections and target
+Fixed scalar calls can also use direct emission; variadic, aggregate and other
+unsupported call shapes fall back. Unsupported functions use the ordinary backend
+in the same object. Modules with debug source files use ordinary code generation. Unwind, linkage, sections and target
 validation retain their normal contracts. See the [AArch64](../targets/aarch64/codegen.md#direct-emission) and
 [x86-64](../targets/x86_64/codegen.md#direct-emission) direct-emission contracts.
 `--codegen-report` counts supported functions as `direct_functions`.

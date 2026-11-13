@@ -90,10 +90,18 @@ pub(crate) fn write_int<W: Write + ?Sized>(w: &mut W, n: i128, plus: bool) -> fm
 pub enum Cfi {
     DefCfaOffset(u64),
     DefCfaRegister(u8),
+    /// Restore the register rule established by the CIE.
+    Restore(u8),
     Start,
     End,
-    DefCfa { register: u8, offset: u64 },
-    Offset { register: u8, offset: i64 },
+    DefCfa {
+        register: u8,
+        offset: u64,
+    },
+    Offset {
+        register: u8,
+        offset: i64,
+    },
     Personality(String),
     Lsda(String),
 }
@@ -120,6 +128,10 @@ impl Cfi {
             Self::DefCfaRegister(r) => {
                 f.write_str(".cfi_def_cfa_register ")?;
                 write_int(f, (*r).into(), false)
+            }
+            Self::Restore(register) => {
+                f.write_str(".cfi_restore ")?;
+                cfi_register(f, *register)
             }
             Self::Start => f.write_str(".cfi_startproc"),
             Self::End => f.write_str(".cfi_endproc"),
@@ -682,9 +694,11 @@ impl Directive {
                 }
             }
             Self::Cfi(Cfi::Personality(s) | Cfi::Lsda(s)) => symbol(s)?,
-            Self::Cfi(Cfi::DefCfa { register, .. } | Cfi::Offset { register, .. })
-                if *register > 95 =>
-            {
+            Self::Cfi(
+                Cfi::DefCfa { register, .. }
+                | Cfi::Offset { register, .. }
+                | Cfi::Restore(register),
+            ) if *register > 95 => {
                 return Err("invalid CFI register".into());
             }
             _ => {}

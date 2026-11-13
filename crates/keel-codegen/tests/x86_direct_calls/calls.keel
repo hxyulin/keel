@@ -1,0 +1,68 @@
+decl @foreign6(i64,i64,i64,i64,i64,i64)->i64
+decl @narrow_observer(i8 sext,i16 uext)->i64
+decl @alignment()->i64
+decl @poke(ptr,i32)
+func @local6(i64,i64,i64,i64,i64,i64)->i64 {
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64):
+ v6=iadd v0,v1
+ v7=xor v2,v3
+ v8=imul v4,v5
+ v9=iadd v6,v7
+ v10=isub v9,v8
+ return v10
+}
+func @fallback_divide(i64,i64)->i64 {
+block0(v0:i64,v1:i64):
+ v2=udiv v0,v1
+ return v2
+}
+func @chain(i64,i64)->i64 {
+block0(v0:i64,v1:i64):
+ v2=imul v0,v1
+ v3=call @foreign6(v0,v1,v0,v1,v0,v1)
+ v4=call @local6(v1,v0,v1,v0,v1,v0)
+ v5=iconst.i64 3
+ v6=call @fallback_divide(v3,v5)
+ v7=iadd v2,v4
+ v8=iadd v7,v6
+ return v8
+}
+func @recursive(i64)->i64 {
+block0(v0:i64):
+ v1=iconst.i64 0
+ v2=icmp.eq v0,v1
+ brif v2,block1,block2
+block1:
+ v3=iconst.i64 1
+ return v3
+block2:
+ v4=iconst.i64 1
+ v5=isub v0,v4
+ v6=call @recursive(v5)
+ v7=imul v0,v6
+ return v7
+}
+func @narrow_args()->i64 {
+block0:
+ v0=iconst.i8 -1
+ v1=iconst.i16 -1
+ v2=call @narrow_observer(v0,v1)
+ return v2
+}
+func @void_call(i32)->i64 {
+ ss0=stack_slot 4,align 4
+block0(v0:i32):
+ v1=stack_addr ss0
+ call @poke(v1,v0)
+ v2=load.i32 v1
+ v3=uext.i64 v2
+ v4=call @alignment()
+ v5=iadd v3,v4
+ return v5
+}
+func @indirect(ptr,i8 sext,i16 uext,i32)->i64 {
+block0(v0:ptr,v1:i8,v2:i16,v3:i32):
+ v4=call_indirect v0(v1,v2,v3):(i8 sext,i16 uext,i32)->i8 sext
+ v5=uext.i64 v4
+ return v5
+}

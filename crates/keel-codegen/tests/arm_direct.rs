@@ -77,7 +77,7 @@ fn narrow_memory_conversions_stacks_and_unwind_keep_text_object_parity() {
         let program = program.unwrap();
         assert_eq!(
             report.counters[backend_profile::Counter::DirectFunctions as usize],
-            module.functions.len() as u64 - 1
+            module.functions.len() as u64
         );
         assert_eq!(
             keel_asm::assemble_program_for(target, &program).unwrap(),

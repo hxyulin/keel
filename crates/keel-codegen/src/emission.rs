@@ -32,7 +32,7 @@ pub enum BackendMode {
     /// Run ordinary instruction selection and register allocation.
     #[default]
     Standard,
-    /// Directly encode supported AArch64 and x86-64 scalar leaves, with a stack
+    /// Directly encode supported AArch64 and x86-64 scalar functions, with a stack
     /// home per value. Unsupported functions use the ordinary backend.
     /// Debug functions retain the ordinary lowering and metadata.
     CompileSpeed,

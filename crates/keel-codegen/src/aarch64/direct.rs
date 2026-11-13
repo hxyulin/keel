@@ -1,11 +1,11 @@
-//! Compile-speed lowering for bounded scalar leaves. Every value has an
+//! Compile-speed lowering for bounded scalar functions. Every value has an
 //! eight-byte stack home. x9/x10/x11 are scratches; no liveness or allocation runs.
 //! Eligibility is transactional: unsupported input leaves the output untouched
 //! and uses the ordinary backend. All offsets are local to the encoded body.
 use super::{Cfi, Directive, Expression, Function, Output, Sink, Type};
 use keel_ir::{
-    ArgExt, BinaryOp, BlockCall, CallConv, ConvertOp, EntityRef, InstData, IntCC, Intrinsic,
-    Purpose, UnaryOp, Value,
+    ArgExt, BinaryOp, BlockCall, CallArgs, CallConv, ConvertOp, EntityRef, InstData, IntCC,
+    Intrinsic, Purpose, Signature, UnaryOp, Value,
 };
 
 fn word(out: &mut Vec<u8>, bits: u32) {
@@ -37,11 +37,13 @@ fn edge(func: &Function, dest: &BlockCall, out: &mut Vec<u8>, branches: &mut Vec
     branches.push((out.len(), dest.block.index()));
     word(out, 0x14000000);
 }
-struct Code {
+struct Code<'a> {
     bytes: Vec<u8>,
     frame: u32,
     /// Offsets of the ADD sp before each RET, for precise unwind transitions.
     epilogues: Vec<usize>,
+    saved_lr: Option<u32>,
+    calls: Vec<(usize, &'a str)>,
 }
 fn bits(ty: Type) -> Option<u32> {
     Some(match ty {
@@ -66,33 +68,67 @@ fn result(out: &mut Vec<u8>, dst: u32, width: u32) {
     normalize(out, 9, width);
     store(out, 9, dst);
 }
-fn encode(func: &Function, linux: bool) -> Option<Code> {
-    if func.sig.variadic
-        || func.sig.returns_twice
-        || func.personality.is_some()
-        || func.sig.params.len() > 8
-        || func.sig.returns.len() > 1
-        || func
-            .sig
+fn scalar_signature(sig: &Signature, linux: bool) -> bool {
+    !sig.variadic
+        && !sig.returns_twice
+        && sig.params.len() <= 8
+        && sig.returns.len() <= 1
+        && sig
             .params
             .iter()
-            .chain(&func.sig.returns)
-            .any(|p| bits(p.ty).is_none() || p.purpose != Purpose::Normal)
+            .chain(&sig.returns)
+            .all(|p| bits(p.ty).is_some() && p.purpose == Purpose::Normal)
+        && (linux
+            || sig.cc != CallConv::C
+            || !sig
+                .returns
+                .first()
+                .is_some_and(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None))
+}
+fn arguments(
+    bytes: &mut Vec<u8>,
+    func: &Function,
+    sig: &Signature,
+    args: &CallArgs,
+    linux: bool,
+) -> Option<()> {
+    if !scalar_signature(sig, linux) || args.has_explicit_abi() || args.len() != sig.params.len() {
+        return None;
+    }
+    for (index, (&value, param)) in args.iter().zip(&sig.params).enumerate() {
+        if func.value_type(value) != param.ty {
+            return None;
+        }
+        load(bytes, index as u32, home(func, value));
+        if param.ext == ArgExt::Sext && matches!(param.ty, Type::I8 | Type::I16) {
+            word(
+                bytes,
+                0x13000000 | (bits(param.ty)? - 1) << 10 | (index as u32) << 5 | index as u32,
+            );
+        }
+    }
+    Some(())
+}
+fn call_result(bytes: &mut Vec<u8>, sig: &Signature, dst: u32) -> Option<()> {
+    if let Some(result) = sig.returns.first() {
+        normalize(bytes, 0, bits(result.ty)?);
+        store(bytes, 0, dst);
+    }
+    Some(())
+}
+fn encode(func: &Function, linux: bool) -> Option<Code<'_>> {
+    if !scalar_signature(&func.sig, linux)
+        || func.personality.is_some()
         || !func.debug_vars.is_empty()
     {
         return None;
     }
-    // Darwin C requires producers to specify the narrow result's ABI extension.
-    if !linux
-        && func.sig.cc == CallConv::C
-        && func
-            .sig
-            .returns
-            .first()
-            .is_some_and(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None)
-    {
-        return None;
-    }
+    let has_calls = func.layout_insts().any(|(_, inst)| {
+        matches!(
+            func.inst_data(inst),
+            InstData::Call { .. } | InstData::CallIndirect { .. }
+        )
+    });
     let extra = func
         .blocks()
         .map(|b| func.block_params(b).len())
@@ -109,6 +145,14 @@ fn encode(func: &Function, linux: bool) -> Option<Code> {
         stack[slot.index()] = frame;
         frame = frame.checked_add(data.size as usize)?;
     }
+    let saved_lr = if has_calls {
+        frame = frame.checked_add(7)? & !7;
+        let save = frame;
+        frame = frame.checked_add(8)?;
+        Some(save as u32)
+    } else {
+        None
+    };
     frame = frame.checked_add(15)? & !15;
     if frame > 4080 {
         return None;
@@ -116,7 +160,11 @@ fn encode(func: &Function, linux: bool) -> Option<Code> {
     let frame = frame as u32;
     let mut bytes = Vec::with_capacity(func.num_values() * 24 + 64);
     let mut epilogues = Vec::new();
+    let mut calls = Vec::new();
     word(&mut bytes, 0xd10003ff | frame << 10);
+    if let Some(save) = saved_lr {
+        store(&mut bytes, 30, save / 8);
+    }
     let entry = func.entry_block()?;
     for (index, &value) in func.block_params(entry).iter().enumerate() {
         normalize(&mut bytes, index as u32, bits(func.value_type(value))?);
@@ -298,6 +346,29 @@ fn encode(func: &Function, linux: bool) -> Option<Code> {
                     patch(&mut bytes, position, 0xb4000009 | (distance as u32) << 5);
                     edge(func, &dests[1], &mut bytes, &mut branches);
                 }
+                InstData::Call { func: callee, args } => {
+                    let callee = func.callee(*callee);
+                    if func.inst_results(inst).len() != callee.sig.returns.len() {
+                        return None;
+                    }
+                    arguments(&mut bytes, func, &callee.sig, args, linux)?;
+                    calls.push((bytes.len(), callee.name.as_str()));
+                    word(&mut bytes, 0x94000000);
+                    call_result(&mut bytes, &callee.sig, dst)?;
+                }
+                InstData::CallIndirect { sig, callee, args } => {
+                    // Keep the target out of x0-x7 while staging all ABI arguments.
+                    load(&mut bytes, 9, home(func, *callee));
+                    let signature = func.signature(*sig);
+                    if func.value_type(*callee) != Type::Ptr
+                        || func.inst_results(inst).len() != signature.returns.len()
+                    {
+                        return None;
+                    }
+                    arguments(&mut bytes, func, signature, args, linux)?;
+                    word(&mut bytes, 0xd63f0120);
+                    call_result(&mut bytes, signature, dst)?;
+                }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
                     if let Some(&value) = args.first() {
                         let ret = &func.sig.returns[0];
@@ -305,6 +376,9 @@ fn encode(func: &Function, linux: bool) -> Option<Code> {
                         if ret.ext == ArgExt::Sext && matches!(ret.ty, Type::I8 | Type::I16) {
                             word(&mut bytes, 0x13000000 | (bits(ret.ty)? - 1) << 10);
                         }
+                    }
+                    if let Some(save) = saved_lr {
+                        load(&mut bytes, 30, save / 8);
                     }
                     epilogues.push(bytes.len());
                     word(&mut bytes, 0x910003ff | frame << 10);
@@ -329,15 +403,37 @@ fn encode(func: &Function, linux: bool) -> Option<Code> {
         bytes,
         frame,
         epilogues,
+        saved_lr,
+        calls,
     })
 }
 
 pub(super) fn emit(
     func: &Function,
+    symbols: &crate::symbols::Symbols<'_>,
     out: &mut Output,
     linux: bool,
     emission: crate::EmissionOptions,
 ) -> bool {
+    // Keep the ordinary ABI rejection contract: external Darwin C calls need
+    // explicit extension attributes on narrow arguments. Indirect calls can
+    // target external code too, including signatures retained after IR edits.
+    for (_, callee) in func.callees() {
+        if super::check_call_signature(
+            || format!("call to @{}", callee.name),
+            &callee.sig,
+            !linux && symbols.is_external(&callee.name),
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    for (_, signature) in func.signatures() {
+        if super::check_call_signature(|| "indirect call".into(), signature, !linux).is_err() {
+            return false;
+        }
+    }
     let Some(code) = encode(func, linux) else {
         return false;
     };
@@ -346,23 +442,70 @@ pub(super) fn emit(
     if unwind {
         out.directive(Directive::Cfi(Cfi::Start));
     }
-    // CFI describes the state at each instruction boundary, including later
-    // laid-out blocks after a return. No assembly or instruction re-encoding runs.
-    out.bytes(&code.bytes[..4]);
-    if unwind {
-        out.directive(Directive::Cfi(Cfi::DefCfaOffset(code.frame.into())));
-    }
-    let mut position = 4;
-    for epilogue in code.epilogues {
-        out.bytes(&code.bytes[position..epilogue + 4]);
-        if unwind {
-            out.directive(Directive::Cfi(Cfi::DefCfaOffset(0)));
+    // Merge zero-byte CFI events and symbolic BLs into the encoded layout.
+    // Branch patching counted each BL placeholder as four bytes, exactly as the
+    // assembler and linker will encode the symbolic call.
+    let saved_lr = code.saved_lr;
+    let frame = code.frame;
+    let lr_rule = saved_lr.map(|save| i64::from(save) - i64::from(frame));
+    let events = std::iter::once((4, Cfi::DefCfaOffset(frame.into())))
+        .chain(lr_rule.map(|offset| {
+            (
+                8,
+                Cfi::Offset {
+                    register: 30,
+                    offset,
+                },
+            )
+        }))
+        .chain(code.epilogues.into_iter().flat_map(move |epilogue| {
+            [
+                saved_lr.map(|_| (epilogue, Cfi::Restore(30))),
+                Some((epilogue + 4, Cfi::DefCfaOffset(0))),
+                Some((epilogue + 8, Cfi::DefCfaOffset(frame.into()))),
+                lr_rule.map(|offset| {
+                    (
+                        epilogue + 8,
+                        Cfi::Offset {
+                            register: 30,
+                            offset,
+                        },
+                    )
+                }),
+            ]
+            .into_iter()
+            .flatten()
+        }));
+    let mut events = events.peekable();
+    let mut calls = code.calls.into_iter().peekable();
+    let mut position = 0;
+    loop {
+        let boundary = match (events.peek(), calls.peek()) {
+            (Some((a, _)), Some((b, _))) => *a.min(b),
+            (Some((a, _)), None) => *a,
+            (None, Some((b, _))) => *b,
+            (None, None) => break,
+        };
+        out.bytes(&code.bytes[position..boundary]);
+        position = boundary;
+        while events.peek().is_some_and(|(at, _)| *at == boundary) {
+            let (_, event) = events.next().unwrap();
+            if unwind {
+                out.directive(Directive::Cfi(event));
+            }
         }
-        out.bytes(&code.bytes[epilogue + 4..epilogue + 8]);
-        if unwind {
-            out.directive(Directive::Cfi(Cfi::DefCfaOffset(code.frame.into())));
+        if calls.peek().is_some_and(|(at, _)| *at == boundary) {
+            let (_, callee) = calls.next().unwrap();
+            out.branch_name(
+                true,
+                if linux {
+                    super::Name::Text(callee)
+                } else {
+                    super::Name::Symbol(callee)
+                },
+            );
+            position += 4;
         }
-        position = epilogue + 8;
     }
     out.bytes(&code.bytes[position..]);
     let end = format!(

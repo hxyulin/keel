@@ -1,10 +1,10 @@
-//! Bounded SysV scalar leaves encoded without selection, liveness or allocation.
-//! Every value has a zero-extended eight-byte home. Only rax/rcx/rdx are used
-//! as scratch registers. Failed eligibility never publishes partial output.
+//! Bounded SysV scalar functions encoded without selection, liveness or allocation.
+//! Every value has a zero-extended eight-byte home. rax/rcx/rdx compute values;
+//! r10 holds indirect call targets. Failed eligibility publishes no partial output.
 use super::{Cfi, Directive, Expression, Function, Output, Sink};
 use keel_ir::{
-    ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, InstData, IntCC, Intrinsic, Purpose, Type,
-    UnaryOp, Value,
+    ArgExt, BinaryOp, BlockCall, CallArgs, ConvertOp, EntityRef, FuncRef, InstData, IntCC,
+    Intrinsic, Purpose, Signature, Type, UnaryOp, Value,
 };
 
 fn width(ty: Type) -> Option<u32> {
@@ -79,26 +79,47 @@ fn displacement(out: &mut [u8], position: usize, target: usize) -> Option<()> {
     out[position..position + 4].copy_from_slice(&delta.to_le_bytes());
     Some(())
 }
+struct CallSite {
+    offset: usize,
+    callee: FuncRef,
+}
 struct Code {
     bytes: Vec<u8>,
     frame: u32,
     epilogues: Vec<usize>,
+    calls: Vec<CallSite>,
 }
-fn encode(func: &Function) -> Option<Code> {
-    if func.sig.variadic
-        || func.sig.returns_twice
-        || func.personality.is_some()
-        || func.sig.params.len() > 6
-        || func.sig.returns.len() > 1
-        || func.sig.x86_vector_abi.is_some()
-        || !func.debug_vars.is_empty()
-        || func
-            .sig
+fn scalar_signature(sig: &Signature) -> bool {
+    !sig.variadic
+        && !sig.returns_twice
+        && sig.params.len() <= 6
+        && sig.returns.len() <= 1
+        && sig.x86_vector_abi.is_none()
+        && sig
             .params
             .iter()
-            .chain(&func.sig.returns)
-            .any(|p| width(p.ty).is_none() || p.purpose != Purpose::Normal)
-    {
+            .chain(&sig.returns)
+            .all(|p| width(p.ty).is_some() && p.purpose == Purpose::Normal)
+}
+fn arguments(func: &Function, args: &CallArgs, sig: &Signature, bytes: &mut Vec<u8>) -> Option<()> {
+    if !scalar_signature(sig) || args.has_explicit_abi() || args.len() != sig.params.len() {
+        return None;
+    }
+    for ((&value, param), reg) in args.iter().zip(&sig.params).zip([7, 6, 2, 1, 8, 9]) {
+        if func.value_type(value) != param.ty {
+            return None;
+        }
+        load(bytes, 0, home(func, value));
+        if param.ext == ArgExt::Sext {
+            signed(bytes, 0, width(param.ty)?);
+        }
+        // All values already have canonical homes. rax is outside the argument bank.
+        bytes.extend_from_slice(&[0x48 | (reg >> 3), 0x89, 0xc0 | (reg & 7)]);
+    }
+    Some(())
+}
+fn encode(func: &Function) -> Option<Code> {
+    if !scalar_signature(&func.sig) || func.personality.is_some() || !func.debug_vars.is_empty() {
         return None;
     }
     let entry = func.entry_block()?;
@@ -125,6 +146,7 @@ fn encode(func: &Function) -> Option<Code> {
     let frame = frame as u32;
     let mut bytes = Vec::with_capacity(func.num_values() * 32 + 64);
     let mut epilogues = Vec::new();
+    let mut calls = Vec::new();
     bytes.extend_from_slice(&[0x48, 0x81, 0xec]);
     bytes.extend_from_slice(&frame.to_le_bytes());
     for ((&value, param), reg) in func
@@ -298,6 +320,34 @@ fn encode(func: &Function) -> Option<Code> {
                     bytes.extend_from_slice(&slots[slot.index()].to_le_bytes());
                     store(&mut bytes, 0, home(func, dst?));
                 }
+                InstData::Call { func: callee, args } => {
+                    let sig = &func.callee(*callee).sig;
+                    if values.len() != sig.returns.len() {
+                        return None;
+                    }
+                    arguments(func, args, sig, &mut bytes)?;
+                    calls.push(CallSite {
+                        offset: bytes.len(),
+                        callee: *callee,
+                    });
+                    // Publishing replaces exactly these five bytes with a symbolic CALL.
+                    bytes.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
+                    if let Some(value) = dst {
+                        result(func, &mut bytes, value)?;
+                    }
+                }
+                InstData::CallIndirect { sig, callee, args } => {
+                    let sig = func.signature(*sig);
+                    if func.value_type(*callee) != Type::Ptr || values.len() != sig.returns.len() {
+                        return None;
+                    }
+                    arguments(func, args, sig, &mut bytes)?;
+                    load(&mut bytes, 10, home(func, *callee));
+                    bytes.extend_from_slice(&[0x41, 0xff, 0xd2]);
+                    if let Some(value) = dst {
+                        result(func, &mut bytes, value)?;
+                    }
+                }
                 InstData::Intrinsic {
                     id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
                     ..
@@ -337,10 +387,36 @@ fn encode(func: &Function) -> Option<Code> {
         bytes,
         frame,
         epilogues,
+        calls,
     })
 }
 
-pub(super) fn emit(func: &Function, out: &mut Output, emission: crate::EmissionOptions) -> bool {
+fn body(
+    func: &Function,
+    symbols: &crate::symbols::Symbols<'_>,
+    out: &mut Output,
+    bytes: &[u8],
+    position: &mut usize,
+    end: usize,
+    calls: &mut std::iter::Peekable<std::slice::Iter<'_, CallSite>>,
+) {
+    while calls.peek().is_some_and(|call| call.offset < end) {
+        let call = calls.next().expect("peeked call");
+        out.bytes(&bytes[*position..call.offset]);
+        let name = &func.callee(call.callee).name;
+        out.branch_to_function(keel_asm_ir::x86::Opcode::Call, name, !symbols.defines(name));
+        *position = call.offset + 5;
+    }
+    out.bytes(&bytes[*position..end]);
+    *position = end;
+}
+
+pub(super) fn emit(
+    func: &Function,
+    symbols: &crate::symbols::Symbols<'_>,
+    out: &mut Output,
+    emission: crate::EmissionOptions,
+) -> bool {
     let Some(code) = encode(func) else {
         return false;
     };
@@ -363,8 +439,17 @@ pub(super) fn emit(func: &Function, out: &mut Output, emission: crate::EmissionO
         out.directive(Directive::Cfi(Cfi::DefCfaOffset(u64::from(code.frame) + 8)));
     }
     let mut position = 7;
+    let mut calls = code.calls.iter().peekable();
     for epilogue in code.epilogues {
-        out.bytes(&code.bytes[position..epilogue + 7]);
+        body(
+            func,
+            symbols,
+            out,
+            &code.bytes,
+            &mut position,
+            epilogue + 7,
+            &mut calls,
+        );
         if unwind {
             out.directive(Directive::Cfi(Cfi::DefCfaOffset(8)));
         }
@@ -374,7 +459,15 @@ pub(super) fn emit(func: &Function, out: &mut Output, emission: crate::EmissionO
         }
         position = epilogue + 8;
     }
-    out.bytes(&code.bytes[position..]);
+    body(
+        func,
+        symbols,
+        out,
+        &code.bytes,
+        &mut position,
+        code.bytes.len(),
+        &mut calls,
+    );
     out.label(format!(".L{}_end", func.name));
     if unwind {
         out.directive(Directive::Cfi(Cfi::End));

@@ -492,3 +492,52 @@ fn incremental_owned_unit_moves_payloads_and_relocates_across_chunks() {
     let object = assembly.into_object().unwrap();
     assert_eq!(object.sections[0].data.as_ptr(), pointer);
 }
+
+#[test]
+fn restored_cfi_registers_match_source_in_both_encodings() {
+    use keel_asm_ir::{Cfi, Directive};
+    // Compact DW_CFA_restore and extended DW_CFA_restore_extended boundaries.
+    for register in [0, 30, 63, 64, 95] {
+        let mut program = Program::new();
+        program.text(".text\nf:\n");
+        program.directive(Directive::Cfi(Cfi::Start));
+        program.directive(Directive::Cfi(Cfi::Offset {
+            register,
+            offset: -8,
+        }));
+        program.text("nop\n");
+        program.directive(Directive::Cfi(Cfi::Restore(register)));
+        program.text("ret\n");
+        program.directive(Directive::Cfi(Cfi::End));
+        let source = format!(
+            ".text\nf:\n.cfi_startproc\n.cfi_offset {register}, -8\nnop\n.cfi_restore {register}\nret\n.cfi_endproc\n"
+        );
+        assert_eq!(
+            assemble_program_object(&program, TargetFeatures::default()).unwrap(),
+            assemble_object(&source).unwrap()
+        );
+        assert_eq!(
+            keel_asm::x86::assemble_program_object(&program).unwrap(),
+            keel_asm::x86::assemble_object(&source).unwrap()
+        );
+    }
+}
+
+#[test]
+fn typed_cfi_restore_rejects_bad_registers_and_missing_procedures() {
+    use keel_asm_ir::{Cfi, Directive};
+    for register in [96, 255] {
+        let mut program = Program::new();
+        program.text(".text\nf:\n");
+        program.directive(Directive::Cfi(Cfi::Start));
+        program.directive(Directive::Cfi(Cfi::Restore(register)));
+        program.text("ret\n");
+        program.directive(Directive::Cfi(Cfi::End));
+        assert!(assemble_program_object(&program, TargetFeatures::default()).is_err());
+        assert!(keel_asm::x86::assemble_program_object(&program).is_err());
+    }
+    let mut program = Program::new();
+    program.directive(Directive::Cfi(Cfi::Restore(30)));
+    assert!(assemble_program_object(&program, TargetFeatures::default()).is_err());
+    assert!(keel_asm::x86::assemble_program_object(&program).is_err());
+}

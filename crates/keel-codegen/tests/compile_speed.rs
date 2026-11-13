@@ -129,7 +129,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
 fn unsupported_functions_and_debug_use_ordinary_lowering() {
     let cases=[
         "func @f(f64)->f64 {\nblock0(v0:f64):\n return v0\n}\n".to_owned(),
-        "decl @callee(i64)->i64\nfunc @f(i64)->i64 {\nblock0(v0:i64):\n v1=call @callee(v0)\n return v1\n}\n".to_owned(),
+        "decl @callee(i64,...)->i64\nfunc @f(i64)->i64 {\nblock0(v0:i64):\n v1=call @callee(v0)\n return v1\n}\n".to_owned(),
         "func @f(ptr byval {i64})->i64 {\nblock0(v0:ptr):\n v1=iconst.i64 1\n return v1\n}\n".to_owned(),
         "func @f()->i64 {\n ss0=stack_slot 4096, align 16\nblock0:\n v0=iconst.i64 1\n return v0\n}\n".to_owned(),
         format!("file f0 = \"debug.c\"\n{LEAF}"),
@@ -201,7 +201,7 @@ fn native_arithmetic_memory_parallel_copies_and_mixed_calls_match_c() {
     let program = result.unwrap();
     assert_eq!(
         report.counters[backend_profile::Counter::DirectFunctions as usize],
-        13
+        14
     );
     let Some(clang) = keel_test_support::clang() else {
         keel_test_support::skip!(keel_test_support::NO_CLANG);

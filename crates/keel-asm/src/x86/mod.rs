@@ -1079,6 +1079,7 @@ fn pack_cfi(c: &keel_asm_ir::Cfi) -> Option<(u8, u8, u64)> {
         Cfi::DefCfaRegister(r) => (3, r, 0),
         Cfi::DefCfa { register, offset } => (4, register, offset),
         Cfi::Offset { register, offset } => (5, register, offset as u64),
+        Cfi::Restore(register) => (6, register, 0),
         Cfi::Personality(_) | Cfi::Lsda(_) => return None,
     })
 }
@@ -1093,6 +1094,7 @@ fn unpack_cfi(op: u8, register: u8, value: u64) -> keel_asm_ir::Cfi {
             register,
             offset: value,
         },
+        6 => Cfi::Restore(register),
         _ => Cfi::Offset {
             register,
             offset: value as i64,

@@ -441,7 +441,7 @@ pub(crate) fn compile_output<'module>(
             )?;
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &mut out, emission)
+                && direct::emit(original, &symbols, &mut out, emission)
             {
                 frames.push(FrameDebug {
                     slots: Vec::new(),
@@ -514,7 +514,7 @@ pub(crate) fn compile_output<'module>(
             )?;
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &mut out, emission)
+                && direct::emit(original, &symbols, &mut out, emission)
             {
                 return Ok((
                     out,

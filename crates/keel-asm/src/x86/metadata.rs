@@ -380,6 +380,18 @@ pub(super) fn shared_cfi(a: &mut Assembler, c: &keel_asm_ir::Cfi) -> Result<(), 
             f.cfa_offset = (*offset).into();
             leb(&mut f.code, f.cfa_offset, false)
         }
+        Cfi::Restore(register) => {
+            if *register > 95 {
+                return Err("invalid CFI register".into());
+            }
+            if *register < 64 {
+                f.code.push(0xc0 | *register);
+                Ok(())
+            } else {
+                f.code.push(6);
+                leb(&mut f.code, (*register).into(), false)
+            }
+        }
         Cfi::Offset { register, offset } => {
             if *offset > 0 || offset % 8 != 0 {
                 return Err("CFI offset must be a nonpositive multiple of eight".into());

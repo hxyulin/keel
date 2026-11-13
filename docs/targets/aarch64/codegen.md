@@ -318,7 +318,7 @@ cargo test -p keel --test optimization_levels call_sites
 ## Direct emission
 
 `EmissionOptions::backend_mode = BackendMode::CompileSpeed` and CLI
-`--mode speed` try a direct scalar leaf emitter before normal selection,
+`--mode speed` try a direct scalar emitter before normal selection,
 liveness and allocation. Each SSA value has an eight-byte stack home; x9–x11
 are scratch registers. Constants use four fixed MOVZ/MOVK words. There is no
 register cache or optional instruction combining. The structured output carries
@@ -338,19 +338,34 @@ Variable shift counts may have any supported integer width and are masked to
 the operand width. Loads and stores keep their original byte widths, including
 unaligned accesses. Lifetime markers do not share or move fixed slots.
 
+Normal scalar calls use the same bounded signature boundary: up to eight
+normal-purpose integer/pointer arguments, no variadic or returns-twice contract,
+and at most one scalar result. Arguments reload from stack homes into x0–x7;
+narrow `sext`/`uext` contracts remain intact. Darwin external C calls and
+indirect C signatures must specify these attributes for i8/i16 arguments, as
+in ordinary code generation. Direct and fallback callees,
+external calls and recursion share the ordinary calling convention. Direct
+calls publish symbolic BL relocations. Indirect calls keep their target in x9
+while staging arguments, then use BLR. Calls with explicit operand ABI,
+aggregate, float or vector shapes use ordinary code generation.
+
+Functions with calls save x30 in an aligned frame slot and restore it on every
+return. Unwind rules track both the saved and restored LR, including blocks
+laid out after an earlier return. Leaf instruction bytes remain unchanged.
+
 The frame, including value homes, edge-copy temporaries and explicit fixed
 stack slots, is at most 4,080 bytes. Explicit slots may be aligned to at most
 16 bytes. Edge copies stage every source before writing any destination,
 including narrow cyclic copies. Branch displacements are patched within the
 completed function; out-of-range encodings use ordinary code generation.
 
-Calls, division/remainder, other unsupported operations, variadic functions,
+Division/remainder, other unsupported operations, variadic functions,
 returns-twice functions, personalities, larger or more aligned frames and
 modules with debug source files use the ordinary backend. Eligibility is per
 function and does not publish partial bytes. Private-call register-bank proofs
 are disabled in this mode so direct and fallback functions share the ordinary
 calling convention. No debug or unwind option is silently dropped. Encoded
-leaves retain normal symbol binding, visibility, alignment, section placement
+functions retain normal symbol binding, visibility, alignment, section placement
 and optional unwind information, including CFA transitions at each return.
 `direct_functions` in the backend report records the number of functions that
 used direct emission.

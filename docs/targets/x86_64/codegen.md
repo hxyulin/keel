@@ -492,9 +492,9 @@ cargo test -p keel-codegen --test vector_x86 x86_unsigned_byte_compare::
 ## Direct emission
 
 `EmissionOptions::backend_mode = BackendMode::CompileSpeed` and CLI
-`--mode speed` directly encode supported SysV scalar leaves before selection,
+`--mode speed` directly encode supported SysV scalar functions before selection,
 liveness and allocation. Values keep zero-extended eight-byte stack homes.
-RAX, RCX and RDX are scratch registers. Signed operations extend their inputs
+RAX, RCX and RDX are scratch registers; R10 holds indirect call targets. Signed operations extend their inputs
 when needed; shifts mask the count by the value's width even when the count
 has another integer type. No register cache or optional combining runs.
 
@@ -504,17 +504,23 @@ stack slots may require up to 16-byte alignment. The frame keeps their base
 16-byte aligned. Bodies may use integer constants, add/subtract/multiply,
 negation/complement, AND/OR/XOR, signed and unsigned shifts, comparisons,
 select, scalar loads/stores, integer extensions/truncation, pointer/integer
-casts, pointer addition, stack addresses, branches and returns. Sources are
+casts, pointer addition, stack addresses, branches and returns. Normal fixed
+scalar calls support up to six register arguments and at most one scalar result,
+including direct, indirect and recursive calls. Every value keeps its stack home
+across calls. The frame is 16-byte aligned at each call, and outgoing narrow
+arguments follow the signature extension attributes. Sources are
 staged before block parameters are written, including cyclic edge copies.
 Lifetime markers do not reuse fixed-slot storage.
 
-Unsupported instructions and ABI shapes, calls, variadic/returns-twice
+Unsupported instructions and ABI shapes, variadic/returns-twice
 functions, personalities, and modules with debug source files fall back per
 function. No bytes are published until eligibility and branch displacements
 are resolved. Normal symbol binding, visibility, COMDAT/function sections,
 alignment and unwind options are preserved. CFA changes describe each stack
 adjustment and every return. Structured, streamed and source output carry the
-same encoded bytes; source represents them with `.byte`. Per-function target
+same encoded bytes. Symbolic direct calls replace fixed five-byte placeholders
+and use the ordinary symbol-binding and PLT policy, including weak definitions.
+Source represents other encoded instructions with `.byte`. Per-function target
 feature requests are still validated before direct emission, and the emitted
 subset requires only the baseline integer ISA. `direct_functions` reports
 how many functions used this path.

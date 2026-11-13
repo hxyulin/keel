@@ -484,6 +484,18 @@ impl<'a> Debug<'a> {
                 leb128::unsigned(&mut bytes, (*offset).into());
                 Rule::Cfa(u64::from(*register), *offset)
             }
+            C::Restore(register) => {
+                if *register > 95 {
+                    return Err("invalid CFI register".into());
+                }
+                if *register < 64 {
+                    bytes.push(0xc0 | *register);
+                } else {
+                    bytes.push(0x06);
+                    leb128::unsigned(&mut bytes, (*register).into());
+                }
+                Rule::Other
+            }
             C::Offset { register, offset } => {
                 if *register > 95 {
                     return Err("invalid CFI register".into());
