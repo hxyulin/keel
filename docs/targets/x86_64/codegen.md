@@ -488,3 +488,33 @@ cargo test -p keel-codegen --test x86_scalar_selection x86_c_leaf::
 cargo test -p keel-codegen --test fast_cc
 cargo test -p keel-codegen --test vector_x86 x86_unsigned_byte_compare::
 ```
+
+## Direct emission
+
+`EmissionOptions::backend_mode = BackendMode::CompileSpeed` and CLI
+`--mode speed` directly encode supported SysV scalar leaves before selection,
+liveness and allocation. Values keep zero-extended eight-byte stack homes.
+RAX, RCX and RDX are scratch registers. Signed operations extend their inputs
+when needed; shifts mask the count by the value's width even when the count
+has another integer type. No register cache or optional combining runs.
+
+The supported boundary is up to six normal-purpose i8/i16/i32/i64/pointer
+arguments, a void or scalar return, and a frame of at most 4,088 bytes. Fixed
+stack slots may require up to 16-byte alignment. The frame keeps their base
+16-byte aligned. Bodies may use integer constants, add/subtract/multiply,
+negation/complement, AND/OR/XOR, signed and unsigned shifts, comparisons,
+select, scalar loads/stores, integer extensions/truncation, pointer/integer
+casts, pointer addition, stack addresses, branches and returns. Sources are
+staged before block parameters are written, including cyclic edge copies.
+Lifetime markers do not reuse fixed-slot storage.
+
+Unsupported instructions and ABI shapes, calls, variadic/returns-twice
+functions, personalities, and modules with debug source files fall back per
+function. No bytes are published until eligibility and branch displacements
+are resolved. Normal symbol binding, visibility, COMDAT/function sections,
+alignment and unwind options are preserved. CFA changes describe each stack
+adjustment and every return. Structured, streamed and source output carry the
+same encoded bytes; source represents them with `.byte`. Per-function target
+feature requests are still validated before direct emission, and the emitted
+subset requires only the baseline integer ISA. `direct_functions` reports
+how many functions used this path.

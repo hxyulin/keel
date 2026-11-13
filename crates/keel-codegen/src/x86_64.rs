@@ -178,6 +178,7 @@ mod avx512_vl_lane;
 mod avx512_vl_narrow;
 mod avx512_vl_shift;
 mod avx512_vl_widen;
+mod direct;
 mod gather;
 mod mmx_value;
 mod mxcsr_access;
@@ -192,6 +193,60 @@ mod vector;
 pub use output::BinaryInputs;
 use output::*;
 pub(crate) use output::{Output, Stream};
+
+fn function_entry(
+    func: &Function,
+    out: &mut Output,
+    function_sections: bool,
+    goal: crate::CodegenGoal,
+) {
+    let name = &func.name;
+    let symbol = name.clone();
+    if func.weak_odr {
+        out.directive(Directive::ElfSectionMetadata {
+            name: format!(".text.{}", func.name),
+            flags: 6 | 0x200,
+            nobits: false,
+            entry_size: 0,
+            group: Some(func.name.clone()),
+        });
+    } else {
+        out.directive(Directive::ElfSection {
+            name: crate::emission::elf_text_section(&func.attrs, name, function_sections),
+            flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
+            nobits: false,
+        });
+    }
+    // On ELF `.weak` alone makes the symbol global; a preceding `.globl`
+    // changes its binding twice, which assemblers warn about.
+    if !func.local && !func.attrs.weak && !func.weak_odr {
+        out.directive(Directive::Global(symbol.clone()));
+    }
+    if func.attrs.weak || func.weak_odr {
+        out.directive(Directive::ElfWeak(symbol.clone()));
+    }
+    if func.hidden {
+        out.directive(Directive::ElfHidden(symbol.clone()));
+    }
+    let minimum_align = if goal == crate::CodegenGoal::Size {
+        1
+    } else {
+        16
+    };
+    out.align(
+        func.attrs
+            .align
+            .unwrap_or(minimum_align)
+            .max(minimum_align)
+            .trailing_zeros(),
+    );
+    out.directive(Directive::ElfType {
+        name: symbol.clone(),
+        function: true,
+    });
+    out.label(symbol.clone());
+    out.label(format!(".L{name}_begin"));
+}
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -384,6 +439,20 @@ pub(crate) fn compile_output<'module>(
                 &original.attrs,
                 pipeline.selector.x86_features(),
             )?;
+            if emission.backend_mode == crate::BackendMode::CompileSpeed
+                && !debug
+                && direct::emit(original, &mut out, emission)
+            {
+                frames.push(FrameDebug {
+                    slots: Vec::new(),
+                    scope_marks: Vec::new(),
+                    frame_register: None,
+                });
+                if out.flush(&mut sink) {
+                    validated_items = 0;
+                }
+                continue;
+            }
             let selector = crate::x86_features::FeatureSelector {
                 inner: pipeline.selector,
                 features,
@@ -443,6 +512,19 @@ pub(crate) fn compile_output<'module>(
                 &original.attrs,
                 pipeline.selector.x86_features(),
             )?;
+            if emission.backend_mode == crate::BackendMode::CompileSpeed
+                && !debug
+                && direct::emit(original, &mut out, emission)
+            {
+                return Ok((
+                    out,
+                    FrameDebug {
+                        slots: Vec::new(),
+                        scope_marks: Vec::new(),
+                        frame_register: None,
+                    },
+                ));
+            }
             let selector = crate::x86_features::FeatureSelector {
                 inner: pipeline.selector,
                 features,
@@ -1228,50 +1310,7 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let name = &func.name;
         let symbol = name.clone();
-        if func.weak_odr {
-            out.directive(Directive::ElfSectionMetadata {
-                name: format!(".text.{}", func.name),
-                flags: 6 | 0x200,
-                nobits: false,
-                entry_size: 0,
-                group: Some(func.name.clone()),
-            });
-        } else {
-            out.directive(Directive::ElfSection {
-                name: crate::emission::elf_text_section(&func.attrs, name, self.function_sections),
-                flags: 6 | if func.attrs.retain { 0x200000 } else { 0 },
-                nobits: false,
-            });
-        }
-        // On ELF `.weak` alone makes the symbol global; a preceding `.globl`
-        // changes its binding twice, which assemblers warn about.
-        if !func.local && !func.attrs.weak && !func.weak_odr {
-            out.directive(Directive::Global(symbol.clone()));
-        }
-        if func.attrs.weak || func.weak_odr {
-            out.directive(Directive::ElfWeak(symbol.clone()));
-        }
-        if func.hidden {
-            out.directive(Directive::ElfHidden(symbol.clone()));
-        }
-        let minimum_align = if self.goal == crate::CodegenGoal::Size {
-            1
-        } else {
-            16
-        };
-        out.align(
-            func.attrs
-                .align
-                .unwrap_or(minimum_align)
-                .max(minimum_align)
-                .trailing_zeros(),
-        );
-        out.directive(Directive::ElfType {
-            name: symbol.clone(),
-            function: true,
-        });
-        out.label(symbol.clone());
-        out.label(format!(".L{name}_begin"));
+        function_entry(func, out, self.function_sections, self.goal);
         self.out.begin_function(out);
         // The prologue takes the function's location, or else that of its
         // first located instruction, with column 0; the first located

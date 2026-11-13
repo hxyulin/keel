@@ -285,10 +285,7 @@ fn named_modes_reach_native_emission_and_preserve_numbered_presets() {
         assert_eq!(bytes, fs::read(dir.join("three.o")).unwrap());
         let report: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.join(report)).unwrap()).unwrap();
-        assert_eq!(
-            report["counters"]["direct_functions"].as_u64(),
-            Some(u64::from(target.starts_with("aarch64")))
-        );
+        assert_eq!(report["counters"]["direct_functions"].as_u64(), Some(1));
     }
     // Changing presets also turns direct emission off, independent of IR tier overrides.
     let standard = successful(dir.path(), &["compile", "input.keel", "-O0"]);

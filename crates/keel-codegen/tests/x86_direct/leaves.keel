@@ -1,0 +1,88 @@
+func @six(i64,i64,i64,i64,i64,i64)->i64 {
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64):
+ v6=iadd v0,v1
+ v7=xor v2,v3
+ v8=imul v4,v5
+ v9=iadd v6,v7
+ v10=isub v9,v8
+ return v10
+}
+func @fixed(i64)->i64 {
+ ss0=stack_slot 32, align 16
+block0(v0:i64):
+ v1=stack_addr ss0
+ store v0,v1
+ v2=load.i64 v1
+ v3=ptrtoint.i64 v1
+ v4=iconst.i64 15
+ v5=and v3,v4
+ v6=iadd v2,v5
+ return v6
+}
+func @pick(ptr,ptr,i64)->ptr {
+block0(v0:ptr,v1:ptr,v2:i64):
+ v3=select v2,v0,v1
+ v4=ptrtoint.i64 v3
+ v5=inttoptr.ptr v4
+ return v5
+}
+func @pointer_copy(ptr,ptr) {
+block0(v0:ptr,v1:ptr):
+ v2=load.ptr v0
+ store v2,v1
+ return
+}
+func @swap(i64,i64)->i64 {
+block0(v0:i64,v1:i64):
+ v2=iconst.i64 0
+ v3=iconst.i64 1
+ v4=iconst.i64 -13
+ jump block1(v0,v1,v4)
+block1(v5:i64,v6:i64,v7:i64):
+ v8=icmp.ult v2,v5
+ brif v8,block2,block3(v6)
+block2:
+ v9=isub v5,v3
+ jump block1(v9,v7,v6)
+block3(v10:i64):
+ return v10
+}
+func @return_s8(i8 sext)->i8 sext {
+block0(v0:i8):
+ return v0
+}
+func @return_u16(i16 uext)->i16 uext {
+block0(v0:i16):
+ return v0
+}
+func @swap8(i64,i8)->i64 {
+block0(v0:i64,v1:i8):
+ v2=iconst.i64 0
+ v3=iconst.i64 1
+ v4=iconst.i8 -13
+ jump block1(v0,v1,v4)
+block1(v5:i64,v6:i8,v7:i8):
+ v8=icmp.ult v2,v5
+ brif v8,block2,block3(v6)
+block2:
+ v9=isub v5,v3
+ jump block1(v9,v7,v6)
+block3(v10:i8):
+ v11=uext.i64 v10
+ return v11
+}
+func @constant64()->i64 {
+block0:
+ v0=iconst.i64 81985529216486895
+ return v0
+}
+func @constant16()->i16 uext {
+block0:
+ v0=iconst.i16 -292
+ return v0
+}
+func @constant32()->i32 {
+block0:
+ v0=iconst.i32 -2147483648
+ return v0
+}

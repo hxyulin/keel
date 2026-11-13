@@ -1,9 +1,12 @@
 //! Compile-speed lowering for bounded scalar leaves. Every value has an
-//! eight-byte stack home. x9/x10 are scratches; no liveness or allocation runs.
+//! eight-byte stack home. x9/x10/x11 are scratches; no liveness or allocation runs.
 //! Eligibility is transactional: unsupported input leaves the output untouched
 //! and uses the ordinary backend. All offsets are local to the encoded body.
 use super::{Cfi, Directive, Expression, Function, Output, Sink, Type};
-use keel_ir::{BinaryOp, BlockCall, EntityRef, InstData, IntCC, Purpose, Value};
+use keel_ir::{
+    ArgExt, BinaryOp, BlockCall, CallConv, ConvertOp, EntityRef, InstData, IntCC, Intrinsic,
+    Purpose, UnaryOp, Value,
+};
 
 fn word(out: &mut Vec<u8>, bits: u32) {
     out.extend_from_slice(&bits.to_le_bytes());
@@ -40,21 +43,53 @@ struct Code {
     /// Offsets of the ADD sp before each RET, for precise unwind transitions.
     epilogues: Vec<usize>,
 }
-fn encode(func: &Function) -> Option<Code> {
+fn bits(ty: Type) -> Option<u32> {
+    Some(match ty {
+        Type::I8 => 8,
+        Type::I16 => 16,
+        Type::I32 => 32,
+        Type::I64 | Type::Ptr => 64,
+        _ => return None,
+    })
+}
+fn normalize(out: &mut Vec<u8>, reg: u32, width: u32) {
+    if width < 64 {
+        word(out, 0xd3400000 | (width - 1) << 10 | reg << 5 | reg);
+    }
+}
+fn signed(out: &mut Vec<u8>, reg: u32, width: u32) {
+    if width < 64 {
+        word(out, 0x93400000 | (width - 1) << 10 | reg << 5 | reg);
+    }
+}
+fn result(out: &mut Vec<u8>, dst: u32, width: u32) {
+    normalize(out, 9, width);
+    store(out, 9, dst);
+}
+fn encode(func: &Function, linux: bool) -> Option<Code> {
     if func.sig.variadic
         || func.sig.returns_twice
         || func.personality.is_some()
         || func.sig.params.len() > 8
-        || func.sig.returns.len() != 1
-        || func.sig.returns[0].ty != Type::I64
+        || func.sig.returns.len() > 1
         || func
             .sig
             .params
             .iter()
             .chain(&func.sig.returns)
-            .any(|p| !matches!(p.ty, Type::I64 | Type::Ptr) || p.purpose != Purpose::Normal)
-        || func.num_stack_slots() != 0
+            .any(|p| bits(p.ty).is_none() || p.purpose != Purpose::Normal)
         || !func.debug_vars.is_empty()
+    {
+        return None;
+    }
+    // Darwin C requires producers to specify the narrow result's ABI extension.
+    if !linux
+        && func.sig.cc == CallConv::C
+        && func
+            .sig
+            .returns
+            .first()
+            .is_some_and(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None)
     {
         return None;
     }
@@ -63,13 +98,18 @@ fn encode(func: &Function) -> Option<Code> {
         .map(|b| func.block_params(b).len())
         .max()
         .unwrap_or(0);
-    let frame = func
-        .num_values()
-        .checked_add(extra)?
-        .checked_mul(8)?
-        .checked_add(15)?
-        & !15;
-    // One ADD/SUB immediate and scaled stack accesses. Larger frames fall back.
+    let mut frame = func.num_values().checked_add(extra)?.checked_mul(8)?;
+    let mut stack = vec![0; func.num_stack_slots()];
+    for (slot, data) in func.stack_slots() {
+        let align = data.align as usize;
+        if align > 16 || !align.is_power_of_two() {
+            return None;
+        }
+        frame = frame.checked_add(align - 1)? & !(align - 1);
+        stack[slot.index()] = frame;
+        frame = frame.checked_add(data.size as usize)?;
+    }
+    frame = frame.checked_add(15)? & !15;
     if frame > 4080 {
         return None;
     }
@@ -79,18 +119,15 @@ fn encode(func: &Function) -> Option<Code> {
     word(&mut bytes, 0xd10003ff | frame << 10);
     let entry = func.entry_block()?;
     for (index, &value) in func.block_params(entry).iter().enumerate() {
+        normalize(&mut bytes, index as u32, bits(func.value_type(value))?);
         store(&mut bytes, index as u32, home(func, value));
     }
     let mut offsets = vec![0; func.num_blocks()];
     let mut branches = Vec::new();
     for block in func.blocks() {
         offsets[block.index()] = bytes.len();
-        if func
-            .block_params(block)
-            .iter()
-            .any(|&v| !matches!(func.value_type(v), Type::I64 | Type::I8 | Type::Ptr))
-        {
-            return None;
+        for &value in func.block_params(block) {
+            bits(func.value_type(value))?;
         }
         for &inst in func.block_insts(block) {
             let dst = func
@@ -98,7 +135,8 @@ fn encode(func: &Function) -> Option<Code> {
                 .first()
                 .map_or(0, |&v| home(func, v));
             match func.inst_data(inst) {
-                InstData::Iconst { ty: Type::I64, imm } => {
+                InstData::Iconst { ty, imm } if ty.is_int() => {
+                    let width = bits(*ty)?;
                     for half in 0..4 {
                         word(
                             &mut bytes,
@@ -107,11 +145,22 @@ fn encode(func: &Function) -> Option<Code> {
                                 | (((*imm as u64) >> (half * 16)) as u32 & 0xffff) << 5,
                         );
                     }
-                    store(&mut bytes, 9, dst);
+                    result(&mut bytes, dst, width);
                 }
                 InstData::Binary { op, args } => {
-                    if !matches!(func.value_type(args[0]), Type::I64 | Type::Ptr)
-                        || func.value_type(args[1]) != Type::I64
+                    let ty = func.value_type(args[0]);
+                    let width = bits(ty)?;
+                    if *op == BinaryOp::Ptradd {
+                        if ty != Type::Ptr || func.value_type(args[1]) != Type::I64 {
+                            return None;
+                        }
+                    } else if !ty.is_int()
+                        || (if matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr) {
+                            !func.value_type(args[1]).is_int()
+                                || bits(func.value_type(args[1])).is_none()
+                        } else {
+                            func.value_type(args[1]) != ty
+                        })
                     {
                         return None;
                     }
@@ -124,14 +173,53 @@ fn encode(func: &Function) -> Option<Code> {
                         BinaryOp::Or => 0xaa0a0129,
                         BinaryOp::Shl => 0x9aca2129,
                         BinaryOp::Ushr => 0x9aca2529,
+                        BinaryOp::Sshr => 0x9aca2929,
                         _ => return None,
                     };
                     load(&mut bytes, 9, home(func, args[0]));
                     load(&mut bytes, 10, home(func, args[1]));
+                    if matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr) && width < 64 {
+                        // A64 masks variable X shifts to six bits; IR masks to its own width.
+                        normalize(&mut bytes, 10, width.trailing_zeros());
+                    }
+                    if *op == BinaryOp::Sshr {
+                        signed(&mut bytes, 9, width);
+                    }
                     word(&mut bytes, opcode);
-                    store(&mut bytes, 9, dst);
+                    result(&mut bytes, dst, width);
                 }
-                InstData::Icmp { cond, args } if func.value_type(args[0]) == Type::I64 => {
+                InstData::Unary { op, arg } => {
+                    let width = bits(func.value_type(*arg))?;
+                    let opcode = match op {
+                        UnaryOp::Ineg => 0xcb0903e9,
+                        UnaryOp::Bnot => 0xaa2903e9,
+                        _ => return None,
+                    };
+                    load(&mut bytes, 9, home(func, *arg));
+                    word(&mut bytes, opcode);
+                    result(&mut bytes, dst, width);
+                }
+                InstData::Convert { op, ty, arg } => {
+                    let from = bits(func.value_type(*arg))?;
+                    let to = bits(*ty)?;
+                    if !matches!(
+                        op,
+                        ConvertOp::Sext
+                            | ConvertOp::Uext
+                            | ConvertOp::Trunc
+                            | ConvertOp::PtrToInt
+                            | ConvertOp::IntToPtr
+                    ) {
+                        return None;
+                    }
+                    load(&mut bytes, 9, home(func, *arg));
+                    if *op == ConvertOp::Sext {
+                        signed(&mut bytes, 9, from);
+                    }
+                    result(&mut bytes, dst, to);
+                }
+                InstData::Icmp { cond, args } => {
+                    let width = bits(func.value_type(args[0]))?;
                     let condition: u32 = match cond {
                         IntCC::Eq => 0,
                         IntCC::Ne => 1,
@@ -146,26 +234,59 @@ fn encode(func: &Function) -> Option<Code> {
                     };
                     load(&mut bytes, 9, home(func, args[0]));
                     load(&mut bytes, 10, home(func, args[1]));
+                    if matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge) {
+                        signed(&mut bytes, 9, width);
+                        signed(&mut bytes, 10, width);
+                    }
                     word(&mut bytes, 0xeb0a013f);
                     word(&mut bytes, 0x9a9f07e9 | (condition ^ 1) << 12);
                     store(&mut bytes, 9, dst);
                 }
-                InstData::Load {
-                    ty: Type::I64,
-                    addr,
-                    ..
-                } => {
+                InstData::Select { args } => {
+                    bits(func.value_type(args[0]))?;
+                    let width = bits(func.value_type(args[1]))?;
+                    load(&mut bytes, 11, home(func, args[0]));
+                    load(&mut bytes, 9, home(func, args[1]));
+                    load(&mut bytes, 10, home(func, args[2]));
+                    word(&mut bytes, 0xf100017f);
+                    word(&mut bytes, 0x9a8a1129);
+                    result(&mut bytes, dst, width);
+                }
+                InstData::Load { ty, addr, .. } => {
+                    let opcode = match bits(*ty)? {
+                        8 => 0x39400129,
+                        16 => 0x79400129,
+                        32 => 0xb9400129,
+                        64 => 0xf9400129,
+                        _ => return None,
+                    };
                     load(&mut bytes, 9, home(func, *addr));
-                    word(&mut bytes, 0xf9400129);
+                    word(&mut bytes, opcode);
                     store(&mut bytes, 9, dst);
                 }
-                InstData::Store { value, addr, .. } if func.value_type(*value) == Type::I64 => {
+                InstData::Store { value, addr, .. } => {
+                    let opcode = match bits(func.value_type(*value))? {
+                        8 => 0x3900012a,
+                        16 => 0x7900012a,
+                        32 => 0xb900012a,
+                        64 => 0xf900012a,
+                        _ => return None,
+                    };
                     load(&mut bytes, 9, home(func, *addr));
                     load(&mut bytes, 10, home(func, *value));
-                    word(&mut bytes, 0xf900012a);
+                    word(&mut bytes, opcode);
                 }
+                InstData::StackAddr { slot } => {
+                    word(&mut bytes, 0x910003e9 | (stack[slot.index()] as u32) << 10);
+                    store(&mut bytes, 9, dst);
+                }
+                InstData::Intrinsic {
+                    id: Intrinsic::LifetimeStart | Intrinsic::LifetimeEnd,
+                    ..
+                } => {}
                 InstData::Jump { dest } => edge(func, dest, &mut bytes, &mut branches),
                 InstData::Brif { cond, dests } => {
+                    bits(func.value_type(*cond))?;
                     load(&mut bytes, 9, home(func, *cond));
                     let position = bytes.len();
                     word(&mut bytes, 0xb4000009);
@@ -177,8 +298,14 @@ fn encode(func: &Function) -> Option<Code> {
                     patch(&mut bytes, position, 0xb4000009 | (distance as u32) << 5);
                     edge(func, &dests[1], &mut bytes, &mut branches);
                 }
-                InstData::Return { args } if args.len() == 1 => {
-                    load(&mut bytes, 0, home(func, args[0]));
+                InstData::Return { args } if args.len() == func.sig.returns.len() => {
+                    if let Some(&value) = args.first() {
+                        let ret = &func.sig.returns[0];
+                        load(&mut bytes, 0, home(func, value));
+                        if ret.ext == ArgExt::Sext && matches!(ret.ty, Type::I8 | Type::I16) {
+                            word(&mut bytes, 0x13000000 | (bits(ret.ty)? - 1) << 10);
+                        }
+                    }
                     epilogues.push(bytes.len());
                     word(&mut bytes, 0x910003ff | frame << 10);
                     word(&mut bytes, 0xd65f03c0);
@@ -211,7 +338,7 @@ pub(super) fn emit(
     linux: bool,
     emission: crate::EmissionOptions,
 ) -> bool {
-    let Some(code) = encode(func) else {
+    let Some(code) = encode(func, linux) else {
         return false;
     };
     super::function_entry(func, out, linux, emission.function_sections);

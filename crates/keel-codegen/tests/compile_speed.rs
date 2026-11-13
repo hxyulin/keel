@@ -34,9 +34,13 @@ fn parse(source: &str) -> keel_ir::Module {
 }
 #[test]
 fn direct_objects_text_chunks_unwind_and_parallel_agree() {
-    let source = format!("{LEAF}func @narrow(i32)->i32 {{\nblock0(v0:i32):\n return v0\n}}\n");
+    let source = format!("{LEAF}func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n");
     let module = parse(&source);
-    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+    for target in [
+        Target::Aarch64AppleDarwin,
+        Target::Aarch64LinuxGnu,
+        Target::X86_64LinuxGnu,
+    ] {
         let mut images = Vec::new();
         for unwind in [UnwindTables::All, UnwindTables::RequiredOnly] {
             let req = request(target, unwind);
@@ -59,6 +63,17 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
                 bytes,
                 keel_asm::assemble_program_for(target, &chunks).unwrap()
             );
+            if target == Target::X86_64LinuxGnu {
+                let assembler = req
+                    .assemble_x86(
+                        &module,
+                        keel_asm::x86::ProgramAssembler::new(Default::default()),
+                        Box::new(|name| Err(format!("unexpected binary input {name}"))),
+                    )
+                    .unwrap();
+                assert_eq!(bytes, assembler.finish().unwrap());
+            }
+
             let mut parallel = Program::new();
             std::thread::scope(|scope| {
                 keel_codegen::parallel::program_chunks(
@@ -113,7 +128,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
 #[test]
 fn unsupported_functions_and_debug_use_ordinary_lowering() {
     let cases=[
-        "func @f(i32)->i32 {\nblock0(v0:i32):\n return v0\n}\n".to_owned(),
+        "func @f(f64)->f64 {\nblock0(v0:f64):\n return v0\n}\n".to_owned(),
         "decl @callee(i64)->i64\nfunc @f(i64)->i64 {\nblock0(v0:i64):\n v1=call @callee(v0)\n return v1\n}\n".to_owned(),
         "func @f(ptr byval {i64})->i64 {\nblock0(v0:ptr):\n v1=iconst.i64 1\n return v1\n}\n".to_owned(),
         "func @f()->i64 {\n ss0=stack_slot 4096, align 16\nblock0:\n v0=iconst.i64 1\n return v0\n}\n".to_owned(),
@@ -138,14 +153,6 @@ fn unsupported_functions_and_debug_use_ordinary_lowering() {
             keel_asm::assemble_program_for(req.target, &ordinary).unwrap()
         );
     }
-    let module = parse(LEAF);
-    let req = request(Target::X86_64LinuxGnu, UnwindTables::All);
-    assert_eq!(
-        req.program(&module).unwrap(),
-        Request::new(req.target, req.pipeline)
-            .program(&module)
-            .unwrap()
-    );
 }
 
 #[test]
