@@ -2,7 +2,7 @@
 use crate::codegen::{Case, EMPTY as SPILLED};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
-    regalloc::{AllocationTier, Pools},
+    regalloc::{Allocation, AllocationInput, AllocationTier, Loc, Pools, RegisterAllocator},
 };
 
 fn source(ty: &str, edges: bool, same: bool) -> String {
@@ -53,17 +53,43 @@ block1{params}:
 fn compile(
     src: &str,
     tier: SelectionTier,
-    alloc: AllocationTier,
+    alloc: &dyn RegisterAllocator,
     pools: &Pools,
 ) -> (String, Vec<u8>) {
     let module = crate::codegen::parse(src);
     let out = Case::x86(&module)
         .selector(&tier)
-        .allocator(&alloc)
+        .allocator(alloc)
         .pools(pools)
         .no_text_fallback()
         .compile();
     (out.text, out.object)
+}
+
+/// Force actual edge transfers instead of relying on an allocator to leave
+/// parameters in different locations from their incoming values.
+struct DistinctParameterHomes<'a>(&'a dyn RegisterAllocator);
+impl RegisterAllocator for DistinctParameterHomes<'_> {
+    fn name(&self) -> &'static str {
+        "test-distinct-parameter-homes"
+    }
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        use keel_ir::EntityRef;
+        let mut alloc = self.0.allocate(input);
+        // Start from the allocator's base homes, before optional region repair.
+        alloc.edits = Default::default();
+        for block in input.func.blocks().skip(1) {
+            for &param in input.func.block_params(block) {
+                alloc.locs[0][param.index()] = Some(Loc::Stack(alloc.spill_slots));
+                alloc.spill_slots += 1;
+                if input.func.value_type(param) == keel_ir::Type::I128 {
+                    alloc.locs[1][param.index()] = Some(Loc::Stack(alloc.spill_slots));
+                    alloc.spill_slots += 1;
+                }
+            }
+        }
+        alloc
+    }
 }
 
 fn matrix(mut f: impl FnMut(SelectionTier, AllocationTier, &Pools)) {
@@ -79,7 +105,7 @@ fn matrix(mut f: impl FnMut(SelectionTier, AllocationTier, &Pools)) {
 fn false_fallthrough_has_one_inverted_branch_for_every_truth_width() {
     for ty in ["i8", "i16", "i32", "i64", "i128"] {
         matrix(|tier, alloc, pools| {
-            let (text, _) = compile(&source(ty, false, false), tier, alloc, pools);
+            let (text, _) = compile(&source(ty, false, false), tier, &alloc, pools);
             assert!(
                 text.lines()
                     .any(|l| l.contains("\tjne\t") && l.contains("block1")),
@@ -99,7 +125,12 @@ fn real_edge_copies_keep_landing_pads_including_wide_spills_and_same_target() {
     for ty in ["i8", "i64", "i128"] {
         for same in [false, true] {
             matrix(|tier, alloc, pools| {
-                let (text, _) = compile(&source(ty, true, same), tier, alloc, pools);
+                let (text, _) = compile(
+                    &source(ty, true, same),
+                    tier,
+                    &DistinctParameterHomes(&alloc),
+                    pools,
+                );
                 // Both edges pass different constants, including when they
                 // share a target: neither may silently take the other's copy.
                 assert!(text.contains("_else:"), "{text}");
@@ -131,7 +162,7 @@ block2:
                 if materialized { "store v2, v5\n" } else { "" }
             );
             matrix(|tier, alloc, pools| {
-                let (text, _) = compile(&src, tier, alloc, pools);
+                let (text, _) = compile(&src, tier, &alloc, pools);
                 assert!(!text.contains("\tjmp\t"), "{text}");
                 if materialized {
                     assert!(text.contains("\tjne\t"), "{text}");
@@ -158,7 +189,7 @@ block2:
 }}"
         );
         matrix(|tier, alloc, pools| {
-            let (text, _) = compile(&src, tier, alloc, pools);
+            let (text, _) = compile(&src, tier, &alloc, pools);
             assert!(!text.contains("\tjmp\t"), "{text}");
             assert!(text.contains("\tucomisd\t"), "{text}");
         });
@@ -177,7 +208,7 @@ block2:
 }";
     // A single-predecessor parameter is an alias under the default allocator.
     matrix(|tier, alloc, pools| {
-        let (text, _) = compile(src, tier, alloc, pools);
+        let (text, _) = compile(src, tier, &alloc, pools);
         assert!(!text.contains("\tjmp\t"), "{text}");
     });
     let src = src.replace(
@@ -216,14 +247,14 @@ block2(v2: i64):
  return v2
 }";
     matrix(|tier, alloc, pools| {
-        let (text, _) = compile(src, tier, alloc, pools);
+        let (text, _) = compile(src, tier, &DistinctParameterHomes(&alloc), pools);
         assert!(text.contains("\tjne\t"), "{text}");
         assert!(!text.contains("_else:"), "{text}");
         assert!(!text.contains("\tjmp\t"), "{text}");
         let reversed = src.replace("block1, block2(v1)", "block2(v1), block1");
-        let (text, _) = compile(&reversed, tier, alloc, pools);
-        // The destination parameter reuses v0's location, so the true
-        // edge must copy v1 rather than jumping straight to its return.
+        let (text, _) = compile(&reversed, tier, &DistinctParameterHomes(&alloc), pools);
+        // The distinct target home requires a real true-edge copy; jumping
+        // straight to the return would skip that transfer.
         assert!(text.contains("\tje\t"), "{text}");
         assert!(text.contains("\tjmp\t"), "{text}");
     });
@@ -245,7 +276,12 @@ block2(v4: i64):
 #[test]
 fn copy_free_true_edge_branches_directly_when_the_false_edge_is_not_next() {
     matrix(|tier, alloc, pools| {
-        let (text, _) = compile(FALSE_EDGE_COPY_NOT_NEXT, tier, alloc, pools);
+        let (text, _) = compile(
+            FALSE_EDGE_COPY_NOT_NEXT,
+            tier,
+            &DistinctParameterHomes(&alloc),
+            pools,
+        );
         assert!(
             text.lines()
                 .any(|l| l.contains("\tjne\t") && l.contains("block1")),
@@ -266,7 +302,7 @@ block1(v2: i64):
  return v2
 }";
     matrix(|tier, alloc, pools| {
-        let (text, _) = compile(src, tier, alloc, pools);
+        let (text, _) = compile(src, tier, &alloc, pools);
         assert!(text.contains("\tjne\t"), "{text}");
         assert!(!text.contains("\tjmp\t"), "{text}");
         assert!(!text.contains("_else:"), "{text}");
@@ -284,7 +320,7 @@ block2:
  return v0
 }";
     matrix(|tier, alloc, pools| {
-        let (text, _) = compile(src, tier, alloc, pools);
+        let (text, _) = compile(src, tier, &alloc, pools);
         assert!(
             text.lines()
                 .any(|l| l.contains("\tjne\t") && l.contains("block1")),
@@ -492,39 +528,43 @@ block2:
             .success()
     );
     matrix(|tier, alloc, pools| {
-        // Execute on the host only. On ARM this validates the shared IR
-        // fixtures and independent oracle; it makes no x86 execution claim.
-        let object = if cfg!(target_arch = "x86_64") {
-            compile(&src, tier, alloc, pools).1
-        } else {
-            let module = keel_ir::parse(&src).unwrap();
-            keel_ir::verify_module(&module).unwrap();
-            let pipeline = CodegenPipeline {
-                selector: &tier,
-                allocator: &alloc,
-            };
-            let pools = if pools.caller_saved.is_empty() {
-                &SPILLED
+        for force_copies in [false, true] {
+            let pinned = DistinctParameterHomes(&alloc);
+            let allocator: &dyn RegisterAllocator = if force_copies { &pinned } else { &alloc };
+            // Execute on the host only. On ARM this validates the shared IR
+            // fixtures and independent oracle; it makes no x86 execution claim.
+            let object = if cfg!(target_arch = "x86_64") {
+                compile(&src, tier, allocator, pools).1
             } else {
-                &keel_codegen::aarch64::REGISTERS
+                let module = keel_ir::parse(&src).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                let pipeline = CodegenPipeline {
+                    selector: &tier,
+                    allocator,
+                };
+                let pools = if pools.caller_saved.is_empty() {
+                    &SPILLED
+                } else {
+                    &keel_codegen::aarch64::REGISTERS
+                };
+                let program =
+                    keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline)
+                        .unwrap();
+                keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                    .unwrap()
             };
-            let program =
-                keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline)
-                    .unwrap();
-            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-                .unwrap()
-        };
-        fs::write(dir.join("test.o"), object).unwrap();
-        assert!(
-            Command::new("cc")
-                .arg(dir.join("oracle.o"))
-                .arg(dir.join("test.o"))
-                .arg("-o")
-                .arg(dir.join("test"))
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(Command::new(dir.join("test")).status().unwrap().success());
+            fs::write(dir.join("test.o"), object).unwrap();
+            assert!(
+                Command::new("cc")
+                    .arg(dir.join("oracle.o"))
+                    .arg(dir.join("test.o"))
+                    .arg("-o")
+                    .arg(dir.join("test"))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            assert!(Command::new(dir.join("test")).status().unwrap().success());
+        }
     });
 }
