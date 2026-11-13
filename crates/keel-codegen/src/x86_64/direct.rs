@@ -119,10 +119,50 @@ struct Code {
     epilogues: Vec<usize>,
     sites: Vec<Site>,
 }
+fn result_registers(sig: &Signature) -> Option<Vec<u8>> {
+    crate::sysv::multi_result_locs(sig)
+        .ok()?
+        .into_iter()
+        .map(|loc| {
+            if let crate::regalloc::Loc::Reg(reg) = loc {
+                Some(reg)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+fn capture_results(
+    func: &Function,
+    base: u32,
+    values: &[Value],
+    sig: &Signature,
+    bytes: &mut Vec<u8>,
+) -> Option<()> {
+    if sig.returns.len() <= 1 {
+        return if let Some(&value) = values.first() {
+            result(func, base, bytes, value)
+        } else {
+            Some(())
+        };
+    }
+    for ((&value, param), reg) in values.iter().zip(&sig.returns).zip(result_registers(sig)?) {
+        if func.value_type(value) != param.ty {
+            return None;
+        }
+        // Capture RAX first, then normalize each other result through RAX.
+        // The remaining result registers stay intact, including R8 and R9.
+        if reg != 0 {
+            bytes.extend_from_slice(&[0x48 | ((reg >> 3) << 2), 0x89, 0xc0 | ((reg & 7) << 3)]);
+        }
+        result(func, base, bytes, value)?;
+    }
+    Some(())
+}
 fn scalar_signature(sig: &Signature) -> bool {
     !sig.variadic
         && !sig.returns_twice
-        && sig.returns.len() <= 1
+        && (sig.returns.len() <= 1 || result_registers(sig).is_some())
         && sig.x86_vector_abi.is_none()
         && sig
             .params
@@ -465,9 +505,7 @@ fn encode(
                     });
                     // Publishing replaces exactly these five bytes with a symbolic CALL.
                     bytes.extend_from_slice(&[0xe8, 0, 0, 0, 0]);
-                    if let Some(value) = dst {
-                        result(func, base, &mut bytes, value)?;
-                    }
+                    capture_results(func, base, values, sig, &mut bytes)?;
                 }
                 InstData::CallIndirect { sig, callee, args } => {
                     let sig = func.signature(*sig);
@@ -477,9 +515,7 @@ fn encode(
                     arguments(func, base, args, sig, &mut bytes)?;
                     load(&mut bytes, 10, home(func, base, *callee));
                     bytes.extend_from_slice(&[0x41, 0xff, 0xd2]);
-                    if let Some(value) = dst {
-                        result(func, base, &mut bytes, value)?;
-                    }
+                    capture_results(func, base, values, sig, &mut bytes)?;
                 }
                 InstData::Intrinsic { id, args }
                     if matches!(
@@ -544,10 +580,23 @@ fn encode(
                     edge(func, base, &dests[0], &mut bytes, &mut branches);
                 }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
-                    if let Some(&arg) = args.first() {
-                        load(&mut bytes, 0, home(func, base, arg));
-                        if func.sig.returns[0].ext == ArgExt::Sext {
-                            signed(&mut bytes, 0, width(func.value_type(arg))?);
+                    if func.sig.returns.len() <= 1 {
+                        if let Some(&arg) = args.first() {
+                            load(&mut bytes, 0, home(func, base, arg));
+                            if func.sig.returns[0].ext == ArgExt::Sext {
+                                signed(&mut bytes, 0, width(func.value_type(arg))?);
+                            }
+                        }
+                    } else {
+                        for ((&arg, param), reg) in args
+                            .iter()
+                            .zip(&func.sig.returns)
+                            .zip(result_registers(&func.sig)?)
+                        {
+                            if func.value_type(arg) != param.ty {
+                                return None;
+                            }
+                            load(&mut bytes, reg, home(func, base, arg));
                         }
                     }
                     epilogues.push(bytes.len());

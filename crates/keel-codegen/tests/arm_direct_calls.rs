@@ -531,3 +531,6 @@ fn memory_intrinsics_use_ordinary_helper_calls_and_match_native_bytes() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[path = "arm_direct_results/results.rs"]
+mod results;

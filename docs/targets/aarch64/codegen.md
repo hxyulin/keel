@@ -326,12 +326,17 @@ The structured output carries encoded bytes, and assembly text renders those
 bytes with `.byte`.
 
 Arguments and results may be i8, i16, i32, i64 or pointers. The emitter accepts
-normal-purpose arguments and either no result or one scalar result. The first
+normal-purpose arguments and scalar results. The first
 eight scalar arguments use x0–x7; later arguments use the shared ABI placement
 rules, including Darwin packed scalar slots and AAPCS64 eight-byte slots.
 Narrow homes keep zero-extended bit patterns; signed operations extend them
-explicitly. Narrow Darwin C results retain their declared `sext` or `uext` ABI
-contract. Unsupported ABI shapes use ordinary code generation.
+explicitly. Single narrow Darwin C results retain their declared `sext` or `uext` ABI
+contract. Multiple results use the shared ABI classifier: Fast permits up to
+eight integer/pointer results in x0–x7; C permits the existing struct shapes
+whose scalar fields occupy separate eight-byte units within 16 bytes. Multiple
+results carry no extension attributes. Each returned operand reloads from its
+home into its assigned register, including repeated operands. Unsupported ABI
+shapes use ordinary code generation.
 
 The supported operations are integer constants, add/subtract/multiply,
 AND/OR/XOR, negation, complement, shifts, pointer addition, comparisons,
@@ -354,8 +359,9 @@ integer width. Signed `MIN % -1` produces zero. Narrow signed operands extend
 before the operation, and results return to canonical stack homes.
 
 Normal scalar calls use the same signature boundary: normal-purpose
-integer/pointer arguments, no variadic or returns-twice contract, and at most
-one scalar result. Arguments reload from stack homes into x0–x7 and a reserved
+integer/pointer arguments and results, with no variadic or returns-twice
+contract. Call results normalize into separate stack homes before subsequent
+instructions. Arguments reload from stack homes into x0–x7 and a reserved
 outgoing stack area below those homes; narrow `sext`/`uext` contracts remain
 intact. Stack stores write only the declared width, including Darwin packed
 narrow slots. Darwin external C calls and indirect C signatures must specify

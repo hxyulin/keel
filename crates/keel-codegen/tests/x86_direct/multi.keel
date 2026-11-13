@@ -1,0 +1,148 @@
+func @bank(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->(i64,i8,i16,i32,ptr,i8,i16) cc(fast) local {
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ a=trunc.i8 v6
+ b=trunc.i16 v7
+ c=trunc.i32 v8
+ d=inttoptr.ptr v9
+ return v0,a,b,c,d,a,b
+}
+func @bank_fallback(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->(i64,i8,i16,i32,ptr,i8,i16) cc(fast) local {
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ a=trunc.i8 v6
+ b=trunc.i16 v7
+ c=trunc.i32 v8
+ d=inttoptr.ptr v9
+ e=bswap v0
+ f=bswap e
+ return f,a,b,c,d,a,b
+}
+func @bank_named(ptr,i64,i64,i64,i64,i64,i64,i64,i64,i64,i64) {
+block0(out:ptr,v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ r0,r1,r2,r3,r4,r5,r6=call @bank(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9)
+ o0=iconst.i64 0
+ p0=ptradd out,o0
+ store align 8 r0,p0
+ n1=uext.i64 r1
+ o1=iconst.i64 8
+ p1=ptradd out,o1
+ store align 8 n1,p1
+ n2=uext.i64 r2
+ o2=iconst.i64 16
+ p2=ptradd out,o2
+ store align 8 n2,p2
+ n3=uext.i64 r3
+ o3=iconst.i64 24
+ p3=ptradd out,o3
+ store align 8 n3,p3
+ n4=ptrtoint.i64 r4
+ o4=iconst.i64 32
+ p4=ptradd out,o4
+ store align 8 n4,p4
+ n5=uext.i64 r5
+ o5=iconst.i64 40
+ p5=ptradd out,o5
+ store align 8 n5,p5
+ n6=uext.i64 r6
+ o6=iconst.i64 48
+ p6=ptradd out,o6
+ store align 8 n6,p6
+ return
+}
+func @bank_mixed(ptr,i64,i64,i64,i64,i64,i64,i64,i64,i64,i64) {
+block0(out:ptr,v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ r0,r1,r2,r3,r4,r5,r6=call @bank_fallback(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9)
+ o0=iconst.i64 0
+ p0=ptradd out,o0
+ store align 8 r0,p0
+ n1=uext.i64 r1
+ o1=iconst.i64 8
+ p1=ptradd out,o1
+ store align 8 n1,p1
+ n2=uext.i64 r2
+ o2=iconst.i64 16
+ p2=ptradd out,o2
+ store align 8 n2,p2
+ n3=uext.i64 r3
+ o3=iconst.i64 24
+ p3=ptradd out,o3
+ store align 8 n3,p3
+ n4=ptrtoint.i64 r4
+ o4=iconst.i64 32
+ p4=ptradd out,o4
+ store align 8 n4,p4
+ n5=uext.i64 r5
+ o5=iconst.i64 40
+ p5=ptradd out,o5
+ store align 8 n5,p5
+ n6=uext.i64 r6
+ o6=iconst.i64 48
+ p6=ptradd out,o6
+ store align 8 n6,p6
+ return
+}
+func @bank_from_fallback(ptr,i64,i64,i64,i64,i64,i64,i64,i64,i64,i64) {
+block0(out:ptr,v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ e=bswap v0
+ f=bswap e
+ r0,r1,r2,r3,r4,r5,r6=call @bank(f,v1,v2,v3,v4,v5,v6,v7,v8,v9)
+ o0=iconst.i64 0
+ p0=ptradd out,o0
+ store align 8 r0,p0
+ n1=uext.i64 r1
+ o1=iconst.i64 8
+ p1=ptradd out,o1
+ store align 8 n1,p1
+ n2=uext.i64 r2
+ o2=iconst.i64 16
+ p2=ptradd out,o2
+ store align 8 n2,p2
+ n3=uext.i64 r3
+ o3=iconst.i64 24
+ p3=ptradd out,o3
+ store align 8 n3,p3
+ n4=ptrtoint.i64 r4
+ o4=iconst.i64 32
+ p4=ptradd out,o4
+ store align 8 n4,p4
+ n5=uext.i64 r5
+ o5=iconst.i64 40
+ p5=ptradd out,o5
+ store align 8 n5,p5
+ n6=uext.i64 r6
+ o6=iconst.i64 48
+ p6=ptradd out,o6
+ store align 8 n6,p6
+ return
+}
+func @duplicate(i64)->(i64,i64) {
+block0(v:i64):
+ return v,v
+}
+func @ignore(i64)->i64 {
+block0(v:i64):
+ a,b=call @duplicate(v)
+ return a
+}
+decl @c_pair(i64)->(i8,ptr)
+func @pair_out(i8 sext,ptr)->(i8,ptr) {
+block0(a:i8,b:ptr):
+ return a,b
+}
+func @pair_call(i64)->(i8,ptr) {
+block0(v:i64):
+ a,b=call @c_pair(v)
+ return a,b
+}
+func @pair_indirect(ptr,i64)->(i8,ptr) {
+block0(p:ptr,v:i64):
+ a,b=call_indirect p(v) : (i64)->(i8,ptr)
+ return a,b
+}
+func @pair_checksum(i64)->i64 {
+block0(v:i64):
+ a,b=call @c_pair(v)
+ c=uext.i64 a
+ d=ptrtoint.i64 b
+ e=xor c,d
+ return e
+}

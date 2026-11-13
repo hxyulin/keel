@@ -19,7 +19,8 @@ is given, so `keel opt` on `cc -O0 --emit-ir` output runs the passes
 For example, `keel cc --mode speed --emit-object input.c -o input.o` selects
 compilation latency over generated-code performance. Speed gives every value
 a stack home and skips general selection and allocation for supported functions.
-Fixed scalar calls can also use direct emission; variadic, aggregate and other
+Fixed scalar calls, including supported multiple scalar results, and
+`memcpy`/`memmove`/`memset` use direct emission. Variadic, aggregate and other
 unsupported call shapes fall back. Unsupported functions use the ordinary backend
 in the same object. Modules with debug source files use ordinary code generation. Unwind, linkage, sections and target
 validation retain their normal contracts. See the [AArch64](../targets/aarch64/codegen.md#direct-emission) and

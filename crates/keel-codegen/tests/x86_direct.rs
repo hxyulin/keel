@@ -299,3 +299,6 @@ fn direct_symbols_keep_visibility_comdat_sections_and_alignment() {
         .unwrap();
     assert_eq!(bytes, stream.finish().unwrap());
 }
+
+#[path = "x86_direct/multi.rs"]
+mod multi;

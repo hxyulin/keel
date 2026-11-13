@@ -499,7 +499,7 @@ when needed; shifts mask the count by the value's width even when the count
 has another integer type. No register cache or optional combining runs.
 
 The supported boundary is normal-purpose i8/i16/i32/i64/pointer arguments,
-a void or scalar return, and a frame within the ordinary backend
+void, scalar or supported scalar multiple returns, and a frame within the ordinary backend
 `i32::MAX / 2` byte limit. Incoming displacements are also checked against the
 signed 32-bit address range. The first six scalar arguments use GPRs; later
 arguments use eight-byte stack slots. Fixed
@@ -508,7 +508,7 @@ stack slots may require up to 16-byte alignment. The frame keeps their base
 negation/complement, AND/OR/XOR, signed and unsigned shifts, division/remainder, comparisons,
 select, scalar loads/stores, integer extensions/truncation, pointer/integer
 casts, pointer addition, stack addresses, branches and returns. Normal fixed
-scalar calls support register and stack arguments and at most one scalar result,
+scalar calls support register and stack arguments and scalar results,
 including direct, indirect and recursive calls. Every value keeps its stack home
 across calls. The maximum outgoing stack area is reserved below every value
 home, edge-copy temporary and fixed slot, so argument stores cannot destroy
@@ -516,6 +516,13 @@ staged values or an indirect target. The frame is 16-byte aligned at each call, 
 arguments follow the signature extension attributes. Sources are
 staged before block parameters are written, including cyclic edge copies.
 Lifetime markers do not reuse fixed-slot storage.
+
+Multiple results use the shared SysV classification: C-compatible pairs occupy
+separate eightbytes in RAX/RDX; private `cc(fast)` functions may return up to
+seven integer/pointer values in RAX, RDX, RDI, RSI, RCX, R8 and R9. Each call
+result is normalized to its width before entering its home. Multiple-result
+extension attributes, packed C pairs, floats and excess results retain ordinary
+validation or lowering. Fast indirect calls remain invalid in the IR.
 
 `memcpy`, `memmove` and `memset` use their ordinary runtime helpers. Their
 three scalar operands use the normal argument registers, and every value

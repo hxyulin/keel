@@ -1,0 +1,58 @@
+decl @c_narrow(i64, ptr)->(i8, ptr)
+func @call_narrow(i64,ptr)->i64 {
+block0(v0:i64,v1:ptr):
+ a,b=call @c_narrow(v0,v1)
+ p=load.i64 b
+ brif a,block1,block2
+block1:
+ one=iconst.i64 1
+ sum=iadd p,one
+ return sum
+block2:
+ return p
+}
+func @indirect_narrow(ptr,i64,ptr)->(i8,ptr) {
+block0(v0:ptr,v1:i64,v2:ptr):
+ a,b=call_indirect v0(v1,v2):(i64,ptr)->(i8,ptr)
+ return a,b
+}
+func @fallback_pair(i64,i64)->(i64,i64) {
+block0(v0:i64,v1:i64):
+ zero=iconst.i64 0
+ rotated=rotr v0,zero
+ return v1,rotated
+}
+func @call_fallback(i64,i64)->(i64,i64) {
+block0(v0:i64,v1:i64):
+ a,b=call @fallback_pair(v0,v1)
+ return b,a
+}
+func @fallback_caller(i64,i64)->(i64,i64) {
+block0(v0:i64,v1:i64):
+ a,b=call @k_swap(v0,v1)
+ zero=iconst.i64 0
+ rotated=rotr a,zero
+ return rotated,b
+}
+func @fast8(ptr,i64)->(i8,i16,i32,i64,ptr,i64,i32,i8) cc(fast) local {
+block0(v0:ptr,v1:i64):
+ a=trunc.i8 v1
+ b=trunc.i16 v1
+ c=trunc.i32 v1
+ n=iconst.i64 19
+ sum=iadd v1,n
+ return a,b,c,v1,v0,sum,c,a
+}
+func @wide_pair(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->(i64,i64) {
+ ss0=stack_slot 65536, align 16
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ a=iadd v0,v8
+ b=iadd v7,v9
+ return a,b
+}
+func @call_wide_pair(i64,i64,i64,i64,i64,i64,i64,i64,i64,i64)->(i64,i64) {
+ ss0=stack_slot 65536, align 16
+block0(v0:i64,v1:i64,v2:i64,v3:i64,v4:i64,v5:i64,v6:i64,v7:i64,v8:i64,v9:i64):
+ a,b=call @wide_pair(v0,v1,v2,v3,v4,v5,v6,v7,v8,v9)
+ return b,a
+}

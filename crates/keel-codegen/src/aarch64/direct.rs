@@ -10,6 +10,7 @@ use keel_ir::{
     ArgExt, BinaryOp, BlockCall, CallArgs, CallConv, ConvertOp, EntityRef, InstData, IntCC,
     Intrinsic, Purpose, Signature, UnaryOp, Value,
 };
+use std::borrow::Cow;
 
 fn word(out: &mut Vec<u8>, bits: u32) {
     out.extend_from_slice(&bits.to_le_bytes());
@@ -156,13 +157,13 @@ fn result(out: &mut Vec<u8>, dst: u32, width: u32) {
 fn scalar_signature(sig: &Signature, linux: bool) -> bool {
     !sig.variadic
         && !sig.returns_twice
-        && sig.returns.len() <= 1
         && sig
             .params
             .iter()
             .chain(&sig.returns)
             .all(|p| bits(p.ty).is_some() && p.purpose == Purpose::Normal)
-        && (linux
+        && (sig.returns.len() != 1
+            || linux
             || sig.cc != CallConv::C
             || !sig
                 .returns
@@ -221,10 +222,37 @@ fn arguments(
     }
     Some(())
 }
-fn call_result(bytes: &mut Vec<u8>, sig: &Signature, dst: u32) -> Option<()> {
-    if let Some(result) = sig.returns.first() {
-        normalize(bytes, 0, bits(result.ty)?);
-        store(bytes, 0, dst);
+fn return_registers(sig: &Signature) -> Option<Cow<'static, [Loc]>> {
+    let locations = match sig.returns.len() {
+        0 => Cow::Borrowed(&[][..]),
+        1 => Cow::Borrowed(&[Loc::Reg(0)][..]),
+        _ => Cow::Owned(abi::multi_result_locs(sig).ok()?),
+    };
+    locations
+        .iter()
+        .all(|location| matches!(location, Loc::Reg(0..=7)))
+        .then_some(locations)
+}
+fn call_results(
+    bytes: &mut Vec<u8>,
+    func: &Function,
+    sig: &Signature,
+    values: &[Value],
+    home_base: u32,
+) -> Option<()> {
+    let registers = return_registers(sig)?;
+    if values.len() != sig.returns.len() {
+        return None;
+    }
+    for ((&value, result), &location) in values.iter().zip(&sig.returns).zip(registers.iter()) {
+        if func.value_type(value) != result.ty {
+            return None;
+        }
+        let Loc::Reg(register) = location else {
+            return None;
+        };
+        normalize(bytes, u32::from(register), bits(result.ty)?);
+        store(bytes, u32::from(register), home_base + home(func, value));
     }
     Some(())
 }
@@ -275,6 +303,7 @@ fn encode<'a>(
     {
         return None;
     }
+    let result_registers = return_registers(&func.sig)?;
     let mut has_calls = false;
     let mut outgoing = 0;
     let mut locations = Vec::new();
@@ -636,7 +665,13 @@ fn encode<'a>(
                     )?;
                     sites.push((bytes.len(), Site::Call(callee.name.as_str())));
                     word(&mut bytes, 0x94000000);
-                    call_result(&mut bytes, &callee.sig, dst)?;
+                    call_results(
+                        &mut bytes,
+                        func,
+                        &callee.sig,
+                        func.inst_results(inst),
+                        home_base,
+                    )?;
                 }
                 InstData::CallIndirect { sig, callee, args } => {
                     // Keep the target out of x0-x7 while staging all ABI arguments.
@@ -657,14 +692,36 @@ fn encode<'a>(
                         home_base,
                     )?;
                     word(&mut bytes, 0xd63f0120);
-                    call_result(&mut bytes, signature, dst)?;
+                    call_results(
+                        &mut bytes,
+                        func,
+                        signature,
+                        func.inst_results(inst),
+                        home_base,
+                    )?;
                 }
                 InstData::Return { args } if args.len() == func.sig.returns.len() => {
-                    if let Some(&value) = args.first() {
-                        let ret = &func.sig.returns[0];
-                        load(&mut bytes, 0, value_home(value));
-                        if ret.ext == ArgExt::Sext && matches!(ret.ty, Type::I8 | Type::I16) {
-                            word(&mut bytes, 0x13000000 | (bits(ret.ty)? - 1) << 10);
+                    for ((&value, ret), &location) in args
+                        .iter()
+                        .zip(&func.sig.returns)
+                        .zip(result_registers.iter())
+                    {
+                        if func.value_type(value) != ret.ty {
+                            return None;
+                        }
+                        let Loc::Reg(register) = location else {
+                            return None;
+                        };
+                        let register = u32::from(register);
+                        load(&mut bytes, register, value_home(value));
+                        if args.len() == 1
+                            && ret.ext == ArgExt::Sext
+                            && matches!(ret.ty, Type::I8 | Type::I16)
+                        {
+                            word(
+                                &mut bytes,
+                                0x13000000 | (bits(ret.ty)? - 1) << 10 | register << 5 | register,
+                            );
                         }
                     }
                     let restore_lr = if let Some(save) = saved_lr {

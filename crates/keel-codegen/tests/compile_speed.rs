@@ -69,6 +69,18 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
           v12=call @stack_external(v0,v1,v2,v3,v4,v5,v6,v7,v8,v11)\n\
           return v12\n\
          }}\n\
+         func @pair(i64,i64)->(i64,i64) {{\n\
+         block0(v0:i64,v1:i64):\n\
+          return v1,v0\n\
+         }}\n\
+         func @pair_use(i64,i64)->i64 {{\n\
+         block0(v0:i64,v1:i64):\n\
+          v2,v3=call @pair(v0,v1)\n\
+          v4=symbol_addr @pair\n\
+          v5,v6=call_indirect v4(v2,v3):(i64,i64)->(i64,i64)\n\
+          v7=isub v5,v6\n\
+          return v7\n\
+         }}\n\
          func @fallback(f64)->f64 {{\nblock0(v0:f64):\n return v0\n}}\n"
     );
     let module = parse(&source);
@@ -85,7 +97,7 @@ fn direct_objects_text_chunks_unwind_and_parallel_agree() {
             assert!(direct_count(&program) > 0);
             assert_eq!(
                 report.counters[backend_profile::Counter::DirectFunctions as usize],
-                3
+                5
             );
             let bytes = keel_asm::assemble_program_for(target, &program).unwrap();
             assert_eq!(
