@@ -1,6 +1,7 @@
 //! Lazy scalar facts tied to one immutable final function. No optimizer cache,
 //! CFG stamp or enabled pass is trusted to establish a value's current bits.
-use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, Type, Value, ValueDef};
+use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::{BinaryOp, Block, ConvertOp, EntityRef, Function, InstData, Type, Value, ValueDef};
 use std::cell::{Cell, OnceCell};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -12,19 +13,71 @@ struct Bits {
 pub(crate) struct ValueBits<'a> {
     func: &'a Function,
     bits: OnceCell<Vec<Cell<Option<Bits>>>>,
+    cfg: OnceCell<ControlFlowGraph>,
 }
 impl<'a> ValueBits<'a> {
     pub(crate) fn new(func: &'a Function) -> Self {
         Self {
             func,
             bits: OnceCell::new(),
+            cfg: OnceCell::new(),
         }
     }
 
     pub(crate) fn unsigned_bounds(&self, value: Value) -> Option<(u64, u64)> {
-        let width = width(self.func.value_type(self.func.resolve(value)))?;
-        let bits = self.get(value, 0);
+        let value = self.func.resolve(value);
+        let width = width(self.func.value_type(value))?;
+        let bits = match self.func.value_def(value) {
+            ValueDef::Param(block, index) => self.incoming_bits(block, index as usize, width),
+            _ => self.get(value, 0),
+        };
         Some((bits.one, mask(width) & !bits.zero))
+    }
+
+    fn incoming_bits(&self, block: Block, index: usize, width: u32) -> Bits {
+        const MAX_EDGE_VISITS: usize = 256;
+        if Some(block) == self.func.entry_block() {
+            return Bits::default();
+        }
+        let cfg = self
+            .cfg
+            .get_or_init(|| ControlFlowGraph::compute(self.func));
+        let preds = cfg.preds(block);
+        if preds.is_empty() || preds.len() > MAX_EDGE_VISITS {
+            return Bits::default();
+        }
+        let mut bits = Bits {
+            zero: mask(width),
+            one: mask(width),
+        };
+        let mut remaining = MAX_EDGE_VISITS;
+        for &pred in preds {
+            let Some(&term) = self.func.block_insts(pred).last() else {
+                return Bits::default();
+            };
+            let inst = self.func.inst_data(term);
+            if !matches!(
+                inst,
+                InstData::Jump { .. } | InstData::Brif { .. } | InstData::Switch { .. }
+            ) {
+                return Bits::default();
+            }
+            for dest in inst.branch_dests() {
+                if remaining == 0 {
+                    return Bits::default();
+                }
+                remaining -= 1;
+                if dest.block == block {
+                    let incoming = self.get(dest.args[index], 0);
+                    bits.zero &= incoming.zero;
+                    bits.one &= incoming.one;
+                    if bits == Bits::default() {
+                        return bits;
+                    }
+                }
+            }
+        }
+        bits
     }
 
     fn get(&self, value: Value, depth: usize) -> Bits {
@@ -32,8 +85,8 @@ impl<'a> ValueBits<'a> {
         let Some(width) = width(self.func.value_type(value)) else {
             return Bits::default();
         };
-        // Phi values are unknown. Bound expression depth independently of the
-        // input size; reaching the limit loses precision, never correctness.
+        // Only the queried parameter examines its incoming edges. A parameter
+        // encountered while following an operand remains unknown.
         if depth == 32 {
             return Bits::default();
         }

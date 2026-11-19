@@ -894,8 +894,9 @@ fixed-register, temporary and ABI-copy effects, followed by measurement.
 
 Scalar bit facts are queried lazily from the exact immutable final function.
 They infer zero/one bits through constants, masks, shifts and integer extension or
-truncation. Phi nodes, unsupported operations and deep expressions return unknown;
-no optional optimizer pass or cached CFG stamp supplies a proof. The
+truncation. For a jump-table index supplied by a block parameter, selection keeps
+only the bits that agree on every incoming edge. Nested block parameters,
+unsupported operations and deep expressions supply no additional information. The
 `bounded-switch` cover uses these unsigned bounds to omit a table check only when
 every possible input has a table slot. It adds at most two default entries, costing
 at most eight bytes in exchange for two ARM instructions. Unknown ranges keep

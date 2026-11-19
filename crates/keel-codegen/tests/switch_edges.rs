@@ -249,6 +249,37 @@ block2(v6:i64):
 }
 
 #[test]
+fn switch_bounds_merge_every_argument_even_from_the_same_predecessor() {
+    use keel_codegen::{SelectionOptions, Target};
+    let source = "func @merged(i64,i64,i32) -> i64 cc(c) {
+entry(v0:i64,v1:i64,v2:i32):
+ v3 = iconst.i64 7
+ v4 = and v0, v3
+ v5 = and v1, v3
+ brif v2, dispatch(v4), dispatch(v5)
+dispatch(v6:i64):
+ switch v6, default, [0:valid,1:valid,2:valid,3:valid,4:valid,5:valid,6:valid,7:valid]
+valid:
+ return v6
+default:
+ v7 = iconst.i64 -1
+ return v7
+}";
+    for (source, checked) in [
+        (source.to_owned(), false),
+        (source.replace("dispatch(v5)", "dispatch(v1)"), true),
+    ] {
+        let module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        for target in Target::NATIVE {
+            let text =
+                keel_codegen::compile_with_options(&module, target, SelectionOptions::ALL).unwrap();
+            assert_eq!(text.contains("\tcmp\t"), checked, "{text}");
+        }
+    }
+}
+
+#[test]
 fn bounded_switches_keep_flag_definitions_for_opaque_observers() {
     use keel_codegen::{SelectionOptions, Target};
     for target in Target::NATIVE {
