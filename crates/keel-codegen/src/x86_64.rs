@@ -87,7 +87,6 @@ mod intrinsic_family;
 pub mod iretq;
 mod legacy_x87_images;
 pub mod linux_syscall;
-mod loop_align;
 mod lower_control;
 mod lower_memory;
 mod lower_scalar;
@@ -1059,6 +1058,7 @@ struct FunctionCompiler<'a> {
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
+    preferred_backedge: Option<Block>,
     out: Output,
     uses_trap: bool,
     /// Scalar magnitude/sign masks referenced by this function (f32, f64).
@@ -1289,6 +1289,7 @@ impl<'a> FunctionCompiler<'a> {
             frameless,
             saved,
             next_block: None,
+            preferred_backedge: None,
             features,
             feature_error: None,
             out: Output::new(structured),
@@ -1387,14 +1388,15 @@ impl<'a> FunctionCompiler<'a> {
 
             // Only reachable blocks, in the order the allocator numbered them.
             let order = self.alloc.order.clone();
-            let aligned = if self.goal == crate::CodegenGoal::Size {
-                HashSet::default()
+            let loop_layout = if self.goal == crate::CodegenGoal::Size {
+                crate::word_compare_loops::Layout::default()
             } else {
-                loop_align::headers(func)
+                crate::word_compare_loops::layout(func)
             };
             for (i, &block) in order.iter().enumerate() {
                 self.next_block = order.get(i + 1).copied();
-                if aligned.contains(&block) {
+                self.preferred_backedge = loop_layout.backedges.get(&block).copied();
+                if loop_layout.headers.contains(&block) {
                     // A 32-byte fetch boundary costs at most 31 bytes per header.
                     self.out.align(5);
                 }

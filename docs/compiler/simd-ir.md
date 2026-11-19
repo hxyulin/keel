@@ -217,8 +217,8 @@ remain opt-in; `auto-loop-batch` still admits only sums and absolute-value sums.
 On AArch64, adjacent proven
 floating reads can lower to register-pair loads after allocation. Spilled
 results, observable reads and source-location boundaries retain separate loads.
-Both rotate their generated scalar tail despite its multiple guarded entries.
-Ordinary loop rotation keeps its existing admission rules.
+Both rotate their generated scalar tail even when it has more than two
+guarded entries.
 Full (`-O3`) instead runs `auto-loop-batch` on AArch64 and x86-64. It selects the
 scalar schedule for unsigned i64 trip counts proven to be at least 32 elements.
 A literal count must have a byte count that fits u64. Existing dominating

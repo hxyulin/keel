@@ -216,6 +216,9 @@ estimates do not drive selection.
 A `switch` with at least four dense cases, spanning less than three times
 their count, becomes a jump table; the rest is a chain of compares.
 
+In a small word-comparison loop, a copy-free conditional backedge branches
+directly to the header when neither successor falls through.
+
 Conditional branches reach ±1 MiB. A function whose code may be bigger
 (interpreter loops get there: QuickJS's is about 4 MB from keel) has each one
 rewritten as the opposite branch over a `b`, which reaches ±128 MiB. Only

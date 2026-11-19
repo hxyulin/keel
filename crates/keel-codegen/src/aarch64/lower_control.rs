@@ -173,6 +173,8 @@ impl FunctionCompiler<'_> {
                 let then_noop = self.block_args_noop(then_dest, 0);
                 if then_noop
                     && (self.next_block == Some(else_dest.block)
+                        || (self.preferred_backedge == Some(then_dest.block)
+                            && self.next_block != Some(then_dest.block))
                         || !self.block_args_noop(else_dest, 1))
                 {
                     match &test {

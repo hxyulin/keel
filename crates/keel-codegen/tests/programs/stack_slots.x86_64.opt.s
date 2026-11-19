@@ -44,14 +44,10 @@
 	jne	".Lmain_block2"
 	mov	rsi, r8
 .Lmain_block3:
-	# v93 = iconst.i64 10
-	# v16 = icmp.ult v13, v93
-	# brif v16, block4, block5
-	cmp	r8, 10
-	jae	".Lmain_block5"
+	# jump block4(v13, v14)
 .Lmain_block4:
 	# v86 = iconst.i64 2
-	# v18 = shl v13, v86
+	# v18 = shl v99, v86
 	# v89 = stack_addr ss1
 	lea	rdi, [rbp + -88]
 	# v19 = ptradd v89, v18
@@ -59,16 +55,19 @@
 	mov	edi, dword ptr [rdi + r8 * 4]
 	# v21 = sext.i64 v20
 	movsxd	rdi, edi
-	# v22 = iadd v14, v21
+	# v22 = iadd v100, v21
 	add	rsi, rdi
 	# v23 = iconst.i64 1
-	# v24 = iadd v13, v23
+	# v24 = iadd v99, v23
 	add	r8, 1
-	# jump block3(v24, v22)
-	jmp	".Lmain_block3"
+	# v103 = iconst.i64 10
+	# v104 = icmp.ult v24, v103
+	# brif v104, block4(v24, v22), block5(v22)
+	cmp	r8, 10
+	jb	".Lmain_block4"
 .Lmain_block5:
 	# v26 = iconst.i64 135
-	# v27 = icmp.ne v14, v26
+	# v27 = icmp.ne v102, v26
 	cmp	rsi, 135
 	setne	sil
 	# v29 = uext.i32 v27

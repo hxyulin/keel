@@ -161,7 +161,7 @@ block5:
 }
 
 #[test]
-fn multiple_latches_body_cycles_and_unrepaired_liveouts_are_unchanged() {
+fn multiple_latches_and_body_cycles_are_unchanged() {
     let cases = [
         source()
             .replace("brif v6,block3,block4", "brif v6,block3,block5")
@@ -169,10 +169,6 @@ fn multiple_latches_body_cycles_and_unrepaired_liveouts_are_unchanged() {
         source()
             .replace("brif v6,block3,block4", "brif v6,block5,block4")
             .replace("block4:", "block5:\n brif v6,block5,block3\nblock4:"),
-        source().replace(
-            "block4:\n return v2",
-            "block4:\n jump block5\nblock5:\n return v2",
-        ),
     ];
     for src in cases {
         let mut m = keel_ir::parse(&src).unwrap();
@@ -185,6 +181,42 @@ fn multiple_latches_body_cycles_and_unrepaired_liveouts_are_unchanged() {
             "{src}"
         );
         assert_eq!(before, m.to_string());
+    }
+}
+
+#[test]
+fn two_entries_and_a_downstream_join_receive_current_header_values() {
+    let src = "func @scan(i64,i64) -> i64 {
+entry(v0:i64,v1:i64):
+ v2 = iconst.i64 0
+ v3 = iconst.i64 1
+ v4 = iconst.i64 2
+ v5 = icmp.ne v0,v2
+ brif v5,header(v0),start
+start:
+ jump header(v1)
+header(v6:i64):
+ v7 = icmp.ne v6,v2
+ brif v7,body,tail
+body:
+ v8 = icmp.eq v6,v4
+ brif v8,done,latch
+latch:
+ v9 = isub v6,v3
+ jump header(v9)
+tail:
+ jump done
+done:
+ return v6
+}";
+    let before = keel_ir::parse(src).unwrap();
+    let mut after = before.clone();
+    let pass = keel_opt::find_pass("loop-rotate").unwrap();
+    assert!(pass.run(&mut after.functions[0], &Default::default()));
+    keel_ir::verify_module(&after).unwrap();
+    for (args, expected) in [([0, 0], 0), ([0, 1], 0), ([0, 5], 2), ([4, 0], 2)] {
+        assert_eq!(support::execute(&before.functions[0], &args), expected);
+        assert_eq!(support::execute(&after.functions[0], &args), expected);
     }
 }
 

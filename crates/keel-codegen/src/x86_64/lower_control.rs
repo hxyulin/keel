@@ -76,11 +76,13 @@ impl FunctionCompiler<'_> {
                 };
                 // Branch directly to a copy-free true edge when the false
                 // successor is next or the false edge is the only one with
-                // copies, copying its arguments inline. Otherwise keep copies
-                // on their own edges with landing pads.
+                // copies. Also take a copy-free word loop backedge directly
+                // when neither successor falls through.
                 let then_noop = self.block_args_noop(then_dest, 0);
                 if then_noop
                     && (self.next_block == Some(else_dest.block)
+                        || (self.preferred_backedge == Some(then_dest.block)
+                            && self.next_block != Some(then_dest.block))
                         || !self.block_args_noop(else_dest, 1))
                 {
                     self.jump_to_block(Opcode::Jcc(condition(invert_cond(not))), then_dest.block);

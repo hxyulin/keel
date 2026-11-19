@@ -842,21 +842,20 @@ loop-carried floating-point operation is reassociated.
 
 Use discovery scans the function once per admitted rotation, tracking only the
 at most eight header parameters and results that can be carried. The same scan
-finds exits requiring forwarded values. It does not build a set of unrelated
-values or change rotation admission and value ordering.
+finds uses of those values outside the loop.
 
 `loop-rotate` copies a small header test to the unique latch while retaining the
-entry guard. A natural loop may contain up to four body blocks and distinct
-early exits. Header operations are restricted to integer constants, compares,
-and wrapping addition/subtraction. Every memory access stays in its original
-block, so an empty loop or an early mismatch performs no extra loads.
+original guard for up to two external predecessors. A natural loop may contain
+up to four body blocks and distinct early exits. Header operations are
+restricted to integer constants, compares, and wrapping addition/subtraction.
+Every memory access stays in its original block, so an empty loop or an early
+mismatch performs no extra loads.
 
-The pass forwards current header values to body and exit parameters. A shared
-tail keeps its existing edge arguments; direct header-value uses outside the
-loop must be in an immediate exit reached only from the loop. Uses in a later
-descendant require SSA repair that this bounded pass does not perform. Calls, source locations,
-debugger variable homes and cyclic bodies reject rotation. Empty lexical
-scopes alone do not prevent it.
+The pass forwards the current header values as block arguments through up to
+twelve downstream blocks dominated by the original header. Existing edge
+arguments still reach shared tails. Calls in the loop, source locations in
+the loop, debugger variable homes and cyclic bodies reject rotation. Empty
+lexical scopes alone allow rotation.
 
 ### loop-unroll-exact
 

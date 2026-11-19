@@ -2,6 +2,9 @@
 //! entry guard remains, so no body access executes on an empty loop.
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{Block, Function, InstData as D, Value};
+
+const MAX_FORWARD_BLOCKS: usize = 12;
+
 pub(crate) struct LoopRotate;
 impl crate::Pass for LoopRotate {
     fn name(&self) -> &'static str {
@@ -80,9 +83,8 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
         return false;
     };
     let latch = *latch;
-    // Keep every external entry guarded. Rotation only redirects the unique
-    // backedge, so versioned loops may have several external predecessors.
-    if latch == h || (!batched && cfg.preds(h).len() != 2) {
+    // Every external predecessor still goes through the original guard.
+    if latch == h || (!batched && !(2..=3).contains(&cfg.preds(h).len())) {
         return false;
     }
     let Some(&back) = f.block_insts(latch).last() else {
@@ -105,18 +107,12 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     if !region.contains(&body) || region.contains(&exit) {
         return false;
     }
-    let mut exits = FxHashSet::default();
     for b in region.iter().copied().chain([h]) {
         let Some(&term) = f.block_insts(b).last() else {
             return false;
         };
         if !matches!(f.inst_data(term), D::Jump { .. } | D::Brif { .. }) {
             return false;
-        }
-        for dest in f.inst_data(term).branch_dests() {
-            if dest.block != h && !region.contains(&dest.block) {
-                exits.insert(dest.block);
-            }
         }
         // Calls and source locations in the loop retain their original graph.
         if f.block_insts(b).iter().any(|&i| {
@@ -151,9 +147,9 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     // At most four parameters and four header results can be carried. Record
     // only their uses, rather than hashing every value used in the function.
     // A candidate used outside the header is necessarily retained, so this
-    // same scan also discovers exits needing forwarded values.
+    // same scan also discovers blocks needing forwarded values.
     let mut used = 0u16;
-    let mut forwarded_exits = FxHashSet::default();
+    let mut work = Vec::new();
     for b in f.blocks() {
         if b == h {
             continue;
@@ -169,12 +165,30 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
             });
         }
         if uses_header && !region.contains(&b) {
-            // Shared tails can receive existing arguments, but a direct use
-            // needs a current value from every predecessor.
-            if !exits.contains(&b) || cfg.preds(b).iter().any(|p| *p != h && !region.contains(p)) {
+            work.push(b);
+        }
+    }
+    // Walk backward through exit paths to carry the current values to their
+    // uses. An external predecessor must also have the header in scope.
+    let mut forwarded = FxHashSet::default();
+    while let Some(b) = work.pop() {
+        if b == h || region.contains(&b) || !forwarded.insert(b) {
+            continue;
+        }
+        if forwarded.len() > MAX_FORWARD_BLOCKS || !dom.dominates(h, b) {
+            return false;
+        }
+        for &pred in cfg.preds(b) {
+            let Some(&term) = f.block_insts(pred).last() else {
+                return false;
+            };
+            if !matches!(
+                f.inst_data(term),
+                D::Jump { .. } | D::Brif { .. } | D::Switch { .. }
+            ) {
                 return false;
             }
-            forwarded_exits.insert(b);
+            work.push(pred);
         }
     }
     let mut index = 0;
@@ -187,7 +201,7 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
         .iter()
         .map(|&v| (v, f.append_block_param(body, f.value_type(v))))
         .collect();
-    let exit_maps: FxHashMap<_, FxHashMap<_, _>> = forwarded_exits
+    let exit_maps: FxHashMap<_, FxHashMap<_, _>> = forwarded
         .iter()
         .map(|&b| {
             (
@@ -199,11 +213,7 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
             )
         })
         .collect();
-    for b in region
-        .iter()
-        .copied()
-        .chain(forwarded_exits.iter().copied())
-    {
+    for b in region.iter().copied().chain(forwarded.iter().copied()) {
         let map = exit_maps.get(&b).unwrap_or(&body_map);
         for i in f.block_insts(b).to_vec() {
             let mut d = f.inst_data(i).clone();
@@ -230,16 +240,23 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     });
     *f.inst_data_mut(back) = d;
     // Existing exit arguments precede the new forwarding arguments.
-    for b in region.iter().copied().chain([h]) {
+    for b in region
+        .iter()
+        .copied()
+        .chain([h])
+        .chain(forwarded.iter().copied())
+    {
         let term = *f.block_insts(b).last().unwrap();
         for dest in f.inst_data_mut(term).branch_dests_mut() {
-            if dest.block == body || forwarded_exits.contains(&dest.block) {
+            if dest.block == body || forwarded.contains(&dest.block) {
                 let map = if b == h {
                     None
                 } else if b == latch {
                     Some(&next)
-                } else {
+                } else if region.contains(&b) {
                     Some(&body_map)
+                } else {
+                    Some(&exit_maps[&b])
                 };
                 dest.args
                     .extend(carried.iter().map(|v| map.map_or(*v, |m| m[v])));

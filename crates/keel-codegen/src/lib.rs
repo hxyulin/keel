@@ -36,6 +36,7 @@ mod text;
 pub mod tuning;
 mod value_bits;
 mod vector;
+mod word_compare_loops;
 pub mod x86_64;
 
 pub use regalloc::Pools;

@@ -49,7 +49,8 @@ below) land only if the suite shows no retired-instruction regression.
 
 Word-comparison loops align their headers. Interior compare blocks retain
 their natural placement so the loop does not execute alignment padding between
-its bounds check and the loads.
+its bounds check and the loads. A copy-free conditional backedge branches
+directly to the loop header when neither successor falls through.
 
 With bounded allocation, a jump into a block containing only a dense switch
 can run the switch at the jump site after establishing the original block

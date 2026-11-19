@@ -4,7 +4,7 @@
 	.p2align	2
 _main:
 Lmain_begin:
-	; regalloc: v0=x11 v1=x9 v8=x11 v9=x11 v10=x11 v12=x9 v13=x10 v14=x9 v20=x11 v21=x11 v22=x9 v24=x10 v27=x9 v29=x9 v30=x10 v31=x11 v33=x12 v35=x12 v37=x13 v38=x9 v39=x12 v41=x12 v43=x13 v44=x9 v45=x12 v46=x12 v48=x12 v49=x13 v50=x9 v53=x12 v54=x13 v55=x12 v56=x13 v57=x9 v60=x12 v68=x10 v71=x11 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9 v89=x11 v90=x10 v95=x9 v98=x10
+	; regalloc: v0=x11 v1=x9 v8=x11 v9=x11 v10=x11 v12=x9 v13=x10 v14=x9 v20=x11 v21=x11 v22=x9 v24=x10 v27=x9 v29=x9 v30=x10 v31=x11 v33=x12 v35=x12 v37=x13 v38=x9 v39=x12 v41=x12 v43=x13 v44=x9 v45=x12 v46=x12 v48=x12 v49=x13 v50=x9 v53=x12 v54=x13 v55=x12 v56=x13 v57=x9 v60=x12 v68=x10 v71=x11 v78=x10 v79=x11 v80=x10 v81=x11 v83=x12 v84=x9 v89=x11 v90=x10 v95=x9 v98=x10 v99=x10 v100=x9 v102=x9
 	.cfi_startproc
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
@@ -43,14 +43,10 @@ Lmain_block2:
 	b.lo	Lmain_block2
 	mov	x9, x10
 Lmain_block3:
-	; v93 = iconst.i64 10
-	; v16 = icmp.ult v13, v93
-	; brif v16, block4, block5
-	cmp	x10, #10
-	b.hs	Lmain_block5
+	; jump block4(v13, v14)
 Lmain_block4:
 	; v86 = iconst.i64 2
-	; v18 = shl v13, v86
+	; v18 = shl v99, v86
 	; v89 = stack_addr ss1
 	add	x11, sp, #904
 	add	x11, x11, #1, lsl #12
@@ -59,16 +55,19 @@ Lmain_block4:
 	ldr	w11, [x11, x10, lsl #2]
 	; v21 = sext.i64 v20
 	sxtw	x11, w11
-	; v22 = iadd v14, v21
+	; v22 = iadd v100, v21
 	add	x9, x9, x11
 	; v23 = iconst.i64 1
-	; v24 = iadd v13, v23
+	; v24 = iadd v99, v23
 	add	x10, x10, #1
-	; jump block3(v24, v22)
-	b	Lmain_block3
+	; v103 = iconst.i64 10
+	; v104 = icmp.ult v24, v103
+	; brif v104, block4(v24, v22), block5(v22)
+	cmp	x10, #10
+	b.lo	Lmain_block4
 Lmain_block5:
 	; v26 = iconst.i64 135
-	; v27 = icmp.ne v14, v26
+	; v27 = icmp.ne v102, v26
 	cmp	x9, #135
 	cset	w9, ne
 	; v29 = uext.i32 v27

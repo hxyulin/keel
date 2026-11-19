@@ -1015,6 +1015,8 @@ struct FunctionCompiler<'a> {
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
+    preferred_backedge: Option<Block>,
+    prefer_word_loop_backedges: bool,
     out: Output,
     uses_trap: bool,
     /// Exception handling, for a function with a personality.
@@ -1193,6 +1195,7 @@ impl<'a> FunctionCompiler<'a> {
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
+        let goal = crate::emission::function_goal(&func.attrs, request.emission.goal);
         let frameless = plan::frameless(
             func,
             module,
@@ -1200,7 +1203,7 @@ impl<'a> FunctionCompiler<'a> {
             frame_size,
             incoming,
             &alloc,
-            crate::emission::function_goal(&func.attrs, request.emission.goal),
+            goal,
         );
         let share_returns = !func.attrs.optnone
             && !frameless
@@ -1298,6 +1301,8 @@ impl<'a> FunctionCompiler<'a> {
             share_returns,
             return_epilogue_emitted: false,
             next_block: None,
+            preferred_backedge: None,
+            prefer_word_loop_backedges: goal == crate::CodegenGoal::Speed,
             out: if linux && !structured {
                 Output::ElfText(Default::default())
             } else {
@@ -1609,8 +1614,14 @@ impl<'a> FunctionCompiler<'a> {
             backend_scope!(LoweringBody);
             // Only reachable blocks, in the order the allocator numbered them.
             let order = self.alloc.order.clone();
+            let backedges = if self.prefer_word_loop_backedges {
+                crate::word_compare_loops::layout(func).backedges
+            } else {
+                Default::default()
+            };
             for (i, &block) in order.iter().enumerate() {
                 self.next_block = order.get(i + 1).copied();
+                self.preferred_backedge = backedges.get(&block).copied();
                 self.out.label_name(self.block_name(block));
                 for &inst in func.block_insts(block) {
                     if let Output::Text(text) | Output::ElfText(text) = &mut self.out {

@@ -1,16 +1,22 @@
-//! Bound fetch alignment to small, call-free word-comparison loops.
+//! Find small, call-free word-comparison loops for native block layout.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-use keel_ir::fxhash::FxHashSet;
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{BinaryOp, Block, Function, InstData, Type, ValueDef};
 
-pub(super) fn headers(f: &Function) -> FxHashSet<Block> {
-    let mut headers = FxHashSet::default();
+#[derive(Default)]
+pub(crate) struct Layout {
+    pub(crate) headers: FxHashSet<Block>,
+    pub(crate) backedges: FxHashMap<Block, Block>,
+}
+
+pub(crate) fn layout(f: &Function) -> Layout {
+    let mut layout = Layout::default();
     if f.blocks().count() < 2 {
-        return headers;
+        return layout;
     }
     let candidates: Vec<_> = f.blocks().filter(|&b| word_compare(f, b)).collect();
     if candidates.is_empty() {
-        return headers;
+        return layout;
     }
     let cfg = ControlFlowGraph::compute(f);
     let dom = DominatorTree::compute(f, &cfg);
@@ -24,6 +30,7 @@ pub(super) fn headers(f: &Function) -> FxHashSet<Block> {
         if pending.is_empty() || Some(header) == f.entry_block() {
             continue;
         }
+        let latches = pending.clone();
         let mut members = FxHashSet::default();
         members.insert(header);
         let mut instructions = f.block_insts(header).len();
@@ -53,15 +60,23 @@ pub(super) fn headers(f: &Function) -> FxHashSet<Block> {
             // Padding an interior compare block puts NOPs on the hot
             // fall-through path from the bounds check.
             if candidates.iter().any(|block| members.contains(block)) {
-                headers.insert(header);
+                layout.headers.insert(header);
+                for latch in latches {
+                    let successors = cfg.succs(latch);
+                    if successors.len() == 2
+                        && successors.iter().any(|block| !members.contains(block))
+                    {
+                        layout.backedges.insert(latch, header);
+                    }
+                }
             }
             // At most 248 bytes of loop padding per function.
-            if headers.len() == 8 {
+            if layout.headers.len() == 8 {
                 break;
             }
         }
     }
-    headers
+    layout
 }
 
 fn word_compare(f: &Function, b: Block) -> bool {
@@ -114,9 +129,48 @@ block3:
         keel_ir::verify_module(&module).unwrap();
         let func = &module.functions[0];
         assert_eq!(
-            headers(func),
+            layout(func).headers,
             [func.blocks().nth(1).unwrap()].into_iter().collect()
         );
+    }
+
+    #[test]
+    fn a_non_fallthrough_latch_branches_directly_to_the_word_loop() {
+        let module = keel_ir::parse(
+            "func @f(ptr,ptr,i8,i8) -> i64 {
+entry(v0:ptr,v1:ptr,v2:i8,v7:i8):
+ brif v7,exit,compare
+compare:
+ v3 = load.i64 v0
+ v4 = load.i64 v1
+ v5 = xor v3,v4
+ brif v5,mismatch,latch
+latch:
+ brif v2,compare,exit
+mismatch:
+ return v5
+exit:
+ v6 = uext.i64 v2
+ return v6
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let pipeline = crate::CodegenPipeline {
+            selector: &crate::SelectionTier::Full,
+            allocator: &crate::regalloc::AllocationTier::Fast,
+        };
+        for target in crate::Target::NATIVE {
+            let text = crate::compile_with_pipeline(&module, target, &pipeline).unwrap();
+            assert!(
+                text.lines().any(|line| {
+                    let op = line.split_whitespace().next().unwrap_or_default();
+                    matches!(op, "jne" | "b.ne" | "cbnz")
+                        && line.trim_end_matches('"').ends_with("f_block1")
+                }),
+                "{text}"
+            );
+        }
     }
 
     #[test]
@@ -124,7 +178,8 @@ block3:
         let source = "func @loop(ptr, ptr) -> i64 {\nblock0(v0: ptr, v1: ptr):\n jump block1\nblock1:\n v2 = load.i64 v0\n v3 = load.i64 v1\n v4 = xor v2, v3\n brif v4, block1, block2(v4)\nblock2(v5: i64):\n return v5\n}\n";
         let m = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&m).unwrap();
-        let h = headers(&m.functions[0]);
+        let layout = layout(&m.functions[0]);
+        let h = &layout.headers;
         assert_eq!(h.len(), 1);
         let pipeline = crate::CodegenPipeline {
             selector: &crate::SelectionTier::Full,
@@ -140,7 +195,9 @@ block3:
             keel_asm::x86::assemble_program_object(&program).unwrap(),
             keel_asm::x86::assemble_object(&text).unwrap()
         );
-        assert!(h.contains(&m.functions[0].blocks().nth(1).unwrap()));
+        let header = m.functions[0].blocks().nth(1).unwrap();
+        assert!(h.contains(&header));
+        assert_eq!(layout.backedges.get(&header), Some(&header));
         for body in [
             source.replace("xor v2, v3", "iadd v2, v3"),
             format!(
@@ -150,7 +207,7 @@ block3:
         ] {
             let m = keel_ir::parse(&body).unwrap();
             keel_ir::verify_module(&m).unwrap();
-            assert!(headers(&m.functions[0]).is_empty());
+            assert!(super::layout(&m.functions[0]).headers.is_empty());
         }
     }
 }
