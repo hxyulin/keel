@@ -157,6 +157,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |
 | `loop-unroll-exact` | Fully unroll tiny literal-trip loops in scalar operation order |
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
+| `loop-unroll-words` | Check the range once per four scalar word comparisons and exit at the first mismatch |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
 | `if-convert` (opt-in) | Bounded scalar if-conversion |
 | `loop-matmul` | Guarded four-column tiling of bounded wrapping i32 matrix products on AArch64 |

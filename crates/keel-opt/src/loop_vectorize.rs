@@ -18,6 +18,8 @@ mod copy;
 pub(crate) use copy::LoopCopy;
 mod narrow;
 mod scan;
+mod word_compare;
+pub(crate) use word_compare::LoopUnrollWords;
 
 /// Packed 128-bit capabilities used for vectorization profitability. Portable
 /// uses the intersection of the two supported targets, not scalar fallbacks.

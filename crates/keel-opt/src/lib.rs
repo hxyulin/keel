@@ -423,6 +423,7 @@ pub(crate) static LOOP_DOT: &dyn Pass = &loop_dot::LoopDot;
 pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
 pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
 pub(crate) static LOOP_UNROLL: &dyn Pass = &loop_unroll::LoopUnroll;
+pub(crate) static LOOP_UNROLL_WORDS: &dyn Pass = &loop_vectorize::LoopUnrollWords;
 pub(crate) static LOOP_UNROLL_EXACT: &dyn Pass = &loop_unroll_exact::LoopUnrollExact;
 pub(crate) static LOOP_COPY: &dyn Pass = &loop_vectorize::LoopCopy;
 pub(crate) static LOOP_VECTORIZE: &dyn Pass = &loop_vectorize::LoopVectorize;
@@ -496,6 +497,7 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_STRENGTH_REDUCE,
     LOOP_UNROLL,
     LOOP_UNROLL_EXACT,
+    LOOP_UNROLL_WORDS,
     LOOP_DOT,
     LOOP_BATCH,
     LOOP_BATCH_SCALAR,
@@ -829,7 +831,7 @@ const FULL_ROUND: [&str; 18] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 35] = [
+const FULL_EPILOGUE: [&str; 36] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -865,6 +867,7 @@ const FULL_EPILOGUE: [&str; 35] = [
     "tail-calls",
     "branch-facts",
     "outline-cold",
+    "loop-unroll-words",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller
