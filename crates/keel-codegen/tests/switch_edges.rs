@@ -44,11 +44,29 @@ block4:
     assert_eq!(text.matches("_table:\n").count(), 1, "{text}");
     assert_eq!(text.matches("jmp\trax").count(), 3, "{text}");
 
-    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+    let pools = &keel_codegen::aarch64::REGISTERS;
+    let arm = keel_codegen::aarch64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+    let arm_program =
+        keel_codegen::aarch64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+    let arm_object =
+        keel_asm::assemble_program_object(&arm_program, keel_asm::TargetFeatures::default())
+            .unwrap();
+    assert_eq!(arm_object, keel_asm::assemble_object(&arm).unwrap());
+    assert_eq!(arm.matches("_table:\n").count(), 1, "{arm}");
+    assert_eq!(arm.matches("\tbr\tx17").count(), 3, "{arm}");
+
+    let native = if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        Some(object)
+    } else if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
+        Some(arm_object)
+    } else {
+        None
+    };
+    if let Some(native) = native {
         use std::{fs, path::Path, process::Command};
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("switch-dispatch-tails");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("dispatch.o"), object).unwrap();
+        fs::write(dir.join("dispatch.o"), native).unwrap();
         fs::write(dir.join("driver.c"), "long dispatch(long, int, long, long); int main(void) { for (long i = -1; i <= 64; ++i) for (int b = 0; b <= 1; ++b) if (dispatch(i,b,71,93) != (i >= 0 && i < 64 ? i : b ? 71 : 93)) return 1; return 0; }").unwrap();
         let output = Command::new("clang")
             .current_dir(&dir)

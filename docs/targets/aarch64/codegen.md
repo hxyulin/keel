@@ -216,6 +216,10 @@ estimates do not drive selection.
 A `switch` with at least four dense cases, spanning less than three times
 their count, becomes a jump table; the rest is a chain of compares.
 
+With bounded allocation, an unconditional jump to a block containing only
+a dense switch can issue the dispatch after its argument copies. Up to 128
+sites per function share the original table and case landing pads.
+
 In a small word-comparison loop, a copy-free conditional backedge branches
 directly to the header when neither successor falls through.
 

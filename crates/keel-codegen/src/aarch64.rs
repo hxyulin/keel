@@ -121,7 +121,6 @@ mod absolute_diff;
 mod compare_neon;
 mod constant_plan;
 mod direct;
-#[cfg(feature = "experimental-dispatch")]
 mod dispatch_tail;
 mod extended_add;
 mod integer_neon;
@@ -951,8 +950,9 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
-    #[cfg(feature = "experimental-dispatch")]
     dispatch_tails: HashMap<Inst, Inst>,
+    #[cfg(feature = "experimental-dispatch")]
+    independent_dispatch_tails: HashMap<Inst, Inst>,
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
@@ -1250,8 +1250,15 @@ impl<'a> FunctionCompiler<'a> {
                 })
             }
         };
+        let dispatch_tails = crate::dispatch_tail::plan(
+            func,
+            module,
+            &alloc,
+            &selection,
+            goal != crate::CodegenGoal::Size && pipeline.allocator.name() == "bounded",
+        );
         #[cfg(feature = "experimental-dispatch")]
-        let dispatch_tails = dispatch_tail::plan(
+        let independent_dispatch_tails = dispatch_tail::plan(
             func,
             module,
             &alloc,
@@ -1262,8 +1269,9 @@ impl<'a> FunctionCompiler<'a> {
         Ok(Self {
             linux,
             variadic_area: calls.variadic_area,
-            #[cfg(feature = "experimental-dispatch")]
             dispatch_tails,
+            #[cfg(feature = "experimental-dispatch")]
+            independent_dispatch_tails,
             func,
             symbols,
             alloc,
@@ -4207,13 +4215,16 @@ impl<'a> FunctionCompiler<'a> {
         arg: Value,
         dests: &[BlockCall],
         cases: &[i64],
-        site: Option<Inst>,
+        site: dispatch_tail::SwitchSite,
     ) {
-        // Allocation identity remains `inst`; only assembly identities vary.
+        // Allocation identity remains `inst`, even with independent tables.
         let allocation_inst = inst;
         let inst = match site {
-            None => self.func.inst_name(inst).to_string(),
-            Some(site) => format!(
+            dispatch_tail::SwitchSite::Original | dispatch_tail::SwitchSite::Shared => {
+                self.func.inst_name(inst).to_string()
+            }
+            #[cfg(feature = "experimental-dispatch")]
+            dispatch_tail::SwitchSite::Independent(site) => format!(
                 "{}_tail{}",
                 self.func.inst_name(inst),
                 self.func.inst_name(site)
@@ -4231,14 +4242,19 @@ impl<'a> FunctionCompiler<'a> {
             .switch_bounds
             .get(&allocation_inst)
             .is_some_and(|&range| plan.bound(range));
-        let targets: Vec<String> = dests
-            .iter()
-            .enumerate()
-            .map(|(i, d)| match self.block_args_noop(d, i) {
-                true => self.label(d.block),
-                false => format!("L{}_{inst}_edge{i}", self.func.name),
-            })
-            .collect();
+        let target = |i, d: &BlockCall| match self.block_args_noop(d, i) {
+            true => self.label(d.block),
+            false => format!("L{}_{inst}_edge{i}", self.func.name),
+        };
+        let targets: Vec<_> = if site == dispatch_tail::SwitchSite::Shared {
+            vec![target(0, &dests[0])]
+        } else {
+            dests
+                .iter()
+                .enumerate()
+                .map(|(i, dest)| target(i, dest))
+                .collect()
+        };
         let (min, span) = (plan.min, plan.span);
         if plan.jump_table() {
             // idx = x - min, unsigned; anything above the span is default.
@@ -4274,6 +4290,9 @@ impl<'a> FunctionCompiler<'a> {
                 ],
             );
             self.mach("br", [(Reg::x(S1)).into()]);
+            if site == dispatch_tail::SwitchSite::Shared {
+                return;
+            }
             // Offsets from the table to each target, never executed.
             self.out.label(table.clone());
             for i in plan.table() {

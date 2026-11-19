@@ -117,12 +117,9 @@ impl FunctionCompiler<'_> {
             }
             InstData::Jump { ref dest } => {
                 self.block_args(dest, 0);
-                #[cfg(feature = "experimental-dispatch")]
                 if !self.emit_dispatch_tail(inst) {
                     self.branch_unless_next(dest.block);
                 }
-                #[cfg(not(feature = "experimental-dispatch"))]
-                self.branch_unless_next(dest.block);
             }
             InstData::Brif { cond, ref dests } => {
                 let [then_dest, else_dest] = &**dests;
@@ -213,7 +210,7 @@ impl FunctionCompiler<'_> {
                 arg,
                 ref dests,
                 ref cases,
-            } => self.switch(inst, arg, dests, cases, None),
+            } => self.switch(inst, arg, dests, cases, dispatch_tail::SwitchSite::Original),
             InstData::Trap => self.mach("brk", [Arg::imm(1)]),
             InstData::Return { ref args } => {
                 // A struct result in registers is loaded from where the

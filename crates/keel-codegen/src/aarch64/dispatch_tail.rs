@@ -1,9 +1,12 @@
-//! Bounded post-allocation experiment. No SSA or allocation identities change.
+//! Replicate switch dispatch sequences after their original edge copies.
 use super::*;
 
+#[cfg(feature = "experimental-dispatch")]
 const MAX_CLONES: usize = 8;
+#[cfg(feature = "experimental-dispatch")]
 const MAX_TABLE_ENTRIES: usize = 1024;
 
+#[cfg(feature = "experimental-dispatch")]
 pub(super) fn plan(
     func: &Function,
     module: &Module,
@@ -77,17 +80,35 @@ pub(super) fn plan(
     sites
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwitchSite {
+    Original,
+    Shared,
+    #[cfg(feature = "experimental-dispatch")]
+    Independent(Inst),
+}
+
 impl FunctionCompiler<'_> {
     /// Called after the original Jump's parallel edge copies. That establishes
     /// every dispatch block parameter, including ones used directly downstream.
     pub(super) fn emit_dispatch_tail(&mut self, jump: Inst) -> bool {
-        let Some(&switch) = self.dispatch_tails.get(&jump) else {
+        let shared = self
+            .dispatch_tails
+            .get(&jump)
+            .map(|&switch| (switch, SwitchSite::Shared));
+        #[cfg(feature = "experimental-dispatch")]
+        let shared = shared.or_else(|| {
+            self.independent_dispatch_tails
+                .get(&jump)
+                .map(|&switch| (switch, SwitchSite::Independent(jump)))
+        });
+        let Some((switch, site)) = shared else {
             return false;
         };
-        let InstData::Switch { arg, dests, cases } = self.func.inst_data(switch).clone() else {
+        let InstData::Switch { arg, dests, cases } = self.func.inst_data(switch) else {
             unreachable!("planned switch")
         };
-        let saved = (self.current_inst, self.allocation_index, self.next_block);
+        let saved = (self.current_inst, self.allocation_index);
         self.current_inst = Some(switch);
         self.allocation_index = self.alloc.edits.instruction_index(switch);
         if let Some(index) = self.allocation_index {
@@ -95,8 +116,8 @@ impl FunctionCompiler<'_> {
         }
         // next_block is the physical next block at the Jump emission site.
         // Dense switches always transfer explicitly, including every case pad.
-        self.switch(switch, arg, &dests, &cases, Some(jump));
-        (self.current_inst, self.allocation_index, self.next_block) = saved;
+        self.switch(switch, *arg, dests, cases, site);
+        (self.current_inst, self.allocation_index) = saved;
         true
     }
 }

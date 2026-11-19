@@ -1233,7 +1233,7 @@ impl<'a> FunctionCompiler<'a> {
             packed_sign_values,
             packed_low_loads,
         } = covers;
-        let dispatch_tails = dispatch_tail::plan(
+        let dispatch_tails = crate::dispatch_tail::plan(
             func,
             module,
             &alloc,

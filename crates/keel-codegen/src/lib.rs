@@ -15,6 +15,7 @@ pub mod aarch64;
 mod abi;
 pub mod cover;
 mod data;
+mod dispatch_tail;
 mod dwarf;
 mod emission;
 pub mod parallel;
