@@ -13,9 +13,9 @@
 //!   clif-none      Cranelift opt_level=none
 //!   clif-speed     Cranelift opt_level=speed
 //! Native stages: codegen (IR -> typed assembly program, incl. allocation) and
-//! object (encoding/assembly + Mach-O). Cranelift stages: setup (ISA/object
+//! object (encoding/assembly and object writing). Cranelift stages: setup (ISA/object
 //! module), translate (Keel -> CLIF), codegen (incl. machine-code emission)
-//! and object (definitions + Mach-O). Stage boundaries differ between the two
+//! and object (definitions and object writing). Stage boundaries differ between the two
 //! backends; only per-config totals are directly comparable.
 use keel_cranelift::{OptLevel, Options, TargetProfile};
 use std::time::Instant;
@@ -27,7 +27,7 @@ struct Run {
     stages: Vec<(&'static str, u128)>,
 }
 
-fn native(module: &keel_ir::Module, full: bool) -> Result<Run, String> {
+fn native(module: &keel_ir::Module, target: TargetProfile, full: bool) -> Result<Run, String> {
     let selector = keel_codegen::tuning::TunedSelector {
         options: if full {
             keel_codegen::SelectionOptions::ALL
@@ -45,17 +45,24 @@ fn native(module: &keel_ir::Module, full: bool) -> Result<Run, String> {
         selector: &feature_selector,
         allocator: &keel_codegen::regalloc::AllocationTier::Full,
     };
+    let native_target = match target {
+        TargetProfile::AppleArm64 => keel_codegen::Target::Aarch64AppleDarwin,
+        TargetProfile::X86_64Linux => keel_codegen::Target::X86_64LinuxGnu,
+    };
     let start = Instant::now();
-    let program = keel_codegen::compile_program_with_pipeline(
-        module,
-        keel_codegen::Target::Aarch64AppleDarwin,
-        &pipeline,
-    )
-    .map_err(|e| e.to_string())?;
+    let program = keel_codegen::compile_program_with_pipeline(module, native_target, &pipeline)
+        .map_err(|e| e.to_string())?;
     let codegen = start.elapsed().as_nanos();
     let start = Instant::now();
-    let bytes = keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-        .map_err(|e| e.to_string())?;
+    let bytes = match target {
+        TargetProfile::AppleArm64 => {
+            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                .map_err(|e| e.to_string())?
+        }
+        TargetProfile::X86_64Linux => {
+            keel_asm::x86::assemble_program_object(&program).map_err(|e| e.to_string())?
+        }
+    };
     let object = start.elapsed().as_nanos();
     Ok(Run {
         bytes,
@@ -63,9 +70,14 @@ fn native(module: &keel_ir::Module, full: bool) -> Result<Run, String> {
     })
 }
 
-fn cranelift(module: &keel_ir::Module, opt: OptLevel, verify_clif: bool) -> Result<Run, String> {
+fn cranelift(
+    module: &keel_ir::Module,
+    target: TargetProfile,
+    opt: OptLevel,
+    verify_clif: bool,
+) -> Result<Run, String> {
     let options = Options {
-        target: TargetProfile::AppleArm64,
+        target,
         opt,
         verify_clif,
     };
@@ -81,12 +93,17 @@ fn cranelift(module: &keel_ir::Module, opt: OptLevel, verify_clif: bool) -> Resu
     })
 }
 
-fn run_config(module: &keel_ir::Module, config: &str, verify_clif: bool) -> Result<Run, String> {
+fn run_config(
+    module: &keel_ir::Module,
+    target: TargetProfile,
+    config: &str,
+    verify_clif: bool,
+) -> Result<Run, String> {
     match config {
-        "keel-baseline" => native(module, false),
-        "keel-full" => native(module, true),
-        "clif-none" => cranelift(module, OptLevel::None, verify_clif),
-        "clif-speed" => cranelift(module, OptLevel::Speed, verify_clif),
+        "keel-baseline" => native(module, target, false),
+        "keel-full" => native(module, target, true),
+        "clif-none" => cranelift(module, target, OptLevel::None, verify_clif),
+        "clif-speed" => cranelift(module, target, OptLevel::Speed, verify_clif),
         _ => unreachable!(),
     }
 }
@@ -119,7 +136,7 @@ fn json_str(s: &str) -> String {
     out
 }
 
-fn objects(args: &[String]) -> Result<(), String> {
+fn objects(target: TargetProfile, args: &[String]) -> Result<(), String> {
     let mut out_dir = None;
     let mut label = None;
     let mut input = None;
@@ -138,7 +155,8 @@ fn objects(args: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     for config in CONFIGS {
         // Objects for correctness runs are built with the CLIF verifier on.
-        let run = run_config(&module, config, true).map_err(|e| format!("{config}: {e}"))?;
+        let run =
+            run_config(&module, target, config, true).map_err(|e| format!("{config}: {e}"))?;
         let path = format!("{out_dir}/{label}.{config}.o");
         std::fs::write(&path, &run.bytes).map_err(|e| format!("{path}: {e}"))?;
         println!(
@@ -151,7 +169,7 @@ fn objects(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn time(args: &[String]) -> Result<(), String> {
+fn time(target: TargetProfile, args: &[String]) -> Result<(), String> {
     let mut warmup = 3usize;
     let mut reps = 15usize;
     let mut out = None;
@@ -181,7 +199,7 @@ fn time(args: &[String]) -> Result<(), String> {
         let (_, reference_module) = load(path)?;
         let mut reference = Vec::new();
         for config in CONFIGS {
-            let run = run_config(&reference_module, config, true)
+            let run = run_config(&reference_module, target, config, true)
                 .map_err(|e| format!("{label} {config}: {e}"))?;
             if let Some(dir) = &emit_dir {
                 let p = format!("{dir}/{label}.{config}.o");
@@ -200,7 +218,7 @@ fn time(args: &[String]) -> Result<(), String> {
             // Rotate configuration order so drift is not attributed to one.
             for k in 0..CONFIGS.len() {
                 let c = (rep + k) % CONFIGS.len();
-                let run = run_config(&module, CONFIGS[c], false)?;
+                let run = run_config(&module, target, CONFIGS[c], false)?;
                 if fnv(&run.bytes) != reference[c] {
                     return Err(format!(
                         "{label} {}: nondeterministic or verifier-dependent output",
@@ -256,7 +274,7 @@ fn time(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|&opt| {
             let s = keel_cranelift::explicit_settings(&Options {
-                target: TargetProfile::AppleArm64,
+                target,
                 opt,
                 verify_clif: false,
             });
@@ -275,10 +293,10 @@ fn time(args: &[String]) -> Result<(), String> {
     std::fs::write(&out, doc).map_err(|e| format!("{out}: {e}"))
 }
 
-fn support(args: &[String]) -> Result<(), String> {
+fn support(target: TargetProfile, args: &[String]) -> Result<(), String> {
     for path in args {
         let (_, module) = load(path)?;
-        for (name, result) in keel_cranelift::function_support(&module) {
+        for (name, result) in keel_cranelift::function_support_for_target(&module, target) {
             let error = match result {
                 Ok(()) => "null".to_string(),
                 Err(e) => json_str(&e),
@@ -295,12 +313,12 @@ fn support(args: &[String]) -> Result<(), String> {
 
 /// Compile-time-only inputs from real code: functions the bridge rejects are
 /// replaced by external declarations, so both backends see identical IR.
-fn subset(args: &[String]) -> Result<(), String> {
+fn subset(target: TargetProfile, args: &[String]) -> Result<(), String> {
     let [input, output] = args else {
         return Err("subset IN.keel OUT.keel".into());
     };
     let (_, mut module) = load(input)?;
-    let rejected: Vec<String> = keel_cranelift::function_support(&module)
+    let rejected: Vec<String> = keel_cranelift::function_support_for_target(&module, target)
         .into_iter()
         .filter_map(|(name, r)| r.err().map(|_| name))
         .collect();
@@ -332,16 +350,28 @@ fn subset(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn run(args: &[String]) -> Result<(), String> {
+    let (target, args) = match args {
+        [flag, name, rest @ ..] if flag == "--target" => (
+            TargetProfile::from_cli(name).ok_or_else(|| format!("unsupported target {name}"))?,
+            rest,
+        ),
+        _ => (TargetProfile::AppleArm64, args),
+    };
+    match args {
+        [cmd, rest @ ..] if cmd == "objects" => objects(target, rest),
+        [cmd, rest @ ..] if cmd == "time" => time(target, rest),
+        [cmd, rest @ ..] if cmd == "support" => support(target, rest),
+        [cmd, rest @ ..] if cmd == "subset" => subset(target, rest),
+        _ => Err(
+            "usage: keel-cranelift-bench [--target TRIPLE] objects|time|support|subset ...".into(),
+        ),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = match args.first().map(String::as_str) {
-        Some("objects") => objects(&args[1..]),
-        Some("time") => time(&args[1..]),
-        Some("support") => support(&args[1..]),
-        Some("subset") => subset(&args[1..]),
-        _ => Err("usage: keel-cranelift-bench objects|time|support ...; see source header".into()),
-    };
-    if let Err(e) = result {
+    if let Err(e) = run(&args) {
         eprintln!("keel-cranelift-bench: {e}");
         std::process::exit(1);
     }

@@ -1,7 +1,7 @@
 # Experimental Keel IR → Cranelift bridge
 
 `keel-cranelift` translates verified Keel IR into Cranelift IR (CLIF) and
-emits an Apple arm64 Mach-O object with Cranelift. It is a diagnostic tool:
+emits Mach-O on Apple arm64 and ELF on x86-64 Linux with Cranelift. It is a diagnostic tool:
 it compares Keel's native backend with Cranelift's on **the same Keel IR**,
 for correctness and for compile/runtime cost. It is not a production
 backend. It does not replace or change the native backend, the `keel`
@@ -21,8 +21,8 @@ cargo test  --release --locked --target-dir ../../target/keel-cranelift
     --opt speed input.keel -o output.o           # or --emit clif -o -
 ```
 
-- `--target` is mandatory, as for `keel-llvm`. Only
-  `arm64-apple-macosx11.0.0` is accepted, and the host is never inferred.
+- `--target` is mandatory. Use `arm64-apple-macosx11.0.0` for Darwin
+  or `x86_64-unknown-linux-gnu` for Linux.
 - `--opt none|speed` selects Cranelift's `opt_level`. `speed_and_size` is
   not exposed.
 - The CLIF verifier runs unless `--no-verify` is given. Output is identical
@@ -31,28 +31,40 @@ cargo test  --release --locked --target-dir ../../target/keel-cranelift
   `function @f: blockN, instM (<instruction>): unsupported: ...`, and nothing
   is written. Output is published through a temporary file and a rename.
 
-`keel-cranelift-bench` is the comparison harness:
+`keel-cranelift-bench [--target TRIPLE]` is the comparison harness.
+It defaults to Apple arm64:
 
 - `objects` writes one object per configuration.
 - `time` times all configurations in-process from one parsed module.
 - `support` reports per-function coverage.
 - `subset` keeps only supported functions, for compile-time inputs.
 
-`tools/compare.py` drives the whole procedure and writes the evidence. Its
-order is: correctness gate, then compile timing, then exploratory runtime.
+Run the correctness-gated benchmark from the repository root on either host:
+
+```sh
+cargo build --release -p keel
+cargo build --release --locked --manifest-path crates/keel-cranelift/Cargo.toml --bin keel-cranelift-bench
+python3 suite/integration/compiler-bench/compiler.py --runtime --out target/compiler-bench \
+    --keel target/release/keel --bench crates/keel-cranelift/target/release/keel-cranelift-bench
+```
+
+The runner selects the native target, checks every linked configuration against
+Clang, then measures compilation. `--runtime` adds interleaved kernel timing
+and an identical copy of the optimized Keel executable as a control. On
+Linux, prefix the benchmark command with `taskset -c N` to run on one idle CPU.
+`tools/compare.py` remains the Apple arm64 exploratory comparison.
 
 ## Pinned versions and settings
 
 - `cranelift-codegen`, `-frontend`, `-module` and `-object` are pinned to
   `=0.136.3`, the newest stable release (2026-10-14). The lock file pins
   `regalloc2 0.15.2`, `object 0.40.0` and `target-lexicon 0.13.5`.
-- Only the `arm64` backend feature is enabled: no host detection, JIT,
-  disassembler or unwind support.
+- The `arm64` and `x86` backend features are enabled. The bridge does not
+  inherit the host CPU features.
 - API use was checked against the 0.136.3 sources: `MemFlagsData` interning,
   `FunctionBuilder::finalize(config)` and `Switch::emit`.
-- The ISA is built from triple `aarch64-apple-macosx11.0.0`, which sets
-  LC_BUILD_VERSION minos 11.0.
-- Calling convention: `apple_aarch64`.
+- Apple arm64 uses `apple_aarch64` and Mach-O minimum OS 11.0. Linux
+  x86-64 uses `system_v` and baseline x86-64.
 - Explicit settings: `opt_level`, `is_pic=true` (GOT access for
   non-colocated symbols), `unwind_info=false` and `enable_verifier`.
   - Native Keel objects can carry `__compact_unwind` and `__eh_frame`;
@@ -175,7 +187,7 @@ Sources: Keel's `docs/compiler/design.md`, `docs/compiler/simd-ir.md` and
 
 **Scope**
 
-- Only Apple arm64 Mach-O. There is no x86-64/ELF profile and no unwind
+- Apple arm64 Mach-O and x86-64 Linux ELF. There is no unwind
   info.
 - Scope is kernels, not C applications. Lua 5.4.7 coverage is reported
   only as a translation statistic: 980 of 1107 functions are accepted, and
@@ -211,10 +223,10 @@ comparable:
 
 - Native: `codegen` covers selection, register allocation and frame layout
   into a typed assembly program. `object` covers the integrated assembler's
-  encoding plus Mach-O writing.
+  encoding and object writing.
 - Cranelift: `setup`, then `translate` (symbol declaration and CLIF
   construction), then `codegen` (`Context::compile`, including machine-code
-  emission), then `object` (definitions plus Mach-O serialization).
+  emission), then `object` (definitions and object writing).
 
 **What timing includes and excludes**
 

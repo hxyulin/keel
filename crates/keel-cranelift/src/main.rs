@@ -2,9 +2,9 @@ use keel_cranelift::{OptLevel, Options, TargetProfile};
 use std::io::{Read, Write};
 use std::path::Path;
 
-const USAGE: &str = "keel-cranelift --target arm64-apple-macosx11.0.0 [--opt none|speed] [--emit object|clif] [--no-verify] <input.keel|-> -o <output|->
+const USAGE: &str = "keel-cranelift --target <arm64-apple-macosx11.0.0|x86_64-unknown-linux-gnu> [--opt none|speed] [--emit object|clif] [--no-verify] <input.keel|-> -o <output|->
 Experimental diagnostic Keel IR -> Cranelift bridge; see crates/keel-cranelift/README.md.
---opt defaults to none. --emit defaults to object (Mach-O). The CLIF verifier
+--opt defaults to none. --emit defaults to object. The CLIF verifier
 runs unless --no-verify is given. Objects require -o <path>.";
 
 fn run() -> Result<(), String> {
@@ -18,12 +18,10 @@ fn run() -> Result<(), String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--target" => {
-                let value = args
-                    .next()
-                    .ok_or("--target requires arm64-apple-macosx11.0.0")?;
+                let value = args.next().ok_or("--target requires a target triple")?;
                 target = Some(TargetProfile::from_cli(&value).ok_or_else(|| {
                     format!(
-                        "unsupported target {value}; only arm64-apple-macosx11.0.0 is supported"
+                        "unsupported target {value}; expected arm64-apple-macosx11.0.0 or x86_64-unknown-linux-gnu"
                     )
                 })?);
             }
@@ -51,7 +49,7 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    let target = target.ok_or("explicit --target arm64-apple-macosx11.0.0 required")?;
+    let target = target.ok_or("explicit --target required")?;
     let input = input.ok_or("input path or - required")?;
     let output = output.ok_or("-o <output> required")?;
     let src = if input == "-" {

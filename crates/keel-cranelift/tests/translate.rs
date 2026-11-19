@@ -218,7 +218,7 @@ fn cli_requires_target_and_preserves_output_on_failure() {
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("--target"));
     let wrong = Command::new(exe)
-        .args(["--target", "x86_64-unknown-linux-gnu"])
+        .args(["--target", "aarch64-unknown-linux-gnu"])
         .arg(&input)
         .args(["-o", "-"])
         .output()

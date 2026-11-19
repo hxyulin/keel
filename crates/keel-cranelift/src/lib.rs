@@ -25,20 +25,28 @@ pub mod import;
 
 pub type Result<T> = std::result::Result<T, String>;
 
-/// The only validated target: Apple arm64, Mach-O, Apple's AAPCS64 variant.
+/// Native object targets supported by the benchmark bridge.
 /// The CLI spells it as `keel-llvm` does; it never infers the host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetProfile {
     AppleArm64,
+    X86_64Linux,
 }
 impl TargetProfile {
     pub const CLI_NAME: &'static str = "arm64-apple-macosx11.0.0";
     pub fn from_cli(name: &str) -> Option<Self> {
-        (name == Self::CLI_NAME).then_some(Self::AppleArm64)
+        match name {
+            Self::CLI_NAME => Some(Self::AppleArm64),
+            "x86_64-unknown-linux-gnu" => Some(Self::X86_64Linux),
+            _ => None,
+        }
     }
     /// target-lexicon triple; the version becomes LC_BUILD_VERSION minos.
     pub fn cranelift_triple(self) -> &'static str {
-        "aarch64-apple-macosx11.0.0"
+        match self {
+            Self::AppleArm64 => "aarch64-apple-macosx11.0.0",
+            Self::X86_64Linux => "x86_64-unknown-linux-gnu",
+        }
     }
 }
 
@@ -83,8 +91,7 @@ pub fn explicit_settings(options: &Options) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Build the target ISA. Only shared flags are set; AArch64 ISA flags keep
-/// their baseline defaults (no LSE/PAuth/BTI assumptions, no host probing).
+/// Build a baseline target ISA without inheriting the host CPU features.
 pub fn build_isa(options: &Options) -> Result<OwnedTargetIsa> {
     let mut flags = settings::builder();
     for (name, value) in explicit_settings(options) {
@@ -193,8 +200,16 @@ pub fn translate_to_clif(module: &k::Module, options: &Options) -> Result<String
 /// For coverage reporting only; objects are never produced from a partial
 /// module.
 pub fn function_support(module: &k::Module) -> Vec<(String, Result<()>)> {
+    function_support_for_target(module, TargetProfile::AppleArm64)
+}
+
+/// Report independently translatable functions for an explicit target.
+pub fn function_support_for_target(
+    module: &k::Module,
+    target: TargetProfile,
+) -> Vec<(String, Result<()>)> {
     let options = Options {
-        target: TargetProfile::AppleArm64,
+        target,
         opt: OptLevel::None,
         verify_clif: true,
     };
@@ -452,7 +467,10 @@ fn ty(t: k::Type) -> Result<ir::Type> {
             | k::VectorType::I64x8
             | k::VectorType::F32x16
             | k::VectorType::F64x8 => {
-                return Err("512-bit SIMD values are not supported by the diagnostic Cranelift bridge".into());
+                return Err(
+                    "512-bit SIMD values are not supported by the diagnostic Cranelift bridge"
+                        .into(),
+                );
             }
             k::VectorType::I8x16 => types::I8X16,
             k::VectorType::I8x32 => types::I8X32,
@@ -488,7 +506,7 @@ fn abi_param(p: &k::AbiParam) -> Result<CAbiParam> {
     })
 }
 
-fn signature(s: &k::Signature) -> Result<ir::Signature> {
+fn signature(s: &k::Signature, call_conv: CallConv) -> Result<ir::Signature> {
     if s.x86_vector_abi.is_some() {
         return Err("explicit x86 vector ABI is unsupported by Cranelift".into());
     }
@@ -501,7 +519,7 @@ fn signature(s: &k::Signature) -> Result<ir::Signature> {
     if s.returns.len() > 1 {
         return Err("multiple-result signatures are unsupported".into());
     }
-    let mut sig = ir::Signature::new(CallConv::AppleAarch64);
+    let mut sig = ir::Signature::new(call_conv);
     for p in &s.params {
         sig.params.push(abi_param(p)?);
     }
@@ -529,6 +547,7 @@ pub fn translate(module: &k::Module, options: &Options) -> Result<Translation> {
 
 fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Translation> {
     check_module(module)?;
+    let config = object.target_config();
     let mut symbols: HashMap<&str, Sym> = HashMap::new();
     for d in &module.data {
         let linkage = match &d.init {
@@ -546,7 +565,8 @@ fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Transl
     }
     let mut signatures = Vec::with_capacity(module.functions.len());
     for f in &module.functions {
-        let sig = signature(&f.sig).map_err(|e| format!("function @{}: {e}", f.name))?;
+        let sig = signature(&f.sig, config.default_call_conv)
+            .map_err(|e| format!("function @{}: {e}", f.name))?;
         if f.personality.is_some() {
             return Err(format!(
                 "function @{}: exception handling is unsupported",
@@ -591,7 +611,8 @@ fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Transl
                 .filter(|d| relocated.contains(d.name.as_str())),
         );
     for d in decls {
-        let sig = signature(&d.sig).map_err(|e| format!("@{}: {e}", d.name))?;
+        let sig =
+            signature(&d.sig, config.default_call_conv).map_err(|e| format!("@{}: {e}", d.name))?;
         match symbols.get(d.name.as_str()) {
             Some(Sym::Data(_)) => {
                 return Err(format!("@{}: declared as data and function", d.name));
@@ -666,7 +687,6 @@ fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Transl
         data.push((*id, desc));
     }
 
-    let config = object.target_config();
     let mut builder_ctx = FunctionBuilderContext::new();
     let mut functions = Vec::with_capacity(module.functions.len());
     for (f, (id, sig)) in module.functions.iter().zip(signatures) {
@@ -1143,7 +1163,7 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                 let sref = match self.sigs[sig.index()] {
                     Some(r) => r,
                     None => {
-                        let s = signature(f.signature(*sig))?;
+                        let s = signature(f.signature(*sig), self.config.default_call_conv)?;
                         let r = self.b.import_signature(s);
                         self.sigs[sig.index()] = Some(r);
                         r

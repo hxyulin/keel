@@ -1,7 +1,7 @@
 /* Driver for kernels.c, compiled once by Clang and linked against each
  * backend's kernels object.
  *   driver check            print every kernel result over edge-case inputs
- *   driver time NAME REPS   time REPS calls in-process (CLOCK_UPTIME_RAW),
+ *   driver time NAME REPS   time REPS calls in-process (a monotonic clock),
  *                           printing "NAME ns checksum"; startup excluded.
  * Inputs come from a fixed xorshift sequence; output is deterministic. */
 #include <math.h>
@@ -158,7 +158,15 @@ static int check(void) {
     return 0;
 }
 
-static u64 now(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+static u64 now(void) {
+#if defined(__APPLE__)
+    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return (u64)ts.tv_sec * 1000000000 + (u64)ts.tv_nsec;
+#endif
+}
 static volatile u64 sink;
 
 static int timed(const char *name, u64 reps) {

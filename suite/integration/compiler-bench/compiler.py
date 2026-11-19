@@ -19,10 +19,46 @@ import time
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = ["keel-baseline", "keel-full", "clif-none", "clif-speed"]
+KERNELS = "logic fnv1a crc32 sieve matmul dot saxpy divmix gcd isort qsort interp classify bits narrow fconv collatz copy dispatch names stackobj".split()
 
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def time_kernels(run, out, rounds, warmups, seed):
+    configurations = ["clang-O2", "raw-keel-full", "raw-clif-speed", "O-keel-full", "O-clif-speed"]
+    images = {name: out / f"check-{name}" for name in configurations}
+    control = out / "runtime-control"
+    shutil.copy2(images["O-keel-full"], control)
+    images["control"] = control
+    rng = random.Random(seed)
+    workloads = {}
+    for kernel in KERNELS:
+        def execute(name, reps):
+            actual, ns, checksum = run([images[name], "time", kernel, reps]).decode().split()
+            if actual != kernel:
+                raise RuntimeError(f"unexpected kernel {actual!r}")
+            return int(ns), checksum
+
+        calibrations = [execute(name, 32)[0] for name in configurations]
+        reps = max(1, min(200_000, round(32 * 20_000_000 / max(1, max(calibrations)))))
+        expected = execute("clang-O2", reps)[1]
+        samples = {name: [] for name in images}
+        orders = []
+        for index in range(warmups + rounds):
+            order = list(images)
+            rng.shuffle(order)
+            orders.append(order)
+            for name in order:
+                ns, checksum = execute(name, reps)
+                if checksum != expected:
+                    raise RuntimeError(f"{kernel} checksum mismatch in {name}")
+                if index >= warmups:
+                    samples[name].append(ns)
+        workloads[kernel] = {"reps": reps, "checksum": expected, "samples_ns": samples,
+                             "orders_including_warmups": orders}
+    return workloads
 
 
 def main():
@@ -33,16 +69,34 @@ def main():
     p.add_argument("--clang", default="clang")
     p.add_argument("--correctness-only", action="store_true",
                    help="run support/object/output gates and stop before all timing rounds")
+    p.add_argument("--runtime", action="store_true", help="also time the in-process kernel workloads")
     p.add_argument("--warmups", type=int, default=2)
     p.add_argument("--rounds", type=int, default=7)
     p.add_argument("--seed", type=int, default=20261024)
     a = p.parse_args()
     if a.warmups < 1 or a.rounds < 3:
         p.error("require at least one warmup and three rounds")
+    if a.runtime and a.correctness_only:
+        p.error("--runtime and --correctness-only are mutually exclusive")
+    host = (platform.system(), platform.machine())
+    if host == ("Darwin", "arm64"):
+        target_keel = "aarch64-apple-darwin"
+        target_clang = "arm64-apple-macosx11.0.0"
+        cpu_cmd = ["sysctl", "-n", "machdep.cpu.brand_string"]
+        hardware_cmd = ["sysctl", "hw.model", "hw.memsize", "hw.ncpu"]
+        os_cmd = ["sw_vers"]
+    elif host == ("Linux", "x86_64"):
+        target_keel = target_clang = "x86_64-unknown-linux-gnu"
+        cpu_cmd = ["uname", "-m"]
+        hardware_cmd = ["lscpu"]
+        os_cmd = ["uname", "-sr"]
+    else:
+        p.error(f"unsupported benchmark host: {host}")
     a.out = a.out.resolve()
     a.out.mkdir(parents=True, exist_ok=False)
     a.keel, a.bench = a.keel.resolve(), a.bench.resolve()
     clang = str(Path(shutil.which(a.clang) or a.clang).resolve())
+    backend_command = [a.bench, "--target", target_clang]
     commands = []
     report = {"schema": 1, "commands": commands, "correctness_passed": False}
 
@@ -69,9 +123,9 @@ def main():
             "tree": run(["git", "rev-parse", "HEAD^{tree}"]).decode().strip(),
             "compiler_source_status": run(["git", "status", "--porcelain", "--", "crates", "Cargo.toml", "Cargo.lock"]).decode(),
             "host": platform.uname()._asdict(),
-            "cpu": run(["sysctl", "-n", "machdep.cpu.brand_string"]).decode().strip(),
-            "hardware": run(["sysctl", "hw.model", "hw.memsize", "hw.ncpu"]).decode(),
-            "os": run(["sw_vers"]).decode(),
+            "cpu": run(cpu_cmd).decode().strip(),
+            "hardware": run(hardware_cmd).decode(),
+            "os": run(os_cmd).decode(),
             "clang": run([clang, "--version"]).decode(),
             "clang_path": clang,
             "load_start": os.getloadavg(),
@@ -85,16 +139,16 @@ def main():
             "c_boundary": "subprocess wall time: raw C read, preprocessing, frontend (including Keel frontend-IR verification), configured optimization, native code generation, integrated assembly, object write; no linking",
             "ir_boundary": "sum of backend stage timers on identical parsed verified Keel IR; excludes parse/verify, IR optimization, process startup, filesystem writes, linking; CLIF verifier off during timing, on for gated objects; FNV64 verifier-on/off fingerprints checked per sample by existing harness",
             "features": "native objects include unwind services; Cranelift unwind_info=false; unequal services",
-            "target_keel": "aarch64-apple-darwin", "target_clang": "arm64-apple-macosx11.0.0",
+            "target_keel": target_keel, "target_clang": target_clang,
             "scope": "one maintained kernels translation unit; 21 named kernel checks plus helpers; no application or runtime performance claim",
             "host_control": "no enforced quiet-host gate, core pinning, frequency control or scheduling isolation; load snapshots only"}
         driver_obj = a.out / "driver.o"
-        run([clang, "-target", "arm64-apple-macosx11.0.0", "-O2", "-ffp-contract=off", "-c", driver, "-o", driver_obj])
+        run([clang, "-target", target_clang, "-O2", "-ffp-contract=off", "-c", driver, "-o", driver_obj])
         c_commands = {}
         for name, flags in [("keel-raw", []), ("keel-O", ["-O"])]:
-            c_commands[name] = [a.keel, "cc", *flags, "--target", "aarch64-apple-darwin", "--emit-object", source, "-o", a.out / f"{name}.o"]
+            c_commands[name] = [a.keel, "cc", *flags, "--target", target_keel, "--emit-object", source, "-o", a.out / f"{name}.o"]
         for name, flag in [("clang-O0", "-O0"), ("clang-O2", "-O2")]:
-            c_commands[name] = [clang, "-target", "arm64-apple-macosx11.0.0", flag, "-ffp-contract=off", "-c", source, "-o", a.out / f"{name}.o"]
+            c_commands[name] = [clang, "-target", target_clang, flag, "-ffp-contract=off", "-c", source, "-o", a.out / f"{name}.o"]
         objects = {}
         for name, cmd in c_commands.items():
             run(cmd)
@@ -104,18 +158,18 @@ def main():
         for variant, flags in [("raw", []), ("O", ["-O"])]:
             ir = a.out / f"kernels.{variant}.keel"
             irs[variant] = ir
-            run([a.keel, "cc", *flags, "--target", "aarch64-apple-darwin", "--emit-ir", source, "-o", ir])
-            support = [json.loads(line) for line in run([a.bench, "support", ir]).splitlines()]
+            run([a.keel, "cc", *flags, "--target", target_keel, "--emit-ir", source, "-o", ir])
+            support = [json.loads(line) for line in run([*backend_command, "support", ir]).splitlines()]
             report["support"][variant] = support
             if any(row["error"] is not None for row in support):
                 raise RuntimeError(f"unsupported functions in {variant}; no timing")
-            for line in run([a.bench, "objects", "--out-dir", a.out, "--label", variant, ir]).splitlines():
+            for line in run([*backend_command, "objects", "--out-dir", a.out, "--label", variant, ir]).splitlines():
                 row = json.loads(line)
                 objects[f"{variant}-{row['config']}"] = Path(row["path"])
         outputs = {}
         for name, obj in objects.items():
             exe = a.out / f"check-{name}"
-            run([clang, "-target", "arm64-apple-macosx11.0.0", driver_obj, obj, "-o", exe])
+            run([clang, "-target", target_clang, driver_obj, obj, "-o", exe])
             outputs[name] = run([exe, "check"])
             (a.out / f"check-{name}.txt").write_bytes(outputs[name])
         oracle = outputs["clang-O0"]
@@ -155,7 +209,7 @@ def main():
             "argv": list(map(str, c_commands[name]))} for name, values in samples.items()}
         report["c_orders_including_warmups"] = orders
         backend = a.out / "ir-time.json"
-        run([a.bench, "time", "--warmup", a.warmups, "--reps", a.rounds,
+        run([*backend_command, "time", "--warmup", a.warmups, "--reps", a.rounds,
              "--out", backend, "--emit-dir", a.out,
              *[f"{variant}={ir}" for variant, ir in irs.items()]])
         report["ir_to_object"] = json.loads(backend.read_text())
@@ -165,6 +219,9 @@ def main():
                 if sha(a.out / f"{variant}.{config}.o") != gated_hashes[name]:
                     raise RuntimeError(f"timed {name} object differs from gated object")
         report["objects_sha256"] = gated_hashes
+        if a.runtime:
+            report["protocol"]["runtime_boundary"] = "monotonic clock inside the driver, fixed input and repetitions per kernel, checksum checked on every run"
+            report["kernel_runtime"] = time_kernels(run, a.out, a.rounds, a.warmups, a.seed)
         report["load_end"] = os.getloadavg()
         report["completed"] = True
         save()

@@ -13,8 +13,8 @@ publish = false
 [dependencies]
 keel-ir = { path = "../keel-ir" }
 # Exact pins; 0.136.3 is the newest stable Cranelift release (2026-10-14).
-# Only the AArch64 backend is compiled. No host detection, JIT or unwind info.
-cranelift-codegen = { version = "=0.136.3", default-features = false, features = ["std", "arm64"] }
+# Only the benchmarked backends are compiled. No JIT or unwind info.
+cranelift-codegen = { version = "=0.136.3", default-features = false, features = ["std", "arm64", "x86"] }
 cranelift-frontend = { version = "=0.136.3", default-features = false, features = ["std"] }
 cranelift-module = { version = "=0.136.3", default-features = false, features = ["std"] }
 cranelift-object = { version = "=0.136.3", default-features = false }
