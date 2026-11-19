@@ -363,7 +363,15 @@ fn allocate_tier_inner(
             let intervals =
                 build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
             let mut spilled = weighted::linear_scan(
-                func, selection, &order, &intervals, pools, &mut locs, &weights, false,
+                func,
+                selection,
+                &order,
+                &intervals,
+                pools,
+                &mut locs,
+                &weights,
+                false,
+                weighted::LengthPenalty::Linear,
             );
             if tier == AllocationTier::Compact {
                 assign_compact_spill_slots(func, &mut spilled, &mut locs, &selection.hints)

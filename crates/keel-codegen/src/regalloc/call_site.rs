@@ -33,6 +33,7 @@ fn scan(
         &mut locs,
         weights,
         callee_first,
+        weighted::LengthPenalty::Linear,
     );
     let slots = if tier == AllocationTier::Compact {
         assign_compact_spill_slots(input.func, &mut spills, &mut locs, &input.selection.hints)

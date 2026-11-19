@@ -1,8 +1,8 @@
 //! Temporarily displace idle scalar owners inside bounded call-free regions.
 use super::{
     Allocation, AllocationInput, AllocationTier, Constraint, ControlFlowGraph, Interval, Loc,
-    OperandKind, ValuePart, allocation_order, assign_spill_slots, baseline_allocation,
-    build_intervals, weighted,
+    OperandKind, ValuePart, allocation_order, assign_compact_spill_slots, assign_spill_slots,
+    baseline_allocation, build_intervals, weighted,
 };
 use keel_ir::Inst;
 use keel_ir::{EntityRef, InstData, Type};
@@ -20,8 +20,16 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     profiling::scope!("bounded-spill-repair");
     backend_scope!(Allocation);
     // Retain Full's intervals for segment repair rather than reconstructing
-    // CFG liveness after the scan. Allocation order, weights and homes match Full.
+    // CFG liveness after the scan. A large dispatch table keeps interpreter
+    // state live through many mutually exclusive opcode handlers. Count those
+    // intervals less heavily and use copy-aware homes for spilled edge values.
     let func = input.func;
+    let shared_dispatch = input.selection.shared_dispatch_allocation;
+    let penalty = if shared_dispatch {
+        weighted::LengthPenalty::SquareRoot
+    } else {
+        weighted::LengthPenalty::Linear
+    };
     let cfg = ControlFlowGraph::compute(func);
     let (order, weights) = allocation_order(func, &cfg, AllocationTier::Full);
     let intervals = build_intervals(
@@ -42,8 +50,13 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         &mut locs,
         &weights,
         false,
+        penalty,
     );
-    let spill_slots = assign_spill_slots(&mut spills, &mut locs);
+    let spill_slots = if shared_dispatch {
+        assign_compact_spill_slots(func, &mut spills, &mut locs, &input.selection.hints)
+    } else {
+        assign_spill_slots(&mut spills, &mut locs)
+    };
     let alloc = baseline_allocation(order, locs, spill_slots, input.pools);
     // Region repair only reloads low halves of these scalar types. Other
     // spills, including i128 halves and vector values, cannot create a segment.

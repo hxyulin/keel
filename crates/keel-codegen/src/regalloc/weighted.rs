@@ -4,6 +4,12 @@
 use super::*;
 use keel_ir::dominators::DominatorTree;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum LengthPenalty {
+    Linear,
+    SquareRoot,
+}
+
 pub(super) fn block_weights(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Vec<u32> {
     let mut weights = vec![1u32; func.num_blocks()];
     let mut positions = vec![usize::MAX; func.num_blocks()];
@@ -69,6 +75,7 @@ pub(super) fn linear_scan<'a>(
     locs: &mut [Vec<Option<Loc>>; 2],
     weights: &[u32],
     callee_first: bool,
+    length_penalty: LengthPenalty,
 ) -> Vec<&'a Interval> {
     // Reuse layout loop weights. Build operand costs only when the scan
     // must choose between spilling two values.
@@ -80,7 +87,14 @@ pub(super) fn linear_scan<'a>(
         &selection.hints,
         |a, b| {
             let (costs, lengths) = costs.get_or_init(|| {
-                spill_costs_with_weights(func, selection, order, intervals, weights)
+                let (costs, mut lengths) =
+                    spill_costs_with_weights(func, selection, order, intervals, weights);
+                if length_penalty == LengthPenalty::SquareRoot {
+                    for length in &mut lengths {
+                        *length = length.isqrt();
+                    }
+                }
+                (costs, lengths)
             });
             // Products can exceed u64 for very large functions. Keep comparisons
             // exact and deterministic without floating point or truncating ratios.

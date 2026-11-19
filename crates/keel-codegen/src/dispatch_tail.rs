@@ -3,9 +3,25 @@ use crate::lowering::SwitchPlan;
 use crate::regalloc::Allocation;
 use crate::select::Selection;
 use keel_ir::fxhash::FxHashMap as HashMap;
-use keel_ir::{Function, Inst, InstData, Module, Type};
+use keel_ir::{Block, Function, Inst, InstData, Module, Type};
 
 const MAX_SITES: usize = 128;
+
+pub(crate) fn large_switch(func: &Function, block: Block) -> Option<Inst> {
+    let [switch] = *func.block_insts(block) else {
+        return None;
+    };
+    let InstData::Switch { arg, cases, .. } = func.inst_data(switch) else {
+        return None;
+    };
+    let mask = match func.value_type(func.resolve(*arg)) {
+        Type::I32 => u32::MAX as u64,
+        Type::I64 => u64::MAX,
+        _ => return None,
+    };
+    ((64..=256).contains(&cases.len()) && SwitchPlan::new(cases, mask).jump_table())
+        .then_some(switch)
+}
 
 pub(crate) fn plan(
     func: &Function,
@@ -41,23 +57,10 @@ pub(crate) fn plan(
     // work to replay after the predecessor has copied its block arguments.
     let mut switches = HashMap::default();
     for &block in &alloc.order {
-        let [switch] = func.block_insts(block) else {
-            continue;
-        };
-        let InstData::Switch { arg, cases, .. } = func.inst_data(*switch) else {
-            continue;
-        };
-        let ty = func.value_type(func.resolve(*arg));
-        let mask = match ty {
-            Type::I32 => u32::MAX as u64,
-            Type::I64 => u64::MAX,
-            _ => continue,
-        };
-        if (64..=256).contains(&cases.len())
-            && SwitchPlan::new(cases, mask).jump_table()
-            && supported(*switch)
+        if let Some(switch) = large_switch(func, block)
+            && supported(switch)
         {
-            switches.insert(block, *switch);
+            switches.insert(block, switch);
         }
     }
 

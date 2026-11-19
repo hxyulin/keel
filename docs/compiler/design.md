@@ -844,7 +844,11 @@ and returns-twice functions skip displacement. The four-use threshold is a stati
 opportunity filter, not a runtime profitability proof. Fast, Full and Split remain
 independently selectable. Application runtime gains are unproven.
 
-`Bounded` (`--regalloc bounded`) uses Full homes and bounded call-free segments.
+`Bounded` (`--regalloc bounded`) uses Full's scan and bounded call-free segments.
+On x86-64, for functions with large shared jump tables, its spill score
+divides weighted operand traffic by the integer square root of live interval
+length. Its spill homes use Compact's copy preferences to reduce moves
+along dispatch edges.
 The CLI selects it at `-O2` and `-O3` (`-O`); `-O0` retains Full,
 `-Os` selects Compact, and `-O1` retains Fast. Library callers retain Full
 unless they select another allocator.
