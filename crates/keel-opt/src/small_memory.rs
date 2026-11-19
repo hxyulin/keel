@@ -235,16 +235,24 @@ fn expand_memcmp_equality(f: &mut Function, at: Inst, args: &[Value]) -> bool {
         if !observes {
             continue;
         }
-        let InstData::Icmp {
-            cond: IntCC::Eq | IntCC::Ne,
-            args,
-        } = data
-        else {
-            return false;
+        let equality_only = match data {
+            InstData::Icmp {
+                cond: IntCC::Eq | IntCC::Ne,
+                args,
+            } => {
+                (f.resolve(args[0]) == result && int_const(f, args[1]) == Some(0))
+                    || (f.resolve(args[1]) == result && int_const(f, args[0]) == Some(0))
+            }
+            InstData::Brif { cond, dests } => {
+                f.resolve(*cond) == result
+                    && dests
+                        .iter()
+                        .flat_map(|dest| &dest.args)
+                        .all(|&arg| f.resolve(arg) != result)
+            }
+            _ => false,
         };
-        if !((f.resolve(args[0]) == result && int_const(f, args[1]) == Some(0))
-            || (f.resolve(args[1]) == result && int_const(f, args[0]) == Some(0)))
-        {
+        if !equality_only {
             return false;
         }
         used = true;
@@ -391,6 +399,23 @@ mod memcmp_tests {
             );
             assert!(!apply(&mut m));
         }
+    }
+
+    #[test]
+    fn branch_condition_can_expand_but_forwarded_result_cannot() {
+        let length = "v3 = iconst.i64 16";
+        let mut condition = candidate(
+            length,
+            "brif v4, block1, block2\nblock1:\nv6 = iconst.i8 1\nreturn v6\nblock2:\nv7 = iconst.i8 0\nreturn v7",
+        );
+        assert!(apply(&mut condition));
+        keel_ir::verify_module(&condition).unwrap();
+
+        let mut forwarded = candidate(
+            length,
+            "brif v4, block1(v4), block2\nblock1(v6: i32):\nv7 = trunc.i8 v6\nreturn v7\nblock2:\nv8 = iconst.i8 0\nreturn v8",
+        );
+        assert!(!apply(&mut forwarded));
     }
 
     #[test]

@@ -50,15 +50,10 @@ pub(super) fn headers(f: &Function) -> FxHashSet<Block> {
                     .all(|&i| f.inst_data(i).call_args().is_none())
             })
         {
-            // Compare-word loops are particularly sensitive to splitting their
-            // load/XOR/test sequence across fetch boundaries.
-            for &block in &candidates {
-                if members.contains(&block) && headers.len() < 8 {
-                    headers.insert(header);
-                    if headers.len() < 8 {
-                        headers.insert(block);
-                    }
-                }
+            // Padding an interior compare block puts NOPs on the hot
+            // fall-through path from the bounds check.
+            if candidates.iter().any(|block| members.contains(block)) {
+                headers.insert(header);
             }
             // At most 248 bytes of loop padding per function.
             if headers.len() == 8 {
@@ -97,6 +92,33 @@ fn word_compare(f: &Function, b: Block) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounds_check_falls_through_to_an_unpadded_word_compare() {
+        let module = keel_ir::parse(
+            "func @f(ptr, ptr, i8) -> i8 {
+block0(v0: ptr, v1: ptr, v2: i8):
+    jump block1
+block1:
+    brif v2, block2, block3
+block2:
+    v3 = load.i64 v0
+    v4 = load.i64 v1
+    v5 = xor v3, v4
+    brif v5, block3, block1
+block3:
+    return v2
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let func = &module.functions[0];
+        assert_eq!(
+            headers(func),
+            [func.blocks().nth(1).unwrap()].into_iter().collect()
+        );
+    }
+
     #[test]
     fn word_loop_only_and_calls_excluded() {
         let source = "func @loop(ptr, ptr) -> i64 {\nblock0(v0: ptr, v1: ptr):\n jump block1\nblock1:\n v2 = load.i64 v0\n v3 = load.i64 v1\n v4 = xor v2, v3\n brif v4, block1, block2(v4)\nblock2(v5: i64):\n return v5\n}\n";

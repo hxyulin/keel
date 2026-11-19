@@ -48,7 +48,9 @@ impl FunctionCompiler<'_> {
             }
             InstData::Jump { ref dest } => {
                 self.block_args(dest, 0);
-                self.branch_unless_next(dest.block);
+                if !self.emit_dispatch_tail(inst) {
+                    self.branch_unless_next(dest.block);
+                }
             }
             InstData::Brif { cond, ref dests } => {
                 let [then_dest, else_dest] = &**dests;
@@ -106,7 +108,7 @@ impl FunctionCompiler<'_> {
                 arg,
                 ref dests,
                 ref cases,
-            } => self.switch(inst, arg, dests, cases),
+            } => self.switch(inst, arg, dests, cases, false),
             InstData::Trap => self.emit(Opcode::Ud2, []),
             InstData::Return { ref args } => {
                 if self.named.locs.first() == Some(&ArgLoc::SretX87) {

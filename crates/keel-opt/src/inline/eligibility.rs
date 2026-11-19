@@ -93,6 +93,7 @@ pub(super) fn body_eligibility_reason(
                     Intrinsic::Memcpy
                         | Intrinsic::Memmove
                         | Intrinsic::Memset
+                        | Intrinsic::Memcmp
                         | Intrinsic::Debugtrap
                         | Intrinsic::LifetimeStart
                         | Intrinsic::LifetimeEnd

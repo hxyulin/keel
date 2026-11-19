@@ -524,7 +524,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     .position(|builtin| builtin.name() == name)
                 else {
                     return Err(format!(
-                        "unsupported builtin opt-out `{raw}`; expected abs, labs, llabs, fabs, fabsf, fabsl, memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
+                        "unsupported builtin opt-out `{raw}`; expected abs, labs, llabs, fabs, fabsf, fabsl, memcmp, memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
                     ));
                 };
                 opts.disabled_library_builtins |= 1 << index;

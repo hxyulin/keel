@@ -2,6 +2,69 @@
 use keel_codegen::{CodegenPipeline, SelectionTier, regalloc::AllocationTier};
 
 #[test]
+fn dense_dispatch_tails_share_the_table_and_case_copies() {
+    let cases = (0..64)
+        .map(|case| format!("{case}: block{}(v4)", 5 + case % 12))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut source = format!(
+        "func @dispatch(i64, i32, i64, i64) -> i64 cc(c) {{
+block0(v0: i64, v1: i32, v2: i64, v3: i64):
+    brif v1, block1, block2
+block1:
+    jump block3(v0, v2)
+block2:
+    jump block3(v0, v3)
+block3(v4: i64, v5: i64):
+    switch v4, block4, [{cases}]
+block4:
+    return v5
+"
+    );
+    for block in 5..17 {
+        source.push_str(&format!(
+            "block{block}(v{}: i64):\n    return v{}\n",
+            block + 2,
+            block + 2
+        ));
+    }
+    source.push('}');
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Bounded,
+    };
+    let pools = &keel_codegen::x86_64::REGISTERS;
+    let text = keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+    let program =
+        keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline).unwrap();
+    let object = keel_asm::x86::assemble_program_object(&program).unwrap();
+    assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
+    assert_eq!(text.matches("_table:\n").count(), 1, "{text}");
+    assert_eq!(text.matches("jmp\trax").count(), 3, "{text}");
+
+    if cfg!(all(target_arch = "x86_64", target_os = "linux")) {
+        use std::{fs, path::Path, process::Command};
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("switch-dispatch-tails");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("dispatch.o"), object).unwrap();
+        fs::write(dir.join("driver.c"), "long dispatch(long, int, long, long); int main(void) { for (long i = -1; i <= 64; ++i) for (int b = 0; b <= 1; ++b) if (dispatch(i,b,71,93) != (i >= 0 && i < 64 ? i : b ? 71 : 93)) return 1; return 0; }").unwrap();
+        let output = Command::new("clang")
+            .current_dir(&dir)
+            .args(["driver.c", "dispatch.o", "-o", "run"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(Command::new(dir.join("run")).status().unwrap().success());
+    }
+}
+
+#[test]
 fn sparse_default_jumps_over_case_pads_on_both_targets() {
     let module = keel_ir::parse(
         "func @f(i32) -> i32 {

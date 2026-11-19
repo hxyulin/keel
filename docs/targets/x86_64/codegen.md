@@ -47,6 +47,15 @@ The register-assignment design keeps r10 and r11 reserved, for 12
 allocatable general registers. Frameless scalar C leaves (beyond the size goal
 below) land only if the suite shows no retired-instruction regression.
 
+Word-comparison loops align their headers. Interior compare blocks retain
+their natural placement so the loop does not execute alignment padding between
+its bounds check and the loads.
+
+With bounded allocation, a jump into a block containing only a dense switch
+can run the switch at the jump site after establishing the original block
+arguments. Up to 128 sites per function share the switch's jump table and case
+landing pads. The original switch still handles incoming conditional edges.
+
 ## AVX selection
 
 AVX is opt-in through `x86::Features { avx: true, ..Default::default() }`, the

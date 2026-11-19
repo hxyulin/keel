@@ -79,6 +79,7 @@ mod constant_division;
 mod cpu_control;
 mod cx16;
 mod descriptor_queries;
+mod dispatch_tail;
 mod f80;
 mod flags_state;
 mod inline_asm;
@@ -992,6 +993,7 @@ struct FunctionCompiler<'a> {
     alloc: Allocation,
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
+    dispatch_tails: HashMap<Inst, Inst>,
     selection: crate::select::Selection,
     packed_absolute_values: HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
@@ -1231,7 +1233,15 @@ impl<'a> FunctionCompiler<'a> {
             packed_sign_values,
             packed_low_loads,
         } = covers;
+        let dispatch_tails = dispatch_tail::plan(
+            func,
+            module,
+            &alloc,
+            &selection,
+            goal != crate::CodegenGoal::Size && pipeline.allocator.name() == "bounded",
+        );
         let mut compiler = Self {
+            dispatch_tails,
             goal,
             shared_return,
             code_model: CodeModel::default(),
@@ -4070,7 +4080,26 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    fn switch(&mut self, inst: Inst, arg: Value, dests: &[BlockCall], cases: &[i64]) {
+    fn switch_target(&self, inst: Inst, index: usize, dest: &BlockCall) -> String {
+        if self.block_args_noop(dest, index) {
+            self.label(dest.block)
+        } else {
+            format!(
+                ".L{}_{inst_name}_edge{index}",
+                self.func.name,
+                inst_name = self.func.inst_name(inst)
+            )
+        }
+    }
+
+    fn switch(
+        &mut self,
+        inst: Inst,
+        arg: Value,
+        dests: &[BlockCall],
+        cases: &[i64],
+        replica: bool,
+    ) {
         let ty = self.ty(arg);
         // Compare the zero-extended bits with the cases as unsigned bits.
         let mask = mask(ty);
@@ -4083,18 +4112,6 @@ impl<'a> FunctionCompiler<'a> {
             .switch_bounds
             .get(&inst)
             .is_some_and(|&range| plan.bound(range));
-        let targets: Vec<String> = dests
-            .iter()
-            .enumerate()
-            .map(|(i, d)| match self.block_args_noop(d, i) {
-                true => self.label(d.block),
-                false => format!(
-                    ".L{}_{inst_name}_edge{i}",
-                    self.func.name,
-                    inst_name = self.func.inst_name(inst)
-                ),
-            })
-            .collect();
         let (min, span) = (plan.min, plan.span);
         // A value that fits a sign-extended 32-bit immediate.
         let imm = |this: &mut Self, value: u64| -> AsmOperand {
@@ -4105,7 +4122,7 @@ impl<'a> FunctionCompiler<'a> {
                 asm_arg(value as i64)
             }
         };
-        if plan.jump_table() {
+        let table = if plan.jump_table() {
             // idx = x - min, unsigned; anything above the span is default.
             // A 32-bit index is zero-extended by writing it.
             let rax = reg(S0, width);
@@ -4120,7 +4137,8 @@ impl<'a> FunctionCompiler<'a> {
             }
             if !bounded {
                 self.emit(Opcode::Cmp, [asm_arg(rax), asm_arg(span)]);
-                self.emit(Opcode::Jcc(7), [asm_arg(&targets[0])]);
+                let default = self.switch_target(inst, 0, &dests[0]);
+                self.emit(Opcode::Jcc(7), [asm_arg(&default)]);
             }
             let table = format!(
                 ".L{}_{inst_name}_table",
@@ -4145,6 +4163,20 @@ impl<'a> FunctionCompiler<'a> {
             );
             self.emit(Opcode::Add, [asm_arg(r64(0)), asm_arg(r64(1))]);
             self.emit(Opcode::Jmp, [asm_arg(r64(0))]);
+            if replica {
+                return;
+            }
+            Some(table)
+        } else {
+            debug_assert!(!replica);
+            None
+        };
+        let targets: Vec<_> = dests
+            .iter()
+            .enumerate()
+            .map(|(i, dest)| self.switch_target(inst, i, dest))
+            .collect();
+        if let Some(table) = table {
             self.out.align(2);
             self.out.label(table.clone());
             for i in plan.table() {

@@ -7,7 +7,7 @@ their limits. [C frontend](README.md) covers the overall language support.
 ## Standard-library builtins
 
 Hosted native C compilation recognizes direct calls to canonical external
-`memcpy`, `memmove` and `memset` declarations as memory intrinsics, and calls to
+`memcmp`, `memcpy`, `memmove` and `memset` declarations as memory intrinsics, and calls to
 `sqrt`, `sqrtf` and `sqrtl` as the IR `fsqrt` operation.
 `abs`, `labs` and `llabs` become integer compare/negate/select operations;
 `fabs`, `fabsf` and `fabsl` become the IR `fabs` operation.
@@ -34,7 +34,7 @@ designator, retain their ordinary call form.
 Taking a function's address still produces the library function's address.
 
 `-fno-builtin` disables ordinary-call recognition. The bounded per-function forms
-are `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
+are `-fno-builtin-memcmp`, `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
 `-fno-builtin-sqrt`, `-fno-builtin-sqrtf`, `-fno-builtin-sqrtl`,
 `-fno-builtin-abs`, `-fno-builtin-labs`, `-fno-builtin-llabs`,
 `-fno-builtin-fabs`, `-fno-builtin-fabsf`, `-fno-builtin-fabsl`,
@@ -44,7 +44,7 @@ are `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-builtin-memset`,
 `-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
 reenables global recognition without changing `__STDC_HOSTED__`. Later global
 flags win; per-function exclusions remain active across global toggles.
-Explicit `__builtin_memcpy`, `__builtin_memmove` and `__builtin_memset` retain
+Explicit `__builtin_memcmp`, `__builtin_memcpy`, `__builtin_memmove` and `__builtin_memset` retain
 their existing semantics regardless of these ordinary-call policies.
 
 Absolute-value arguments are evaluated once. Integer absolute value is defined

@@ -35,11 +35,13 @@ pub enum LibraryBuiltin {
     Sqrtf,
     /// Square root of a `long double`, where it has the `double` format.
     Sqrtl,
+    /// Compare the object representations of two memory regions.
+    Memcmp,
 }
 
 impl LibraryBuiltin {
     /// Every operation, in the order of their `-fno-builtin-` names.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Abs,
         Self::Labs,
         Self::Llabs,
@@ -55,6 +57,7 @@ impl LibraryBuiltin {
         Self::Sqrt,
         Self::Sqrtf,
         Self::Sqrtl,
+        Self::Memcmp,
     ];
 
     /// The library function's name.
@@ -75,6 +78,7 @@ impl LibraryBuiltin {
             Self::Sqrt => "sqrt",
             Self::Sqrtf => "sqrtf",
             Self::Sqrtl => "sqrtl",
+            Self::Memcmp => "memcmp",
         }
     }
 
@@ -84,7 +88,7 @@ impl LibraryBuiltin {
             .find(|operation| operation.name() == name)
     }
 
-    const fn bit(self) -> u16 {
+    const fn bit(self) -> u32 {
         1 << self as u8
     }
 
@@ -94,6 +98,7 @@ impl LibraryBuiltin {
             Self::Memcpy => Some(Intrinsic::Memcpy),
             Self::Memmove => Some(Intrinsic::Memmove),
             Self::Memset => Some(Intrinsic::Memset),
+            Self::Memcmp => Some(Intrinsic::Memcmp),
             _ => None,
         }
     }
@@ -128,6 +133,18 @@ impl LibraryBuiltin {
         const COPY_QUALIFIERS: &[&[u8]] = &[&[0], &[1], &[]];
         const FILL_QUALIFIERS: &[&[u8]] = &[&[0], &[], &[]];
         let void_ptr = |ty: &Ty<'_>| matches!(ty, Ty::Ptr(p) if **p == Ty::Void);
+        if self == Self::Memcmp {
+            const COMPARE_QUALIFIERS: &[&[u8]] = &[&[1], &[1], &[]];
+            return f.has_prototype()
+                && !f.variadic
+                && !f.microsoft_x64
+                && f.ret == Ty::Int(IntKind::Int)
+                && f.params.len() == 3
+                && void_ptr(&f.params[0])
+                && void_ptr(&f.params[1])
+                && f.params[2] == ULONG
+                && f.param_quals == COMPARE_QUALIFIERS;
+        }
         f.has_prototype()
             && !f.variadic
             && !f.microsoft_x64
@@ -153,7 +170,7 @@ impl LibraryBuiltin {
 /// retain their semantics regardless of this policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LibraryBuiltins {
-    enabled: u16,
+    enabled: u32,
     math_errno: bool,
 }
 

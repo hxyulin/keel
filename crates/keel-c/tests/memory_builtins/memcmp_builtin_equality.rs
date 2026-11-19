@@ -1,4 +1,4 @@
-//! Explicit builtin equality expansion and ordinary-call fallback contracts.
+//! Equality expansion and ordinary-call opt-out contracts.
 use keel_ir::{InstData, Target};
 use std::{fs, process::Command};
 
@@ -27,11 +27,58 @@ fn run(c: &mut Command) {
 }
 
 #[test]
+fn memcmp_opt_out_keeps_the_ordinary_call() {
+    let source = "int memcmp(const void *, const void *, unsigned long);\n\
+        int ordinary(const void *a, const void *b) { return !memcmp(a, b, 16); }\n\
+        int explicit(const void *a, const void *b) { return !__builtin_memcmp(a, b, 16); }";
+    let module = keel_c::compile_with_policies(
+        source,
+        "memcmp-opt-out.c",
+        keel_c::Options::default(),
+        keel_c::FunctionBinding::default(),
+        keel_c::LibraryBuiltins::hosted().disable(keel_c::LibraryBuiltin::Memcmp),
+    )
+    .unwrap();
+    let ordinary = &module.functions[0];
+    assert!(ordinary.layout_insts().any(|(_, inst)| matches!(
+        ordinary.inst_data(inst),
+        InstData::Call { func, .. } if ordinary.callee(*func).name == "memcmp"
+    )));
+    let explicit = &module.functions[1];
+    assert!(explicit.layout_insts().any(|(_, inst)| matches!(
+        explicit.inst_data(inst),
+        InstData::Intrinsic {
+            id: keel_ir::Intrinsic::Memcmp,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn required_inlining_accepts_library_memcmp() {
+    let source = "int memcmp(const void *, const void *, unsigned long);\n\
+        static inline __attribute__((always_inline)) int eq(const void *a, const void *b) {\n\
+            return !memcmp(a, b, 16);\n\
+        }\n\
+        int call(const void *a, const void *b) { return eq(a, b); }";
+    let module = compile(source, Target::default());
+    let call = module.functions.iter().find(|f| f.name == "call").unwrap();
+    assert!(!call.layout_insts().any(|(_, inst)| matches!(
+        call.inst_data(inst),
+        InstData::Call { .. }
+            | InstData::Intrinsic {
+                id: keel_ir::Intrinsic::Memcmp,
+                ..
+            }
+    )));
+}
+
+#[test]
 fn builtin_equality_native_guard_pages_and_both_target_objects() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("memcmp-builtin-native");
     fs::create_dir_all(&dir).unwrap();
     let mut source = String::from(
-        "int memcmp(const void*,const void*,unsigned long); int ordinary(const void *a,const void *b){return memcmp(a,b,16)==0;} int general(const void*a,const void*b){return __builtin_memcmp(a,b,16);} int order(const void*a,const void*b){return __builtin_memcmp(a,b,16)<0;} int variable(const void*a,const void*b,unsigned long n){return __builtin_memcmp(a,b,n)==0;}\n",
+        "int memcmp(const void*,const void*,unsigned long); int ordinary(const void *a,const void *b){if (memcmp(a,b,16)) return 0; return 1;} int general(const void*a,const void*b){return __builtin_memcmp(a,b,16);} int order(const void*a,const void*b){return __builtin_memcmp(a,b,16)<0;} int variable(const void*a,const void*b,unsigned long n){return __builtin_memcmp(a,b,n)==0;}\n",
     );
     let mut declarations = String::new();
     let mut checks = String::new();
@@ -72,7 +119,13 @@ fn builtin_equality_native_guard_pages_and_both_target_objects() {
             assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),InstData::Intrinsic{id,..} if id.info().name=="memcmp")),"{name}");
         }
         let f = m.functions.iter().find(|f| f.name == "ordinary").unwrap();
-        assert!(f.layout_insts().any(|(_,i)|matches!(f.inst_data(i),InstData::Call{func,..} if f.callee(*func).name=="memcmp")));
+        assert!(!f.layout_insts().any(|(_, i)| matches!(
+            f.inst_data(i),
+            InstData::Call { func, .. } if f.callee(*func).name == "memcmp"
+        ) || matches!(
+            f.inst_data(i),
+            InstData::Intrinsic { id, .. } if id.info().name == "memcmp"
+        )));
         let assembly = dir.join(format!("{}.s", target.triple()));
         fs::write(&assembly, keel_codegen::compile(&m, target).unwrap()).unwrap();
         run(Command::new("clang")
@@ -108,7 +161,7 @@ fn builtin_equality_native_guard_pages_and_both_target_objects() {
 #include <stdlib.h>
 #include <string.h>
 {declarations}
-int comparator16(void*,void*);int side(void);int general(const void*,const void*);int order(const void*,const void*);int variable(const void*,const void*,unsigned long);
+int comparator16(void*,void*);int ordinary(const void*,const void*);int side(void);int general(const void*,const void*);int order(const void*,const void*);int variable(const void*,const void*,unsigned long);
 typedef int (*Fn)(const void*,const void*);
 static unsigned char *area(long p) {{
  unsigned char *a=mmap(0,p*3,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);
@@ -146,7 +199,7 @@ static void check(Fn eq,Fn ne,int n) {{
 int main(void) {{
  {checks}
  unsigned char a[16]={{0}},b[16]={{255}};
- if(comparator16(a,a)!=1||comparator16(a,b)!=0)abort();
+ if(comparator16(a,a)!=1||comparator16(a,b)!=0||ordinary(a,a)!=1||ordinary(a,b)!=0)abort();
  if(general(a,b)>=0||general(b,a)<=0||order(a,b)!=1||order(b,a)!=0||variable(a,b,0)!=1||variable(a,b,16)!=0)abort();
  return !side();
 }}

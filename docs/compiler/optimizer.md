@@ -574,8 +574,9 @@ before any store, so overlap in either direction works. `memset` multiplies
 its unsigned-extended fill by the repeated 0x01 pattern. A zero
 length removes only the intrinsic. Each operation is expanded alone, never
 merged with a neighbouring one. Variable and larger lengths stay. It also
-replaces a `memcmp` of at most 32 bytes whose result is only compared with
-zero by chunked loads and compares. Balanced, Size and Full run it before
+replaces a `memcmp` of at most 32 bytes with chunked loads and compares when
+every use checks for zero, either with an equality comparison or as a branch
+condition. Balanced, Size and Full run it before
 `stack-forward` in the inlining rounds, and the inliner charges an expandable
 copy as its loads and stores.
 
