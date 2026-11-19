@@ -2,6 +2,8 @@
 mod ascii_scan;
 #[path = "loop_vectorize/conditional_widen.rs"]
 mod conditional_widen;
+#[path = "loop_vectorize/copy.rs"]
+mod copy;
 #[path = "loop_vectorize/loop_reduce_affine.rs"]
 mod loop_reduce_affine;
 #[path = "loop_vectorize/loop_reduce_casts.rs"]

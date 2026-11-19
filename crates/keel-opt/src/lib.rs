@@ -424,6 +424,7 @@ pub(crate) static LOOP_ROTATE: &dyn Pass = &loop_rotate::LoopRotate;
 pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopStrengthReduce;
 pub(crate) static LOOP_UNROLL: &dyn Pass = &loop_unroll::LoopUnroll;
 pub(crate) static LOOP_UNROLL_EXACT: &dyn Pass = &loop_unroll_exact::LoopUnrollExact;
+pub(crate) static LOOP_COPY: &dyn Pass = &loop_vectorize::LoopCopy;
 pub(crate) static LOOP_VECTORIZE: &dyn Pass = &loop_vectorize::LoopVectorize;
 pub(crate) static LOOP_REDUCE: &dyn Pass = &loop_vectorize::LoopReduce;
 pub(crate) static LOOP_REDUCE_MULTI: &dyn Pass = &loop_vectorize::MultiLoopReduce;
@@ -501,6 +502,7 @@ pub static PASSES: &[&dyn Pass] = &[
     AUTO_LOOP_BATCH,
     FAST_LOOP_DOT,
     LOOP_VECTORIZE,
+    LOOP_COPY,
     LOOP_REDUCE,
     LOOP_REDUCE_MULTI,
     FAST_LOOP_REDUCE,
@@ -827,7 +829,7 @@ const FULL_ROUND: [&str; 18] = [
     "loop-reduce",
 ];
 
-const FULL_EPILOGUE: [&str; 34] = [
+const FULL_EPILOGUE: [&str; 35] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -841,6 +843,7 @@ const FULL_EPILOGUE: [&str; 34] = [
     "loop-reduce-multi",
     "loop-unroll",
     "loop-rotate",
+    "loop-copy",
     "phi-simplify",
     "dce",
     "constant-args",

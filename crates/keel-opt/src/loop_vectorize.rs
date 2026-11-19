@@ -14,6 +14,8 @@ use keel_ir::{
     VectorBinaryOp as V, VectorType,
 };
 use std::collections::BTreeMap;
+mod copy;
+pub(crate) use copy::LoopCopy;
 mod narrow;
 mod scan;
 

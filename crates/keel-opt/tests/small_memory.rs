@@ -58,16 +58,20 @@ fn check_expansion(pass: &str, op: &str, size: usize, limit: usize) {
     let mut written = 0;
     let mut stores = 0;
     let mut vector_loads = 0;
+    let expected_flags = MemoryFlags {
+        trap_ub: op == "memcpy",
+        ..MemoryFlags::default()
+    };
     for (_, i) in f.layout_insts() {
         match f.inst_data(i) {
             InstData::Load { ty, flags, .. } => {
                 assert_eq!(stores, 0, "all loads must precede stores");
-                assert_eq!(*flags, MemoryFlags::default());
+                assert_eq!(*flags, expected_flags);
                 read += bytes(*ty);
                 vector_loads += usize::from(ty.is_vector());
             }
             InstData::Store { value, flags, .. } => {
-                assert_eq!(*flags, MemoryFlags::default());
+                assert_eq!(*flags, expected_flags);
                 written += bytes(f.value_type(*value));
                 stores += 1;
             }

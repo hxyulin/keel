@@ -77,6 +77,12 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
             continue;
         }
         let (id, args) = (*id, args.clone());
+        // memcpy requires valid ranges. Keep that contract after expansion
+        // so a later loop transform can combine its exact accesses.
+        let flags = MemoryFlags {
+            trap_ub: id == Intrinsic::Memcpy,
+            ..MemoryFlags::default()
+        };
         let Some(size) = expanded_length(f, at, limit) else {
             continue;
         };
@@ -106,7 +112,7 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
                 InstData::Load {
                     ty: Type::Vector(VectorType::I8x16),
                     addr,
-                    flags: MemoryFlags::default(),
+                    flags,
                 },
             );
             chunks.push((offset, value));
@@ -151,15 +157,7 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
                     })
                 } else {
                     let addr = address(f, at, args[1], offset);
-                    emit(
-                        f,
-                        at,
-                        InstData::Load {
-                            ty,
-                            addr,
-                            flags: MemoryFlags::default(),
-                        },
-                    )
+                    emit(f, at, InstData::Load { ty, addr, flags })
                 };
                 chunks.push((offset, value));
                 offset += width;
@@ -169,15 +167,7 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
         // must work for either overlap direction, including sub-chunk overlap.
         for (offset, value) in chunks {
             let addr = address(f, at, args[0], offset);
-            insert(
-                f,
-                at,
-                InstData::Store {
-                    value,
-                    addr,
-                    flags: MemoryFlags::default(),
-                },
-            );
+            insert(f, at, InstData::Store { value, addr, flags });
         }
         // Leave operand producers in place, including zero-length side effects.
         f.remove_inst(at);

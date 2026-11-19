@@ -146,6 +146,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `stack-promote-large` | Promote private fields with pruned SSA and larger release budgets |
 | `stack-promote-balanced` | Select native promotion budgets for Balanced |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
+| `loop-copy` | Widen guarded forward word copies with a scalar path for short match distances |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
 | `fast-loop-dot` | Full-tier SIMD dot, sum-of-squares and squared-distance accumulation, only in `fast_math` functions |
 | `auto-loop-batch` | Full-tier native scalar batching for literal or dominating-guard lower bounds of at least 32 trips |
@@ -529,6 +530,12 @@ value without reassociation. Absolute-value maps use the existing range and
 alias guards, including the scalar fallback for partial overlap.
 The `instcombine` byte-load rule may combine two such reads over their exact
 byte footprint; it neither reads extra bytes nor crosses another memory access.
+Fixed-size `memcpy` expansion retains the intrinsic's requirement for valid
+source and destination ranges as `trap_ub` on its loads and stores. In the
+Full native pipeline, `loop-copy` uses this or `notrap` to widen a forward
+word copy to 32-byte chunks when the destination is at least 32 bytes ahead
+of the source. It leaves a final scalar iteration and preserves the scalar
+path for shorter distances, including overlapping copies that repeat bytes.
 
 ### stack-forward
 
