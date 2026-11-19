@@ -374,9 +374,11 @@ exceptions:
 - An instruction that stays in its block keeps its place, so chains of selects
   do not sink past calls and keep their conditions alive.
 - Instructions without operands (constants, addresses) are rematerialized in
-  each block that uses them, undoing GVN's function-wide merging. In
-  `gcm-size`, a copy supplying a branch argument goes before the adjacent
-  comparison so selection can keep the comparison and branch together.
+  each block that uses them, undoing GVN's function-wide merging. The regular
+  `gcm` pass keeps the original definitions of stack addresses in functions
+  with at least 512 stack slots. In `gcm-size`, a copy supplying a branch
+  argument goes before the adjacent comparison so selection can keep the
+  comparison and branch together.
 - A `ptradd` of a constant offset stays at the late placement instead of being
   hoisted out of loops, whatever its base. Selection folds the offset into
   loads and stores, while a hoisted address is one more pointer live across

@@ -259,3 +259,34 @@ block6:
 ";
     assert_eq!(func.to_string(), expected);
 }
+
+#[test]
+fn speed_gcm_keeps_existing_addresses_in_large_stack_frames() {
+    for (count, pass, expected) in [(511, "gcm", 2), (512, "gcm", 1), (512, "gcm-size", 2)] {
+        let slots = (0..count)
+            .map(|index| format!("    ss{index} = stack_slot 8, align 8\n"))
+            .collect::<String>();
+        let source = format!(
+            "func @f(i8,i64) -> i64 {{
+{slots}entry(v0:i8,v1:i64):
+    v2 = stack_addr ss0
+    brif v0,left,right
+left:
+    store v1,v2
+    v3 = load.i64 v2
+    return v3
+right:
+    v4 = load.i64 v2
+    return v4
+}}"
+        );
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::run_passes(&mut module, &[pass]).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(
+            module.to_string().matches("stack_addr ss0").count(),
+            expected
+        );
+    }
+}

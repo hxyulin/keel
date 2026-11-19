@@ -35,6 +35,9 @@
 //! loop, costs a register the whole way, and GVN merges every `iconst 1` in
 //! a function into one. (A register allocator that rematerializes would do
 //! this better, at the point where it actually runs out of registers.)
+//! The regular pass keeps existing stack addresses in functions with many
+//! stack slots, where copying addresses to every user block can change
+//! allocation across thousands of stack accesses.
 //!
 //! Users are placed before the instructions they use, so "first use" is
 //! already final when an instruction is placed. Pure instructions cannot
@@ -48,6 +51,7 @@ use keel_ir::{
 
 /// No instruction or block, in the dense per-instruction arrays below.
 const NONE: u32 = u32::MAX;
+const LARGE_STACK_SLOT_COUNT: usize = 512;
 
 pub fn run(func: &mut Function) -> bool {
     run_with_policy(func, false)
@@ -58,6 +62,8 @@ pub fn run_size(func: &mut Function) -> bool {
 }
 
 fn run_with_policy(func: &mut Function, preserve_branches: bool) -> bool {
+    let keep_stack_addresses =
+        !preserve_branches && func.num_stack_slots() >= LARGE_STACK_SLOT_COUNT;
     // An actual FLAGS observation cannot use the usual assumption that pure
     // arithmetic may freely cross pinned instructions. This is deliberately
     // function-wide until IR has explicit machine-FLAGS resource dependencies.
@@ -133,7 +139,10 @@ fn run_with_policy(func: &mut Function, preserve_branches: bool) -> bool {
                 });
                 found
             };
-            if !data.is_pinned() && !f80 {
+            if !data.is_pinned()
+                && !f80
+                && !(keep_stack_addresses && matches!(data, InstData::StackAddr { .. }))
+            {
                 floating.push(inst);
             }
             data.for_each_operand(|v| {
