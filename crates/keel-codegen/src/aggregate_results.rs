@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     AbiParam, BinaryOp, Block, CallConv, FuncRef, Function, InsertPoint, Inst, InstData, Intrinsic,
-    MemoryFlags, Purpose, StackSlot, Type, Value,
+    Layout, MemoryFlags, Purpose, StackSlot, Type, Value,
 };
 
 #[derive(Default)]
@@ -19,8 +19,9 @@ struct Home {
     escaped: bool,
 }
 
-pub(super) fn promote(func: &Function) -> Cow<'_, Function> {
-    if func.num_stack_slots() == 0
+pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
+    if debug
+        || func.num_stack_slots() == 0
         || func.num_values() > 100_000
         || func.debug_loc.is_some()
         || !func.debug_vars.is_empty()
@@ -29,9 +30,9 @@ pub(super) fn promote(func: &Function) -> Cow<'_, Function> {
     {
         return Cow::Borrowed(func);
     }
-    // SysV returns this layout in RAX:RDX without passing a hidden address.
-    // Two i64 results use those registers and leave all other arguments in
-    // their original places, including byval and stack arguments.
+    // SysV and the AArch64 ABIs return this layout in their two integer
+    // result registers without passing a hidden address. Two i64 results
+    // leave the other arguments in their original places.
     let candidates: FxHashSet<_> = func
         .callees()
         .filter(|(_, callee)| {
@@ -44,7 +45,7 @@ pub(super) fn promote(func: &Function) -> Cow<'_, Function> {
                 && callee.attrs.contract.parameters.is_empty()
                 && callee.attrs.contract.parameter_ranges.is_empty()
                 && matches!(sig.params.first().map(|p| &p.purpose),
-                    Some(Purpose::Sret(layout)) if super::aggregate_boundary::pair(layout))
+                    Some(Purpose::Sret(layout)) if is_integer_pair(layout))
         })
         .map(|(id, _)| id)
         .collect();
@@ -251,4 +252,9 @@ pub(super) fn promote(func: &Function) -> Cow<'_, Function> {
         output.remove_inst(site);
     }
     Cow::Owned(output)
+}
+
+pub(crate) fn is_integer_pair(layout: &Layout) -> bool {
+    matches!(layout, Layout::Array(t, 2) if **t == Layout::Scalar(Type::I64))
+        || matches!(layout, Layout::Struct(fs) if fs.as_slice() == [Layout::Scalar(Type::I64), Layout::Scalar(Type::I64)])
 }

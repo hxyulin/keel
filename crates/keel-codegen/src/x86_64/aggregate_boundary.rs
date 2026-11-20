@@ -6,14 +6,8 @@ use super::sysv::{self, ArgLoc, RegPiece, Slot};
 use crate::regalloc::Loc;
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{
-    AbiParam, BinaryOp, CallConv, ConvertOp, Function, InstData, Layout, Purpose, Signature, Type,
-    Value,
+    AbiParam, BinaryOp, CallConv, ConvertOp, Function, InstData, Purpose, Signature, Type, Value,
 };
-
-pub(super) fn pair(layout: &Layout) -> bool {
-    matches!(layout, Layout::Array(t, 2) if **t == Layout::Scalar(Type::I64))
-        || matches!(layout, Layout::Struct(fs) if fs.as_slice() == [Layout::Scalar(Type::I64), Layout::Scalar(Type::I64)])
-}
 
 fn signature(old: &Signature) -> Option<Signature> {
     if old.cc != CallConv::C
@@ -22,7 +16,7 @@ fn signature(old: &Signature) -> Option<Signature> {
         || old.x86_vector_abi.is_some()
         || !old.returns.is_empty()
         || old.params.len() > 16
-        || !matches!(&old.params.first()?.purpose, Purpose::Sret(l) if pair(l))
+        || !matches!(&old.params.first()?.purpose, Purpose::Sret(l) if crate::aggregate_results::is_integer_pair(l))
     {
         return None;
     }
@@ -30,7 +24,9 @@ fn signature(old: &Signature) -> Option<Signature> {
     new.params = old.params[1..]
         .iter()
         .map(|p| match &p.purpose {
-            Purpose::ByVal(l) if pair(l) => Some(AbiParam::new(Type::I128)),
+            Purpose::ByVal(l) if crate::aggregate_results::is_integer_pair(l) => {
+                Some(AbiParam::new(Type::I128))
+            }
             Purpose::Normal
                 if matches!(
                     p.ty,
@@ -627,6 +623,7 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use keel_ir::Layout;
     const SOURCE: &str = include_str!("../../tests/fixtures/aggregate-call-wrapper.keel");
     fn source(s: &str) -> Function {
         let m = keel_ir::parse(s).unwrap();

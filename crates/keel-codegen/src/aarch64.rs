@@ -406,7 +406,8 @@ pub(crate) fn compile_output<'module>(
                 out.flush(&mut sink);
                 continue;
             }
-            let lowered = vector::lower(original);
+            let promoted = crate::aggregate_results::promote(original, debug);
+            let lowered = vector::lower(&promoted);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let request = crate::Request::new(target, *pipeline)
                 .pools(pools)
@@ -468,7 +469,8 @@ pub(crate) fn compile_output<'module>(
                     },
                 )));
             }
-            let lowered = vector::lower(original);
+            let promoted = crate::aggregate_results::promote(original, debug);
+            let lowered = vector::lower(&promoted);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let request = crate::Request::new(target, *pipeline)
                 .pools(pools)

@@ -42,10 +42,8 @@ fn fixed_destinations_recompute_addresses_and_dynamic_destinations_keep_the_save
     ) {
         let (text, _) = compile(&m, sel, alloc, pools);
         for (f, callee, base) in [
-            ("fixed_pair", "make_pair", "sp"),
             ("fixed_hfa", "make_hfa", "sp"),
             ("fixed_nine", "make_nine", "sp"),
-            ("dynamic", "make_pair", "x19"),
             ("overlap", "increment", "sp"),
         ] {
             assert!(

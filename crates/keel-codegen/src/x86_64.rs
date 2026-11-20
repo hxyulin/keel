@@ -72,7 +72,6 @@
 
 mod aes;
 mod aggregate_boundary;
-mod aggregate_results;
 mod aggregate_va_arg;
 mod byte_shuffle;
 mod cache_stream;
@@ -466,11 +465,7 @@ pub(crate) fn compile_output<'module>(
                 .then(|| aggregate_boundary::lower(original))
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
-            let promoted = if debug {
-                std::borrow::Cow::Borrowed(func)
-            } else {
-                aggregate_results::promote(func)
-            };
+            let promoted = crate::aggregate_results::promote(func, debug);
             let lowered = vector::lower(&promoted, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
@@ -544,11 +539,7 @@ pub(crate) fn compile_output<'module>(
                 .then(|| aggregate_boundary::lower(original))
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
-            let promoted = if debug {
-                std::borrow::Cow::Borrowed(func)
-            } else {
-                aggregate_results::promote(func)
-            };
+            let promoted = crate::aggregate_results::promote(func, debug);
             let lowered = vector::lower(&promoted, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
