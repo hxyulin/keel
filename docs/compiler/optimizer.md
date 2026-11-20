@@ -539,6 +539,10 @@ Full native pipeline, `loop-copy` uses this or `notrap` to widen a forward
 word copy to 32-byte chunks when the destination is at least 32 bytes ahead
 of the source. It leaves a final scalar iteration and preserves the scalar
 path for shorter distances, including overlapping copies that repeat bytes.
+The pass also broadcasts an eight-byte pattern from a fixed stack slot to
+fill 32 bytes per iteration. The widened path checks that its destination
+range is disjoint from the pattern. The scalar path rereads the pattern on
+every iteration, so an overlapping store can still change later reads.
 
 ### stack-forward
 

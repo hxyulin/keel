@@ -1,6 +1,6 @@
-//! Widen an eight-byte forward copy loop when its match distance admits it.
+//! Widen eight-byte forward copy and fill loops with guarded ranges.
 use super::*;
-use keel_ir::MemoryFlags;
+use keel_ir::{MemoryFlags, StackSlot};
 
 pub(crate) struct LoopCopy;
 
@@ -9,7 +9,7 @@ impl crate::Pass for LoopCopy {
         "loop-copy"
     }
     fn description(&self) -> &'static str {
-        "widen guarded forward word copies while preserving short-distance overlap"
+        "widen guarded forward word copies and fills while preserving overlap"
     }
     fn family(&self) -> crate::PassFamily {
         crate::PassFamily::Vectorize
@@ -23,6 +23,9 @@ impl crate::Pass for LoopCopy {
         for block in blocks {
             if let Some(copy) = analyze(f, block) {
                 widen(f, copy);
+                changed = true;
+            } else if let Some(fill) = analyze_fill(f, block) {
+                widen_fill(f, fill);
                 changed = true;
             }
         }
@@ -52,6 +55,21 @@ fn step(f: &Function, next: Value, base: Value) -> Option<Inst> {
     }
 }
 
+fn forward_bound(f: &Function, block: Block, cond: Value, next: Value) -> Option<(Inst, Value)> {
+    let compare = def(f, cond)?;
+    let D::Icmp { cond, args } = *f.inst_data(compare) else {
+        return None;
+    };
+    let [lhs, rhs] = args.map(|v| f.resolve(v));
+    let next = f.resolve(next);
+    let end = match cond {
+        IntCC::Ult if lhs == next => rhs,
+        IntCC::Ugt if rhs == next => lhs,
+        _ => return None,
+    };
+    (def(f, end).is_none_or(|i| f.inst_block(i) != block)).then_some((compare, end))
+}
+
 fn analyze(f: &Function, block: Block) -> Option<CopyLoop> {
     let [dst, src] = *f.block_params(block) else {
         return None;
@@ -72,18 +90,8 @@ fn analyze(f: &Function, block: Block) -> Option<CopyLoop> {
     };
     let advance_dst = step(f, next_dst, dst)?;
     let advance_src = step(f, next_src, src)?;
-    let compare = def(f, *cond)?;
-    let D::Icmp { cond, args } = *f.inst_data(compare) else {
-        return None;
-    };
-    let [a, b] = args.map(|v| f.resolve(v));
-    let next_dst = f.resolve(next_dst);
-    let end = match cond {
-        IntCC::Ult if a == next_dst => b,
-        IntCC::Ugt if b == next_dst => a,
-        _ => return None,
-    };
-    if end == dst || end == src || def(f, end).is_some_and(|i| f.inst_block(i) == block) {
+    let (compare, end) = forward_bound(f, block, *cond, next_dst)?;
+    if end == dst || end == src {
         return None;
     }
     let safe = |flags: MemoryFlags| !flags.volatile && (flags.notrap || flags.trap_ub);
@@ -119,6 +127,17 @@ fn analyze(f: &Function, block: Block) -> Option<CopyLoop> {
     }
     let (_, load) = source?;
     let store = destination?;
+    let incoming = loop_entry(f, block)?;
+    Some(CopyLoop {
+        scalar: block,
+        incoming,
+        end,
+        load,
+        store,
+    })
+}
+
+fn loop_entry(f: &Function, block: Block) -> Option<Inst> {
     let analysis = crate::analysis::get(f);
     let preds = analysis.cfg.preds(block);
     let [first, second] = *preds else {
@@ -137,13 +156,154 @@ fn analyze(f: &Function, block: Block) -> Option<CopyLoop> {
     {
         return None;
     }
-    Some(CopyLoop {
+    Some(incoming)
+}
+
+struct FillLoop {
+    scalar: Block,
+    incoming: Inst,
+    end: Value,
+    source: StackSlot,
+    load: MemoryFlags,
+    store: MemoryFlags,
+}
+
+fn analyze_fill(f: &Function, block: Block) -> Option<FillLoop> {
+    let [dst] = *f.block_params(block) else {
+        return None;
+    };
+    let body = f.block_insts(block);
+    let &term = body.last()?;
+    let D::Brif { cond, dests } = f.inst_data(term) else {
+        return None;
+    };
+    if f.value_type(dst) != Type::Ptr || dests[0].block != block || dests[1].block == block {
+        return None;
+    }
+    let [next_dst] = *dests[0].args else {
+        return None;
+    };
+    let advance = step(f, next_dst, dst)?;
+    let (compare, end) = forward_bound(f, block, *cond, next_dst)?;
+    if end == dst {
+        return None;
+    }
+    let mut read = None;
+    let mut write = None;
+    for &inst in body {
+        if f.inst_loc(inst).is_some() {
+            return None;
+        }
+        if [term, compare, advance].contains(&inst) {
+            continue;
+        }
+        match *f.inst_data(inst) {
+            D::Iconst { .. } | D::StackAddr { .. } => {}
+            D::Load {
+                ty: Type::I64,
+                addr,
+                flags,
+            } if flags.notrap && !flags.volatile && read.is_none() => {
+                let D::StackAddr { slot } = *f.inst_data(def(f, addr)?) else {
+                    return None;
+                };
+                read = Some((slot, f.first_result(inst), flags));
+            }
+            D::Store { addr, value, flags }
+                if f.resolve(addr) == dst
+                    && !flags.volatile
+                    && (flags.notrap || flags.trap_ub)
+                    && write.is_none() =>
+            {
+                write = Some((f.resolve(value), flags));
+            }
+            _ => return None,
+        }
+    }
+    let (source, loaded, load) = read?;
+    let (stored, store) = write?;
+    if loaded != stored || f.stack_slot(source).size < 8 {
+        return None;
+    }
+    Some(FillLoop {
         scalar: block,
-        incoming,
+        incoming: loop_entry(f, block)?,
         end,
+        source,
         load,
         store,
     })
+}
+
+fn widen_fill(f: &mut Function, c: FillLoop) {
+    let guard = f.create_block();
+    let prepare = f.create_block();
+    let vector = f.create_block();
+    let dst = f.append_block_param(guard, Type::Ptr);
+    let d = f.append_block_param(vector, Type::Ptr);
+    let source = emit(f, guard, D::StackAddr { slot: c.source });
+    let dst_bits = pointer_bits(f, guard, dst);
+    let src_bits = pointer_bits(f, guard, source);
+    let end = pointer_bits(f, guard, c.end);
+    let chunk = iconst(f, guard, Type::I64, 32);
+    let limit = bin(f, guard, B::Isub, end, chunk);
+    let valid_limit = cmp(f, guard, IntCC::Uge, end, chunk);
+    let fits = cmp(f, guard, IntCC::Ult, dst_bits, limit);
+    let valid_trip = bin(f, guard, B::And, valid_limit, fits);
+    // Check the whole vector-written interval. The source can be before
+    // the first output word or at or beyond the original end pointer.
+    let word = iconst(f, guard, Type::I64, 8);
+    let distance = bin(f, guard, B::Isub, dst_bits, src_bits);
+    let before = cmp(f, guard, IntCC::Ule, src_bits, dst_bits);
+    let separated = cmp(f, guard, IntCC::Uge, distance, word);
+    let earlier = bin(f, guard, B::And, before, separated);
+    let after = cmp(f, guard, IntCC::Uge, src_bits, end);
+    let disjoint = bin(f, guard, B::Or, earlier, after);
+    let safe = bin(f, guard, B::And, valid_trip, disjoint);
+    branch(f, guard, safe, prepare, vec![], c.scalar, vec![dst]);
+    let ty = Type::Vector(VectorType::I64x2);
+    let pattern = emit(
+        f,
+        prepare,
+        D::Load {
+            ty: Type::I64,
+            addr: source,
+            flags: c.load,
+        },
+    );
+    let fill = emit(f, prepare, D::VectorSplat { ty, arg: pattern });
+    jump(f, prepare, vector, vec![dst]);
+
+    let half = iconst(f, vector, Type::I64, 16);
+    let high = bin(f, vector, B::Ptradd, d, half);
+    let mut high_flags = c.store;
+    high_flags.align = high_flags.align.min(16);
+    f.append_inst(
+        vector,
+        D::Store {
+            value: fill,
+            addr: d,
+            flags: c.store,
+        },
+    );
+    f.append_inst(
+        vector,
+        D::Store {
+            value: fill,
+            addr: high,
+            flags: high_flags,
+        },
+    );
+    let next = bin(f, vector, B::Ptradd, d, chunk);
+    let next_bits = pointer_bits(f, vector, next);
+    let more = cmp(f, vector, IntCC::Ult, next_bits, limit);
+    // Leave the last scalar iteration to produce the original exit values.
+    branch(f, vector, more, vector, vec![next], c.scalar, vec![next]);
+    for dest in f.inst_data_mut(c.incoming).branch_dests_mut() {
+        if dest.block == c.scalar {
+            dest.block = guard;
+        }
+    }
 }
 
 fn pointer_bits(f: &mut Function, block: Block, arg: Value) -> Value {

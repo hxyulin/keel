@@ -73,3 +73,77 @@ fn copies_with_observable_faults_or_volatile_accesses_stay_scalar() {
         );
     }
 }
+
+const FILL: &str = "func @fill(ptr,i64,i64,i64) -> i64 {
+ ss0 = stack_slot 128, align 8
+entry(v0:ptr,v1:i64,v2:i64,v3:i64):
+  v4 = stack_addr ss0
+  store v3,v4
+  v5 = ptradd v4,v1
+  v6 = iconst.i64 -1
+  v7 = icmp.eq v1,v6
+  v8 = select v7,v0,v5
+  v9 = ptradd v8,v2
+  jump loop(v8)
+loop(v10:ptr):
+  v11 = stack_addr ss0
+  v12 = load.i64 notrap v11
+  store trap_ub v12,v10
+  v13 = iconst.i64 8
+  v14 = ptradd v10,v13
+  v15 = icmp.ult v14,v9
+  brif v15,loop(v14),exit
+exit:
+  v16 = load.i64 v10
+  return v16
+}";
+
+#[test]
+fn fill_widens_disjoint_ranges_and_keeps_aliasing_reads_in_the_loop() {
+    let module = optimized(FILL);
+    assert_eq!(module.to_string().matches("vsplat.i64x2").count(), 1);
+    let seed = 0x0807_0605_0403_0201_u64;
+    for (offset, length, value) in [
+        (u64::MAX, 0, seed),
+        (u64::MAX, 32, seed),
+        (u64::MAX, 65, seed),
+        (8, 65, seed),
+        (1, 65, 0x0706_0504_0302_0101),
+    ] {
+        let mut interp = Interpreter::new(&module);
+        let base = interp.memory_mut().alloc_bytes(&[0xaa; 128], 8);
+        let result = interp.call(
+            "fill",
+            &[
+                Val::Ptr(base),
+                Val::I64(offset),
+                Val::I64(length),
+                Val::I64(seed),
+            ],
+        );
+        assert_eq!(result, Outcome::Return(vec![Val::I64(value)]));
+        let mut expected = [0xaa; 128];
+        if offset == u64::MAX {
+            for chunk in expected
+                .chunks_exact_mut(8)
+                .take(length.max(1).div_ceil(8) as usize)
+            {
+                chunk.copy_from_slice(&seed.to_le_bytes());
+            }
+        }
+        assert_eq!(interp.memory().read(base, 128).unwrap(), expected);
+    }
+}
+
+#[test]
+fn fill_keeps_volatile_writes_and_observable_load_faults_scalar() {
+    for source in [
+        FILL.replace("load.i64 notrap", "load.i64"),
+        FILL.replace("store trap_ub", "store volatile"),
+    ] {
+        assert_eq!(
+            optimized(&source).to_string(),
+            keel_ir::parse(&source).unwrap().to_string()
+        );
+    }
+}
