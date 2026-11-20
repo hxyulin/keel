@@ -129,7 +129,7 @@ impl<'p> Gen<'p> {
                 .iter()
                 .enumerate()
                 .map(|(index, global)| {
-                    crate::LibraryBuiltin::named(global.name).is_some()
+                    crate::library_builtins::StandardLibraryCall::named(global.name).is_some()
                         && !p
                             .globals
                             .iter()

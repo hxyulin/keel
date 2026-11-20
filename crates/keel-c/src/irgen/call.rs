@@ -1,6 +1,7 @@
 //! Calls, including library builtins, overflow builtins and checked memory builtins.
 
 use super::*;
+use crate::library_builtins::StandardLibraryCall;
 
 impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     /// The signature to call global function `g` with.
@@ -85,6 +86,56 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
     }
 
+    fn small_signed_decimal(&mut self, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
+        if self.g.debug
+            || keel_ir::FunctionPolicy::resolve(&self.b.function().attrs)
+                .is_ok_and(keel_ir::FunctionPolicy::disabled)
+        {
+            return Ok(None);
+        }
+        let [dst, capacity, format, value] = args else {
+            return Ok(None);
+        };
+        if value.ty != Ty::Int(crate::types::IntKind::Int)
+            || !fold_int(capacity, FOLD_DEPTH, self.g.p.c_layout)
+                .is_some_and(|n| (12..=i64::from(i32::MAX)).contains(&n))
+        {
+            return Ok(None);
+        }
+        let mut format = format;
+        while let ExprKind::Cast(inner) = format.kind {
+            format = inner;
+        }
+        let ExprKind::Addr(literal) = format.kind else {
+            return Ok(None);
+        };
+        let ExprKind::Str(id) = literal.kind else {
+            return Ok(None);
+        };
+        let literal = &self.g.p.strings[id];
+        if literal.wide || literal.bytes != b"%d\0" {
+            return Ok(None);
+        }
+        // The literal format has no other conversions, and every i32 and
+        // its terminating zero fit in 12 bytes.
+        const NAME: &str = "keel.c.format_i32";
+        if self.g.p.globals.iter().any(|global| global.symbol == NAME) {
+            return Ok(None);
+        }
+        let sig = Signature::new(&[Type::Ptr, Type::I32], &[Type::I32]);
+        if !self.g.module.has_symbol(NAME) {
+            let mut helpers = keel_ir::parse(include_str!("decimal_format.keel"))
+                .expect("the internal decimal formatter is valid IR");
+            self.g.module.functions.append(&mut helpers.functions);
+        }
+        self.set_loc(e.loc);
+        let dst = self.val(dst)?;
+        let value = self.val(value)?;
+        let callee = self.b.import_function(NAME, sig);
+        let call = self.b.ins().call(callee, &[dst, value]);
+        Ok(Some(self.b.function().first_result(call)))
+    }
+
     pub(super) fn call(
         &mut self,
         f: &Expr<'p>,
@@ -99,8 +150,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             && let ExprKind::Global(index) = inner.kind
         {
             let global = &self.g.p.globals[index];
-            if let Some(operation) = crate::LibraryBuiltin::named(global.name)
-                && self.g.library_builtins.allows(operation)
+            if let Some(operation) = StandardLibraryCall::named(global.name)
+                && operation.allowed(self.g.library_builtins, self.g.p.target)
                 && self.g.library_builtin_symbols[index]
                 && global.library_builtin_compatible
                 && operation.prototype(&Ty::Func(fty))
@@ -110,30 +161,37 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 && global.weak.is_none()
                 && !global.returns_twice
                 && !global.incompatible_return
-                && (!matches!(
-                    operation,
-                    crate::LibraryBuiltin::Sqrtl
-                        | crate::LibraryBuiltin::Fabsl
-                        | crate::LibraryBuiltin::Copysignl
-                ) || self.g.p.target == keel_ir::Target::Aarch64AppleDarwin)
             {
-                return match operation.intrinsic() {
-                    Some(id) => self.builtin(Builtin::Memory(id), args, e),
-                    None => match operation {
-                        crate::LibraryBuiltin::Abs
-                        | crate::LibraryBuiltin::Labs
-                        | crate::LibraryBuiltin::Llabs => self.builtin(Builtin::Abs, args, e),
-                        crate::LibraryBuiltin::Fabs
-                        | crate::LibraryBuiltin::Fabsf
-                        | crate::LibraryBuiltin::Fabsl => self.builtin(Builtin::Fabs, args, e),
-                        crate::LibraryBuiltin::Copysign
-                        | crate::LibraryBuiltin::Copysignf
-                        | crate::LibraryBuiltin::Copysignl => {
-                            self.builtin(Builtin::Copysign, args, e)
+                match operation {
+                    StandardLibraryCall::DecimalSnprintf => {
+                        if let Some(value) = self.small_signed_decimal(args, e)? {
+                            return Ok(Some(value));
                         }
-                        _ => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
-                    },
-                };
+                    }
+                    StandardLibraryCall::Builtin(operation) => {
+                        return match operation.intrinsic() {
+                            Some(id) => self.builtin(Builtin::Memory(id), args, e),
+                            None => match operation {
+                                crate::LibraryBuiltin::Abs
+                                | crate::LibraryBuiltin::Labs
+                                | crate::LibraryBuiltin::Llabs => {
+                                    self.builtin(Builtin::Abs, args, e)
+                                }
+                                crate::LibraryBuiltin::Fabs
+                                | crate::LibraryBuiltin::Fabsf
+                                | crate::LibraryBuiltin::Fabsl => {
+                                    self.builtin(Builtin::Fabs, args, e)
+                                }
+                                crate::LibraryBuiltin::Copysign
+                                | crate::LibraryBuiltin::Copysignf
+                                | crate::LibraryBuiltin::Copysignl => {
+                                    self.builtin(Builtin::Copysign, args, e)
+                                }
+                                _ => self.library_sqrt(index, fty, &args[0], e.loc).map(Some),
+                            },
+                        };
+                    }
+                }
             }
         }
         let mapping = self.g.abi_mapping(fty, usize::MAX, &[])?;

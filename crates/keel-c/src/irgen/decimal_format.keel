@@ -1,0 +1,42 @@
+func @keel.c.format_i32(ptr, i32) -> i32 local {
+    ss0 = stack_slot 12, align 8
+block0(v0:ptr, v1:i32):
+    v2 = stack_addr ss0
+    v3 = iconst.i64 11
+    v4 = ptradd v2, v3
+    v5 = iconst.i8 0
+    store v5, v4
+    v6 = iconst.i32 0
+    v7 = icmp.slt v1, v6
+    v8 = ineg v1
+    v9 = select v7, v8, v1
+    v10 = iconst.i64 -1
+    v11 = iconst.i32 10
+    v12 = iconst.i32 48
+    jump block1(v9, v4)
+block1(v13:i32, v14:ptr):
+    v15 = udiv v13, v11
+    v16 = imul v15, v11
+    v17 = isub v13, v16
+    v18 = iadd v17, v12
+    v19 = trunc.i8 v18
+    v20 = ptradd v14, v10
+    store v19, v20
+    brif v15, block1(v15, v20), block2
+block2:
+    brif v7, block3, block4(v20)
+block3:
+    v21 = ptradd v20, v10
+    v22 = iconst.i8 45
+    store v22, v21
+    jump block4(v21)
+block4(v23:ptr):
+    v24 = ptrtoint.i64 v4
+    v25 = ptrtoint.i64 v23
+    v26 = isub v24, v25
+    v27 = iconst.i64 1
+    v28 = iadd v26, v27
+    intrinsic memcpy(v0, v23, v28)
+    v29 = trunc.i32 v26
+    return v29
+}

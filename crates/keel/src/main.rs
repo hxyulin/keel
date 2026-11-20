@@ -191,6 +191,7 @@ struct Options {
     freestanding: bool,
     no_builtin: bool,
     disabled_library_builtins: u16,
+    no_decimal_snprintf: bool,
     sysroot: Option<std::path::PathBuf>,
     system_include_dirs: Vec<std::path::PathBuf>,
     darwin_deployment: Option<String>,
@@ -227,6 +228,12 @@ impl Options {
         } else {
             keel_c::LibraryBuiltins::hosted()
         };
+        if !self.no_builtin
+            && !self.no_decimal_snprintf
+            && self.optimization == keel_opt::OptimizationTier::Full
+        {
+            policy = policy.with_decimal_snprintf();
+        }
         for (index, builtin) in keel_c::LibraryBuiltin::ALL.into_iter().enumerate() {
             if self.disabled_library_builtins & (1 << index) != 0 {
                 policy = policy.disable(builtin);
@@ -519,12 +526,16 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-fno-builtin-function" => {
                 let name = raw.strip_prefix("-fno-builtin-").unwrap_or_default();
+                if name == "snprintf" {
+                    opts.no_decimal_snprintf = true;
+                    continue;
+                }
                 let Some(index) = keel_c::LibraryBuiltin::ALL
                     .iter()
                     .position(|builtin| builtin.name() == name)
                 else {
                     return Err(format!(
-                        "unsupported builtin opt-out `{raw}`; expected abs, labs, llabs, fabs, fabsf, fabsl, memcmp, memcpy, memmove, memset, sqrt, sqrtf or sqrtl"
+                        "unsupported builtin opt-out `{raw}`; expected abs, labs, llabs, fabs, fabsf, fabsl, memcmp, memcpy, memmove, memset, snprintf, sqrt, sqrtf or sqrtl"
                     ));
                 };
                 opts.disabled_library_builtins |= 1 << index;
@@ -2663,6 +2674,59 @@ mod library_builtin_options_tests {
     use keel_ir::{InstData, Intrinsic};
 
     const SOURCE: &str = "void *memcpy(void *,const void *,unsigned long);\nvoid *memmove(void *,const void *,unsigned long);\nvoid *memset(void *,int,unsigned long);\nvoid *copy(void *d,const void *s,unsigned long n){return memcpy(d,s,n);}\nvoid *move(void *d,const void *s,unsigned long n){return memmove(d,s,n);}\nvoid *fill(void *d,int c,unsigned long n){return memset(d,c,n);}\nvoid *explicit(void *d,const void *s,unsigned long n){return __builtin_memcpy(d,s,n);}\n";
+
+    #[test]
+    fn full_c_optimization_specializes_only_plain_decimal_snprintf() {
+        let dir = std::env::temp_dir().join(format!("keel-decimal-format-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("decimal.i");
+        let output = dir.join("decimal.keel");
+        std::fs::write(
+            &input,
+            r#"
+int snprintf(char *restrict out, unsigned long n, const char *restrict format, ...);
+int decimal(char *p, int x) { return snprintf(p, 12, "%d", x); }
+int short_buffer(char *p, int x) { return snprintf(p, 11, "%d", x); }
+int dynamic_format(char *p, int x, const char *f) { return snprintf(p, 12, f, x); }
+int width(char *p, int x) { return snprintf(p, 16, "%03d", x); }
+"#,
+        )
+        .unwrap();
+        let calls_snprintf = |function: &keel_ir::Function| {
+            function.layout_insts().any(|(_, inst)| {
+                matches!(function.inst_data(inst), InstData::Call { func, .. }
+                    if function.callee(*func).name == "snprintf")
+            })
+        };
+        for (flags, specialized) in [
+            (&["-O"][..], true),
+            (&["-O0"][..], false),
+            (&["-O", "-g"][..], false),
+            (&["-O", "-fno-builtin-snprintf"][..], false),
+        ] {
+            let mut argv = vec![
+                "cc".into(),
+                "--target".into(),
+                "x86_64-unknown-linux-gnu".into(),
+                "--emit-ir".into(),
+                input.display().to_string(),
+                "-o".into(),
+                output.display().to_string(),
+            ];
+            argv.extend(flags.iter().map(|flag| (*flag).to_owned()));
+            run(argv).unwrap();
+            let module = keel_ir::parse(&std::fs::read_to_string(&output).unwrap()).unwrap();
+            for function in module.functions.iter().filter(|f| !f.local) {
+                assert_eq!(
+                    calls_snprintf(function),
+                    function.name != "decimal" || !specialized,
+                    "{flags:?}, {}",
+                    function.name,
+                );
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn library_builtin_flags_apply_to_preprocessed_inputs_and_keep_explicit_builtins() {

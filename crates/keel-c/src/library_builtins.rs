@@ -1,4 +1,4 @@
-//! Frontend provenance for supported standard-library memory and math operations.
+//! Frontend provenance for supported standard-library operations.
 use crate::types::{IntKind, Ty, ULONG};
 use keel_ir::Intrinsic;
 
@@ -166,12 +166,64 @@ impl LibraryBuiltin {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum StandardLibraryCall {
+    Builtin(LibraryBuiltin),
+    DecimalSnprintf,
+}
+
+impl StandardLibraryCall {
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        if name == "snprintf" {
+            Some(Self::DecimalSnprintf)
+        } else {
+            LibraryBuiltin::named(name).map(Self::Builtin)
+        }
+    }
+
+    pub(crate) fn allowed(self, policy: LibraryBuiltins, target: keel_ir::Target) -> bool {
+        match self {
+            Self::Builtin(operation) => {
+                policy.allows(operation)
+                    && (!matches!(
+                        operation,
+                        LibraryBuiltin::Sqrtl | LibraryBuiltin::Fabsl | LibraryBuiltin::Copysignl
+                    ) || target == keel_ir::Target::Aarch64AppleDarwin)
+            }
+            Self::DecimalSnprintf => policy.decimal_snprintf,
+        }
+    }
+
+    pub(crate) fn prototype(self, ty: &Ty<'_>) -> bool {
+        if let Self::Builtin(operation) = self {
+            return operation.prototype(ty);
+        }
+        let Ty::Func(f) = ty else {
+            return false;
+        };
+        let char_ptr = |ty: &Ty<'_>| {
+            matches!(ty, Ty::Ptr(p)
+                if matches!(**p, Ty::Int(IntKind::Char | IntKind::UPlainChar)))
+        };
+        f.has_prototype()
+            && f.variadic
+            && !f.microsoft_x64
+            && f.ret == Ty::Int(IntKind::Int)
+            && f.params.len() == 3
+            && char_ptr(&f.params[0])
+            && f.params[1] == ULONG
+            && char_ptr(&f.params[2])
+            && f.param_quals == [&[0][..], &[], &[1]]
+    }
+}
+
 /// Recognition policy for ordinary C library calls. Explicit `__builtin_` calls
 /// retain their semantics regardless of this policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LibraryBuiltins {
     enabled: u32,
     math_errno: bool,
+    decimal_snprintf: bool,
 }
 
 impl Default for LibraryBuiltins {
@@ -187,6 +239,7 @@ impl LibraryBuiltins {
         Self {
             enabled: (1 << Self::OPERATION_COUNT) - 1,
             math_errno: true,
+            decimal_snprintf: false,
         }
     }
 
@@ -195,6 +248,7 @@ impl LibraryBuiltins {
         Self {
             enabled: 0,
             math_errno: true,
+            decimal_snprintf: false,
         }
     }
 
@@ -218,6 +272,13 @@ impl LibraryBuiltins {
     #[must_use]
     pub const fn without_math_errno(mut self) -> Self {
         self.math_errno = false;
+        self
+    }
+
+    /// Allow small signed decimal `snprintf` calls to use a private formatter.
+    #[must_use]
+    pub const fn with_decimal_snprintf(mut self) -> Self {
+        self.decimal_snprintf = true;
         self
     }
 

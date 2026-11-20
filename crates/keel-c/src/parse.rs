@@ -2135,8 +2135,9 @@ impl<'a> Parser<'a> {
         let g = match existing {
             Some(g) => {
                 let global = &mut self.globals[g];
-                global.library_builtin_compatible &= crate::LibraryBuiltin::named(name)
-                    .is_some_and(|operation| operation.prototype(&ty));
+                global.library_builtin_compatible &=
+                    crate::library_builtins::StandardLibraryCall::named(name)
+                        .is_some_and(|operation| operation.prototype(&ty));
                 if global.ty.numeric_redeclaration_conflict(&ty)
                     || matches!((global.ty, ty), (Ty::Func(a), Ty::Func(b))
                         if !a.parameters_compatible(b))
@@ -2180,8 +2181,9 @@ impl<'a> Parser<'a> {
                     thread_local: false,
                     returns_twice: false,
                     incompatible_return: false,
-                    library_builtin_compatible: crate::LibraryBuiltin::named(name)
-                        .is_some_and(|operation| operation.prototype(&ty)),
+                    library_builtin_compatible:
+                        crate::library_builtins::StandardLibraryCall::named(name)
+                            .is_some_and(|operation| operation.prototype(&ty)),
                     function_attrs: keel_ir::FunctionAttrs::default(),
                     visibility: None,
                     weak: None,

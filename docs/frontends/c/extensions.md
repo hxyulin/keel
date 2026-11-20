@@ -17,6 +17,12 @@ API's `compile` and `compile_with_binding` entry points use this hosted policy.
 `compile_with_policies` accepts `LibraryBuiltins` for explicit control. The bounded
 Wasm profile remains freestanding and does not recognize ordinary library calls.
 
+Full native optimization also specializes a direct `snprintf` call with the
+literal `"%d"`, one `int` argument and a constant capacity of at least 12
+and at most `INT_MAX`. The helper writes the signed decimal digits and a
+terminating zero and returns the character count. Library API callers can
+enable this transformation through `LibraryBuiltins`.
+
 Recognition uses declaration identity and types after parsing the complete
 translation unit. All declarations must retain the canonical native LP64
 prototype, including pointer qualifiers and `unsigned long` size. `sqrtl`, `fabsl` and `copysignl` are
@@ -38,8 +44,8 @@ are `-fno-builtin-memcmp`, `-fno-builtin-memcpy`, `-fno-builtin-memmove`, `-fno-
 `-fno-builtin-sqrt`, `-fno-builtin-sqrtf`, `-fno-builtin-sqrtl`,
 `-fno-builtin-abs`, `-fno-builtin-labs`, `-fno-builtin-llabs`,
 `-fno-builtin-fabs`, `-fno-builtin-fabsf`, `-fno-builtin-fabsl`,
-`-fno-builtin-copysign`, `-fno-builtin-copysignf` and
-`-fno-builtin-copysignl`.
+`-fno-builtin-copysign`, `-fno-builtin-copysignf`,
+`-fno-builtin-copysignl` and `-fno-builtin-snprintf`.
 `-ffreestanding` sets `__STDC_HOSTED__` to zero and disables ordinary recognition;
 `-fhosted` restores hosted preprocessing and global recognition. `-fbuiltin`
 reenables global recognition without changing `__STDC_HOSTED__`. Later global
