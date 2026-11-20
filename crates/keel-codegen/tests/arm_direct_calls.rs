@@ -279,6 +279,31 @@ fn stack_module() -> keel_ir::Module {
     )
     .unwrap();
     source.push_str("func @large_frame(i64)->i64 {\n ss0=stack_slot 65520, align 16\n ss1=stack_slot 8, align 8\nblock0(v0:i64):\n v1=stack_addr ss1\n store v0,v1\n v2=call @capture_large(v0)\n v3=load.i64 v1\n v4=iadd v2,v3\n return v4\n}\n");
+    source.push_str(
+        r#"
+decl @pair_probe(ptr byval [2 x i64],i64,i64,i64,i64,i64,ptr byval [2 x i64],i64)->i64 cc(c)
+func @outgoing_pairs(i64,i64)->i64 cc(c) {
+ ss0=stack_slot 16, align 8
+ ss1=stack_slot 16, align 8
+block0(v0:i64,v1:i64):
+ v2=stack_addr ss0
+ v3=stack_addr ss1
+ v4=iconst.i64 8
+ v5=ptradd v2,v4
+ v6=ptradd v3,v4
+ v7=iadd v0,v1
+ v8=xor v0,v1
+ store v0,v2
+ store v1,v5
+ store v7,v3
+ store v8,v6
+ v9=iconst.i64 3
+ v10=iconst.i64 5
+ v11=call @pair_probe(v2,v0,v1,v7,v8,v9,v3,v10)
+ return v11
+}
+"#,
+    );
     let module = keel_ir::parse(&source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     module
@@ -292,11 +317,15 @@ fn scalar_stack_abi_and_large_offsets_keep_both_object_routes() {
         let program = program.unwrap();
         assert_eq!(
             report.counters[backend_profile::Counter::DirectFunctions as usize],
-            module.functions.len() as u64 - 1
+            module.functions.len() as u64 - 2
         );
+        let text = request.text(&module).unwrap();
+        let pairs = text.split_once("outgoing_pairs:\n").unwrap().1;
+        assert!(!pairs.contains("stack_addr ss0"), "{pairs}");
+        assert!(pairs.contains("stack_addr ss1"), "{pairs}");
         assert_eq!(
             keel_asm::assemble_program_for(target, &program).unwrap(),
-            keel_asm::assemble_source_for(target, &request.text(&module).unwrap()).unwrap()
+            keel_asm::assemble_source_for(target, &text).unwrap()
         );
     }
 }

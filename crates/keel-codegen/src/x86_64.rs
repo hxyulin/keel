@@ -469,7 +469,8 @@ pub(crate) fn compile_output<'module>(
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
             let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
-            let promoted_outputs = aggregate_outputs::promote(&promoted_inputs, debug);
+            let promoted_outputs =
+                crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
             let lowered = vector::lower(&promoted_outputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
@@ -545,7 +546,8 @@ pub(crate) fn compile_output<'module>(
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
             let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
-            let promoted_outputs = aggregate_outputs::promote(&promoted_inputs, debug);
+            let promoted_outputs =
+                crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
             let lowered = vector::lower(&promoted_outputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(

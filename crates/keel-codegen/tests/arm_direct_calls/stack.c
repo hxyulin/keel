@@ -15,6 +15,11 @@ uint64_t stack_probe(PARAMS) {
 static uint64_t many_probe(uint64_t a,uint64_t b,uint64_t c,uint64_t d,uint64_t e,uint64_t f,uint64_t g,uint64_t h,uint64_t i,uint64_t j,uint64_t k,uint64_t l,uint64_t m,uint64_t n) {
     return a+3*b+5*c+7*d+11*e+13*f+17*g+19*h+23*i+29*j+31*k+37*l+41*m+43*n;
 }
+typedef struct { uint64_t lo,hi; } Pair;
+extern uint64_t outgoing_pairs(uint64_t,uint64_t);
+uint64_t pair_probe(Pair a,uint64_t b,uint64_t c,uint64_t d,uint64_t e,uint64_t f,Pair g,uint64_t h) {
+    return 3*a.lo+5*a.hi+7*b+11*c+13*d+17*e+19*f+23*g.lo+29*g.hi+31*h;
+}
 static _Unwind_Reason_Code visit(struct _Unwind_Context *context,void *data) {
     Dl_info info;uintptr_t ip=(uintptr_t)_Unwind_GetIP(context);
     if(ip && dladdr((void*)(ip-1),&info) && info.dli_saddr==(void*)large_frame) *(unsigned*)data=1;
@@ -40,5 +45,11 @@ int main(void) {
     }
     if(indirect_large_homes((void*)many_probe)!=many_probe(4187,4188,4189,4190,4191,4192,4193,4194,4195,4196,4197,4198,4199,4200))return 6;
     if(large_frame(17)!=45)return 7;
+    const uint64_t inputs[]={0,1,UINT64_MAX,UINT64_C(0x8000000000000000)};
+    for(unsigned i=0;i<sizeof(inputs)/sizeof(inputs[0]);i++) {
+        uint64_t x=inputs[i],y=inputs[i]+11,sum=x+y,bits=x^y;
+        if(outgoing_pairs(x,y)!=pair_probe((Pair){x,y},x,y,sum,bits,3,(Pair){sum,bits},5))
+            return 8;
+    }
     return 0;
 }

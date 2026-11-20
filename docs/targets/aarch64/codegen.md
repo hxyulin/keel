@@ -57,6 +57,13 @@ still determine whether that register is available.
 
 ## Calls and copies
 
+The caller can pass the words of a private 16-byte byval argument directly
+from SSA when both words are initialized in the call's block. This applies to
+two-word integer aggregates assigned to two general-purpose registers.
+Darwin and Linux each check the original argument registers, stack offsets
+and copy areas before changing the caller's local signature. A pair that
+spills to the stack as a unit keeps the ordinary byval copy.
+
 Base allocation puts call-live values in callee-saved registers, proven
 preserved caller registers or spill homes. `CallSiteAllocator` can instead save
 GPRs at clobber sites and keep them in caller registers between those sites.
