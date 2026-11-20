@@ -72,6 +72,7 @@
 
 mod aes;
 mod aggregate_boundary;
+mod aggregate_inputs;
 mod aggregate_va_arg;
 mod byte_shuffle;
 mod cache_stream;
@@ -466,7 +467,8 @@ pub(crate) fn compile_output<'module>(
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
-            let lowered = vector::lower(&promoted, features);
+            let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
+            let lowered = vector::lower(&promoted_inputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
                 &func,
@@ -540,7 +542,8 @@ pub(crate) fn compile_output<'module>(
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
-            let lowered = vector::lower(&promoted, features);
+            let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
+            let lowered = vector::lower(&promoted_inputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
                 &func,

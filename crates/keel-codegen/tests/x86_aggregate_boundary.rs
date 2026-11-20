@@ -8,6 +8,31 @@ use keel_codegen::{
     regalloc::{AllocationTier, Pools},
 };
 const SOURCE: &str = include_str!("fixtures/aggregate-call-wrapper.keel");
+const BYVAL_INPUTS: &str = r#"
+func @read_byval_registers(ptr byval [2 x i64], i64, ptr byval [2 x i64], i64, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64, v2: ptr, v3: i64, v4: i64):
+ v5 = load.i64 v0
+ v6 = iconst.i64 8
+ v7 = ptradd v2, v6
+ v8 = load.i32 v7
+ v9 = uext.i64 v8
+ v10 = ptradd v0, v6
+ v11 = load.ptr v10
+ v12 = ptrtoint.i64 v11
+ v13 = xor v5, v9
+ v14 = xor v13, v12
+ v15 = iadd v14, v1
+ v16 = iadd v15, v3
+ v17 = iadd v16, v4
+ return v17
+}
+func @read_byval_rolled(i64, i64, i64, i64, i64, ptr byval [2 x i64], i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: ptr, v6: i64):
+ v7 = load.i64 v5
+ v8 = xor v7, v6
+ return v8
+}
+"#;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -38,7 +63,8 @@ block0(v0: i128):
     );
     let alias = format!("func @JS_Call_alias({definition}")
         .replace("v6 = stack_addr ss4", "v6 = stack_addr ss5");
-    let module = keel_ir::parse(&format!("{SOURCE}{modified}{alias}{shifts}")).unwrap();
+    let module =
+        keel_ir::parse(&format!("{SOURCE}{modified}{alias}{shifts}{BYVAL_INPUTS}")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     for selector in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
@@ -71,6 +97,8 @@ fn execute(bytes: &[u8]) {
 #include <stdlib.h>
 typedef struct { uint64_t lo,hi; } P;
 extern P JS_Call(void *,P,P,int,P *), JS_Call_mut(void *,P,P,int,P *), JS_Call_alias(void *,P,P,int,P *);
+extern uint64_t read_byval_registers(P,uint64_t,P,uint64_t,uint64_t);
+extern uint64_t read_byval_rolled(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,P,uint64_t);
 typedef unsigned __int128 U;
 extern U shl64(U), ushr64(U);
 extern __int128 sshr64(__int128);
@@ -89,6 +117,9 @@ int main(void) {
   if(shl64(wide)!=(wide<<64) || ushr64(wide)!=(wide>>64)
      || sshr64((__int128)wide)!=(__int128)(int64_t)x) abort();
   P a={x,~x},b={x>>11,x<<29},v={~(x<<5),x>>7};
+  if(read_byval_registers(a,b.lo,b,v.lo,v.hi)!=(a.lo^(uint32_t)b.hi^a.hi)+b.lo+v.lo+v.hi)
+      abort();
+  if(read_byval_rolled(x,x,x,x,x,a,b.lo)!=(a.lo^b.lo)) abort();
   void *ctx=(void *)(uintptr_t)(i+17); int argc=(int)(x>>32);
   P p=JS_Call(ctx,a,b,argc,&v);
   P q=JS_CallInternal(ctx,a,b,(P){0,3},argc,&v,2);
