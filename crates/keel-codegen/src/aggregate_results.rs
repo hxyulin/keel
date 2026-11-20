@@ -312,3 +312,173 @@ pub(crate) fn is_integer_pair(layout: &Layout) -> bool {
     matches!(layout, Layout::Array(t, 2) if **t == Layout::Scalar(Type::I64))
         || matches!(layout, Layout::Struct(fs) if fs.as_slice() == [Layout::Scalar(Type::I64), Layout::Scalar(Type::I64)])
 }
+
+/// Return the two words directly when the virtual result address is only
+/// used by exact scalar stores in return blocks.
+pub(crate) fn promote_exits(
+    func: &Function,
+    debug: bool,
+    goal: crate::CodegenGoal,
+) -> Cow<'_, Function> {
+    if debug
+        || goal != crate::CodegenGoal::Speed
+        || !is_register_pair_result(&func.sig)
+        || func.num_values() > 10_000
+        || func.debug_loc.is_some()
+        || !func.debug_vars.is_empty()
+        || func.debug_return.is_some()
+        || func.personality.is_some()
+        || func.attrs.optnone
+        || func.attrs.naked
+        || func.attrs.interrupt
+        || !func.attrs.contract.parameters.is_empty()
+        || !func.attrs.contract.parameter_ranges.is_empty()
+        || !func.restrict_params.is_empty()
+    {
+        return Cow::Borrowed(func);
+    }
+    let Some(entry) = func.entry_block() else {
+        return Cow::Borrowed(func);
+    };
+    let low = func.block_params(entry)[0];
+    if func.resolve(low) != low {
+        return Cow::Borrowed(func);
+    }
+
+    let mut upper = FxHashMap::default();
+    for (_, inst) in func.layout_insts() {
+        let data = func.inst_data(inst);
+        if matches!(
+            data,
+            InstData::InlineAsm { .. }
+                | InstData::Intrinsic {
+                    id: Intrinsic::FrameAddress,
+                    ..
+                }
+                | InstData::ReturnCall { .. }
+                | InstData::ReturnCallIndirect { .. }
+        ) || crate::lowering::returns_twice(func, data)
+            || data.branch_dests().iter().any(|dest| dest.block == entry)
+        {
+            return Cow::Borrowed(func);
+        }
+        if let InstData::Binary {
+            op: BinaryOp::Ptradd,
+            args: [base, offset],
+        } = *data
+            && func.resolve(base) == low
+            && crate::fold::iconst(func, offset) == Some(8)
+        {
+            let high = func.first_result(inst);
+            if func.resolve(high) != high {
+                return Cow::Borrowed(func);
+            }
+            upper.insert(high, inst);
+        }
+    }
+
+    let mut exits = Vec::new();
+    for block in func.blocks() {
+        let mut words = [None, None];
+        for &inst in func.block_insts(block) {
+            let data = func.inst_data(inst);
+            match data {
+                InstData::Binary {
+                    op: BinaryOp::Ptradd,
+                    ..
+                } if upper.contains_key(&func.first_result(inst)) => {}
+                InstData::Store { addr, value, flags }
+                    if func.resolve(*addr) == low || upper.contains_key(&func.resolve(*addr)) =>
+                {
+                    let word = usize::from(func.resolve(*addr) != low);
+                    if flags.volatile
+                        || flags.align > 8
+                        || func.value_type(*value) != Type::I64
+                        || words[word].replace((inst, *value)).is_some()
+                    {
+                        return Cow::Borrowed(func);
+                    }
+                }
+                InstData::Return { .. } => {
+                    let [Some(lo), Some(hi)] = words else {
+                        return Cow::Borrowed(func);
+                    };
+                    exits.push((inst, lo, hi));
+                    words = [None, None];
+                }
+                _ => {
+                    let mut escaped = false;
+                    data.for_each_operand(|operand| {
+                        let operand = func.resolve(operand);
+                        escaped |= operand == low || upper.contains_key(&operand);
+                    });
+                    if escaped {
+                        return Cow::Borrowed(func);
+                    }
+                }
+            }
+        }
+        if words.iter().any(Option::is_some) {
+            return Cow::Borrowed(func);
+        }
+    }
+    if exits.is_empty() {
+        return Cow::Borrowed(func);
+    }
+
+    let mut output = func.clone();
+    use_register_results(&mut output.sig);
+    output.remove_block_param(entry, 0);
+    for (ret, (low_store, low_value), (high_store, high_value)) in exits {
+        output.replace_inst(
+            ret,
+            InstData::Return {
+                args: vec![low_value, high_value],
+            },
+        );
+        output.remove_inst(low_store);
+        output.remove_inst(high_store);
+    }
+    for inst in upper.into_values() {
+        output.remove_inst(inst);
+    }
+    Cow::Owned(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::promote_exits;
+    use crate::CodegenGoal;
+    use std::borrow::Cow;
+
+    #[test]
+    fn a_register_return_home_must_have_no_observers() {
+        let source = "decl @observe(ptr) cc(c)\n\
+            func @pair(ptr sret {i64,i64},i64,i64) cc(c) {\n\
+            block0(v0:ptr,v1:i64,v2:i64):\n\
+                v3 = iconst.i64 8\n\
+                v4 = ptradd v0,v3\n\
+                store v1,v0\n\
+                store v2,v4\n\
+                return\n\
+            }";
+        let module = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert!(matches!(
+            promote_exits(&module.functions[0], false, CodegenGoal::Speed),
+            Cow::Owned(_),
+        ));
+
+        for replacement in ["store volatile v1,v0", "call @observe(v0)\nstore v1,v0"] {
+            let module = keel_ir::parse(&source.replace("store v1,v0", replacement)).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            assert!(
+                matches!(
+                    promote_exits(&module.functions[0], false, CodegenGoal::Speed),
+                    Cow::Borrowed(_),
+                ),
+                "{replacement}",
+            );
+        }
+    }
+}

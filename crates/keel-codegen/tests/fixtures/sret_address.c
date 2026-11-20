@@ -12,6 +12,7 @@ extern uint64_t fixed_pair(uint64_t),external(Pair*,uint64_t),indirect(Pair(*)(u
 extern uint64_t read_and_store_pair(Pair*,uint64_t);
 extern uint64_t indirect_mixed(Pair(*)(uint64_t),Pair*,uint64_t);
 extern double fixed_hfa(double);
+extern Pair pair_return_edges(uint64_t,uint64_t,int);
 #define CHECK(c) do { if(!(c)) { fprintf(stderr,"oracle line %d\n",__LINE__);return 1; } } while(0)
 int main(void) {
  uint64_t state=1;
@@ -25,6 +26,9 @@ int main(void) {
   CHECK(external(&out,x)==p.a && out.a==p.a && out.b==p.b);
   CHECK(indirect(make_pair,x)==p.a);
   CHECK(indirect_mixed(make_pair,&out,x)==(p.a^p.b) && out.a==second.a && out.b==second.b);
+  Pair yes=pair_return_edges(p.a,p.b,1);
+  Pair no=pair_return_edges(p.a,p.b,0);
+  CHECK(yes.a==p.b && yes.b==p.a && no.a==(p.a^p.b) && no.b==p.b);
   CHECK(dynamic(x)==(p.a^x));
   CHECK(overlap(x)==((x+1)^(x+19)));
   Nine n=make_nine(x);uint64_t word;memcpy(&word,n.bytes,8);

@@ -118,3 +118,18 @@ block0(v0:i64):
  v11 = xor v10,v9
  return v11
 }
+func @pair_return_edges(ptr sret {i64,i64},i64,i64,i32) cc(c) {
+block0(v0:ptr,v1:i64,v2:i64,v3:i32):
+ v4 = iconst.i64 8
+ v5 = ptradd v0,v4
+ brif v3, block1, block2
+block1:
+ store v1,v5
+ store v2,v0
+ return
+block2:
+ v6 = xor v1,v2
+ store v6,v0
+ store v2,v5
+ return
+}

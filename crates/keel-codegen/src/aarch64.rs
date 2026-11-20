@@ -410,6 +410,7 @@ pub(crate) fn compile_output<'module>(
                 continue;
             }
             let promoted = crate::aggregate_results::promote(original, debug);
+            let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
             let incoming =
                 aggregate_inputs::promote(&promoted, debug, linux, emission.pressure_schedule);
             let promoted = crate::aggregate_outputs::promote(&incoming, debug, |sig| {
@@ -478,6 +479,7 @@ pub(crate) fn compile_output<'module>(
                 )));
             }
             let promoted = crate::aggregate_results::promote(original, debug);
+            let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
             let incoming =
                 aggregate_inputs::promote(&promoted, debug, linux, emission.pressure_schedule);
             let promoted = crate::aggregate_outputs::promote(&incoming, debug, |sig| {

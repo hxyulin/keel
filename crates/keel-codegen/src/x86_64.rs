@@ -468,6 +468,7 @@ pub(crate) fn compile_output<'module>(
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
+            let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
             let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
             let promoted_outputs =
                 crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
@@ -545,6 +546,7 @@ pub(crate) fn compile_output<'module>(
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
+            let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
             let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
             let promoted_outputs =
                 crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
