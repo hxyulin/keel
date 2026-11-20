@@ -3,17 +3,95 @@ use keel_ir::{InstData, Module};
 const LUA: &str = include_str!("fixtures/full-inline-index2value.keel");
 
 fn run(m: &mut Module, pass: &str) -> keel_opt::OptimizationReport {
+    run_for_target(m, pass, keel_opt::VectorTarget::Portable)
+}
+
+fn run_for_target(
+    m: &mut Module,
+    pass: &str,
+    target: keel_opt::VectorTarget,
+) -> keel_opt::OptimizationReport {
     keel_ir::verify_module(m).unwrap();
     let mut report = keel_opt::OptimizationReport::default();
-    keel_opt::run_passes_for_target_with_report(
-        m,
-        &[pass],
-        keel_opt::VectorTarget::Portable,
-        &mut report,
-    )
-    .unwrap();
+    keel_opt::run_passes_for_target_with_report(m, &[pass], target, &mut report).unwrap();
     keel_ir::verify_module(m).unwrap();
     report
+}
+
+#[test]
+fn aarch64_full_admits_a_bounded_pointer_scanner() {
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+
+    let source = "
+decl @error(ptr) -> i32
+
+func @scan(ptr, ptr) -> ptr local {
+block0(v0: ptr, v1: ptr):
+    v2 = iconst.i64 1
+    v3 = ptradd v1, v2
+    v4 = load.i8 trap_ub v1
+    switch v4, block3, [37: block1, 91: block2]
+block1:
+    v5 = load.ptr v0
+    v6 = icmp.eq v3, v5
+    brif v6, block4, block5
+block2:
+    jump block6(v3)
+block3:
+    return v3
+block4:
+    v12 = call @error(v0)
+    jump block5
+block5:
+    v8 = ptradd v3, v2
+    return v8
+block6(v9: ptr):
+    v10 = load.i8 trap_ub v9
+    brif v10, block7, block8
+block7:
+    v11 = ptradd v9, v2
+    jump block6(v11)
+block8:
+    return v9
+}
+
+func @caller(ptr, ptr) -> ptr {
+block0(v0: ptr, v1: ptr):
+    v2 = call @scan(v0, v1)
+    return v2
+}
+";
+    let observed = |source: &str, pass, target| {
+        let mut module = keel_ir::parse(source).unwrap();
+        run_for_target(&mut module, pass, target)
+            .invocations
+            .into_iter()
+            .flat_map(|entry| entry.inline_sites)
+            .find(|site| site.caller == "caller" && site.callee == "scan")
+            .unwrap()
+            .outcome
+    };
+    assert_eq!(
+        observed(source, "inline-cheap-reserve", Aarch64Neon),
+        "inlined"
+    );
+    assert_eq!(
+        observed(source, "inline-cheap-reserve", X86Sse2),
+        "profitability_blocks"
+    );
+    assert_eq!(
+        observed(source, "inline-noninterposable", Aarch64Neon),
+        "profitability_blocks"
+    );
+    for source in [
+        source.replace("load.i8 trap_ub", "load.i8 volatile"),
+        source.replace("    jump block5", "    brif v12, block3, block5"),
+    ] {
+        assert_eq!(
+            observed(&source, "inline-cheap-reserve", Aarch64Neon),
+            "profitability_blocks"
+        );
+    }
 }
 fn outcome(source: &str, pass: &str, caller: &str, callee: &str) -> String {
     let mut m = keel_ir::parse(source).unwrap();

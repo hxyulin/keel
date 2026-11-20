@@ -67,6 +67,7 @@ pub(super) fn run_observed_policy_budgeted(
         cost: cost_policy,
         target,
     } = policy;
+    let admit_pointer_scanners = cheap_reserve && target == crate::VectorTarget::Aarch64Neon;
     let flatten = module.functions.iter().any(|f| f.attrs.flatten);
     let roots = if cost_policy == InlineCost::Size {
         crate::assembly_symbols::roots(module)
@@ -159,7 +160,7 @@ pub(super) fn run_observed_policy_budgeted(
     for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f, admit_noninterposable);
         let profitability = if legality.is_none() && !flatten {
-            profitability_reason(f, admit_noninterposable)
+            profitability_reason(f, admit_noninterposable, admit_pointer_scanners)
         } else {
             None
         };
@@ -498,7 +499,7 @@ pub(super) fn run_observed_policy_budgeted(
             } {
                 Some(("size profitability", "size_profitability"))
             } else if (!caller.attrs.flatten && flatten) || specialization_only.contains(&t) {
-                profitability_reason(callee, admit_noninterposable)
+                profitability_reason(callee, admit_noninterposable, admit_pointer_scanners)
                     .map(|r| ("profitability threshold", r))
             } else {
                 None

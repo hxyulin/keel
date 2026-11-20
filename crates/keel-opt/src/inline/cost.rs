@@ -1,6 +1,6 @@
 //! Size limits, callee profitability and the cost of inlining one callee.
 use super::clone::{byval_copy_chunks, inline_stack_slots};
-use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, Intrinsic, Purpose};
+use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, Intrinsic, Purpose, Type};
 
 /// The instructions an intrinsic in a priority or cheap-helper callee adds
 /// beyond its own, or `None` when it can become a call. Codegen calls libc
@@ -311,7 +311,72 @@ pub(super) fn inline_cost(callee: &Function) -> (usize, u64) {
     (cost, stack)
 }
 
-pub(super) fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
+// These scanners can spend blocks on a bounded dispatch, a byte loop and
+// exceptional return paths. Inlining keeps the caller's input pointer and
+// returned cursor in the same register allocation.
+fn small_pointer_scanner(f: &Function) -> bool {
+    if !f.local
+        || f.sig.params.len() != 2
+        || !f
+            .sig
+            .params
+            .iter()
+            .all(|p| p.ty == Type::Ptr && p.purpose == Purpose::Normal)
+        || !matches!(f.sig.returns.as_slice(), [p] if p.ty == Type::Ptr && p.purpose == Purpose::Normal)
+        || f.blocks().take(17).count() > 16
+        || f.stack_slots().next().is_some()
+    {
+        return false;
+    }
+    let Some(entry) = f.entry_block() else {
+        return false;
+    };
+    if !f.block_insts(entry).last().is_some_and(|&i| matches!(f.inst_data(i),
+        InstData::Switch { cases, .. } if cases.len() == 2 && cases.iter().all(|&c| (0..=127).contains(&c))))
+    {
+        return false;
+    }
+    let mut calls = Vec::new();
+    for (_, i) in f.layout_insts() {
+        match f.inst_data(i) {
+            InstData::Iconst { .. }
+            | InstData::Icmp { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::Return { .. }
+            | InstData::Jump { .. }
+            | InstData::Brif { .. }
+            | InstData::Switch { .. }
+            | InstData::Binary {
+                op: BinaryOp::Ptradd,
+                ..
+            }
+            | InstData::Convert {
+                op: keel_ir::ConvertOp::Sext | keel_ir::ConvertOp::Uext,
+                ..
+            } => {}
+            InstData::Load {
+                ty: Type::I8 | Type::Ptr,
+                flags,
+                ..
+            } if !flags.volatile => {}
+            InstData::Call { .. } if calls.len() < 2 => calls.push(i),
+            _ => return false,
+        }
+    }
+    !f.layout_insts().any(|(_, i)| {
+        let mut used = false;
+        f.inst_data(i).for_each_operand(|v| {
+            used |= crate::ir_match::def(f, v).is_some_and(|d| calls.contains(&d));
+        });
+        used
+    })
+}
+
+pub(super) fn profitability_reason(
+    f: &Function,
+    full: bool,
+    admit_pointer_scanners: bool,
+) -> Option<&'static str> {
     let scale = if f.attrs.inlinehint || f.attrs.hot {
         2
     } else {
@@ -320,7 +385,10 @@ pub(super) fn profitability_reason(f: &Function, full: bool) -> Option<&'static 
     if f.attrs.alwaysinline || (full && readonly_leaf(f)) {
         return None;
     }
-    if f.blocks().count() > MAX_BLOCKS * scale && !cheap_leaf_switch(f) {
+    if f.blocks().count() > MAX_BLOCKS * scale
+        && !cheap_leaf_switch(f)
+        && !(admit_pointer_scanners && small_pointer_scanner(f))
+    {
         Some("profitability_blocks")
     } else if code_size(f) > MAX_INSTS * scale {
         Some("profitability_instructions")

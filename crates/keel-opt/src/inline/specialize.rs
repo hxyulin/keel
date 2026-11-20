@@ -126,15 +126,15 @@ impl Cache {
         // Constant context must reveal a body no more expensive than the
         // existing call-cost allowance. Larger contexts still need a more
         // precise profitability model, rather than wider ordinary thresholds.
-        let result = if cost.0 <= CALL_SITE_COST && profitability_reason(&function, true).is_none()
-        {
-            let result = self.bodies.len();
-            self.bodies.push(Body { function, cost });
-            Some(result)
-        } else {
-            crate::analysis::forget(&function);
-            None
-        };
+        let result =
+            if cost.0 <= CALL_SITE_COST && profitability_reason(&function, true, false).is_none() {
+                let result = self.bodies.len();
+                self.bodies.push(Body { function, cost });
+                Some(result)
+            } else {
+                crate::analysis::forget(&function);
+                None
+            };
         self.entries.insert(key, result);
         result
     }

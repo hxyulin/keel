@@ -206,6 +206,7 @@ impl Pass for InlineCheapReserve {
             context.sites.as_deref_mut(),
             InlinePolicy {
                 cheap_reserve: true,
+                target: context.target,
                 ..InlinePolicy::NONINTERPOSABLE
             },
             Some(&callers),

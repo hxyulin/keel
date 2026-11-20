@@ -408,6 +408,12 @@ wrapper already contains them, and freeze templates before the ordinary sites.
 Template instruction and stack costs are cached within that invocation.
 Caller stack checks and growth ledgers still use the current caller state.
 
+AArch64 Full also admits local pointer scanners with two pointer arguments
+and a pointer result. The entry dispatch has two byte cases. The scanner has
+at most 16 blocks, no stack slots or store instructions, and at most two direct calls
+whose results it does not use. The ordinary instruction and growth limits
+still apply.
+
 Cloning remaps block and value handles through direct-index tables when their
 arena bounds are at most 4096, limiting each table to 32 KiB for current handle
 types. Larger arenas use sparse maps, including small live bodies with many
