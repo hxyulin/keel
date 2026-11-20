@@ -21,7 +21,11 @@ struct CopySite {
 }
 
 pub(crate) fn run(f: &mut Function, context: &OptimizationContext) -> bool {
-    if context.target != VectorTarget::X86Sse2 || f.num_blocks() < 128 {
+    if !matches!(
+        context.target,
+        VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon
+    ) || f.num_blocks() < 128
+    {
         return false;
     }
     let copies: Vec<_> = f

@@ -3,7 +3,7 @@ use keel_ir::{EntityRef, InstData, MemoryFlags, Module, Type};
 #[test]
 fn short_record_copies_keep_the_original_fallback_and_copy_order() {
     use keel_ir_interp::{Interpreter, Outcome, Val};
-    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+    use keel_opt::VectorTarget::{Aarch64Neon, Portable, X86Sse2};
     use std::fmt::Write as _;
 
     let cases = (2..129)
@@ -83,7 +83,11 @@ block1:
     assert_eq!(optimized.to_string(), before);
     let mut arm = original.clone();
     keel_opt::run_passes_for_target(&mut arm, &pass, Aarch64Neon).unwrap();
-    assert_eq!(arm.to_string(), original.to_string());
+    keel_ir::verify_module(&arm).unwrap();
+    assert_eq!(arm.to_string(), before);
+    let mut portable = original.clone();
+    keel_opt::run_passes_for_target(&mut portable, &pass, Portable).unwrap();
+    assert_eq!(portable.to_string(), original.to_string());
     let mut ordinary = keel_ir::parse(&source.replace(
         "intrinsic memcpy(v2, v1, v10)",
         "intrinsic memmove(v2, v1, v10)",

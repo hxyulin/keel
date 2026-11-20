@@ -124,7 +124,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `inline-late-record-copy` | Inline bounded local record-copy helpers after loop optimization on AArch64 and x86-64 |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
-| `short-record-copies` | Specialize single-record and empty `memcpy` paths in large x86-64 functions |
+| `short-record-copies` | Specialize single-record and empty `memcpy` paths in large native functions |
 | `memory-expand` | Expand constant memory intrinsics of 0 to 128 bytes in Fast and Basic; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
 | `stack-notrap` | Mark loads and stores proven inside a fixed stack slot `notrap`; see [memory passes](#memory-passes) |
@@ -552,7 +552,7 @@ The `instcombine` byte-load rule may combine two such reads over their exact
 byte footprint; it neither reads extra bytes nor crosses another memory access.
 Fixed-size `memcpy` expansion retains the intrinsic's requirement for valid
 source and destination ranges as `trap_ub` on its loads and stores. Full on
-x86-64 also specializes two kinds of dynamic `memcpy` in large functions. It
+AArch64 and x86-64 specializes two kinds of dynamic `memcpy` in large functions. It
 copies one 16-byte record directly when a scaled signed count is one and
 skips an eight-byte-element copy when its byte count is zero. The pass only
 applies when both kinds are present, and it keeps the original intrinsic for
