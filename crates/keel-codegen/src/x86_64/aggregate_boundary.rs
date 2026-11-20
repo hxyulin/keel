@@ -10,7 +10,7 @@ use keel_ir::{
     Value,
 };
 
-fn pair(layout: &Layout) -> bool {
+pub(super) fn pair(layout: &Layout) -> bool {
     matches!(layout, Layout::Array(t, 2) if **t == Layout::Scalar(Type::I64))
         || matches!(layout, Layout::Struct(fs) if fs.as_slice() == [Layout::Scalar(Type::I64), Layout::Scalar(Type::I64)])
 }

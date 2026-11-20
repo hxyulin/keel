@@ -14,6 +14,21 @@ block0(v0:i64):
  v6 = xor v2,v5
  return v6
 }
+func @read_and_store_pair(ptr,i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:ptr,v1:i64):
+ v2 = stack_addr ss0
+ intrinsic lifetime_start(v2)
+ call @make_pair(v2,v1)
+ v3 = load.i64 align 8 v2
+ v4 = iconst.i64 8
+ v5 = ptradd v2,v4
+ v6 = load.i64 align 8 v5
+ intrinsic lifetime_end(v2)
+ v7 = xor v3,v6
+ call @make_pair(v0,v7)
+ return v7
+}
 func @external(ptr,i64)->i64 cc(c) {
 block0(v0:ptr,v1:i64):
  call @make_pair(v0,v1)

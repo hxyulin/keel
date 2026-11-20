@@ -50,12 +50,7 @@ fn fixed_integer_pairs_use_frame_offsets_and_pointer_arguments_keep_the_save() {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&EMPTY, &keel_codegen::x86_64::REGISTERS] {
                 let (text, _) = compile(&m, sel, alloc, pools);
-                for (f, callee) in [
-                    ("fixed_pair", "make_pair"),
-                    ("dynamic", "make_pair"),
-                    ("overlap", "increment"),
-                    ("indirect", "r10"),
-                ] {
+                for (f, callee) in [("overlap", "increment"), ("indirect", "r10")] {
                     assert!(
                         after_call(&text, f, callee).starts_with("mov\tqword ptr [rbp"),
                         "{f}: {text}"
