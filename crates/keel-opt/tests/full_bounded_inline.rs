@@ -106,6 +106,82 @@ fn outcome(source: &str, pass: &str, caller: &str, callee: &str) -> String {
 }
 
 #[test]
+fn x86_full_can_inline_bounded_record_copies_after_loop_optimization() {
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+
+    let source = "
+decl @grow(ptr) -> i32
+
+func @copy(ptr, ptr, ptr, ptr, i64, i64) -> i32 local {
+block0(v0:ptr, v1:ptr, v2:ptr, v3:ptr, v4:i64, v5:i64):
+    v6 = iconst.i64 0
+    v7 = iconst.i64 8
+    v8 = iconst.i32 0
+    v9 = icmp.ugt v4, v5
+    brif v9, block1, block2
+block1:
+    v10 = call @grow(v0)
+    brif v10, block6, block2
+block2:
+    brif v4, block3(v6), block4
+block3(v11:i64):
+    v12 = ptradd v2, v11
+    v13 = load.i64 v12
+    v14 = ptradd v1, v11
+    store v13, v14
+    v15 = iadd v11, v7
+    v16 = icmp.ult v15, v4
+    brif v16, block3(v15), block4
+block4:
+    brif v5, block5(v6), block8
+block5(v17:i64):
+    v18 = ptradd v3, v17
+    v19 = load.i64 v18
+    v20 = ptradd v0, v17
+    store v19, v20
+    v21 = iadd v17, v7
+    v22 = icmp.ult v21, v5
+    brif v22, block5(v21), block7
+block6:
+    return v10
+block7:
+    jump block8
+block8:
+    return v8
+}
+
+func @caller(ptr, ptr, ptr, ptr, i64, i64) -> i32 {
+block0(v0:ptr, v1:ptr, v2:ptr, v3:ptr, v4:i64, v5:i64):
+    v6 = call @copy(v0, v1, v2, v3, v4, v5)
+    return v6
+}
+";
+    let still_calls = |source: &str, pass, target| {
+        let mut module = keel_ir::parse(source).unwrap();
+        run_for_target(&mut module, pass, target);
+        let caller = &module.functions[1];
+        caller.layout_insts().any(|(_, i)| {
+            matches!(caller.inst_data(i), InstData::Call { func, .. }
+                if caller.callee(*func).name == "copy")
+        })
+    };
+    let late = "inline-late-record-copy";
+    assert!(!still_calls(source, late, X86Sse2));
+    assert!(still_calls(source, late, Aarch64Neon));
+    assert!(still_calls(source, "inline-cheap-reserve", X86Sse2));
+    assert!(still_calls(
+        &source.replace("load.i64 v12", "load.i64 volatile v12"),
+        late,
+        X86Sse2
+    ));
+    assert!(still_calls(
+        &source.replace("-> i32 local", "-> i32 noinline local"),
+        late,
+        X86Sse2
+    ));
+}
+
+#[test]
 fn retained_lua_leaf_is_full_only_and_keeps_load_flags() {
     let original = keel_ir::parse(LUA).unwrap();
     assert_eq!(original.functions[0].blocks().count(), 14);

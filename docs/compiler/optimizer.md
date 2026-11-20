@@ -122,6 +122,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 |---|---|
 | `inline` (opt-in) | Bounded private direct-call expansion; see [inlining](#inlining) |
 | `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
+| `inline-late-record-copy` | Inline bounded local record-copy helpers after loop optimization on x86-64 |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `memory-expand` | Expand constant memory intrinsics of 0 to 128 bytes in Fast and Basic; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
@@ -414,6 +415,12 @@ and a pointer result. The entry dispatch has two byte cases. The scanner has
 at most 16 blocks, no stack slots or store instructions, and at most two direct calls
 whose results it does not use. The ordinary instruction and growth limits
 still apply.
+
+On x86-64, Full runs `inline-late-record-copy` after loop optimization. It
+admits a bounded local record-copy helper with a single direct call and two
+separate copy loops. The pass applies the usual call binding, legality and
+growth checks. Running it late keeps the original copy loops available to the
+loop optimizer before it clones them into their callers.
 
 Cloning remaps block and value handles through direct-index tables when their
 arena bounds are at most 4096, limiting each table to 32 KiB for current handle

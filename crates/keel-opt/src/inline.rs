@@ -116,6 +116,7 @@ impl Pass for InlineSize {
 enum InlineCost {
     Default,
     Size,
+    LateRecordCopy,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -217,6 +218,60 @@ impl Pass for InlineCheapReserve {
     fn uses_inline_budget(&self) -> bool {
         true
     }
+    fn family(&self) -> PassFamily {
+        PassFamily::Inline
+    }
+}
+
+pub(crate) struct InlineLateRecordCopy;
+
+impl Pass for InlineLateRecordCopy {
+    fn name(&self) -> &'static str {
+        "inline-late-record-copy"
+    }
+
+    fn description(&self) -> &'static str {
+        "inline bounded local record-copy helpers after loop optimization"
+    }
+
+    fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
+        false
+    }
+
+    fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
+        if context.target != crate::VectorTarget::X86Sse2
+            || !module.functions.iter().any(cost::late_record_copy)
+        {
+            return Some(false);
+        }
+        let callers = enabled_callers(module, context);
+        let report = run_observed_policy_budgeted(
+            module,
+            context.sites.as_deref_mut(),
+            InlinePolicy {
+                cost: InlineCost::LateRecordCopy,
+                target: context.target,
+                ..InlinePolicy::NONINTERPOSABLE
+            },
+            Some(&callers),
+            context.budget,
+        );
+        let changed = report.changed_callers(module, context.changed);
+        for (function, &changed) in module.functions.iter_mut().zip(context.changed.iter()) {
+            if changed {
+                crate::canonicalize::run(function);
+                crate::instcombine::run(function);
+                crate::simplify_cfg::run(function);
+                crate::dce::run(function);
+            }
+        }
+        Some(changed)
+    }
+
+    fn uses_inline_budget(&self) -> bool {
+        true
+    }
+
     fn family(&self) -> PassFamily {
         PassFamily::Inline
     }

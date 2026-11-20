@@ -447,6 +447,7 @@ pub(crate) static ADJACENT_ABS: &dyn Pass = &BuiltinPass::new(
     |f, _| adjacent_abs::run(f),
 );
 pub(crate) static INLINE_CHEAP_RESERVE: &dyn Pass = &inline::InlineCheapReserve;
+pub(crate) static INLINE_LATE_RECORD_COPY: &dyn Pass = &inline::InlineLateRecordCopy;
 pub(crate) static CALL_LOAD_REUSE: &dyn Pass = &call_load_reuse::CallLoadReuse;
 pub(crate) static INTERNAL_FAST_CALLS: &dyn Pass = &internal_fast_calls::InternalFastCalls;
 pub(crate) static TAIL_CALLS: &dyn Pass = &tail_calls::TailCalls;
@@ -529,6 +530,7 @@ pub static PASSES: &[&dyn Pass] = &[
     INLINE_NONINTERPOSABLE,
     ADJACENT_ABS,
     INLINE_CHEAP_RESERVE,
+    INLINE_LATE_RECORD_COPY,
     CALL_LOAD_REUSE,
     INTERNAL_FAST_CALLS,
     TAIL_CALLS,
@@ -856,7 +858,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 38] = [
+const FULL_EPILOGUE: [&str; 39] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -881,6 +883,7 @@ const FULL_EPILOGUE: [&str; 38] = [
     "loop-unroll-exact",
     "load-reuse",
     "dce",
+    "inline-late-record-copy",
     "empty-calls",
     "inline-guards",
     "dce",

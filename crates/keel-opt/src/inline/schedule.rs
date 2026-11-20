@@ -158,12 +158,16 @@ pub(super) fn run_observed_policy_budgeted(
     let mut specialization_only = FxHashSet::default();
     let mut specialized = super::specialize::Cache::default();
     for (index, f) in module.functions.iter().enumerate() {
+        if cost_policy == InlineCost::LateRecordCopy && !super::cost::late_record_copy(f) {
+            continue;
+        }
         let legality = eligibility_reason(f, admit_noninterposable);
-        let profitability = if legality.is_none() && !flatten {
-            profitability_reason(f, admit_noninterposable, admit_pointer_scanners)
-        } else {
-            None
-        };
+        let profitability =
+            if legality.is_none() && !flatten && cost_policy != InlineCost::LateRecordCopy {
+                profitability_reason(f, admit_noninterposable, admit_pointer_scanners)
+            } else {
+                None
+            };
         let recursion = !f.attrs.noinline && recursive[index];
         let reason = if f.attrs.noinline {
             Some("noinline")

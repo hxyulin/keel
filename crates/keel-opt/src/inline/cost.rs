@@ -372,6 +372,61 @@ fn small_pointer_scanner(f: &Function) -> bool {
     })
 }
 
+// Keep state-copy loops out of the early rounds, which would run the loop
+// transforms and register-pressure growth independently at every call site.
+pub(super) fn late_record_copy(f: &Function) -> bool {
+    if !f.local
+        || !(6..=8).contains(&f.sig.params.len())
+        || f.sig.params.iter().filter(|p| p.ty == Type::Ptr).count() < 3
+        || f.sig.params.iter().any(|p| p.purpose != Purpose::Normal)
+        || !matches!(f.sig.returns.as_slice(), [p] if p.ty == Type::I32 && p.purpose == Purpose::Normal)
+        || f.blocks().take(21).count() > 20
+        || f.layout_insts().take(161).count() > 160
+        || f.stack_slots().next().is_some()
+    {
+        return false;
+    }
+    let mut calls = 0;
+    for (_, inst) in f.layout_insts() {
+        match f.inst_data(inst) {
+            InstData::Call { .. } => calls += 1,
+            InstData::CallIndirect { .. } | InstData::Invoke { .. } => return false,
+            _ => {}
+        }
+    }
+    if calls != 1 {
+        return false;
+    }
+    let mut copies = 0;
+    for block in f.blocks() {
+        let insts = f.block_insts(block);
+        let Some(&term) = insts.last() else { continue };
+        if !f
+            .inst_data(term)
+            .branch_dests()
+            .iter()
+            .any(|d| d.block == block)
+        {
+            continue;
+        }
+        if insts.iter().any(|&inst| {
+            if let InstData::Store { value, flags, .. } = *f.inst_data(inst)
+                && !flags.volatile
+                && let Some(load) = crate::ir_match::def(f, value)
+            {
+                return f.inst_block(load) == block && matches!(
+                    f.inst_data(load), InstData::Load { ty, flags, .. }
+                        if !flags.volatile && (matches!(ty, Type::I64 | Type::Ptr) || ty.is_vector())
+                );
+            }
+            false
+        }) {
+            copies += 1;
+        }
+    }
+    copies >= 2
+}
+
 pub(super) fn profitability_reason(
     f: &Function,
     full: bool,
