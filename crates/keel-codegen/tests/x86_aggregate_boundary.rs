@@ -33,6 +33,35 @@ block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: ptr, v6: i64):
  return v8
 }
 "#;
+const OUTGOING_PAIRS: &str = r#"
+decl @take_outgoing(i64, ptr byval [2 x i64], ptr byval [2 x i64], ptr byval [2 x i64], i64, i64) -> i64 cc(c)
+decl @replace_outgoing(ptr, i64) cc(c)
+func @outgoing_pair_moves(i64, i64) -> i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+ ss1 = stack_slot 16, align 8
+ ss2 = stack_slot 16, align 8
+block0(v0: i64, v1: i64):
+ jump block1
+block1:
+ v2 = stack_addr ss0
+ v3 = stack_addr ss1
+ v4 = stack_addr ss2
+ v5 = iconst.i64 8
+ v6 = ptradd v2, v5
+ v7 = ptradd v3, v5
+ v8 = ptradd v4, v5
+ v9 = iadd v0, v1
+ v10 = xor v0, v1
+ store v0, v2
+ store v1, v6
+ store v1, v3
+ store v9, v7
+ store v0, v4
+ store v10, v8
+ v11 = call @take_outgoing(v9, v2, v3, v4, v10, v1)
+ return v11
+}
+"#;
 const EMPTY: Pools = Pools {
     caller_saved: &[],
     callee_saved: &[],
@@ -63,8 +92,18 @@ block0(v0: i128):
     );
     let alias = format!("func @JS_Call_alias({definition}")
         .replace("v6 = stack_addr ss4", "v6 = stack_addr ss5");
-    let module =
-        keel_ir::parse(&format!("{SOURCE}{modified}{alias}{shifts}{BYVAL_INPUTS}")).unwrap();
+    let escaped = OUTGOING_PAIRS
+        .split_once("func @outgoing_pair_moves(")
+        .unwrap()
+        .1
+        .replace(
+            " v11 = call",
+            " call @replace_outgoing(v4, v9)\n v11 = call",
+        );
+    let module = keel_ir::parse(&format!(
+        "{SOURCE}{modified}{alias}{shifts}{BYVAL_INPUTS}{OUTGOING_PAIRS}func @outgoing_escapes({escaped}"
+    ))
+    .unwrap();
     keel_ir::verify_module(&module).unwrap();
     for selector in [SelectionTier::Baseline, SelectionTier::Full] {
         for allocator in [AllocationTier::Fast, AllocationTier::Full] {
@@ -75,6 +114,10 @@ block0(v0: i128):
                 };
                 let text =
                     keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                let outgoing = text.split_once("\n\"outgoing_pair_moves\":").unwrap().1;
+                let (outgoing, escaped) = outgoing.split_once("\n\"outgoing_escapes\":").unwrap();
+                assert!(!outgoing.contains("stack_addr"), "{outgoing}");
+                assert!(escaped.contains("stack_addr"), "{escaped}");
                 let program =
                     keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline)
                         .unwrap();
@@ -102,6 +145,12 @@ extern uint64_t read_byval_rolled(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,P
 typedef unsigned __int128 U;
 extern U shl64(U), ushr64(U);
 extern __int128 sshr64(__int128);
+extern uint64_t outgoing_pair_moves(uint64_t,uint64_t), outgoing_escapes(uint64_t,uint64_t);
+uint64_t take_outgoing(uint64_t first,P a,P b,P c,uint64_t last_reg,uint64_t last_stack) {
+ return first + 3*a.lo + 5*a.hi + 7*b.lo + 11*b.hi + 13*c.lo + 17*c.hi +
+        19*last_reg + 23*last_stack;
+}
+void replace_outgoing(P *p,uint64_t lo) { p->lo=lo; }
 P JS_CallInternal(void *ctx,P fn,P self,P target,int argc,P *argv,int flags) {
  if(target.lo || target.hi!=3 || flags!=2) abort();
  return (P){fn.lo^self.hi^argv[0].lo^(uint32_t)argc,
@@ -120,6 +169,11 @@ int main(void) {
   if(read_byval_registers(a,b.lo,b,v.lo,v.hi)!=(a.lo^(uint32_t)b.hi^a.hi)+b.lo+v.lo+v.hi)
       abort();
   if(read_byval_rolled(x,x,x,x,x,a,b.lo)!=(a.lo^b.lo)) abort();
+  uint64_t y=b.lo, sum=x+y, bits=x^y;
+  if(outgoing_pair_moves(x,y)!=take_outgoing(sum,(P){x,y},(P){y,sum},(P){x,bits},bits,y))
+      abort();
+  if(outgoing_escapes(x,y)!=take_outgoing(sum,(P){x,y},(P){y,sum},(P){sum,bits},bits,y))
+      abort();
   void *ctx=(void *)(uintptr_t)(i+17); int argc=(int)(x>>32);
   P p=JS_Call(ctx,a,b,argc,&v);
   P q=JS_CallInternal(ctx,a,b,(P){0,3},argc,&v,2);

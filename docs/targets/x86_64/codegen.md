@@ -409,6 +409,15 @@ accesses, captured addresses, several or indirect calls, variadic calls, frame
 observers and debugger-visible functions use ordinary lowering. The temporary
 i128 function never replaces the public module function.
 
+Ordinary C calls also pass two-word integer arguments directly from SSA when
+each copy is a private 16-byte slot with both words stored in the call's block.
+For a pair spilled as a unit before a later scalar claims the last integer
+register, the caller places register arguments first and preserves the order
+of stack arguments. It checks every register and stack offset against the
+original layout, including unchanged arguments. Captured, volatile or partly
+initialized copies use ordinary byval lowering. The callee still receives the
+original System V ABI.
+
 ## Frames
 
 The SysV backend omits the frame for `cc(c)` SIMD leaves and `cc(fast)`
