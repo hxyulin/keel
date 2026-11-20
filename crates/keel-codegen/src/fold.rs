@@ -24,8 +24,8 @@ pub(crate) fn iconst(func: &Function, v: Value) -> Option<i64> {
 /// block parameters (even with clean incoming edges), calls, truncations and
 /// arithmetic do not qualify. Resolve aliases before inspecting the definition.
 ///
-/// Plain i8/i16 loads write a zero-extended full GPR on both targets; AArch64
-/// comparisons also write the whole W register. x86 SETcc only writes a byte.
+/// Plain i8/i16 loads write a zero-extended full GPR on both targets. AArch64
+/// comparisons, i32 loads and i32 logical operations write the whole W register. x86 SETcc only writes a byte.
 /// Both emitters' scalar register/stack transfers, including Fast/Full spills,
 /// edge copies and experimental allocation edits, copy all 64 bits. Thus the
 /// invariant follows the value through allocation, without tracking registers.
@@ -40,7 +40,9 @@ pub(crate) fn zero_extended_narrow(
 ) -> bool {
     use crate::regalloc::{Loc, OperandKind, ValuePart};
     let value = func.resolve(value);
-    if !matches!(func.value_type(value), Type::I8 | Type::I16) {
+    let ty = func.value_type(value);
+    let word = aarch64 && ty == Type::I32;
+    if !word && !matches!(ty, Type::I8 | Type::I16) {
         return false;
     }
     let ValueDef::Result(inst, 0) = func.value_def(value) else {
@@ -65,11 +67,20 @@ pub(crate) fn zero_extended_narrow(
             ty: Type::I8 | Type::I16,
             ..
         }
-    ) || (aarch64
+    ) || (word
         && matches!(
             func.inst_data(inst),
-            InstData::Icmp { .. } | InstData::Fcmp { .. }
+            InstData::Load { ty: Type::I32, .. }
+                | InstData::Binary {
+                    op: keel_ir::BinaryOp::And | keel_ir::BinaryOp::Or | keel_ir::BinaryOp::Xor,
+                    ..
+                }
         ))
+        || (aarch64
+            && matches!(
+                func.inst_data(inst),
+                InstData::Icmp { .. } | InstData::Fcmp { .. }
+            ))
 }
 
 /// A set of one function's values, as a dense membership table.

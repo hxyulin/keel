@@ -194,3 +194,50 @@ fn separated_bitwise_sums_do_not_duplicate_shared_work_or_match_different_masks(
         }
     }
 }
+
+#[test]
+fn subtracting_one_after_wrapping_negation_is_complement() {
+    for ty in ["i32", "i64"] {
+        let source = format!(
+            "func @f({ty}) -> {ty} {{
+block0(v0: {ty}):
+    v1 = ineg v0
+    v2 = iconst.{ty} 1
+    v3 = isub v1, v2
+    return v3
+}}"
+        );
+        let (original, optimized) = apply(&source);
+        assert!(optimized.to_string().contains("bnot v0"), "{optimized}");
+        for input in [0, 1, 1 << 31, u32::MAX as u64, 1 << 63, u64::MAX] {
+            assert_eq!(
+                support::execute(&original.functions[0], &[input]),
+                support::execute(&optimized.functions[0], &[input]),
+                "{ty}, input {input}"
+            );
+        }
+    }
+}
+
+#[test]
+fn two_single_use_zero_extensions_can_share_a_narrow_and() {
+    let source = "func @f(i32, i32) -> i64 {
+block0(v0: i32, v1: i32):
+    v2 = uext.i64 v0
+    v3 = uext.i64 v1
+    v4 = and v2, v3
+    return v4
+}";
+    let (original, optimized) = apply(source);
+    let text = optimized.to_string();
+    assert!(text.contains("and v0, v1"), "{text}");
+    assert_eq!(text.matches("uext.i64").count(), 1, "{text}");
+    for input in [0, 1, 1 << 31, u32::MAX as u64] {
+        let args = [input, 0xf123_ffee];
+        assert_eq!(
+            support::execute(&original.functions[0], &args),
+            support::execute(&optimized.functions[0], &args),
+            "inputs {args:?}"
+        );
+    }
+}

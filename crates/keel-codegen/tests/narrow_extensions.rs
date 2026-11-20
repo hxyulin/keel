@@ -274,9 +274,15 @@ fn distinct_conversion_destination_still_copies_the_value() {
 
 /// Register-to-register `mov r32, r32` copies, and how many of them copy a
 /// register onto itself (the explicit zero extension).
-fn moves32(output: &str) -> (usize, usize) {
-    let r32 =
-        |r: &str| r.starts_with('e') && r.len() == 3 || r.starts_with('r') && r.ends_with('d');
+fn moves32(output: &str, target: Target) -> (usize, usize) {
+    let r32 = |r: &str| {
+        if target == Target::X86_64LinuxGnu {
+            r.starts_with('e') && r.len() == 3 || r.starts_with('r') && r.ends_with('d')
+        } else {
+            r.strip_prefix('w')
+                .is_some_and(|suffix| suffix.parse::<u8>().is_ok())
+        }
+    };
     let (mut all, mut same) = (0, 0);
     for line in output.lines() {
         let Some(operands) = line.trim_start().strip_prefix("mov\t") else {
@@ -311,7 +317,11 @@ fn i32_alu_and_load_results_need_no_explicit_zero_extension() {
                 for tiny in [false, true] {
                     let output =
                         assembly(source, Target::X86_64LinuxGnu, selector, allocator, tiny);
-                    assert_eq!(moves32(&output).1, 0, "{source}\n{output}");
+                    assert_eq!(
+                        moves32(&output, Target::X86_64LinuxGnu).1,
+                        0,
+                        "{source}\n{output}"
+                    );
                 }
             }
         }
@@ -331,7 +341,31 @@ fn i32_values_from_other_code_or_unproven_operations_still_extend() {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 let output = assembly(source, Target::X86_64LinuxGnu, selector, allocator, false);
-                assert!(moves32(&output).0 > 0, "{i}: {output}");
+                assert!(
+                    moves32(&output, Target::X86_64LinuxGnu).0 > 0,
+                    "{i}: {output}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn arm_i32_loads_and_bitwise_results_are_already_zero_extended() {
+    let load = "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i32 v0\n v2 = uext.i64 v1\n return v2\n}";
+    let call = "decl @external() -> i32\nfunc @f() -> i64 {\nblock0:\n v0 = call @external()\n v1 = uext.i64 v0\n return v1\n}";
+    let logical = ["and", "or", "xor"].map(|op| format!(
+        "func @f(i32,i32) -> i64 {{\nblock0(v0: i32,v1: i32):\n v2 = {op} v0,v1\n v3 = uext.i64 v2\n return v3\n}}"
+    ));
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                for source in logical.iter().map(String::as_str).chain([load]) {
+                    let output = assembly(source, target, selector, allocator, false);
+                    assert_eq!(moves32(&output, target).1, 0, "{source}\n{output}");
+                }
+                let output = assembly(call, target, selector, allocator, false);
+                assert!(moves32(&output, target).0 > 0, "{output}");
             }
         }
     }
@@ -366,6 +400,7 @@ fn pressure_source() -> String {
         "func @incoming(i8) -> i64 {\nblock0(v0: i8):\n v1 = uext.i64 v0\n return v1\n}\n",
     );
     source.push_str("func @boolean(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.ult v0, v1\n v3 = uext.i64 v2\n return v3\n}\n");
+    source.push_str("func @word_pressure(ptr,i32) -> i64 {\nblock0(v0:ptr,v1:i32):\n v2 = load.i32 v0\n v3 = and v2,v1\n call @clobber()\n jump block1\nblock1:\n v4 = uext.i64 v3\n return v4\n}\n");
     source
 }
 
@@ -401,6 +436,7 @@ fn native_loads_survive_call_spills_and_cross_block_liveness() {
     std::fs::write(dir.join("driver.c"), r#"
 #include <stdint.h>
 extern uint64_t pressure(uint16_t *), wrapped(uint64_t,uint64_t), incoming(uint64_t), boolean(uint64_t,uint64_t), call_narrow(void);
+extern uint64_t word_pressure(uint32_t *,uint32_t);
 uint64_t dirty(void) { return UINT64_C(0xfedcba98765432ab); }
 __attribute__((noinline)) void clobber(void) {
 #if defined(__x86_64__)
@@ -419,6 +455,8 @@ int main(void) {
   if (wrapped(a,b)!=(uint8_t)(a+b)) return 2;
   if (incoming(a)!=(uint8_t)a) return 3;
   if (call_narrow()!=171) return 5;
+  uint32_t word = (uint32_t)(b + 65537*k);
+  if (word_pressure(&word,(uint32_t)a)!=(uint64_t)(word & (uint32_t)a)) return 6;
   if (boolean(a,b)!=(a<b) || boolean(b,a)!=(b<a)) return 4;
  }
  return 0;

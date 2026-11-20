@@ -116,7 +116,6 @@ Lprivate_acc_block3:
 	; v29 = load.i32 align 8 v28
 	ldr	w9, [x9]
 	; v30 = uext.i64 v29
-	mov	w9, w9
 	; v31 = iadd v26, v30
 	add	x9, x10, x9
 	; return v31

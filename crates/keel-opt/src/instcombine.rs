@@ -77,6 +77,8 @@ rules! {
     Canonicalize = "canonicalize",
     BranchCondition = "branch-condition",
     QuotientReuse = "quotient-reuse",
+    ComplementIndex = "complement-index",
+    NarrowAnd = "narrow-and",
 }
 
 impl Rule {
@@ -1019,6 +1021,60 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Opt
             };
             if identity.is_some() {
                 return identity;
+            }
+            if full && matches!(ty, Type::I32 | Type::I64) {
+                if op == BinaryOp::Isub
+                    && y == Some(1)
+                    && let ValueDef::Result(def, 0) = func.value_def(func.resolve(a))
+                    && let InstData::Unary {
+                        op: UnaryOp::Ineg,
+                        arg,
+                    } = *func.inst_data(def)
+                {
+                    return Some((
+                        Rule::ComplementIndex,
+                        Fold::Data(InstData::Unary {
+                            op: UnaryOp::Bnot,
+                            arg,
+                        }),
+                    ));
+                }
+                if op == BinaryOp::And && ty == Type::I64 {
+                    let word = |v| {
+                        let ValueDef::Result(def, 0) = func.value_def(func.resolve(v)) else {
+                            return None;
+                        };
+                        match *func.inst_data(def) {
+                            InstData::Convert {
+                                op: ConvertOp::Uext,
+                                arg,
+                                ..
+                            } if func.value_type(arg) == Type::I32 => Some(arg),
+                            _ => None,
+                        }
+                    };
+                    if let (Some(lhs), Some(rhs)) = (word(a), word(b))
+                        && uses.single(func, a)
+                        && uses.single(func, b)
+                    {
+                        let narrowed = func.insert_inst(
+                            InsertPoint::Before(inst),
+                            InstData::Binary {
+                                op: BinaryOp::And,
+                                args: [lhs, rhs],
+                            },
+                        );
+                        func.set_inst_loc(narrowed, func.inst_loc(inst));
+                        return Some((
+                            Rule::NarrowAnd,
+                            Fold::Data(InstData::Convert {
+                                op: ConvertOp::Uext,
+                                ty,
+                                arg: func.first_result(narrowed),
+                            }),
+                        ));
+                    }
+                }
             }
             // A widening zero extension has no possible bits above its source
             // width. The literal's upper bits do not matter to this identity.

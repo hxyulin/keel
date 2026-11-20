@@ -41,7 +41,6 @@ Lmask_sext32_block0:
 	; v3 = and v1, v2
 	and	w9, w9, #0x7fffffff
 	; v4 = uext.i64 v3
-	mov	w9, w9
 	; return v4
 	mov	x0, x9
 	ldp	x29, x30, [sp], #16
