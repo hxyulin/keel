@@ -181,6 +181,7 @@ fn cleanup_policy_is_full_only() {
         "internal-fast-calls",
         "tail-calls",
         "branch-facts",
+        "fold-zero-byte-suffix",
         "outline-cold",
         "loop-unroll-words",
     ]));

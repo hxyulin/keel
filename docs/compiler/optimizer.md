@@ -170,6 +170,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
 | `tail-calls` | Replace adjacent scalar call/return pairs; see [tail calls](#tail-calls) |
 | `branch-facts` | Fold repeated or complementary integer comparisons established by dominating edges |
+| `fold-zero-byte-suffix` | Replace six zero-byte steps in a guarded wrapping xor-and-multiply recurrence with one multiply |
 | `range-facts` (opt-in) | Extend branch facts with scoped constant bounds and bounded integer arithmetic |
 | `outline-cold` | Tail-outline bounded terminal panic records into private cold helpers |
 | `fast-cfg`, `fast-local`, `fast-loop-reduce` | The bounded Fast tier; see [Fast](#fast-tier) |
@@ -930,8 +931,9 @@ values). Division by zero and signed MIN/-1 still trap; signed MIN % -1 is zero.
 
 ## Terminal panic records
 
-Full runs `branch-facts` and `outline-cold` after tail-call cleanup. Branch facts
-use canonical integer comparisons and their complements. The opt-in
+Full runs `branch-facts`, `fold-zero-byte-suffix`, and `outline-cold` after
+tail-call cleanup. Branch facts use canonical integer comparisons and their
+complements. The opt-in
 `range-facts` pass also propagates scoped signed/unsigned constant bounds for
 i8 through i64. They also track zero/nonzero conditions and
 bounded add, subtract and multiply expressions when their endpoints stay in the
@@ -948,6 +950,13 @@ with another predecessor, and duplicate branch destinations do not. Facts are
 restored on leaving each dominator subtree. This is neither a loop fixed point
 nor a general relational range solver. A fold runs CFG cleanup and DCE so
 unreachable panic records stop consuming storage.
+
+`fold-zero-byte-suffix` recognizes eight scalar steps that xor successive
+bytes of one i64 word into an accumulator and multiply by the same odd
+constant. If the word fits in 16 bits, the final six steps reduce to a single
+wrapping multiply. Larger words follow the original recurrence. The skipped
+arithmetic must have no other users, and both paths join before the original
+store.
 
 Cold outlining accepts a private Fast function with at most 256 laid-out
 instructions and 4096 instruction/value arena entries. It moves a terminal trap

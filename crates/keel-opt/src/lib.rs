@@ -97,6 +97,7 @@ impl From<VectorTarget> for OptimizationContext {
 
 mod bounded_stack_dse;
 mod branch_facts;
+mod fold_zero_byte_suffix;
 mod memory_alias;
 mod memory_forward;
 mod module_cleanup;
@@ -455,6 +456,11 @@ pub(crate) static BRANCH_FACTS: &dyn Pass = &BuiltinPass::new(
     "fold integer comparisons known from dominating edges",
     |f, _| branch_facts::run(f),
 );
+pub(crate) static FOLD_ZERO_BYTE_SUFFIX: &dyn Pass = &BuiltinPass::new(
+    "fold-zero-byte-suffix",
+    "shortcut a scalar xor-and-multiply recurrence over zero high bytes",
+    |f, _| fold_zero_byte_suffix::run(f),
+);
 pub(crate) static RANGE_FACTS: &dyn Pass = &BuiltinPass::new(
     "range-facts",
     "fold bounded signed and unsigned ranges on dominating edges",
@@ -525,6 +531,7 @@ pub static PASSES: &[&dyn Pass] = &[
     TAIL_CALLS,
     OUTLINE_COLD,
     BRANCH_FACTS,
+    FOLD_ZERO_BYTE_SUFFIX,
     RANGE_FACTS,
     CONSTANT_ARGS,
     SPECIALIZE_ZERO_FLAGS,
@@ -845,7 +852,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 36] = [
+const FULL_EPILOGUE: [&str; 37] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -880,6 +887,7 @@ const FULL_EPILOGUE: [&str; 36] = [
     "internal-fast-calls",
     "tail-calls",
     "branch-facts",
+    "fold-zero-byte-suffix",
     "outline-cold",
     "loop-unroll-words",
 ];

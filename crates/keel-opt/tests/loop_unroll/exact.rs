@@ -1,5 +1,84 @@
 use keel_ir::{InstData as D, Type};
 use keel_ir_interp::Interpreter;
+use std::fmt::Write as _;
+
+fn byte_recurrence(factor: i64) -> String {
+    let mut text = format!(
+        "func @hash(ptr,i64,i64) -> i64 {{
+block0(v0:ptr,v1:i64,v2:i64):
+ v3=iconst.i64 {factor}
+"
+    );
+    let mut state = 2;
+    for (lane, base) in (4..).step_by(6).take(8).enumerate() {
+        let shifted = if lane == 0 {
+            1
+        } else {
+            writeln!(text, " v{base}=iconst.i64 {}", lane * 8).unwrap();
+            writeln!(text, " v{}=ushr v1,v{base}", base + 1).unwrap();
+            base + 1
+        };
+        let byte = if lane == 7 {
+            shifted
+        } else {
+            writeln!(text, " v{}=trunc.i8 v{shifted}", base + 2).unwrap();
+            writeln!(text, " v{}=uext.i64 v{}", base + 3, base + 2).unwrap();
+            base + 3
+        };
+        writeln!(text, " v{}=xor v{state},v{byte}", base + 4).unwrap();
+        state = base + 5;
+        writeln!(text, " v{state}=imul v{},v3", base + 4).unwrap();
+    }
+    writeln!(text, " store v{state},v0\n return v{state}\n}}").unwrap();
+    text
+}
+
+#[test]
+fn zero_byte_suffix_folds_wrapping_steps_at_the_guard_boundary() {
+    use keel_ir_interp::{Outcome, Val};
+
+    for factor in [1_099_511_628_211_i64, -5] {
+        let mut module = keel_ir::parse(&byte_recurrence(factor)).unwrap();
+        keel_opt::run_passes(&mut module, &["fold-zero-byte-suffix"]).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let optimized = keel_ir::parse(&module.to_string()).unwrap();
+        let function = &optimized.functions[0];
+        assert_eq!(function.blocks().count(), 4);
+        let mut interpreter = Interpreter::for_function(function);
+        let ptr = interpreter.memory_mut().alloc_bytes(&[0; 8], 8);
+        for word in [0_u64, 1, 255, 256, 65_535, 65_536, 1 << 56, u64::MAX] {
+            for seed in [0_u64, 1, 0xcbf2_9ce4_8422_2325, u64::MAX] {
+                let expected = word.to_le_bytes().into_iter().fold(seed, |hash, byte| {
+                    (hash ^ u64::from(byte)).wrapping_mul(factor as u64)
+                });
+                let outcome =
+                    interpreter.call("hash", &[Val::Ptr(ptr), Val::I64(word), Val::I64(seed)]);
+                assert_eq!(outcome, Outcome::Return(vec![Val::I64(expected)]));
+                assert_eq!(
+                    interpreter.memory().read(ptr, 8).unwrap(),
+                    expected.to_le_bytes()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn zero_byte_suffix_leaves_observable_or_different_recurrences_alone() {
+    let stock = byte_recurrence(1_099_511_628_211);
+    for source in [
+        stock.replace("store v51,v0", "store volatile v51,v0"),
+        stock.replace(" v46=iconst", " v52=load.i64 volatile v0\n v46=iconst"),
+        stock.replace("return v51", "return v45"),
+        stock.replace("iconst.i64 40", "iconst.i64 41"),
+    ] {
+        assert_ne!(source, stock);
+        let mut module = keel_ir::parse(&source).unwrap();
+        let before = module.to_string();
+        keel_opt::run_passes(&mut module, &["fold-zero-byte-suffix"]).unwrap();
+        assert_eq!(module.to_string(), before);
+    }
+}
 
 fn source(start: i64, bound: i64, ty: Type, rotated: bool) -> String {
     let entry = if rotated {
