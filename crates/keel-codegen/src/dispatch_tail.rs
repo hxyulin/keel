@@ -11,16 +11,19 @@ pub(crate) fn large_switch(func: &Function, block: Block) -> Option<Inst> {
     let [switch] = *func.block_insts(block) else {
         return None;
     };
+    is_large_dense_switch(func, switch).then_some(switch)
+}
+
+pub(crate) fn is_large_dense_switch(func: &Function, switch: Inst) -> bool {
     let InstData::Switch { arg, cases, .. } = func.inst_data(switch) else {
-        return None;
+        return false;
     };
     let mask = match func.value_type(func.resolve(*arg)) {
         Type::I32 => u32::MAX as u64,
         Type::I64 => u64::MAX,
-        _ => return None,
+        _ => return false,
     };
-    ((64..=256).contains(&cases.len()) && SwitchPlan::new(cases, mask).jump_table())
-        .then_some(switch)
+    (64..=256).contains(&cases.len()) && SwitchPlan::new(cases, mask).jump_table()
 }
 
 pub(crate) fn plan(

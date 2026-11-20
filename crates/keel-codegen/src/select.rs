@@ -181,7 +181,7 @@ pub struct Selection {
     /// Copy and scalar ABI register affinities, never constraints.
     pub hints: Hints,
     /// Keep heavily used values and coalesce spill homes on x86 dispatch edges.
-    pub(crate) shared_dispatch_allocation: bool,
+    pub(crate) large_dispatch_allocation: bool,
     /// The cover that claimed each root instruction, indexed by instruction.
     owners: Vec<Option<Cover>>,
     /// Covers the selection options turned off. Empty by default, so a

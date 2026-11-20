@@ -24,8 +24,8 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     // state live through many mutually exclusive opcode handlers. Count those
     // intervals less heavily and use copy-aware homes for spilled edge values.
     let func = input.func;
-    let shared_dispatch = input.selection.shared_dispatch_allocation;
-    let penalty = if shared_dispatch {
+    let large_dispatch = input.selection.large_dispatch_allocation;
+    let penalty = if large_dispatch {
         weighted::LengthPenalty::SquareRoot
     } else {
         weighted::LengthPenalty::Linear
@@ -52,7 +52,7 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         false,
         penalty,
     );
-    let spill_slots = if shared_dispatch {
+    let spill_slots = if large_dispatch {
         assign_compact_spill_slots(func, &mut spills, &mut locs, &input.selection.hints)
     } else {
         assign_spill_slots(&mut spills, &mut locs)

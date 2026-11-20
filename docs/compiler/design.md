@@ -845,7 +845,7 @@ opportunity filter, not a runtime profitability proof. Fast, Full and Split rema
 independently selectable. Application runtime gains are unproven.
 
 `Bounded` (`--regalloc bounded`) uses Full's scan and bounded call-free segments.
-On x86-64, for functions with large shared jump tables, its spill score
+On x86-64, for functions with large dense switches, its spill score
 divides weighted operand traffic by the integer square root of live interval
 length. Its spill homes use Compact's copy preferences to reduce moves
 along dispatch edges.

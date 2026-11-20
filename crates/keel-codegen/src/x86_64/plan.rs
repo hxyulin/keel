@@ -411,10 +411,11 @@ impl Covers {
             uses,
         );
         selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
-        selection.shared_dispatch_allocation = func.num_blocks() >= 64
+        selection.large_dispatch_allocation = func.num_blocks() >= 64
             && func
                 .blocks()
-                .any(|block| crate::dispatch_tail::large_switch(func, block).is_some());
+                .filter_map(|block| func.block_insts(block).last())
+                .any(|&switch| crate::dispatch_tail::is_large_dense_switch(func, switch));
         let on = |cover| selection.enabled(cover);
         let [
             mask_tests,
