@@ -3,7 +3,7 @@ use keel_ir::{EntityRef, InstData, MemoryFlags, Module, Type};
 #[test]
 fn guarded_memcmp_keeps_the_first_byte_difference_and_exact_width() {
     use keel_ir_interp::{Interpreter, Outcome, Val};
-    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+    use keel_opt::VectorTarget::{Aarch64Neon, Portable, X86Sse2};
 
     let source = "func @cmp(ptr, ptr, i32) -> i32 {
 block0(v0:ptr, v1:ptr, v2:i32):
@@ -17,44 +17,46 @@ block0(v0:ptr, v1:ptr, v2:i32):
 }";
     let pass = ["short-memcmp"];
     let original = keel_ir::parse(source).unwrap();
-    let mut optimized = original.clone();
-    keel_opt::run_passes_for_target(&mut optimized, &pass, Aarch64Neon).unwrap();
-    keel_ir::verify_module(&optimized).unwrap();
-    let function = &optimized.functions[0];
-    assert_eq!(function.blocks().count(), 4);
+    for (target, blocks) in [(Aarch64Neon, 4), (X86Sse2, 5)] {
+        let mut optimized = original.clone();
+        keel_opt::run_passes_for_target(&mut optimized, &pass, target).unwrap();
+        keel_ir::verify_module(&optimized).unwrap();
+        let function = &optimized.functions[0];
+        assert_eq!(function.blocks().count(), blocks);
 
-    for length in [0, 3, 4, 5, 6, 7, 8, 9] {
-        for mismatch in 0..=length {
-            let mut interpreter = Interpreter::for_function(function);
-            let mut low = vec![0x20; length + 1];
-            let mut high = low.clone();
-            if mismatch < length {
-                high[mismatch + 1] = 0xf1;
-                low[mismatch + 1] = 0x03;
-                if let Some(last) = high.get_mut(mismatch + 2) {
-                    *last = 0x11;
+        for length in [0, 3, 4, 5, 6, 7, 8, 9] {
+            for mismatch in 0..=length {
+                let mut interpreter = Interpreter::for_function(function);
+                let mut low = vec![0x20; length + 1];
+                let mut high = low.clone();
+                if mismatch < length {
+                    high[mismatch + 1] = 0xf1;
+                    low[mismatch + 1] = 0x03;
+                    if let Some(last) = high.get_mut(mismatch + 2) {
+                        *last = 0x11;
+                    }
+                }
+                let a = interpreter.memory_mut().alloc_bytes(&low, 1) + 1;
+                let b = interpreter.memory_mut().alloc_bytes(&high, 1) + 1;
+                let encoded = (2 * length + 7) as u32;
+                let delta = if mismatch == length { 0 } else { 3i32 - 0xf1 };
+                for (lhs, rhs, expected) in [(a, b, delta), (b, a, -delta)] {
+                    let status =
+                        interpreter.call("cmp", &[Val::Ptr(lhs), Val::Ptr(rhs), Val::I32(encoded)]);
+                    assert!(
+                        matches!(status, Outcome::Return(values) if values == [Val::I32(expected as u32)])
+                    );
                 }
             }
-            let a = interpreter.memory_mut().alloc_bytes(&low, 1) + 1;
-            let b = interpreter.memory_mut().alloc_bytes(&high, 1) + 1;
-            let encoded = (2 * length + 7) as u32;
-            let delta = if mismatch == length { 0 } else { 3i32 - 0xf1 };
-            for (lhs, rhs, expected) in [(a, b, delta), (b, a, -delta)] {
-                let status =
-                    interpreter.call("cmp", &[Val::Ptr(lhs), Val::Ptr(rhs), Val::I32(encoded)]);
-                assert!(
-                    matches!(status, Outcome::Return(values) if values == [Val::I32(expected as u32)])
-                );
-            }
         }
-    }
 
-    let guarded = optimized.to_string();
-    keel_opt::run_passes_for_target(&mut optimized, &pass, Aarch64Neon).unwrap();
-    assert_eq!(optimized.to_string(), guarded);
-    let mut x86 = original.clone();
-    keel_opt::run_passes_for_target(&mut x86, &pass, X86Sse2).unwrap();
-    assert_eq!(x86.to_string(), original.to_string());
+        let guarded = optimized.to_string();
+        keel_opt::run_passes_for_target(&mut optimized, &pass, target).unwrap();
+        assert_eq!(optimized.to_string(), guarded);
+    }
+    let mut portable = original.clone();
+    keel_opt::run_passes_for_target(&mut portable, &pass, Portable).unwrap();
+    assert_eq!(portable.to_string(), original.to_string());
 }
 
 #[test]

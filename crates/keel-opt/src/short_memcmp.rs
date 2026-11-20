@@ -6,7 +6,10 @@ use keel_ir::{
 };
 
 pub(crate) fn run(f: &mut Function, context: &OptimizationContext) -> bool {
-    if context.target != VectorTarget::Aarch64Neon {
+    if !matches!(
+        context.target,
+        VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
+    ) {
         return false;
     }
     let candidate = f.layout_insts().find_map(|(block, inst)| {
@@ -26,7 +29,7 @@ pub(crate) fn run(f: &mut Function, context: &OptimizationContext) -> bool {
         .then_some((inst, [left, right, size]))
     });
     if let Some((inst, args)) = candidate {
-        specialize(f, inst, args);
+        specialize(f, inst, args, context.target);
         return true;
     }
     false
@@ -64,7 +67,7 @@ fn decoded_length(f: &Function, size: Value) -> bool {
         })
 }
 
-fn specialize(f: &mut Function, inst: Inst, [left, right, size]: [Value; 3]) {
+fn specialize(f: &mut Function, inst: Inst, [left, right, size]: [Value; 3], target: VectorTarget) {
     let block = f.inst_block(inst);
     let next = f
         .block_insts(block)
@@ -99,8 +102,23 @@ fn specialize(f: &mut Function, inst: Inst, [left, right, size]: [Value; 3]) {
     let right_head = f.ins(at).load(Type::I32, right);
     let right_tail = f.ins(at).load(Type::I32, right_end);
     let head_differs = f.ins(at).icmp(IntCC::Ne, left_head, right_head);
-    let a = f.ins(at).select(head_differs, left_head, left_tail);
-    let b = f.ins(at).select(head_differs, right_head, right_tail);
+    let (at, a, b) = if target == VectorTarget::X86Sse2 {
+        let bytes = f.create_block();
+        let a = f.append_block_param(bytes, Type::I32);
+        let b = f.append_block_param(bytes, Type::I32);
+        f.ins(at).brif(
+            head_differs,
+            bytes,
+            &[left_head, right_head],
+            bytes,
+            &[left_tail, right_tail],
+        );
+        (InsertPoint::End(bytes), a, b)
+    } else {
+        let a = f.ins(at).select(head_differs, left_head, left_tail);
+        let b = f.ins(at).select(head_differs, right_head, right_tail);
+        (at, a, b)
+    };
     let changed = f.ins(at).xor(a, b);
     let bit = f.ins(at).ctz(changed);
     let whole_byte = f.ins(at).iconst(Type::I32, 24);

@@ -125,7 +125,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `inline-late-record-copy` | Inline bounded local record-copy helpers after loop optimization on AArch64 and x86-64 |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `short-record-copies` | Specialize single-record and empty `memcpy` paths in large native functions |
-| `short-memcmp` | Compare guarded four- to eight-byte ranges directly on AArch64 |
+| `short-memcmp` | Compare guarded four- to eight-byte ranges directly on native targets |
 | `memory-expand` | Expand constant memory intrinsics of 0 to 128 bytes in Fast and Basic; see [memory passes](#memory-passes) |
 | `stack-forward` | Block-local byte forwarding for nonescaping fixed stack objects |
 | `stack-notrap` | Mark loads and stores proven inside a fixed stack slot `notrap`; see [memory passes](#memory-passes) |
@@ -624,7 +624,7 @@ condition. Balanced, Size and Full run it before
 `stack-forward` in the inlining rounds, and the inliner charges an expandable
 copy as its loads and stores.
 
-Full on AArch64 also guards a short dynamic `memcmp` path for decoded
+Full on AArch64 and x86-64 also guards a short dynamic `memcmp` path for decoded
 lengths. Two words cover each input when its length is four to eight bytes.
 The result is the integer difference of the first unequal bytes. Other
 lengths use the original intrinsic.

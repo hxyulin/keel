@@ -305,7 +305,7 @@ pub(crate) static SHORT_RECORD_COPIES: &dyn Pass = &BuiltinPass::new(
 );
 pub(crate) static SHORT_MEMCMP: &dyn Pass = &BuiltinPass::new(
     "short-memcmp",
-    "compare four to eight bytes directly on guarded AArch64 paths",
+    "compare four to eight bytes directly on guarded native paths",
     short_memcmp::run,
 );
 pub(crate) static MEMORY_EXPAND: &dyn Pass = &BuiltinPass::new(
