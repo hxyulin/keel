@@ -185,6 +185,7 @@ fn cleanup_policy_is_full_only() {
         "outline-cold",
         "loop-unroll-words",
         "specialize-single-count-exit",
+        "thread-entry-status",
     ]));
     let mut m = parse(SOURCE).unwrap();
     assert_ne!(private_aggregate::run(&mut m), 0);

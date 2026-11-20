@@ -597,7 +597,7 @@ block0(v0:ptr,v1:i64):
             for f in &module.functions {
                 for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                     let mut selection = crate::select::Selection::compute(f, target);
-                    selection.fuse_compares(f, |_| vec![], &crate::fold::use_counts(f));
+                    selection.fuse_compares(f, |_| vec![], &crate::fold::use_counts(f), false);
                     for bank in [false, true] {
                         if bank && !matches!(target, crate::select::Target::Aarch64) {
                             continue;

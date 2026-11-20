@@ -228,7 +228,7 @@ pub(crate) fn folded_values_recording(
 /// itself, a compare and a conditional branch, with no 0/1 value in between.
 #[cfg(test)]
 pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
-    fused_compare_pairs(func, &use_counts(func))
+    fused_compare_pairs(func, &use_counts(func), false)
         .into_iter()
         .map(|(value, _, _)| value)
         .collect()
@@ -255,8 +255,9 @@ pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
 pub(crate) fn fused_compare_pairs(
     func: &Function,
     uses: &[u8],
+    across_stack_addr: bool,
 ) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, false, uses)
+    compare_pairs(func, false, across_stack_addr, uses)
 }
 
 /// ARM can delay an exact-width integer compare over at most four tiny pure
@@ -266,13 +267,14 @@ pub(crate) fn aarch64_compare_pairs(
     func: &Function,
     uses: &[u8],
 ) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, true, uses)
+    compare_pairs(func, true, false, uses)
 }
 
 /// `uses` are [`use_counts`]: only zero, one, or multiple raw IR uses matter.
 fn compare_pairs(
     func: &Function,
     aarch64: bool,
+    across_stack_addr: bool,
     uses: &[u8],
 ) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
     let mut candidates = Vec::new();
@@ -288,28 +290,33 @@ fn compare_pairs(
             if !compare {
                 continue;
             }
-            let bounded = aarch64
-                && matches!(*data,
+            let exact_width = matches!(*data,
                 InstData::Icmp { args, .. }
                     if matches!(func.value_type(func.resolve(args[0])), Type::I32 | Type::I64));
+            let arm_span = aarch64 && exact_width;
+            let stack_span = across_stack_addr && exact_width;
+            let limit = if arm_span {
+                5
+            } else {
+                1 + usize::from(stack_span)
+            };
             let location = |inst| func.inst_loc(inst).map(|loc| (loc.file, loc.line));
-            for (gap, &next) in insts[i + 1..]
-                .iter()
-                .take(if bounded { 5 } else { 1 })
-                .enumerate()
-            {
+            for (gap, &next) in insts[i + 1..].iter().take(limit).enumerate() {
                 if let InstData::Brif { cond, .. } = func.inst_data(next) {
                     let result = func.inst_results(inst)[0];
                     // Keep the established adjacent behavior. Nonadjacent
                     // fusion cannot erase independently located source lines.
                     if func.resolve(*cond) == result
-                        && (gap == 0 || location(next) == location(inst))
+                        && (gap == 0 || stack_span || location(next) == location(inst))
                     {
                         candidates.push((result, inst, next));
                     }
                     break;
                 }
-                if !bounded
+                if stack_span && matches!(func.inst_data(next), InstData::StackAddr { .. }) {
+                    continue;
+                }
+                if !arm_span
                     || location(next) != location(inst)
                     || !matches!(
                         func.inst_data(next),
@@ -583,7 +590,7 @@ block2:
     #[test]
     fn arm_bounded_span_transfers_duplicate_uses_to_branch() {
         let func = function(&span_source("i64", "v3 = iconst.i64 7", "icmp.eq", "v0"));
-        assert!(fused_compare_pairs(&func, &use_counts(&func)).is_empty()); // x86 contract unchanged
+        assert!(fused_compare_pairs(&func, &use_counts(&func), false).is_empty());
         let pairs = aarch64_compare_pairs(&func, &use_counts(&func));
         assert_eq!(pairs.len(), 1);
         let (cond, compare, branch) = pairs[0];
@@ -606,6 +613,21 @@ block2:
         let mut selection = Selection::default();
         selection.fuse_aarch64_compares(&aliases, |_| vec![], &use_counts(&aliases));
         assert_eq!(selection.operands(&aliases, branch), vec![leaves[1]; 3]);
+    }
+
+    #[test]
+    fn x86_compare_can_cross_one_stack_address_only_when_enabled() {
+        let source = span_source("i64", "v3 = stack_addr ss0", "icmp.eq", "v0")
+            .replace("{\nblock0", "{\n ss0 = stack_slot 8, align 8\nblock0");
+        let func = function(&source);
+        assert!(fused_compare_pairs(&func, &use_counts(&func), false).is_empty());
+        assert_eq!(
+            fused_compare_pairs(&func, &use_counts(&func), true).len(),
+            1
+        );
+
+        let func = function(&source.replace(" brif", " v4 = stack_addr ss0\n brif"));
+        assert!(fused_compare_pairs(&func, &use_counts(&func), true).is_empty());
     }
 
     #[test]

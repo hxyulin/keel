@@ -1021,6 +1021,7 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     dispatch_tails: HashMap<Inst, Inst>,
+    fold_frame_address_calls: bool,
     selection: crate::select::Selection,
     packed_absolute_values: HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
@@ -1209,7 +1210,10 @@ impl<'a> FunctionCompiler<'a> {
         };
         plan::check_guaranteed_tails(func, &named, present).map_err(err)?;
         let calls = plan::CallArea::plan(func, &facts, &named, shape.frame_align);
-        let mut covers = plan::Covers::select(func, pipeline, &facts);
+        let bounded_speed = goal == crate::CodegenGoal::Speed
+            && pipeline.allocator.name() == "bounded"
+            && module.files.is_empty();
+        let mut covers = plan::Covers::select(func, pipeline, &facts, bounded_speed);
         if pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
             && !func.attrs.optnone
         {
@@ -1282,6 +1286,7 @@ impl<'a> FunctionCompiler<'a> {
         );
         let mut compiler = Self {
             dispatch_tails,
+            fold_frame_address_calls: bounded_speed && !present.inline_asm,
             goal,
             shared_return,
             code_model: CodeModel::default(),

@@ -12,7 +12,16 @@ impl FunctionCompiler<'_> {
             } => {
                 let decl = func.callee(callee);
                 let sret = self.move_args(args, &decl.sig, None, false);
-                self.call_function(Opcode::Call, &decl.name);
+                if self.fold_frame_address_calls
+                    && args.is_empty()
+                    && frame_address_wrapper(self.symbols, decl)
+                {
+                    // A SysV call saves an eight-byte return address. The
+                    // wrapper then saves rbp and returns that frame address.
+                    self.emit(Opcode::Lea, [asm_arg(r64(0)), asm_arg(memory(r64(4), -16))]);
+                } else {
+                    self.call_function(Opcode::Call, &decl.name);
+                }
                 self.call_results(inst, &decl.sig, result, sret);
             }
             InstData::CallIndirect {
@@ -215,4 +224,59 @@ impl FunctionCompiler<'_> {
             _ => unreachable!("not control flow"),
         }
     }
+}
+
+fn frame_address_wrapper(symbols: &crate::symbols::Symbols<'_>, decl: &keel_ir::FuncDecl) -> bool {
+    if decl.attrs.noinline
+        || decl.attrs.optnone
+        || decl.attrs.weak
+        || decl.sig.variadic
+        || decl.sig.returns_twice
+        || !matches!(decl.sig.cc, keel_ir::CallConv::C | keel_ir::CallConv::Fast)
+        || !decl.sig.params.is_empty()
+        || !decl
+            .sig
+            .returns
+            .iter()
+            .map(|param| param.ty)
+            .eq([Type::I64])
+    {
+        return false;
+    }
+    let Some(body) = symbols.function(&decl.name) else {
+        return false;
+    };
+    if !body.local
+        || body.attrs.weak
+        || body.weak_odr
+        || body.attrs.noinline
+        || body.attrs.optnone
+        || body.attrs.naked
+        || body.attrs.interrupt
+        || body.sig != decl.sig
+        || body.personality.is_some()
+        || body.num_stack_slots() != 0
+        || !keel_ir::FunctionPolicy::resolve(&body.attrs).is_ok_and(|p| p.permits_inlining())
+    {
+        return false;
+    }
+    let Some(entry) = body.entry_block() else {
+        return false;
+    };
+    let [frame, cast, ret] = body.block_insts(entry) else {
+        return false;
+    };
+    body.blocks().count() == 1
+        && matches!(
+            body.inst_data(*frame),
+            InstData::Intrinsic {
+                id: Intrinsic::FrameAddress,
+                ..
+            }
+        )
+        && matches!(body.inst_data(*cast),
+            InstData::Convert { op: ConvertOp::PtrToInt, arg, .. }
+                if body.resolve(*arg) == body.first_result(*frame))
+        && matches!(body.inst_data(*ret),
+            InstData::Return { args } if args.as_slice() == body.inst_results(*cast))
 }

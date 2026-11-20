@@ -75,6 +75,74 @@ fn same_call(func: &Function, a: &BlockCall, b: &BlockCall) -> bool {
             .all(|(&x, &y)| func.resolve(x) == func.resolve(y))
 }
 
+/// Bypass the common path of a status check when the entry's fast edge
+/// supplies a constant and the other edge computes the status with a call.
+pub(crate) fn thread_entry_status(f: &mut Function) -> bool {
+    let Some(branch) = f
+        .entry_block()
+        .and_then(|entry| f.block_insts(entry).last())
+        .copied()
+    else {
+        return false;
+    };
+    let InstData::Brif { dests, .. } = f.inst_data(branch) else {
+        return false;
+    };
+    let [slow, fast] = &**dests;
+    if !fast.args.is_empty() {
+        return false;
+    }
+    let [call, slow_jump] = f.block_insts(slow.block) else {
+        return false;
+    };
+    let [literal, fast_jump] = f.block_insts(fast.block) else {
+        return false;
+    };
+    if !matches!(f.inst_data(*literal), InstData::Iconst { .. }) {
+        return false;
+    }
+    let (InstData::Jump { dest: join }, InstData::Jump { dest: from_slow }) =
+        (f.inst_data(*fast_jump), f.inst_data(*slow_jump))
+    else {
+        return false;
+    };
+    if !matches!(f.inst_data(*call), InstData::Call { .. })
+        || join.block != from_slow.block
+        || join.args.as_slice() != f.inst_results(*literal)
+        || from_slow.args.as_slice() != f.inst_results(*call)
+    {
+        return false;
+    }
+    let [status] = f.block_params(join.block) else {
+        return false;
+    };
+    let [check] = f.block_insts(join.block) else {
+        return false;
+    };
+    let InstData::Brif { cond, dests } = f.inst_data(*check) else {
+        return false;
+    };
+    let result = f.first_result(*literal);
+    let dest = &dests[usize::from(constant(f, result).is_some_and(|c| c.is_zero()))];
+    if f.resolve(*cond) != *status || !dest.args.is_empty() || dest.block == join.block {
+        return false;
+    }
+    let mut uses = 0;
+    for (_, inst) in f.layout_insts() {
+        f.inst_data(inst).for_each_operand(|v| {
+            let v = f.resolve(v);
+            uses += usize::from(v == *status || v == result);
+        });
+    }
+    if uses != 2 {
+        return false;
+    }
+    let dest = dest.clone();
+    f.replace_branch_dest(branch, 1, dest);
+    remove_unreachable(f);
+    true
+}
+
 /// Compose one incoming block call with a jump-only block's outgoing call.
 /// Substitution is simultaneous, so permutations and repeated arguments work.
 fn forwarding_target(func: &Function, incoming: &BlockCall) -> Option<BlockCall> {
@@ -250,6 +318,48 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn threading_constant_status_preserves_the_slow_call_and_live_status() {
+        use keel_ir_interp::{Interpreter, Outcome, Val};
+
+        let source = "func @run(i32, i32) -> i32 {
+        block0(v0: i32, v1: i32):
+            brif v0, block1, block2
+        block1:
+            v2 = call @slow(v1)
+            jump block3(v2)
+        block2:
+            v3 = iconst.i32 0
+            jump block3(v3)
+        block3(v4: i32):
+            brif v4, block4, block5
+        block4:
+            v5 = iconst.i32 17
+            return v5
+        block5:
+            v6 = iconst.i32 31
+            return v6
+        }
+        func @slow(i32) -> i32 local {
+        block0(v0: i32):
+            return v0
+        }";
+        let mut module = keel_ir::parse(source).unwrap();
+        assert!(thread_entry_status(&mut module.functions[0]));
+        assert!(!thread_entry_status(&mut module.functions[0]));
+        keel_ir::verify_module(&module).unwrap();
+        for (needs_call, status, expected) in [(0, 1, 31), (1, 0, 31), (1, 1, 17)] {
+            assert_eq!(
+                Interpreter::new(&module).call("run", &[Val::I32(needs_call), Val::I32(status)]),
+                Outcome::Return(vec![Val::I32(expected)]),
+            );
+        }
+
+        let mut observed = keel_ir::parse(&source.replace("return v6", "return v4")).unwrap();
+        assert!(!thread_entry_status(&mut observed.functions[0]));
+        keel_ir::verify_module(&observed).unwrap();
+    }
 
     #[test]
     fn merging_cycle_preserves_entry_and_stops_at_the_new_self_edge() {

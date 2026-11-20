@@ -268,6 +268,10 @@ It does not cross memory accesses, source-location or allocation constraints,
 and is disabled in functions with inline assembly. Memory-operand comparisons
 keep their existing staging boundary.
 
+With Bounded allocation in speed mode, an i32 or i64 comparison used only by
+its branch can also cross one stack-address definition in code without debug
+locations. The backend keeps the operands live until it emits the branch.
+
 ## Memory operand folding
 
 Tree and Full selection fold some loads into their consumer. Every fold keeps
@@ -450,6 +454,11 @@ register-only arguments and calls. The wrapper must have zero frame storage
 and an odd number of callee-saved register pushes, which keeps RSP aligned at
 every call. The emitted unwind rows track RSP through each push and pop.
 Debug locations and stack observers keep the usual frame.
+
+In the same mode, a direct call to a private, inlineable function that only
+returns its own frame address as an integer can use `rsp - 16` at the call
+site. This accounts for the SysV return address and the callee's saved RBP.
+The call's register allocation and stack alignment stay in place.
 
 ## Size emission
 

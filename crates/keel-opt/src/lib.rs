@@ -328,6 +328,17 @@ pub(crate) static SIMPLIFY_CFG: &dyn Pass = &BuiltinPass::new(
     "fold constant branches, skip empty blocks, merge straight-line blocks, remove unreachable blocks",
     |f, _| simplify_cfg::run(f),
 );
+pub(crate) static THREAD_ENTRY_STATUS: &dyn Pass = &BuiltinPass::new(
+    "thread-entry-status",
+    "bypass a constant entry status around its shared check",
+    |f, context| {
+        context.target == VectorTarget::X86Sse2
+            && f.local
+            && f.num_blocks() >= 128
+            && f.debug_vars.is_empty()
+            && simplify_cfg::thread_entry_status(f)
+    },
+);
 pub(crate) static GVN: &dyn Pass = &BuiltinPass::new(
     "gvn",
     "replace equivalent pure instructions with a dominating computation",
@@ -510,6 +521,7 @@ pub static PASSES: &[&dyn Pass] = &[
     CONST_FOLD,
     FAST_MATH,
     SIMPLIFY_CFG,
+    THREAD_ENTRY_STATUS,
     GVN,
     DCE,
     GCM,
@@ -876,7 +888,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 41] = [
+const FULL_EPILOGUE: [&str; 42] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -918,6 +930,7 @@ const FULL_EPILOGUE: [&str; 41] = [
     "outline-cold",
     "loop-unroll-words",
     "specialize-single-count-exit",
+    "thread-entry-status",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller

@@ -447,11 +447,12 @@ impl Selection {
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
         uses: &[u8],
+        across_stack_addr: bool,
     ) -> HashSet<Value> {
         self.fuse_compare_pairs(
             func,
             folds,
-            crate::fold::fused_compare_pairs(func, uses),
+            crate::fold::fused_compare_pairs(func, uses, across_stack_addr),
             Cover::CompareBranch,
         )
     }

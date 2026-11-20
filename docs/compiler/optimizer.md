@@ -168,6 +168,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
 | `specialize-zero-flags` | Share one constant-zero copy of a recursive x86-64 dispatcher |
 | `specialize-single-count-exit` | Give a guarded single-element exit a short continuation on AArch64 |
+| `thread-entry-status` | Route a constant entry status directly to its destination in large local x86-64 functions |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
@@ -1009,6 +1010,11 @@ uses the same reads, writes and return test as the original. Counts that can
 reach the padding loop keep the original path. The rewrite requires the
 duplicated definitions to stay within that path except for explicit branch
 arguments.
+
+On x86-64, `thread-entry-status` bypasses a shared status check when the
+entry's fast edge supplies a constant. The slow edge still calls its helper
+and checks the returned status. The pass requires the constant and status to
+have no other uses and runs on large local functions.
 
 Cold outlining accepts a private Fast function with at most 256 laid-out
 instructions and 4096 instruction/value arena entries. It moves a terminal trap

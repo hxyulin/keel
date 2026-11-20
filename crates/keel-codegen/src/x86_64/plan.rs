@@ -440,6 +440,7 @@ impl Covers {
         func: &Function,
         pipeline: &crate::CodegenPipeline<'_>,
         facts: &crate::kinds::FunctionFacts<'_>,
+        across_stack_addr: bool,
     ) -> Self {
         let (present, uses) = (facts.kinds, &facts.machine_uses);
         let mut selection = pipeline.selector.select_with_uses(
@@ -479,7 +480,7 @@ impl Covers {
         // selects nothing and leaves the selection untouched.
         let mut fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| folds(func, data), uses)
+            selection.fuse_compares(func, |data| folds(func, data), uses, across_stack_addr)
         } else {
             HashSet::default()
         };

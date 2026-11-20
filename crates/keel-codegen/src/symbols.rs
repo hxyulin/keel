@@ -6,6 +6,7 @@ use keel_ir::{DataObject, Module};
 #[derive(Clone, Copy, Default)]
 struct Entry {
     function: bool,
+    definition: Option<u32>,
     /// A function definition that is `weak_odr` and not hidden.
     exported_weak_odr: bool,
     external: bool,
@@ -22,9 +23,10 @@ pub(crate) struct Symbols<'m> {
 impl<'m> Symbols<'m> {
     pub fn new(module: &'m Module) -> Self {
         let mut index = FxHashMap::<&str, Entry>::default();
-        for f in &module.functions {
+        for (position, f) in module.functions.iter().enumerate() {
             let entry = index.entry(&f.name).or_default();
             entry.function = !f.attrs.weak;
+            entry.definition = Some(position as u32);
             entry.exported_weak_odr = f.weak_odr && !f.hidden;
         }
         for d in &module.decls {
@@ -49,6 +51,10 @@ impl<'m> Symbols<'m> {
 
     pub fn contains(&self, name: &str) -> bool {
         self.index.contains_key(name)
+    }
+
+    pub fn function(&self, name: &str) -> Option<&'m keel_ir::Function> {
+        Some(&self.module.functions[self.index.get(name)?.definition? as usize])
     }
 
     /// Same as [`Module::data_object`].

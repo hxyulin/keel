@@ -9,6 +9,67 @@ mod returns;
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 
 #[test]
+fn x86_local_frame_query_matches_the_out_of_line_frame_after_dynamic_allocation() {
+    use keel_test_support::{native, native_program};
+
+    let module = keel_ir::parse(
+        "func @physical() -> i64 noinline local {
+        block0:
+            v0 = intrinsic frame_address()
+            v1 = ptrtoint.i64 v0
+            return v1
+        }
+        func @folded() -> i64 local {
+        block0:
+            v0 = intrinsic frame_address()
+            v1 = ptrtoint.i64 v0
+            return v1
+        }
+        func @check_frame(i64) -> i32 {
+        block0(v0: i64):
+            v1 = intrinsic stack_alloc(v0)
+            v2 = call @physical()
+            v3 = call @folded()
+            v4 = icmp.eq v2, v3
+            v5 = uext.i32 v4
+            return v5
+        }",
+    )
+    .unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Bounded,
+    };
+    let mut emission = keel_codegen::EmissionOptions::default();
+    emission.goal = keel_codegen::CodegenGoal::Speed;
+    let request = keel_codegen::Request::new(target, pipeline).emission(emission);
+    let text = request.text(&module).unwrap();
+    assert!(text.contains("\tcall\t\"physical\""), "{text}");
+    assert!(!text.contains("\tcall\t\"folded\""), "{text}");
+    let bytes = keel_asm::assemble_source_for(target, &text).unwrap();
+    assert_eq!(
+        bytes,
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap()
+    );
+
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) || !native::active() {
+        return;
+    }
+    let oracle = "extern int check_frame(unsigned long);\n\
+                  int main(void) {\n\
+                    for (unsigned long n = 0; n <= 256; n += 17)\n\
+                      if (!check_frame(n)) return 1;\n\
+                    return 0;\n\
+                  }\n";
+    native_program!("x86-local-frame-query")
+        .file("oracle.c", oracle)
+        .file("frame.o", bytes)
+        .link(["-O2", "oracle.c", "frame.o"])
+        .check();
+}
+
+#[test]
 fn sparse_escaping_slots_assemble_on_both_targets() {
     let module = keel_ir::parse(include_str!("programs/compact_frame.keel")).unwrap();
     keel_ir::verify_module(&module).unwrap();
