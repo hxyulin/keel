@@ -118,6 +118,7 @@ use keel_ir::{
 use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
+mod aggregate_inputs;
 mod aggregate_outputs;
 mod compare_neon;
 mod constant_plan;
@@ -409,7 +410,9 @@ pub(crate) fn compile_output<'module>(
                 continue;
             }
             let promoted = crate::aggregate_results::promote(original, debug);
-            let promoted = crate::aggregate_outputs::promote(&promoted, debug, |sig| {
+            let incoming =
+                aggregate_inputs::promote(&promoted, debug, linux, emission.pressure_schedule);
+            let promoted = crate::aggregate_outputs::promote(&incoming, debug, |sig| {
                 aggregate_outputs::plan(sig, linux)
             });
             let lowered = vector::lower(&promoted);
@@ -475,7 +478,9 @@ pub(crate) fn compile_output<'module>(
                 )));
             }
             let promoted = crate::aggregate_results::promote(original, debug);
-            let promoted = crate::aggregate_outputs::promote(&promoted, debug, |sig| {
+            let incoming =
+                aggregate_inputs::promote(&promoted, debug, linux, emission.pressure_schedule);
+            let promoted = crate::aggregate_outputs::promote(&incoming, debug, |sig| {
                 aggregate_outputs::plan(sig, linux)
             });
             let lowered = vector::lower(&promoted);

@@ -13,6 +13,7 @@ pub mod backend_profile;
 
 pub mod aarch64;
 mod abi;
+mod aggregate_inputs;
 mod aggregate_outputs;
 mod aggregate_results;
 pub mod cover;

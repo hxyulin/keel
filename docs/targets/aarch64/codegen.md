@@ -64,6 +64,12 @@ Darwin and Linux each check the original argument registers, stack offsets
 and copy areas before changing the caller's local signature. A pair that
 spills to the stack as a unit keeps the ordinary byval copy.
 
+With pressure scheduling enabled, the callee can also read immutable
+two-word byval arguments directly from their incoming registers. This applies
+to functions with multiple byval arguments and no large dispatch. The backend
+checks every argument location against the original signature. Escaping or
+volatile homes and arguments passed on the stack keep their ordinary copies.
+
 Base allocation puts call-live values in callee-saved registers, proven
 preserved caller registers or spill homes. `CallSiteAllocator` can instead save
 GPRs at clobber sites and keep them in caller registers between those sites.
