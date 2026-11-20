@@ -98,7 +98,10 @@ register-only Fast tail calls also qualify. Debug files, TLS getters, frame
 intrinsics, assembly, exception handling, `optnone`, special entries and
 returns-twice keep their frames. The incoming x29 and x30 remain untouched.
 This follows [Apple's leaf and tail-call frame exception](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms).
-The speed goal retains the existing private Fast leaf policy.
+The speed goal retains the private Fast leaf policy. With bounded allocation,
+it can also return before creating the frame when an entry tag check guards
+a single signed 64-bit integer to double conversion and store. The fallback
+retains its normal frame. DWARF unwind records describe both paths.
 
 From `sp` up:
 

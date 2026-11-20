@@ -122,6 +122,7 @@ mod compare_neon;
 mod constant_plan;
 mod direct;
 mod dispatch_tail;
+mod entry_shortcut;
 mod extended_add;
 mod integer_neon;
 mod intrinsic;
@@ -953,6 +954,7 @@ struct FunctionCompiler<'a> {
     symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
     dispatch_tails: HashMap<Inst, Inst>,
+    entry_shortcut: Option<entry_shortcut::TaggedConversion>,
     #[cfg(feature = "experimental-dispatch")]
     independent_dispatch_tails: HashMap<Inst, Inst>,
     current_inst: Option<Inst>,
@@ -1198,6 +1200,15 @@ impl<'a> FunctionCompiler<'a> {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         let goal = crate::emission::function_goal(&func.attrs, request.emission.goal);
+        let entry_shortcut = (goal == crate::CodegenGoal::Speed
+            && pipeline.allocator.name() == "bounded"
+            && frame_size != 0
+            && !has_inline_asm
+            && module.files.is_empty()
+            && func.debug_loc.is_none()
+            && func.debug_vars.is_empty())
+        .then(|| entry_shortcut::TaggedConversion::analyze(func))
+        .flatten();
         let frameless = plan::frameless(
             func,
             module,
@@ -1272,6 +1283,7 @@ impl<'a> FunctionCompiler<'a> {
             linux,
             variadic_area: calls.variadic_area,
             dispatch_tails,
+            entry_shortcut,
             #[cfg(feature = "experimental-dispatch")]
             independent_dispatch_tails,
             func,
@@ -1388,6 +1400,11 @@ impl<'a> FunctionCompiler<'a> {
             // offset zero also has the standard frameless compact encoding.
             self.cfi(Cfi::DefCfaOffset(0));
         } else {
+            if !self.debug
+                && let Some(shortcut) = self.entry_shortcut.take()
+            {
+                shortcut.emit(&mut self);
+            }
             self.native(
                 Opcode::STP_64_ldstpair_pre,
                 [

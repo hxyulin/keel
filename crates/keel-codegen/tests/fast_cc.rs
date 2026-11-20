@@ -375,3 +375,117 @@ fn checked_peek_matches_the_nine_instruction_leaf_shape() {
     );
     oracle.run(&typed, "checked peek hot and panic paths");
 }
+
+const GUARDED_CONVERSION: &str = "decl @convert_slow(ptr, ptr, ptr) -> i32 cc(c)
+func @convert_tagged(ptr, ptr) -> i32 cc(c) {
+ ss0 = stack_slot 16, align 8
+entry(v0: ptr, v1: ptr):
+ v2 = iconst.i64 8
+ v3 = ptradd v0, v2
+ v4 = load.i8 trap_ub v3
+ v5 = uext.i32 v4
+ v6 = iconst.i32 3
+ v7 = icmp.eq v5, v6
+ brif v7, fast, slow
+fast:
+ v8 = load.i64 v0
+ v9 = sitofp.f64 v8
+ store v9, v1
+ v10 = iconst.i32 1
+ return v10
+slow:
+ v11 = stack_addr ss0
+ v12 = call @convert_slow(v0, v1, v11)
+ return v12
+}";
+
+#[test]
+fn tagged_conversion_preserves_rounding_and_unwind_in_both_paths() {
+    use object::{Object, ObjectSection};
+    let oracle = native_oracle::PreparedOracle::new(
+        "tagged-conversion",
+        r#"#include <fenv.h>
+#include <stdint.h>
+#pragma STDC FENV_ACCESS ON
+struct tagged { int64_t payload; uint8_t tag; };
+extern int convert_tagged(const struct tagged *, double *);
+static unsigned slow_calls;
+int convert_slow(const struct tagged *value, double *out, void *scratch) {
+    *(uint8_t *)scratch = value->tag;
+    *out = -*(uint8_t *)scratch;
+    ++slow_calls;
+    return 2;
+}
+int main(void) {
+    const int modes[] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
+    const int64_t payloads[] = {1, -3, INT64_MIN, INT64_MAX, 9007199254740993LL};
+    for (unsigned mode = 0; mode < sizeof(modes) / sizeof(modes[0]); ++mode) {
+        if (fesetround(modes[mode])) return 1;
+        for (unsigned i = 0; i < sizeof(payloads) / sizeof(payloads[0]); ++i) {
+            struct tagged value = {payloads[i], 3};
+            volatile int64_t payload = value.payload;
+            double result = 0.0;
+            if (convert_tagged(&value, &result) != 1 || result != (double)payload || slow_calls)
+                return 2;
+        }
+    }
+    struct tagged value = {45, 28};
+    double result = 0.0;
+    if (convert_tagged(&value, &result) != 2 || result != -28 || slow_calls != 1) return 3;
+    return 0;
+}
+"#,
+        &["-O2"],
+    );
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Bounded,
+    };
+    for allowed in [true, false] {
+        let source = if allowed {
+            GUARDED_CONVERSION.to_owned()
+        } else {
+            GUARDED_CONVERSION.replace("load.i8 trap_ub", "load.i8 volatile")
+        };
+        let module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let registers = &keel_codegen::aarch64::REGISTERS;
+        let text =
+            keel_codegen::aarch64::compile_with_pipeline(&module, registers, &pipeline).unwrap();
+        assert_eq!(text.contains("_framed_entry"), allowed, "{text}");
+        if allowed {
+            let path = text.split("Lconvert_tagged_framed_entry:").next().unwrap();
+            assert!(
+                path.contains(".cfi_def_cfa_offset 0") && path.contains("\tret\n"),
+                "{path}"
+            );
+            assert!(!path.contains("stp\tx29, x30"), "{path}");
+        }
+        let program =
+            keel_codegen::aarch64::compile_program_with_pipeline(&module, registers, &pipeline)
+                .unwrap();
+        let object = keel_asm::assemble_program_object(&program, Default::default()).unwrap();
+        assert_eq!(keel_asm::assemble_object(&text).unwrap(), object);
+        if allowed {
+            let file = object::File::parse(object.as_slice()).unwrap();
+            let unwind = file
+                .section_by_name("__compact_unwind")
+                .unwrap()
+                .data()
+                .unwrap();
+            assert_eq!(
+                u32::from_le_bytes(unwind[12..16].try_into().unwrap()),
+                0x0300_0000
+            );
+            assert!(file.section_by_name("__eh_frame").is_some());
+        }
+        oracle.run(
+            &object,
+            if allowed {
+                "guarded fast path"
+            } else {
+                "volatile fallback"
+            },
+        );
+    }
+}
