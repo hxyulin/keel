@@ -239,8 +239,10 @@ impl Pass for InlineLateRecordCopy {
     }
 
     fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
-        if context.target != crate::VectorTarget::X86Sse2
-            || !module.functions.iter().any(cost::late_record_copy)
+        if !matches!(
+            context.target,
+            crate::VectorTarget::X86Sse2 | crate::VectorTarget::Aarch64Neon
+        ) || !module.functions.iter().any(cost::late_record_copy)
         {
             return Some(false);
         }

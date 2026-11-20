@@ -106,8 +106,8 @@ fn outcome(source: &str, pass: &str, caller: &str, callee: &str) -> String {
 }
 
 #[test]
-fn x86_full_can_inline_bounded_record_copies_after_loop_optimization() {
-    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+fn full_can_inline_native_record_copies_after_loop_optimization() {
+    use keel_opt::VectorTarget::{Aarch64Neon, Portable, X86Sse2};
 
     let source = "
 decl @grow(ptr) -> i32
@@ -167,7 +167,8 @@ block0(v0:ptr, v1:ptr, v2:ptr, v3:ptr, v4:i64, v5:i64):
     };
     let late = "inline-late-record-copy";
     assert!(!still_calls(source, late, X86Sse2));
-    assert!(still_calls(source, late, Aarch64Neon));
+    assert!(!still_calls(source, late, Aarch64Neon));
+    assert!(still_calls(source, late, Portable));
     assert!(still_calls(source, "inline-cheap-reserve", X86Sse2));
     assert!(still_calls(
         &source.replace("load.i64 v12", "load.i64 volatile v12"),
