@@ -74,6 +74,13 @@ fn derived_abi_macros_match_clang_for_each_target() {
         }
         assert!(compared > 300);
         assert!(!ours.contains_key("__AVX__") && !ours.contains_key("__ARM_NEON"));
+        assert_eq!(
+            ours.get("__ARM_FEATURE_UNALIGNED").map(String::as_str),
+            match target {
+                Target::Aarch64AppleDarwin | Target::Aarch64LinuxGnu => Some("1"),
+                _ => None,
+            }
+        );
         assert_eq!(ours.get("__KEEL__").unwrap(), "1");
     }
 }

@@ -209,6 +209,8 @@ parse, but values are errors. On x86-64 Linux `__float128` and
 
 ## Implementation notes
 
+- **Target capabilities.** Both native AArch64 targets define
+  `__ARM_FEATURE_UNALIGNED` for ordinary loads and stores.
 - **Computed goto.** `&&label` is the label's number in its function, starting
   at 1, and every `goto *p` jumps to one shared dispatch block that switches
   on that number; the switch becomes a jump table. When every computed goto in

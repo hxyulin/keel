@@ -421,6 +421,9 @@ pub fn predefined_macros(
             def(&format!("__{prefix}_{name}__"), "1");
         }
     }
+    if apple || arm_linux {
+        def("__ARM_FEATURE_UNALIGNED", "1");
+    }
     if apple {
         for name in [
             "__APPLE__",
