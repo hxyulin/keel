@@ -418,6 +418,13 @@ at most 16 blocks, no stack slots or store instructions, and at most two direct 
 whose results it does not use. The ordinary instruction and growth limits
 still apply.
 
+AArch64 Full also admits local record decoders with two pointer arguments and
+an integer dispatch argument. The dispatch has 8 to 16 cases. The decoder
+reads and writes memory without volatile accesses. It has at most 16 blocks
+and 208 instructions, no loops or stack slots, and at most one direct call
+with no results. The usual call binding, legality and caller growth checks
+still apply.
+
 On AArch64 and x86-64, Full runs `inline-late-record-copy` after loop optimization. It
 admits a bounded local record-copy helper with a single direct call and two
 separate copy loops. The pass applies the usual call binding, legality and

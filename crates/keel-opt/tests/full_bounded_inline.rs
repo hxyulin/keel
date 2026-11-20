@@ -93,6 +93,91 @@ block0(v0: ptr, v1: ptr):
         );
     }
 }
+#[test]
+fn aarch64_full_admits_a_compact_record_decoder() {
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+
+    let source = "
+decl @fallback(ptr, i32, ptr)
+
+func @decode(ptr, i32, ptr) local {
+block0(v0: ptr, v1: i32, v2: ptr):
+    switch v1, block9, [0: block1, 1: block2, 2: block3, 3: block4, 4: block5, 5: block6, 6: block7, 7: block8]
+block1:
+    v3 = load.i8 v0
+    store v3, v2
+    return
+block2:
+    v4 = load.i16 v0
+    store v4, v2
+    return
+block3:
+    v5 = load.i32 v0
+    store v5, v2
+    return
+block4:
+    v6 = load.i64 v0
+    store v6, v2
+    return
+block5:
+    v7 = iconst.i32 0
+    store v7, v2
+    return
+block6:
+    v8 = iconst.i32 1
+    store v8, v2
+    return
+block7:
+    return
+block8:
+    return
+block9:
+    call @fallback(v0, v1, v2)
+    return
+}
+
+func @caller(ptr, i32, ptr) {
+block0(v0: ptr, v1: i32, v2: ptr):
+    call @decode(v0, v1, v2)
+    return
+}
+";
+    let observed = |source: &str, pass, target| {
+        let mut module = keel_ir::parse(source).unwrap();
+        let report = run_for_target(&mut module, pass, target);
+        let outcome = report
+            .invocations
+            .into_iter()
+            .flat_map(|entry| entry.inline_sites)
+            .find(|site| site.caller == "caller" && site.callee == "decode")
+            .unwrap()
+            .outcome;
+        (outcome, direct_calls(&module, "caller"))
+    };
+    let full = "inline-cheap-reserve";
+    let (outcome, calls) = observed(source, full, Aarch64Neon);
+    assert_eq!(outcome, "inlined");
+    assert_eq!(calls, vec![("fallback".to_owned(), false)]);
+    assert_eq!(observed(source, full, X86Sse2).0, "profitability_blocks");
+    assert_eq!(
+        observed(source, "inline-noninterposable", Aarch64Neon).0,
+        "profitability_blocks"
+    );
+    for source in [
+        source.replace("store v3, v2", "store volatile v3, v2"),
+        source.replace("block8:\n    return", "block8:\n    jump block8"),
+        source.replace(
+            "call @fallback(v0, v1, v2)",
+            "call @fallback(v0, v1, v2)\n    call @fallback(v0, v1, v2)",
+        ),
+    ] {
+        assert_eq!(
+            observed(&source, full, Aarch64Neon).0,
+            "profitability_blocks"
+        );
+    }
+}
+
 fn outcome(source: &str, pass: &str, caller: &str, callee: &str) -> String {
     let mut m = keel_ir::parse(source).unwrap();
     let r = run(&mut m, pass);

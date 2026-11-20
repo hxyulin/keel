@@ -427,22 +427,75 @@ pub(super) fn late_record_copy(f: &Function) -> bool {
     copies >= 2
 }
 
+// An entry switch may spread short record reads and writes across separate
+// return blocks. Bound the complete decoder, including its out-of-line case.
+fn compact_record_decoder(f: &Function) -> bool {
+    if !f.local
+        || !f.sig.returns.is_empty()
+        || !f
+            .sig
+            .params
+            .iter()
+            .map(|p| p.ty)
+            .eq([Type::Ptr, Type::I32, Type::Ptr])
+        || f.sig.params.iter().any(|p| p.purpose != Purpose::Normal)
+        || f.stack_slots().next().is_some()
+        || f.blocks().take(17).count() > 16
+        || code_insts(f).take(209).count() > 208
+    {
+        return false;
+    }
+    let Some(entry) = f.entry_block() else {
+        return false;
+    };
+    let Some(&dispatch) = f.block_insts(entry).last() else {
+        return false;
+    };
+    if !matches!(f.inst_data(dispatch), InstData::Switch { arg, cases, .. }
+        if (8..=16).contains(&cases.len())
+            && f.resolve(*arg) == f.block_params(entry)[1])
+    {
+        return false;
+    }
+    let mut calls = 0;
+    let mut reads = false;
+    let mut writes = false;
+    for (_, inst) in f.layout_insts() {
+        match f.inst_data(inst) {
+            InstData::Load { flags, .. } if !flags.volatile => reads = true,
+            InstData::Store { flags, .. } if !flags.volatile => writes = true,
+            InstData::Call { .. } if f.inst_results(inst).is_empty() => calls += 1,
+            InstData::Load { .. }
+            | InstData::Store { .. }
+            | InstData::Call { .. }
+            | InstData::CallIndirect { .. }
+            | InstData::Invoke { .. }
+            | InstData::Intrinsic { .. } => return false,
+            _ => {}
+        }
+    }
+    reads && writes && calls <= 1 && acyclic_cfg(f)
+}
+
 pub(super) fn profitability_reason(
     f: &Function,
     full: bool,
-    admit_pointer_scanners: bool,
+    admit_aarch64_helpers: bool,
 ) -> Option<&'static str> {
     let scale = if f.attrs.inlinehint || f.attrs.hot {
         2
     } else {
         1
     };
-    if f.attrs.alwaysinline || (full && readonly_leaf(f)) {
+    if f.attrs.alwaysinline
+        || (full && readonly_leaf(f))
+        || (admit_aarch64_helpers && compact_record_decoder(f))
+    {
         return None;
     }
     if f.blocks().count() > MAX_BLOCKS * scale
         && !cheap_leaf_switch(f)
-        && !(admit_pointer_scanners && small_pointer_scanner(f))
+        && !(admit_aarch64_helpers && small_pointer_scanner(f))
     {
         Some("profitability_blocks")
     } else if code_size(f) > MAX_INSTS * scale {
