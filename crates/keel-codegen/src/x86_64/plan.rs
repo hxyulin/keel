@@ -920,6 +920,52 @@ pub(super) fn frame_size(
     Ok(frame_size)
 }
 
+/// An odd number of saved GPRs aligns RSP for calls without a frame
+/// pointer or an additional stack adjustment. Restrict the speed policy
+/// to small local pointer wrappers with no stack storage or observers.
+pub(super) fn register_only_frame(
+    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
+    named: &sysv::Placement,
+    saved: &[u8],
+    offset: usize,
+) -> bool {
+    let present = facts.kinds;
+    offset == 0
+        && func.local
+        && (2..=3).contains(&func.sig.params.len())
+        && func.sig.params[0].ty == Type::Ptr
+        && (func.sig.returns.is_empty()
+            || func.sig.returns.len() == 1 && func.sig.returns[0].ty == Type::Ptr)
+        && func.blocks().take(19).count() <= 18
+        && func.layout_insts().take(161).count() <= 160
+        && !func.sig.variadic
+        && !func.sig.returns_twice
+        && !func.attrs.optnone
+        && func.personality.is_none()
+        && named.stack == 0
+        && func.num_stack_slots() == 0
+        && saved.len() >= 3
+        && saved.len() % 2 == 1
+        && present.call
+        && !present.return_call
+        && !present.intrinsic
+        && !present.inline_asm
+        && !present.landing_pad
+        && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
+        && facts.calls.iter().all(|&i| {
+            let InstData::Call { func: callee, args } = func.inst_data(i) else {
+                return false;
+            };
+            let sig = &func.callee(*callee).sig;
+            !sig.variadic
+                && !sig.returns_twice
+                && !args.has_explicit_abi()
+                && args.len() <= 6
+                && sig.params.iter().all(|p| p.purpose == Purpose::Normal)
+        })
+}
+
 /// Size mode also omits eligible scalar C leaf frames. Speed mode
 /// keeps its existing layout, which was measured with scalar frames.
 /// Keep frames for stack observers and functions needing frame storage.

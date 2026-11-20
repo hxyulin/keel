@@ -501,3 +501,127 @@ int main(void) {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn x86_register_only_wrapper_keeps_call_alignment_and_unwind_rows() {
+    use keel_test_support::{native, native_program};
+
+    let source = "decl @probe(ptr, ptr) -> i64
+func @wrapper(ptr, ptr, ptr) -> ptr local {
+block0(v0:ptr, v1:ptr, v2:ptr):
+    v3 = symbol_addr @wrapper
+    v4 = call @probe(v0, v3)
+    brif v4, block1, block2
+block1:
+    v8 = symbol_addr @wrapper
+    v5 = call @probe(v0, v8)
+    store v2, v1
+    return v0
+block2:
+    v9 = symbol_addr @wrapper
+    v6 = call @probe(v0, v9)
+    store v1, v2
+    return v0
+}
+func @expose() -> ptr {
+block0:
+    v0 = symbol_addr @wrapper
+    return v0
+}";
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Bounded,
+    };
+    let request = keel_codegen::Request::new(target, pipeline);
+    let text = request.text(&module).unwrap();
+    let body = text
+        .split_once("\"wrapper\":\n")
+        .unwrap()
+        .1
+        .split_once(".Lwrapper_end:")
+        .unwrap()
+        .0;
+    assert!(!body.contains("rbp"), "{body}");
+    assert_eq!(body.matches("push\t").count(), 3, "{body}");
+    assert_eq!(body.matches("pop\t").count(), 6, "{body}");
+    assert!(body.contains(".cfi_def_cfa_offset 32"), "{body}");
+
+    let framed = source.replace(
+        "    v3 = symbol_addr @wrapper",
+        "    v7 = intrinsic frame_address()\n    v3 = symbol_addr @wrapper",
+    );
+    let framed = request.text(&keel_ir::parse(&framed).unwrap()).unwrap();
+    assert!(
+        framed
+            .split_once("\"wrapper\":\n")
+            .unwrap()
+            .1
+            .contains("push\trbp")
+    );
+
+    let program = request.program(&module).unwrap();
+    let object = keel_asm::assemble_program_for(target, &program).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    if !native::active() {
+        return;
+    }
+
+    let oracle = r#"
+#include <stdlib.h>
+#include <stdint.h>
+#include <unwind.h>
+static unsigned calls;
+static _Unwind_Reason_Code check_frame(struct _Unwind_Context *ctx, void *ptr) {
+    const uintptr_t ip = _Unwind_GetIP(ctx) - 1;
+    uintptr_t *entry = ptr;
+    if (ip >= *entry && ip - *entry < 160)
+        *entry = 0;
+    return _URC_NO_REASON;
+}
+long probe_impl(void *selector, void *wrapper) {
+    uintptr_t entry = (uintptr_t)wrapper;
+    _Unwind_Backtrace(check_frame, &entry);
+    if (entry)
+        abort();
+    ++calls;
+    return *(int *)selector;
+}
+extern void *expose(void);
+int main(void) {
+    void *(*wrapper)(void *, void **, void **) = expose();
+    void *left = 0, *right = 0;
+    int selector = 1;
+    if (wrapper(&selector, &left, &right) != &selector || left != &right)
+        return 1;
+    selector = 0;
+    if (wrapper(&selector, &left, &right) != &selector || right != &left)
+        return 2;
+    return calls == 4 ? 0 : 3;
+}
+"#;
+    let probe = r#"
+.text
+.globl probe
+.type probe,@function
+probe:
+    mov %rsp, %rax
+    and $15, %eax
+    cmp $8, %eax
+    jne 1f
+    jmp probe_impl
+1:  ud2
+.section .note.GNU-stack,"",@progbits
+"#;
+    native_program!("x86-register-only-wrapper")
+        .file("oracle.c", oracle)
+        .file("probe.S", probe)
+        .file("wrapper.o", object)
+        .link(["-O2", "oracle.c", "probe.S", "wrapper.o"])
+        .check();
+}

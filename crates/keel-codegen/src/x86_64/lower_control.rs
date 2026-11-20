@@ -199,6 +199,17 @@ impl FunctionCompiler<'_> {
                 } else {
                     self.epilogue();
                     self.emit(Opcode::Ret, []);
+                    if self.register_only_frame {
+                        // A subsequent block starts with the callee-saved
+                        // registers on the stack. Restore that unwind row.
+                        self.cfi(Cfi::DefCfaOffset(8 + 8 * self.saved.len() as u64));
+                        for (k, r) in self.saved.clone().into_iter().enumerate() {
+                            self.cfi(Cfi::Offset {
+                                register: dwarf_register(r),
+                                offset: -((16 + 8 * k) as i64),
+                            });
+                        }
+                    }
                 }
             }
             _ => unreachable!("not control flow"),

@@ -445,6 +445,12 @@ locations take part, keeping every lane through a copy cycle. Memory-to-memory
 transfers use `xmm15`/`ymm15`/`zmm15`. Ordinary 128-bit vectors do not reserve a stack
 copy temporary; wide-vector, F80 and intrinsic recipes keep one.
 
+In speed mode, Bounded allocation can omit RBP from small local wrappers with
+register-only arguments and calls. The wrapper must have zero frame storage
+and an odd number of callee-saved register pushes, which keeps RSP aligned at
+every call. The emitted unwind rows track RSP through each push and pop.
+Debug locations and stack observers keep the usual frame.
+
 ## Size emission
 
 `keel cc -Os` and `keel compile -Os` select size-oriented x86 emission in

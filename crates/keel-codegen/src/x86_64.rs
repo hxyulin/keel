@@ -1079,8 +1079,10 @@ struct FunctionCompiler<'a> {
     /// Outgoing arguments, spill slots and IR stack slots: what `sub rsp`
     /// allocates below the saved registers.
     frame_size: usize,
-    /// A private leaf with no stack frame or callee-save obligations.
+    /// Stack addresses and CFI use RSP directly when RBP is omitted.
     frameless: bool,
+    /// Callee-save pushes with an RSP-based unwind row and no local storage.
+    register_only_frame: bool,
     /// The callee-saved registers pushed, in order.
     saved: Vec<u8>,
     /// The block emitted after the current one, which a branch can fall
@@ -1241,17 +1243,27 @@ impl<'a> FunctionCompiler<'a> {
             shape.frame_register,
         );
         let simple_leaf = plan::simple_leaf(func, symbols, present, features);
-        let frame_size =
-            plan::frame_size(goal, &shape, simple_leaf, &saved, offset).map_err(err)?;
-        let frameless = plan::frameless(
-            func,
-            goal,
-            simple_leaf,
-            spills.has_vectors,
-            frame_size,
-            &named,
-            &saved,
-        );
+        let register_only_frame = goal == crate::CodegenGoal::Speed
+            && pipeline.allocator.name() == "bounded"
+            && module.files.is_empty()
+            && shape.frame_register.is_none()
+            && !symbols.has_thread_locals()
+            && plan::register_only_frame(func, &facts, &named, &saved, offset);
+        let frame_size = if register_only_frame {
+            0
+        } else {
+            plan::frame_size(goal, &shape, simple_leaf, &saved, offset).map_err(err)?
+        };
+        let frameless = register_only_frame
+            || plan::frameless(
+                func,
+                goal,
+                simple_leaf,
+                spills.has_vectors,
+                frame_size,
+                &named,
+                &saved,
+            );
         let shared_return = plan::shared_return(func, goal, &alloc, &saved);
         let plan::Covers {
             selection,
@@ -1315,6 +1327,7 @@ impl<'a> FunctionCompiler<'a> {
             named,
             frame_size,
             frameless,
+            register_only_frame,
             saved,
             next_block: None,
             preferred_backedge: None,
@@ -1397,9 +1410,16 @@ impl<'a> FunctionCompiler<'a> {
             // Each push is 8 bytes further from the CFA, which is rbp + 16.
             for (k, r) in self.saved.clone().into_iter().enumerate() {
                 self.emit(Opcode::Push, [asm_arg(r64(r))]);
+                let cfa_offset = if self.register_only_frame {
+                    let offset = 16 + 8 * k as u64;
+                    self.cfi(Cfi::DefCfaOffset(offset));
+                    offset
+                } else {
+                    24 + 8 * k as u64
+                };
                 self.cfi(Cfi::Offset {
                     register: dwarf_register(r),
-                    offset: -((24 + 8 * k) as i64),
+                    offset: -(cfa_offset as i64),
                 });
             }
             if self.frame_size > 0 {
@@ -2992,6 +3012,14 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Restores the callee-saved registers, rsp and rbp.
     fn epilogue(&mut self) {
+        if self.register_only_frame {
+            for (k, r) in self.saved.clone().into_iter().enumerate().rev() {
+                self.emit(Opcode::Pop, [asm_arg(r64(r))]);
+                self.cfi(Cfi::DefCfaOffset(8 + 8 * k as u64));
+                self.cfi(Cfi::Restore(dwarf_register(r)));
+            }
+            return;
+        }
         if self.frameless {
             return;
         }
