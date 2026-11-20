@@ -1,12 +1,36 @@
 //! Keep register-returned integer pairs in SSA when the caller's result home
-//! has no observers beyond same-block word loads.
+//! has no observers beyond same-block word loads. Indirect calls use a
+//! separate signature so other sites can still materialize the pair.
 use std::borrow::Cow;
 
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     AbiParam, BinaryOp, Block, CallConv, FuncRef, Function, InsertPoint, Inst, InstData, Intrinsic,
-    Layout, MemoryFlags, Purpose, StackSlot, Type, Value,
+    Layout, MemoryFlags, Purpose, Signature, StackSlot, Type, Value,
 };
+
+#[derive(Clone, Copy)]
+enum CallSite {
+    Direct(FuncRef),
+    Indirect,
+}
+
+fn is_register_pair_result(sig: &Signature) -> bool {
+    sig.cc == CallConv::C
+        && !sig.variadic
+        && !sig.returns_twice
+        && sig.returns.is_empty()
+        && sig.x86_vector_abi.is_none()
+        && matches!(
+            sig.params.first().map(|p| &p.purpose),
+            Some(Purpose::Sret(layout)) if is_integer_pair(layout)
+        )
+}
+
+fn use_register_results(sig: &mut Signature) {
+    sig.params.remove(0);
+    sig.returns = vec![AbiParam::new(Type::I64); 2];
+}
 
 #[derive(Default)]
 struct Home {
@@ -37,25 +61,23 @@ pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
         .callees()
         .filter(|(_, callee)| {
             let sig = &callee.sig;
-            sig.cc == CallConv::C
-                && !sig.variadic
-                && !sig.returns_twice
-                && sig.returns.is_empty()
-                && sig.x86_vector_abi.is_none()
+            is_register_pair_result(sig)
                 && callee.attrs.contract.parameters.is_empty()
                 && callee.attrs.contract.parameter_ranges.is_empty()
-                && matches!(sig.params.first().map(|p| &p.purpose),
-                    Some(Purpose::Sret(layout)) if is_integer_pair(layout))
         })
         .map(|(id, _)| id)
         .collect();
-    if candidates.is_empty() {
+    if candidates.is_empty()
+        && !func
+            .signatures()
+            .any(|(_, sig)| is_register_pair_result(sig))
+    {
         return Cow::Borrowed(func);
     }
 
     let mut homes = FxHashMap::<StackSlot, Home>::default();
     let mut addresses = FxHashMap::<Value, (StackSlot, usize)>::default();
-    let mut calls = Vec::<(Inst, FuncRef)>::new();
+    let mut calls = Vec::<(Inst, CallSite)>::new();
     let mut blocked = FxHashSet::default();
     for (_, inst) in func.layout_insts() {
         match func.inst_data(inst) {
@@ -77,8 +99,13 @@ pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
                 if args.has_explicit_abi() {
                     blocked.insert(*func);
                 } else {
-                    calls.push((inst, *func));
+                    calls.push((inst, CallSite::Direct(*func)));
                 }
+            }
+            InstData::CallIndirect { sig, args, .. }
+                if !args.has_explicit_abi() && is_register_pair_result(func.signature(*sig)) =>
+            {
+                calls.push((inst, CallSite::Indirect));
             }
             InstData::StackAddr { slot } => {
                 let storage = func.stack_slot(*slot);
@@ -92,7 +119,7 @@ pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
             _ => {}
         }
     }
-    calls.retain(|(_, callee)| !blocked.contains(callee));
+    calls.retain(|(_, site)| !matches!(site, CallSite::Direct(callee) if blocked.contains(callee)));
     if calls.is_empty() || homes.is_empty() {
         return Cow::Borrowed(func);
     }
@@ -136,7 +163,12 @@ pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
                 op: BinaryOp::Ptradd,
                 ..
             } if addresses.contains_key(&func.first_result(inst)) => {}
-            InstData::Call { args, .. } if calls_by_inst.contains_key(&inst) => {
+            data @ (InstData::Call { args, .. } | InstData::CallIndirect { args, .. })
+                if calls_by_inst.contains_key(&inst) =>
+            {
+                if let InstData::CallIndirect { callee, .. } = data {
+                    escape(*callee);
+                }
                 if let Some(&(slot, 0)) = addresses.get(&func.resolve(args[0])) {
                     let home = homes.get_mut(&slot).unwrap();
                     home.escaped |= home.result.replace((inst, block)).is_some();
@@ -177,36 +209,58 @@ pub(crate) fn promote(func: &Function, debug: bool) -> Cow<'_, Function> {
         .filter(|home| !home.escaped && !home.loads.is_empty())
         .filter_map(|home| home.result.map(|(site, _)| (site, home)))
         .collect();
-    let chosen: FxHashSet<_> = isolated.keys().map(|site| calls_by_inst[site]).collect();
-    if chosen.is_empty() {
+    if isolated.is_empty() {
         return Cow::Borrowed(func);
     }
+    let chosen: FxHashSet<_> = isolated
+        .keys()
+        .filter_map(|site| match calls_by_inst[site] {
+            CallSite::Direct(callee) => Some(callee),
+            CallSite::Indirect => None,
+        })
+        .collect();
     let mut output = func.clone();
     for &callee in &chosen {
-        let sig = &mut output.callee_mut(callee).sig;
-        sig.params.remove(0);
-        sig.returns = vec![AbiParam::new(Type::I64); 2];
+        use_register_results(&mut output.callee_mut(callee).sig);
     }
 
-    // A function has one declaration per callee. Rewrite each use of the
-    // changed declaration, materializing the result at the original address
+    // A function has one declaration per direct callee. Rewrite each use of
+    // a changed declaration, materializing the result at the original address
     // whenever later instructions can still observe its storage.
-    for (site, callee) in calls {
-        if !chosen.contains(&callee) {
-            continue;
-        }
-        let InstData::Call { args, .. } = func.inst_data(site) else {
-            unreachable!()
+    for (site, call) in calls {
+        let (addr, data) = match (call, func.inst_data(site)) {
+            (CallSite::Direct(callee), InstData::Call { args, .. }) => {
+                if !chosen.contains(&callee) {
+                    continue;
+                }
+                (
+                    args[0],
+                    InstData::Call {
+                        func: callee,
+                        args: args.iter().copied().skip(1).collect::<Vec<_>>().into(),
+                    },
+                )
+            }
+            (CallSite::Indirect, InstData::CallIndirect { sig, callee, args }) => {
+                if !isolated.contains_key(&site) {
+                    continue;
+                }
+                // Other call sites may still need the original result home.
+                let mut sig = func.signature(*sig).clone();
+                use_register_results(&mut sig);
+                (
+                    args[0],
+                    InstData::CallIndirect {
+                        sig: output.import_signature(sig),
+                        callee: *callee,
+                        args: args.iter().copied().skip(1).collect::<Vec<_>>().into(),
+                    },
+                )
+            }
+            _ => unreachable!("recorded call site"),
         };
-        let addr = args[0];
         let at = InsertPoint::Before(site);
-        let new = output.insert_inst(
-            at,
-            InstData::Call {
-                func: callee,
-                args: args.iter().copied().skip(1).collect::<Vec<_>>().into(),
-            },
-        );
+        let new = output.insert_inst(at, data);
         let [low, high] = *output.inst_results(new) else {
             unreachable!("two-word result");
         };

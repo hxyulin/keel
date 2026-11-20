@@ -43,6 +43,21 @@ block0(v0:ptr,v1:i64):
  v3 = load.i64 v2
  return v3
 }
+func @indirect_mixed(ptr,ptr,i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:ptr,v1:ptr,v2:i64):
+ v3 = stack_addr ss0
+ intrinsic lifetime_start(v3)
+ call_indirect v0(v3,v2) : (ptr sret {i64,i64},i64) cc(c)
+ v4 = load.i64 v3
+ v5 = iconst.i64 8
+ v6 = ptradd v3,v5
+ v7 = load.i64 v6
+ intrinsic lifetime_end(v3)
+ v8 = xor v4,v7
+ call_indirect v0(v1,v8) : (ptr sret {i64,i64},i64) cc(c)
+ return v8
+}
 func @dynamic(i64)->i64 cc(c) {
  ss0 = stack_slot 16, align 8
 block0(v0:i64):

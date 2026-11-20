@@ -10,6 +10,7 @@ Hfa make_hfa(double x) { return (Hfa){x+1.25,x-3.5}; }
 Nine make_nine(uint64_t x) { Nine n; for(unsigned i=0;i<9;i++) n.bytes[i]=(unsigned char)((x>>(8*(i%8)))+i); return n; }
 extern uint64_t fixed_pair(uint64_t),external(Pair*,uint64_t),indirect(Pair(*)(uint64_t),uint64_t),dynamic(uint64_t),overlap(uint64_t),fixed_nine(uint64_t);
 extern uint64_t read_and_store_pair(Pair*,uint64_t);
+extern uint64_t indirect_mixed(Pair(*)(uint64_t),Pair*,uint64_t);
 extern double fixed_hfa(double);
 #define CHECK(c) do { if(!(c)) { fprintf(stderr,"oracle line %d\n",__LINE__);return 1; } } while(0)
 int main(void) {
@@ -23,6 +24,7 @@ int main(void) {
   CHECK(read_and_store_pair(&out,x)==(p.a^p.b) && out.a==second.a && out.b==second.b);
   CHECK(external(&out,x)==p.a && out.a==p.a && out.b==p.b);
   CHECK(indirect(make_pair,x)==p.a);
+  CHECK(indirect_mixed(make_pair,&out,x)==(p.a^p.b) && out.a==second.a && out.b==second.b);
   CHECK(dynamic(x)==(p.a^x));
   CHECK(overlap(x)==((x+1)^(x+19)));
   Nine n=make_nine(x);uint64_t word;memcpy(&word,n.bytes,8);

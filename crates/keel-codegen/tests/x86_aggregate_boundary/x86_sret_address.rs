@@ -50,10 +50,14 @@ fn fixed_integer_pairs_use_frame_offsets_and_pointer_arguments_keep_the_save() {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
             for pools in [&EMPTY, &keel_codegen::x86_64::REGISTERS] {
                 let (text, _) = compile(&m, sel, alloc, pools);
-                for (f, callee) in [("overlap", "increment"), ("indirect", "r10")] {
+                assert!(
+                    after_call(&text, "overlap", "increment").starts_with("mov\tqword ptr [rbp"),
+                    "{text}"
+                );
+                if !pools.caller_saved.is_empty() {
                     assert!(
-                        after_call(&text, f, callee).starts_with("mov\tqword ptr [rbp"),
-                        "{f}: {text}"
+                        !after_call(&text, "indirect", "r10").contains("ptr ["),
+                        "{text}"
                     );
                 }
                 for (f, callee) in [("fixed_hfa", "make_hfa"), ("fixed_nine", "make_nine")] {
