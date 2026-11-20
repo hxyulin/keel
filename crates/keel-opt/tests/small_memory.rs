@@ -157,6 +157,92 @@ block1:
     assert_eq!(ordinary.to_string(), before);
 }
 
+#[test]
+fn short_buffer_copy_preserves_bytes_and_only_copies_the_requested_range() {
+    use keel_ir_interp::{Interpreter, Outcome, Val};
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+    use std::fmt::Write as _;
+
+    let cases = (2..128)
+        .map(|b| format!("{b}: block{b}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut source = format!(
+        "func @copy(ptr, ptr, i32) local {{
+block0(v0: ptr, v1: ptr, v2: i32):
+    switch v2, block1, [{cases}]
+block1:
+    v3 = iconst.i64 8
+    v4 = iconst.i64 16
+    v5 = ptradd v0, v3
+    v6 = ptradd v1, v3
+    v7 = ptradd v0, v4
+    v8 = load.ptr v5
+    v9 = load.ptr v6
+    v10 = load.i32 v7
+    v11 = sext.i64 v10
+    intrinsic memcpy(v9, v8, v11)
+    return
+"
+    );
+    for block in 2..128 {
+        writeln!(source, "block{block}:\n    jump block1").unwrap();
+    }
+    source.push_str("}\n");
+    let run = |text: &str, target| {
+        let mut module = keel_ir::parse(text).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["short-record-copies"], target).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        module
+    };
+    let original = keel_ir::parse(&source).unwrap();
+    let optimized = run(&source, Aarch64Neon);
+    let function = &optimized.functions[0];
+    assert_eq!(function.blocks().count(), 131);
+    let mut repeated = optimized.clone();
+    keel_opt::run_passes_for_target(&mut repeated, &["short-record-copies"], Aarch64Neon).unwrap();
+    assert_eq!(repeated.to_string(), optimized.to_string());
+    assert_eq!(run(&source, X86Sse2).to_string(), original.to_string());
+
+    for text in [
+        source.replace("load.i32 v7", "load.i32 volatile v7"),
+        source.replace("ptradd v0, v4", "ptradd v1, v4"),
+        source.replace("intrinsic memcpy", "intrinsic memmove"),
+    ] {
+        assert_eq!(
+            run(&text, Aarch64Neon).to_string(),
+            keel_ir::parse(&text).unwrap().to_string()
+        );
+    }
+
+    for length in [0usize, 3, 4, 5, 6, 7, 8, 9] {
+        let mut interpreter = Interpreter::for_function(function);
+        let input: Vec<_> = (0..length).map(|i| (192 + 7 * i) as u8).collect();
+        let mut unaligned_input = vec![0xa5];
+        unaligned_input.extend_from_slice(&input);
+        let src = interpreter.memory_mut().alloc_bytes(&unaligned_input, 4) + 1;
+        let dst = interpreter.memory_mut().alloc_bytes(&[0xa5; 12], 4);
+
+        let mut source_record = [0; 20];
+        source_record[8..16].copy_from_slice(&src.to_le_bytes());
+        source_record[16..20].copy_from_slice(&(length as u32).to_le_bytes());
+        let source_record = interpreter.memory_mut().alloc_bytes(&source_record, 8);
+        let mut destination_record = [0; 16];
+        destination_record[8..16].copy_from_slice(&(dst + 1).to_le_bytes());
+        let destination_record = interpreter.memory_mut().alloc_bytes(&destination_record, 8);
+        let args = [
+            Val::Ptr(source_record),
+            Val::Ptr(destination_record),
+            Val::I32(0),
+        ];
+        let status = interpreter.call("copy", &args);
+        assert!(matches!(status, Outcome::Return(_)), "{status:?}");
+        let mut expected = [0xa5; 12];
+        expected[1..1 + length].copy_from_slice(&input);
+        assert_eq!(interpreter.memory().read(dst, 12).unwrap(), expected);
+    }
+}
+
 fn source(op: &str, length: &str) -> String {
     let second = if op == "memset" { "i8" } else { "ptr" };
     let length = if length == "variable" {

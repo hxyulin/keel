@@ -641,6 +641,12 @@ lengths. Two words cover each input when its length is four to eight bytes.
 The result is the integer difference of the first unequal bytes. Other
 lengths use the original intrinsic.
 
+In large local AArch64 functions, `short-record-copies` can specialize a
+copy between corresponding buffer fields when the source record carries
+its signed length immediately after the pointer. Two 32-bit loads and
+stores cover lengths of four to eight bytes. The original copy handles
+all other lengths.
+
 ### memory-expand
 
 `memory-expand` is `small-memory` with a 128-byte limit for `memcpy`,
