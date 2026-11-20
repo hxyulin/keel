@@ -1,5 +1,99 @@
 use keel_ir::{EntityRef, InstData, MemoryFlags, Module, Type};
 
+#[test]
+fn short_record_copies_keep_the_original_fallback_and_copy_order() {
+    use keel_ir_interp::{Interpreter, Outcome, Val};
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+    use std::fmt::Write as _;
+
+    let cases = (2..129)
+        .map(|block| format!("{block}: block{block}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut source = format!(
+        "func @f(ptr, ptr, ptr, i32, i8) {{
+block0(v0:ptr, v1:ptr, v2:ptr, v3:i32, v4:i8):
+    switch v3, block1, [{cases}]
+block1:
+    v5 = sext.i64 v3
+    v6 = iconst.i64 4
+    v7 = shl v5, v6
+    intrinsic memcpy(v1, v0, v7)
+    v8 = uext.i64 v4
+    v9 = iconst.i64 3
+    v10 = shl v8, v9
+    intrinsic memcpy(v2, v1, v10)
+    return
+"
+    );
+    // The switch keeps the fixture above the large-function threshold.
+    for block in 2..129 {
+        writeln!(source, "block{block}:\n    jump block1").unwrap();
+    }
+    source.push_str("}\n");
+
+    let pass = ["short-record-copies"];
+    let original = keel_ir::parse(&source).unwrap();
+    let mut optimized = original.clone();
+    keel_opt::run_passes_for_target(&mut optimized, &pass, X86Sse2).unwrap();
+    keel_ir::verify_module(&optimized).unwrap();
+    let f = &optimized.functions[0];
+    assert_eq!(
+        f.blocks().count(),
+        original.functions[0].blocks().count() + 5
+    );
+    assert!(f.layout_insts().any(|(_, inst)| {
+        matches!(f.inst_data(inst), InstData::Load { ty, flags, .. } if bytes(*ty) == 16 && flags.trap_ub)
+    }));
+
+    const REGION: usize = 2048;
+    let initial: Vec<_> = (0..3 * REGION)
+        .map(|i| ((i * 17 + i / REGION) % 251) as u8)
+        .collect();
+    for records in [0, 1, 2] {
+        for words in [0, 1, 255] {
+            let mut interpreter = Interpreter::for_function(f);
+            let base = interpreter.memory_mut().alloc_bytes(&initial, 1);
+            let status = interpreter.call(
+                "f",
+                &[
+                    Val::Ptr(base + 1),
+                    Val::Ptr(base + REGION as u64 + 1),
+                    Val::Ptr(base + 2 * REGION as u64 + 1),
+                    Val::I32(records),
+                    Val::I8(words),
+                ],
+            );
+            assert!(matches!(status, Outcome::Return(_)), "{status:?}");
+            let mut expected = initial.clone();
+            expected.copy_within(1..1 + records as usize * 16, REGION + 1);
+            expected.copy_within(REGION + 1..REGION + 1 + words as usize * 8, 2 * REGION + 1);
+            assert_eq!(
+                interpreter
+                    .memory()
+                    .read(base, expected.len() as u64)
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+
+    let before = optimized.to_string();
+    keel_opt::run_passes_for_target(&mut optimized, &pass, X86Sse2).unwrap();
+    assert_eq!(optimized.to_string(), before);
+    let mut arm = original.clone();
+    keel_opt::run_passes_for_target(&mut arm, &pass, Aarch64Neon).unwrap();
+    assert_eq!(arm.to_string(), original.to_string());
+    let mut ordinary = keel_ir::parse(&source.replace(
+        "intrinsic memcpy(v2, v1, v10)",
+        "intrinsic memmove(v2, v1, v10)",
+    ))
+    .unwrap();
+    let before = ordinary.to_string();
+    keel_opt::run_passes_for_target(&mut ordinary, &pass, X86Sse2).unwrap();
+    assert_eq!(ordinary.to_string(), before);
+}
+
 fn source(op: &str, length: &str) -> String {
     let second = if op == "memset" { "i8" } else { "ptr" };
     let length = if length == "variable" {

@@ -105,6 +105,7 @@ mod module_cleanup;
 mod outline_cold;
 mod phi_simplify;
 mod scratch;
+mod short_record_copies;
 mod simplify_cfg;
 mod small_memory;
 mod stack_address;
@@ -295,6 +296,11 @@ pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
     "small-memory",
     "expand ordinary constant memory intrinsics of at most 32 bytes",
     |f, _| small_memory::run(f, small_memory::MAX_BYTES),
+);
+pub(crate) static SHORT_RECORD_COPIES: &dyn Pass = &BuiltinPass::new(
+    "short-record-copies",
+    "expand single-record and empty paths for compact dynamic copies",
+    short_record_copies::run,
 );
 pub(crate) static MEMORY_EXPAND: &dyn Pass = &BuiltinPass::new(
     "memory-expand",
@@ -487,6 +493,7 @@ pub static PASSES: &[&dyn Pass] = &[
     FAST_CFG,
     FAST_LOCAL,
     SMALL_MEMORY,
+    SHORT_RECORD_COPIES,
     MEMORY_EXPAND,
     STACK_NOTRAP,
     CONST_FOLD,
@@ -858,7 +865,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 39] = [
+const FULL_EPILOGUE: [&str; 40] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -884,6 +891,7 @@ const FULL_EPILOGUE: [&str; 39] = [
     "load-reuse",
     "dce",
     "inline-late-record-copy",
+    "short-record-copies",
     "empty-calls",
     "inline-guards",
     "dce",
