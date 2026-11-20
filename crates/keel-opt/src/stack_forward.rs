@@ -15,14 +15,19 @@ use keel_ir::{
 
 /// Forwarding without a pointer layout.
 pub fn run(func: &mut Function) -> bool {
-    run_with_layout(func, None)
+    run_with_layout(func, None, false)
 }
 
 /// [`DataLayout::NATIVE64`] has eight-byte integral addresses: storing an i64
 /// then reading the identical bytes as ptr preserves every address bit,
-/// including zero. Without a layout there is no such contract. No
-/// partial-byte or floating-point reinterpretation is added.
-pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -> bool {
+/// including zero. A complete four- or eight-byte native stack word may
+/// also carry the same bits between floating-point and integer types when
+/// the target enables that transfer.
+pub(crate) fn run_with_layout(
+    func: &mut Function,
+    layout: Option<DataLayout>,
+    fp_bits: bool,
+) -> bool {
     // Every rewrite below starts from a slot address.
     if func.num_stack_slots() == 0 {
         return false;
@@ -254,11 +259,11 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                 unique
                     .get(&(slot, offset, ty))
                     .is_some_and(|&(store_block, _, _)| store_block != block)
-                    || (layout == Some(DataLayout::NATIVE64)
-                        && ty == Type::Ptr
-                        && unique
-                            .get(&(slot, offset, Type::I64))
-                            .is_some_and(|&(store_block, _, _)| store_block != block))
+                    || reinterpretation(layout, ty, fp_bits).is_some_and(|(source, _)| {
+                        unique
+                            .get(&(slot, offset, source))
+                            .is_some_and(|&(store_block, _, _)| store_block != block)
+                    })
                     || subranges
                         .get(&(slot, offset, ty))
                         .is_some_and(|&(store_block, _, _, _)| store_block != block)
@@ -345,42 +350,33 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
                         remaining_loads.insert(slot);
                         continue;
                     }
-                    let global = unique.get(&(slot, offset, ty)).and_then(
-                        |&(store_block, store_position, value)| {
+                    let known_value = |source| {
+                        exact.get(&(slot, offset, source)).copied().or_else(|| {
+                            let &(store_block, store_position, value) =
+                                unique.get(&(slot, offset, source))?;
                             reaches(slot, (store_block, store_position), (block, position))
                                 .then_some(value)
-                        },
-                    );
-                    // Only one complete i64 store may supply a pointer. The
-                    // local map invalidates overlaps; the global map retains
-                    // the whole-function unique-writer and dominance proof.
-                    // Convert at the old load, without moving any access or
-                    // synthesizing a pointer from partially written bytes.
-                    let pointer_bits = (layout == Some(DataLayout::NATIVE64)
-                        && ty == Type::Ptr
-                        && flags.align <= 8)
-                        .then(|| {
-                            exact.get(&(slot, offset, Type::I64)).copied().or_else(|| {
-                                let &(store_block, store_position, value) =
-                                    unique.get(&(slot, offset, Type::I64))?;
-                                reaches(slot, (store_block, store_position), (block, position))
-                                    .then_some(value)
-                            })
                         })
-                        .flatten();
-                    let forwarded = exact
-                        .get(&(slot, offset, ty))
-                        .copied()
-                        .or(global)
+                    };
+                    let forwarded = known_value(ty)
                         .or_else(|| {
-                            let arg = pointer_bits?;
+                            let (source, op) = reinterpretation(layout, ty, fp_bits)?;
+                            let permitted = if op == ConvertOp::IntToPtr {
+                                flags.align <= 8
+                            } else {
+                                flags.align <= func.stack_slot(slot).align
+                                    && (flags.align == 0
+                                        || offset.is_multiple_of(flags.align as usize))
+                            };
+                            if !permitted {
+                                return None;
+                            }
+                            // Only a complete store can supply these bits. Keep
+                            // the conversion at the old load position.
+                            let arg = known_value(source)?;
                             let converted = func.insert_inst(
                                 InsertPoint::Before(inst),
-                                InstData::Convert {
-                                    op: ConvertOp::IntToPtr,
-                                    ty: Type::Ptr,
-                                    arg,
-                                },
+                                InstData::Convert { op, ty, arg },
                             );
                             func.set_inst_loc(converted, func.inst_loc(inst));
                             Some(func.first_result(converted))
@@ -480,6 +476,24 @@ pub(crate) fn run_with_layout(func: &mut Function, layout: Option<DataLayout>) -
         }
     }
     changed
+}
+
+fn reinterpretation(
+    layout: Option<DataLayout>,
+    load: Type,
+    fp_bits: bool,
+) -> Option<(Type, ConvertOp)> {
+    if layout != Some(DataLayout::NATIVE64) {
+        return None;
+    }
+    Some(match load {
+        Type::Ptr => (Type::I64, ConvertOp::IntToPtr),
+        Type::F32 if fp_bits => (Type::I32, ConvertOp::Bitcast),
+        Type::I32 if fp_bits => (Type::F32, ConvertOp::Bitcast),
+        Type::F64 if fp_bits => (Type::I64, ConvertOp::Bitcast),
+        Type::I64 if fp_bits => (Type::F64, ConvertOp::Bitcast),
+        _ => return None,
+    })
 }
 
 // Recover only complete i32 lanes from the final same-block byte image. Do

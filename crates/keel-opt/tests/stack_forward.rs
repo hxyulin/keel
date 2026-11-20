@@ -28,6 +28,72 @@ fn loads(m: &Module) -> usize {
         .count()
 }
 #[test]
+fn aarch64_reinterprets_complete_stack_words_at_the_load() {
+    use keel_opt::VectorTarget;
+
+    for (int, float) in [("i32", "f32"), ("i64", "f64")] {
+        let source = format!(
+            "func @roundtrip({int}, ptr) -> {int} {{
+ ss0 = stack_slot 8, align 8
+ ss1 = stack_slot 8, align 8
+block0(v0: {int}, v1: ptr):
+ v2 = stack_addr ss0
+ v3 = stack_addr ss1
+ store v0, v2
+ v4 = load.{float} v2
+ store volatile v4, v1
+ store v4, v3
+ jump block1
+block1:
+ v5 = load.{int} v3
+ return v5
+}}"
+        );
+        for (target, expected) in [(VectorTarget::Aarch64Neon, 0), (VectorTarget::X86Sse2, 2)] {
+            let mut module = keel_ir::parse(&source).unwrap();
+            keel_opt::run_passes_for_target(&mut module, &["stack-forward"], target).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            assert_eq!(loads(&module), expected, "{module}");
+            let text = module.to_string();
+            assert!(text.contains("store volatile"), "{text}");
+            if expected == 0 {
+                assert!(text.contains(&format!("bitcast.{float} v0")), "{text}");
+                assert!(text.contains(&format!("bitcast.{int}")), "{text}");
+            }
+        }
+    }
+}
+
+#[test]
+fn floating_stack_reinterpretation_requires_a_complete_reaching_store() {
+    use keel_opt::VectorTarget;
+
+    for (effect, load) in [
+        ("", "volatile"),
+        ("", "align 16"),
+        ("intrinsic lifetime_start(v1)", ""),
+        ("v3 = iconst.i32 42\n store v3, v1", ""),
+    ] {
+        let source = format!(
+            "func @load_bits(f64) -> i64 {{
+ ss0 = stack_slot 8, align 8
+block0(v0: f64):
+ v1 = stack_addr ss0
+ store v0, v1
+ {effect}
+ v2 = load.i64 {load} v1
+ return v2
+}}"
+        );
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["stack-forward"], VectorTarget::Aarch64Neon)
+            .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(loads(&module), 1, "{module}");
+    }
+}
+
+#[test]
 fn forwards_partial_union_write_and_removes_private_stores() {
     let m = run("func @f(i32) -> i64 {
  ss0 = stack_slot 8, align 8

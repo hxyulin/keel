@@ -384,7 +384,13 @@ pub(crate) static CANONICALIZE: &dyn Pass = &BuiltinPass {
 pub(crate) static STACK_FORWARD: &dyn Pass = &BuiltinPass::new(
     "stack-forward",
     "forward bytes in private fixed stack objects exposed by inlining",
-    |f, context| stack_forward::run_with_layout(f, context.layout),
+    |f, context| {
+        stack_forward::run_with_layout(
+            f,
+            context.layout,
+            context.target == VectorTarget::Aarch64Neon,
+        )
+    },
 );
 pub(crate) static CALL_CONTRACTS: &dyn Pass = &BuiltinPass::new(
     "call-contracts",

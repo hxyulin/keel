@@ -569,6 +569,12 @@ writers and over-aligned pointer loads do not qualify. Contexts without a
 layout, including the portable and Wasm pipelines, do not apply this
 reinterpretation.
 
+On AArch64, `stack-forward` also replaces an exact same-width transfer
+between `i32` and `f32`, or `i64` and `f64`, with a bitcast at the load.
+The store must cover the complete loaded word and reach it without another
+writer. The fixed slot and offset must satisfy the load's alignment.
+Volatile and overlapping accesses keep their memory operations.
+
 Full also recovers complete `i32x4` constructors from these byte facts. Four
 copies of one `i32` become `vsplat`, and four extracts from at most two `i32x4`
 snapshots become `vshuffle`, so C literals such as `(U){s,s,s,s}` and
