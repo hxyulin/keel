@@ -386,6 +386,44 @@ impl CallArea {
     }
 }
 
+fn prefers_dispatch_allocation(func: &Function) -> bool {
+    use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+
+    if func.num_blocks() < 64 {
+        return false;
+    }
+    if func
+        .blocks()
+        .filter_map(|block| func.block_insts(block).last())
+        .any(|&switch| crate::dispatch_tail::is_large_dense_switch(func, switch))
+    {
+        return true;
+    }
+    if !func.local || func.num_blocks() < 128 {
+        return false;
+    }
+    // A smaller dispatch benefits when state remains live across a loop
+    // backedge. Keep the original policy for smaller one-off switches.
+    let mut switches = func.blocks().filter(|&block| {
+        let body = func.block_insts(block);
+        body.len() > 1
+            && body
+                .last()
+                .is_some_and(|&switch| crate::dispatch_tail::is_dense_switch(func, switch, 24))
+    });
+    let Some(block) = switches.next() else {
+        return false;
+    };
+    if switches.next().is_some() {
+        return false;
+    }
+    let cfg = ControlFlowGraph::compute(func);
+    let dom = DominatorTree::compute(func, &cfg);
+    cfg.preds(block)
+        .iter()
+        .any(|&pred| dom.dominates(block, pred))
+}
+
 /// The selection and the x86 covers layered on it, each keyed by the
 /// instruction it replaces.
 pub(super) struct Covers {
@@ -411,11 +449,7 @@ impl Covers {
             uses,
         );
         selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
-        selection.large_dispatch_allocation = func.num_blocks() >= 64
-            && func
-                .blocks()
-                .filter_map(|block| func.block_insts(block).last())
-                .any(|&switch| crate::dispatch_tail::is_large_dense_switch(func, switch));
+        selection.large_dispatch_allocation = prefers_dispatch_allocation(func);
         let on = |cover| selection.enabled(cover);
         let [
             mask_tests,

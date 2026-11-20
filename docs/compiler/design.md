@@ -849,6 +849,9 @@ On x86-64, for functions with large dense switches, its spill score
 divides weighted operand traffic by the integer square root of live interval
 length. Its spill homes use Compact's copy preferences to reduce moves
 along dispatch edges.
+The x86-64 policy also covers a local function with at least 128 blocks
+when it has one embedded dense switch with at least 24 cases and an incoming
+backedge from a block it dominates.
 On AArch64, the same policy applies to a function with one large dense
 switch whose block also contains other instructions.
 The CLI selects it at `-O2` and `-O3` (`-O`); `-O0` retains Full,

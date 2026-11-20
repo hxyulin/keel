@@ -15,6 +15,10 @@ pub(crate) fn large_switch(func: &Function, block: Block) -> Option<Inst> {
 }
 
 pub(crate) fn is_large_dense_switch(func: &Function, switch: Inst) -> bool {
+    is_dense_switch(func, switch, 64)
+}
+
+pub(crate) fn is_dense_switch(func: &Function, switch: Inst, minimum: usize) -> bool {
     let InstData::Switch { arg, cases, .. } = func.inst_data(switch) else {
         return false;
     };
@@ -23,7 +27,7 @@ pub(crate) fn is_large_dense_switch(func: &Function, switch: Inst) -> bool {
         Type::I64 => u64::MAX,
         _ => return false,
     };
-    (64..=256).contains(&cases.len()) && SwitchPlan::new(cases, mask).jump_table()
+    (minimum..=256).contains(&cases.len()) && SwitchPlan::new(cases, mask).jump_table()
 }
 
 pub(crate) fn plan(
