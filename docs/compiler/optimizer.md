@@ -164,6 +164,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-column-reduce` (opt-in) | Alias-checked register tiles for square f32/f64 column sums on native 64-bit targets |
 | `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
 | `specialize-zero-flags` | Share one constant-zero copy of a recursive x86-64 dispatcher |
+| `specialize-single-count-exit` | Give a guarded single-element exit a short continuation on AArch64 |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
@@ -963,6 +964,13 @@ constant. If the word fits in 16 bits, the final six steps reduce to a single
 wrapping multiply. Larger words follow the original recurrence. The skipped
 arithmetic must have no other users, and both paths join before the original
 store.
+
+On AArch64, `specialize-single-count-exit` duplicates one short exit path in
+a large function when a signed result count is exactly one. The guarded path
+uses the same reads, writes and return test as the original. Counts that can
+reach the padding loop keep the original path. The rewrite requires the
+duplicated definitions to stay within that path except for explicit branch
+arguments.
 
 Cold outlining accepts a private Fast function with at most 256 laid-out
 instructions and 4096 instruction/value arena entries. It moves a terminal trap

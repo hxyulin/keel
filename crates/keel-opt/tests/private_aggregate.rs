@@ -184,6 +184,7 @@ fn cleanup_policy_is_full_only() {
         "fold-zero-byte-suffix",
         "outline-cold",
         "loop-unroll-words",
+        "specialize-single-count-exit",
     ]));
     let mut m = parse(SOURCE).unwrap();
     assert_ne!(private_aggregate::run(&mut m), 0);

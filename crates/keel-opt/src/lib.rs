@@ -28,6 +28,7 @@ mod counted_loop;
 mod devirtualize;
 mod loop_columns;
 mod loop_matmul;
+mod specialize_single_count_exit;
 mod specialize_zero_flags;
 mod wasm32;
 pub use wasm32::optimize_wasm32_basic;
@@ -450,6 +451,8 @@ pub(crate) static CALL_LOAD_REUSE: &dyn Pass = &call_load_reuse::CallLoadReuse;
 pub(crate) static INTERNAL_FAST_CALLS: &dyn Pass = &internal_fast_calls::InternalFastCalls;
 pub(crate) static TAIL_CALLS: &dyn Pass = &tail_calls::TailCalls;
 pub(crate) static SPECIALIZE_ZERO_FLAGS: &dyn Pass = &specialize_zero_flags::SpecializeZeroFlags;
+pub(crate) static SPECIALIZE_SINGLE_COUNT_EXIT: &dyn Pass =
+    &specialize_single_count_exit::SpecializeSingleCountExit;
 pub(crate) static CONSTANT_ARGS: &dyn Pass = &constant_args::ConstantArgs;
 pub(crate) static BRANCH_FACTS: &dyn Pass = &BuiltinPass::new(
     "branch-facts",
@@ -535,6 +538,7 @@ pub static PASSES: &[&dyn Pass] = &[
     RANGE_FACTS,
     CONSTANT_ARGS,
     SPECIALIZE_ZERO_FLAGS,
+    SPECIALIZE_SINGLE_COUNT_EXIT,
     EMPTY_CALLS,
     INLINE_GUARDS,
     UNUSED_FUNCTIONS,
@@ -852,7 +856,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 37] = [
+const FULL_EPILOGUE: [&str; 38] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -890,6 +894,7 @@ const FULL_EPILOGUE: [&str; 37] = [
     "fold-zero-byte-suffix",
     "outline-cold",
     "loop-unroll-words",
+    "specialize-single-count-exit",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller

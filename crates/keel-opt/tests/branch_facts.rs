@@ -1,5 +1,120 @@
 mod support;
 use keel_ir::{InstData, parse, verify_module};
+
+#[test]
+fn single_count_exit_preserves_the_memory_observations_of_each_path() {
+    use keel_ir_interp::{Interpreter, Outcome, Val};
+    use keel_opt::VectorTarget::{Aarch64Neon, X86Sse2};
+    use std::fmt::Write as _;
+
+    let cases = (16..144)
+        .map(|block| format!("{block}: block{block}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut source = format!(
+        "func @f(i16, ptr, ptr, ptr, i32) {{
+block0(v0:i16, v1:ptr, v2:ptr, v3:ptr, v4:i32):
+ v5=iconst.i32 1
+ switch v4, block1, [1: block10, {cases}]
+block1:
+ brif v0, block2, block3
+block2:
+ v6=load.i64 v1
+ store v6, v2
+ v7=sext.i32 v0
+ v8=icmp.sgt v7, v5
+ brif v8, block4(v7), block5(v5)
+block3:
+ jump block5(v4)
+block4(v9:i32):
+ v10=iconst.i64 8
+ v11=ptradd v2, v10
+ v12=iconst.i8 0
+ store v12, v11
+ v13=isub v9, v5
+ v14=icmp.sgt v13, v5
+ brif v14, block4(v13), block5(v5)
+block5(v15:i32):
+ v16=load.i16 v3
+ v17=iconst.i16 4
+ v18=and v16, v17
+ brif v18, block6, block7
+block6:
+ return
+block7:
+ v19=load.i64 v2
+ jump block8(v19, v15)
+block8(v20:i64, v21:i32):
+ v22=iconst.i64 24
+ v23=ptradd v3, v22
+ store v20, v23
+ store v21, v3
+ return
+block10:
+ jump block5(v4)
+"
+    );
+    for block in 16..144 {
+        writeln!(source, "block{block}:\n return").unwrap();
+    }
+    source.push_str("}\n");
+
+    let pass = ["specialize-single-count-exit"];
+    let original = parse(&source).unwrap();
+    verify_module(&original).unwrap();
+    let mut candidate = original.clone();
+    keel_opt::run_passes_for_target(&mut candidate, &pass, Aarch64Neon).unwrap();
+    verify_module(&candidate).unwrap();
+    assert_eq!(
+        candidate.functions[0].blocks().count(),
+        original.functions[0].blocks().count() + 3
+    );
+    let candidate = parse(&candidate.to_string()).unwrap();
+    let execute = |function, count, src, dst, status, mode| {
+        let mut interpreter = Interpreter::for_function(function).with_load_trace();
+        let image: Vec<_> = (0..64).map(|i| (i * 17 + 3) as u8).collect();
+        let base = interpreter.memory_mut().alloc_bytes(&image, 8);
+        let result = interpreter.call(
+            "f",
+            &[
+                Val::I16(count),
+                Val::Ptr(base + src),
+                Val::Ptr(base + dst),
+                Val::Ptr(base + status),
+                Val::I32(mode),
+            ],
+        );
+        assert!(matches!(result, Outcome::Return(_)), "{result:?}");
+        (
+            interpreter.memory().read(base, 64).unwrap().to_vec(),
+            interpreter.load_trace().to_vec(),
+        )
+    };
+    for count in [0, 1, 2, 3, 0xffff] {
+        for (src, dst, status) in [(0, 8, 16), (0, 0, 0), (0, 8, 8), (16, 8, 0)] {
+            for mode in [0, 1] {
+                assert_eq!(
+                    execute(&candidate.functions[0], count, src, dst, status, mode),
+                    execute(&original.functions[0], count, src, dst, status, mode),
+                );
+            }
+        }
+    }
+
+    let mut other_target = original.clone();
+    keel_opt::run_passes_for_target(&mut other_target, &pass, X86Sse2).unwrap();
+    assert_eq!(other_target.to_string(), original.to_string());
+    for changed in [
+        source.replace("load.i64 v1", "load.i64 volatile v1"),
+        source.replace("store v21, v3", "store v15, v3"),
+    ] {
+        let mut module = parse(&changed).unwrap();
+        verify_module(&module).unwrap();
+        let before = module.to_string();
+        keel_opt::run_passes_for_target(&mut module, &pass, Aarch64Neon).unwrap();
+        assert_eq!(module.to_string(), before);
+    }
+}
 #[test]
 fn complementary_signed_and_unsigned_tests_fold_only_on_dominating_edges() {
     for (first, second) in [("uge", "ult"), ("sge", "slt"), ("eq", "ne"), ("ugt", "ule")] {

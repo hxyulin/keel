@@ -77,6 +77,7 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
             "fold-zero-byte-suffix",
             "outline-cold",
             "loop-unroll-words",
+            "specialize-single-count-exit",
         ])
         .unwrap();
     assert_eq!(pipeline.last(), Some(&"tail-calls"));
