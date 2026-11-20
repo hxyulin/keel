@@ -12,7 +12,7 @@ use keel_ir::{
 const MAX_TRIPS: usize = 8;
 const MAX_BODY: usize = 24;
 const MAX_CLONED: usize = 128;
-const FUNCTION_BUDGET: usize = 512;
+const FUNCTION_BUDGET: usize = 768;
 
 pub(crate) struct LoopUnrollExact;
 impl crate::Pass for LoopUnrollExact {

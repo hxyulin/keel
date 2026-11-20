@@ -893,7 +893,7 @@ lexical scopes alone allow rotation.
 Full runs `loop-unroll-exact` after loop rotation and dead-code cleanup. It
 accepts counted header/body loops and rotated one-block loops with at most eight
 literal iterations. Each loop may clone at most 128 instructions, within a
-512-instruction function budget. Integer operations and nonvolatile scalar
+768-instruction function budget. Integer operations and nonvolatile scalar
 loads and stores stay in iteration order; the pass does not reassociate
 recurrences. Local forwarding then removes redundant reads using the same
 readability proofs as `load-reuse`; a store alone is not such a proof. Successive stores
