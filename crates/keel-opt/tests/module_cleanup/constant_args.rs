@@ -98,3 +98,132 @@ fn operand_built_identifiers_and_bare_register_spellings_remain_roots() {
         );
     }
 }
+
+fn recursive_dispatch() -> String {
+    use std::fmt::Write as _;
+
+    let mut source = String::from(
+        "func @dispatch(i32, i32) -> i32 cc(c) local {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 4
+ v3 = and v1, v2
+ brif v3, block1, block2
+block1:
+ return v1
+block2:
+",
+    );
+    let cases = (0..24)
+        .map(|i| format!("{i}: block{}", i + 3))
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(source, " switch v0, block27, [{cases}]").unwrap();
+    source.push_str(
+        "block3:
+ return v1
+block4:
+ v4 = iconst.i32 0
+ v5 = call @dispatch(v4, v4)
+ v6 = iadd v5, v1
+ return v6
+block5:
+ v7 = iconst.i32 0
+ v8 = call @dispatch(v7, v7)
+ v9 = isub v8, v1
+ return v9
+",
+    );
+    for block in 6..128 {
+        writeln!(
+            source,
+            "block{block}:
+ jump block{}",
+            block + 1
+        )
+        .unwrap();
+    }
+    source.push_str(
+        "block128:
+ return v1
+}
+func @known(i32) -> i32 cc(c) {
+block0(v0: i32):
+ v1 = iconst.i32 0
+ v2 = call @dispatch(v0, v1)
+ return v2
+}
+func @dynamic(i32, i32) -> i32 cc(c) {
+block0(v0: i32, v1: i32):
+ v2 = call @dispatch(v0, v1)
+ return v2
+}
+",
+    );
+    source
+}
+
+#[test]
+fn recursive_zero_flags_version_preserves_the_call_abi_and_dynamic_entry() {
+    use keel_ir::{InstData, Type};
+    use keel_ir_interp::{Interpreter, Val};
+    use keel_opt::VectorTarget;
+
+    let original = parse(&recursive_dispatch()).unwrap();
+    verify_module(&original).unwrap();
+    let mut module = original.clone();
+    let pass = ["specialize-zero-flags"];
+    keel_opt::run_passes_for_target(&mut module, &pass, VectorTarget::X86Sse2).unwrap();
+    verify_module(&module).unwrap();
+    assert_eq!(module.functions.len(), original.functions.len() + 1);
+    let clone = &module.functions[1];
+    assert_eq!(clone.name, "dispatch.keel.flags0");
+    assert_eq!(clone.sig, original.functions[0].sig);
+    assert!(clone.local);
+    assert!(clone.layout_insts().any(|(_, inst)| {
+        matches!(
+            clone.inst_data(inst),
+            InstData::Call { func, .. } if clone.callee(*func).name == clone.name
+        )
+    }));
+    assert!(
+        module.functions[2]
+            .to_string()
+            .contains("call @dispatch.keel.flags0")
+    );
+    assert!(module.functions[3].to_string().contains("call @dispatch("));
+    for depth in [0, 1, 2, 21, 31] {
+        let depth = Val::int(Type::I32, depth);
+        for flag in [0, 1, 4, 5, -1] {
+            let flags = Val::int(Type::I32, flag);
+            let args = [depth.clone(), flags];
+            assert_eq!(
+                Interpreter::new(&original).call("dynamic", &args),
+                Interpreter::new(&module).call("dynamic", &args)
+            );
+        }
+        let args = [depth];
+        assert_eq!(
+            Interpreter::new(&original).call("known", &args),
+            Interpreter::new(&module).call("known", &args)
+        );
+    }
+    let once = module.to_string();
+    keel_opt::run_passes_for_target(&mut module, &pass, VectorTarget::X86Sse2).unwrap();
+    assert_eq!(module.to_string(), once);
+}
+
+#[test]
+fn recursive_versioning_requires_a_flag_branch_on_x86() {
+    use keel_opt::VectorTarget;
+
+    let source = recursive_dispatch();
+    for (src, target) in [
+        (source.clone(), VectorTarget::Aarch64Neon),
+        (source.replace("brif v3", "brif v0"), VectorTarget::X86Sse2),
+    ] {
+        let mut module = parse(&src).unwrap();
+        let before = module.to_string();
+        keel_opt::run_passes_for_target(&mut module, &["specialize-zero-flags"], target).unwrap();
+        assert_eq!(module.to_string(), before);
+    }
+}

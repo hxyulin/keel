@@ -163,6 +163,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-matmul` | Guarded four-column tiling of bounded wrapping i32 matrix products on AArch64 |
 | `loop-column-reduce` (opt-in) | Alias-checked register tiles for square f32/f64 column sums on native 64-bit targets |
 | `devirtualize-const-table` | Version bounded local constant-table calls before Full inlining |
+| `specialize-zero-flags` | Share one constant-zero copy of a recursive x86-64 dispatcher |
 | `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
 | `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
@@ -817,6 +818,15 @@ If output overlaps input, later reads can observe different values. Such a
 transform needs a nonoverlap proof or an alias-checked scalar fallback.
 
 ## Module cleanup
+
+On x86-64, Full runs `specialize-zero-flags` before its first inlining round.
+It builds at most one local copy per module for a recursive C dispatcher
+whose final `i32` argument controls an early single-bit branch. The body must
+have at least 128 blocks, at most 16,384 instructions, and a switch with at
+least 24 cases. It must call itself directly with zero flags at least twice.
+Direct calls that pass zero use the copy, including recursion inside it.
+The copy has the same calling convention and signature as the original.
+Calls with other flag values continue through the original body.
 
 `constant-args` substitutes an integer or floating literal into a local body
 only when every direct call passes the same literal and the function cannot
