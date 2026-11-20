@@ -427,8 +427,13 @@ fn tiers_expand_memory_by_their_inlining() {
             .filter_map(|(i, p)| (*p == "small-memory").then_some(i))
             .collect();
         assert_eq!(positions.len(), small);
-        for at in positions {
-            assert_eq!(pipeline[at + 1], "stack-forward");
+        for (round, at) in positions.into_iter().enumerate() {
+            let next = &pipeline[at + 1..];
+            if pipeline == DEFAULT_PIPELINE && round == 0 {
+                assert!(next.starts_with(&["constant-data", "stack-forward"]));
+            } else {
+                assert_eq!(next[0], "stack-forward");
+            }
         }
         assert!(!pipeline.contains(&"memory-expand"));
     }

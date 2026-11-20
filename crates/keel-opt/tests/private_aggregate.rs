@@ -174,23 +174,15 @@ fn cleanup_policy_is_full_only() {
             .count(),
         2
     );
-    assert_eq!(
-        keel_opt::OptimizationTier::Full
-            .pipeline()
-            .iter()
-            .rev()
-            .take(6)
-            .copied()
-            .collect::<Vec<_>>(),
-        [
-            "outline-cold",
-            "branch-facts",
-            "tail-calls",
-            "internal-fast-calls",
-            "fast-math",
-            "private-aggregate-cleanup"
-        ]
-    );
+    assert!(full.ends_with(&[
+        "private-aggregate-cleanup",
+        "fast-math",
+        "internal-fast-calls",
+        "tail-calls",
+        "branch-facts",
+        "outline-cold",
+        "loop-unroll-words",
+    ]));
     let mut m = parse(SOURCE).unwrap();
     assert_ne!(private_aggregate::run(&mut m), 0);
     verify_module(&m).unwrap();

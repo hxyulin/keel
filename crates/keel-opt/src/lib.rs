@@ -810,7 +810,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
     run_passes(module, tier.pipeline())
 }
 
-const FULL_ROUND: [&str; 18] = [
+const FULL_ROUND_MEMORY: [&str; 8] = [
     "inline-cheap-reserve",
     "simplify-cfg",
     "canonicalize",
@@ -819,6 +819,9 @@ const FULL_ROUND: [&str; 18] = [
     "simplify-cfg",
     "gvn",
     "small-memory",
+];
+
+const FULL_ROUND_CLEANUP: [&str; 10] = [
     "stack-forward",
     "stack-notrap",
     "canonicalize",
@@ -830,6 +833,8 @@ const FULL_ROUND: [&str; 18] = [
     "loop-vectorize",
     "loop-reduce",
 ];
+
+const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
 const FULL_EPILOGUE: [&str; 36] = [
     "load-reuse",
@@ -895,7 +900,10 @@ const FULL_PARTS: &[&[&str]] = &[
     &["const-fold"],
     &["devirtualize-const-table"],
     &["loop-matmul"],
-    &FULL_ROUND,
+    &FULL_ROUND_MEMORY,
+    // The first memory expansion exposes reads of immutable literal bytes.
+    &["constant-data"],
+    &FULL_ROUND_CLEANUP,
     &FULL_ROUND,
     &FULL_ROUND,
     &FULL_EPILOGUE,
