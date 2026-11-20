@@ -105,6 +105,7 @@ mod module_cleanup;
 mod outline_cold;
 mod phi_simplify;
 mod scratch;
+mod short_memcmp;
 mod short_record_copies;
 mod simplify_cfg;
 mod small_memory;
@@ -302,6 +303,11 @@ pub(crate) static SHORT_RECORD_COPIES: &dyn Pass = &BuiltinPass::new(
     "expand single-record and empty paths for compact dynamic copies",
     short_record_copies::run,
 );
+pub(crate) static SHORT_MEMCMP: &dyn Pass = &BuiltinPass::new(
+    "short-memcmp",
+    "compare four to eight bytes directly on guarded AArch64 paths",
+    short_memcmp::run,
+);
 pub(crate) static MEMORY_EXPAND: &dyn Pass = &BuiltinPass::new(
     "memory-expand",
     "expand ordinary constant memory intrinsics of at most 128 bytes, for tiers without inlining",
@@ -494,6 +500,7 @@ pub static PASSES: &[&dyn Pass] = &[
     FAST_LOCAL,
     SMALL_MEMORY,
     SHORT_RECORD_COPIES,
+    SHORT_MEMCMP,
     MEMORY_EXPAND,
     STACK_NOTRAP,
     CONST_FOLD,
@@ -865,7 +872,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 40] = [
+const FULL_EPILOGUE: [&str; 41] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -892,6 +899,7 @@ const FULL_EPILOGUE: [&str; 40] = [
     "dce",
     "inline-late-record-copy",
     "short-record-copies",
+    "short-memcmp",
     "empty-calls",
     "inline-guards",
     "dce",
