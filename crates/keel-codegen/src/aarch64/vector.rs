@@ -562,16 +562,20 @@ impl FunctionCompiler<'_> {
 
     pub(super) fn vector_insert(&mut self, args: [Value; 2], lane: u8, result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
+        let float_lane = shape.lane_type().is_float();
         let source = self.use_freg(args[0], FS0);
-        // Preserve the scalar operand too before touching an aliased destination.
-        let scalar = if shape.lane_type().is_float() {
+        let scalar = if float_lane {
             self.use_freg(args[1], FS1)
         } else {
             self.use_reg(args[1], S0)
         };
-        self.move_vector(FS2, source);
-        if shape.lane_type().is_float() {
-            self.vector_insert_lane(FS2, lane, scalar, 0, shape);
+        let d = self.def_freg(result);
+        // A floating scalar can share the destination register. An integer
+        // scalar lives in a GPR, so INS can write the final vector directly.
+        let destination = if float_lane { FS2 } else { d };
+        self.move_vector(destination, source);
+        if float_lane {
+            self.vector_insert_lane(destination, lane, scalar, 0, shape);
         } else {
             let bytes = shape.lane_type().bytes().unwrap();
             let element = ["b", "h", "s", "d"][bytes.trailing_zeros() as usize];
@@ -581,13 +585,12 @@ impl FunctionCompiler<'_> {
                 [
                     (FieldId::imm5, bytes | (u32::from(lane) * bytes * 2)),
                     (FieldId::Rn, scalar.into()),
-                    (FieldId::Rd, FS2.into()),
+                    (FieldId::Rd, destination.into()),
                 ],
-                |out| write!(out, "ins\tv{FS2}.{element}[{lane}], {gpr}{scalar}"),
+                |out| write!(out, "ins\tv{destination}.{element}[{lane}], {gpr}{scalar}"),
             );
         }
-        let d = self.def_freg(result);
-        self.move_vector(d, FS2);
+        self.move_vector(d, destination);
         self.def_done(result, d);
     }
 

@@ -93,6 +93,27 @@ fn neon_operations_emit_zero_text_and_identical_objects() {
     let (aggregates, _) = aggregate_fixture();
     compile(&aggregates, SelectionTier::Full, AllocationTier::Full, true);
 }
+
+#[test]
+fn integer_lane_insertion_uses_the_allocated_destination() {
+    let source = "func @insert(ptr, i64, ptr) {
+block0(v0: ptr, v1: i64, v2: ptr):
+ v3 = load.i64x2 align 1 v0
+ v4 = vinsert v3, v1, 1
+ store align 1 v4, v2
+ store align 1 v3, v0
+ return
+}";
+    for tiny in [false, true] {
+        let (text, _) = compile(source, SelectionTier::Baseline, AllocationTier::Full, tiny);
+        assert!(
+            text.contains("ins\tv") && text.contains(".d[1], x"),
+            "{text}"
+        );
+        assert!(!text.contains("ins\tv18.d[1]"), "{text}");
+    }
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn vector_operations_execute_unaligned_edges_masks_and_spills() {

@@ -94,8 +94,8 @@ block0(v0: f64):
 }
 
 #[test]
-fn x86_packs_two_complete_private_stack_lanes() {
-    use keel_opt::VectorTarget::{Portable, X86Sse2};
+fn native_targets_pack_two_complete_private_stack_lanes() {
+    use keel_opt::VectorTarget::{Aarch64Neon, Portable, X86Sse2};
 
     let source = "decl @inspect(ptr)
 func @pack(i64, i64) -> i64x2 {
@@ -115,15 +115,8 @@ block0(v0: i64, v1: i64):
         keel_ir::verify_module(&module).unwrap();
         module
     };
-    let module = forward(source, X86Sse2);
-    assert_eq!(loads(&module), 0, "{module}");
-    let text = module.to_string();
-    assert!(text.contains("vsplat.i64x2 v0"), "{text}");
-    assert!(text.contains(", v1, 1"), "{text}");
-    assert!(text.contains("vinsert"), "{text}");
-    assert!(!text.contains("store "), "{text}");
     assert_eq!(loads(&forward(source, Portable)), 1);
-    for source in [
+    let negative = [
         source.replace("store v0", "store volatile v0"),
         source.replace("align 16 v2", "align 32 v2"),
         source.replace(" v5 = load", " call @inspect(v2)\n v5 = load"),
@@ -131,9 +124,19 @@ block0(v0: i64, v1: i64):
             " store v1, v4",
             " store v1, v4\n v6 = iconst.i32 -1\n store v6, v4",
         ),
-    ] {
-        let module = forward(&source, X86Sse2);
-        assert_eq!(loads(&module), 1, "{module}");
+    ];
+    for target in [X86Sse2, Aarch64Neon] {
+        let module = forward(source, target);
+        assert_eq!(loads(&module), 0, "{module}");
+        let text = module.to_string();
+        assert!(text.contains("vsplat.i64x2 v0"), "{text}");
+        assert!(text.contains(", v1, 1"), "{text}");
+        assert!(text.contains("vinsert"), "{text}");
+        assert!(!text.contains("store "), "{text}");
+        for source in &negative {
+            let module = forward(source, target);
+            assert_eq!(loads(&module), 1, "{module}");
+        }
     }
 }
 

@@ -606,10 +606,10 @@ The store must cover the complete loaded word and reach it without another
 writer. The fixed slot and offset must satisfy the load's alignment.
 Volatile and overlapping accesses keep their memory operations.
 
-On x86-64, two complete `i64` writes to a private 16-byte slot can supply a
-same-block `i64x2` load. The pass builds the vector with a splat and lane
-insertion when the slot satisfies the load's alignment. SSE2 keeps the lanes
-in registers, avoiding a wide reload immediately after two narrow writes.
+On x86-64 and AArch64, two complete `i64` writes to a private 16-byte slot can
+supply a same-block `i64x2` load. The pass builds the vector with a splat and
+lane insertion when the slot satisfies the load's alignment. SSE2 and NEON
+keep the lanes in registers, avoiding a wide reload after two narrow writes.
 
 Full also recovers complete `i32x4` constructors from these byte facts. Four
 copies of one `i32` become `vsplat`, and four extracts from at most two `i32x4`
