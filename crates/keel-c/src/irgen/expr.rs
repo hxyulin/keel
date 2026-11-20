@@ -31,6 +31,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.branch(b, t, f)
             }
             ExprKind::Unary(UnOp::Not, a) => self.branch_ending(a, f, t, ends),
+            _ if !self.g.debug
+                && let Some((op, a, b)) =
+                    super::fold::expected_fallthrough(cond, self.g.p.c_layout) =>
+            {
+                let c = self.compare(op, a, b)?;
+                self.finish_branch(c, f, t, ends);
+                Ok(())
+            }
             _ if let Some(inner) = same_truth(cond, self.g.p.c_layout) => {
                 self.branch_ending(inner, t, f, ends)
             }
@@ -53,15 +61,19 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             _ => {
                 let c = self.truth(cond)?;
-                if let Some(mark) = ends {
-                    let slots = self.temporaries.split_off(mark);
-                    self.end_slots(&slots);
-                }
-                self.b.ins().brif(c, t, &[], f, &[]);
-                self.terminated = true;
+                self.finish_branch(c, t, f, ends);
                 Ok(())
             }
         }
+    }
+
+    fn finish_branch(&mut self, cond: Value, yes: Block, no: Block, ends: Option<usize>) {
+        if let Some(mark) = ends {
+            let slots = self.temporaries.split_off(mark);
+            self.end_slots(&slots);
+        }
+        self.b.ins().brif(cond, yes, &[], no, &[]);
+        self.terminated = true;
     }
 
     /// A value that is non-zero exactly when `e` is true. Comparisons give

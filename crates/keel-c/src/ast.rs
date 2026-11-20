@@ -217,6 +217,8 @@ pub enum Builtin {
     /// Evaluates its arguments once and returns the first value. Branch
     /// likelihood metadata is validated by the parser, then ignored.
     Hint,
+    /// Plain `__builtin_expect`, including its fallthrough hint.
+    Expect,
     /// Advisory prefetch with no emitted instruction; evaluates its address.
     Prefetch,
     /// Pointer alignment contract; optional offset remains a runtime operand.

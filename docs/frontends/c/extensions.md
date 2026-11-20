@@ -119,8 +119,10 @@ deliberately limited behavior:
 
 - `__builtin_expect` and `__builtin_expect_with_probability` return their
   first operand converted to `long` and evaluate each runtime operand once.
-  The probability must be a finite constant in [0, 1]. No branch-likelihood
-  information is kept.
+  An expected value of `1` in `__builtin_expect` can make an unsigned
+  upper-bound check on a just-assigned value fall through in non-debug builds.
+  The probability operand of `__builtin_expect_with_probability` must be a
+  finite constant in [0, 1]. It is validated and discarded.
 - `__builtin_assume_aligned` returns its pointer as `void *` without changing
   or checking it. The alignment must be a nonzero power-of-two constant, and
   the optional offset is evaluated once. Later loads and stores through that

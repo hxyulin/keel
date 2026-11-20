@@ -109,7 +109,9 @@ pub(super) fn same_truth<'e, 'a>(e: &'e Expr<'a>, layout: CDataLayout) -> Option
                     (Some(to), Some(from)) if to.size_with_layout(layout) >= from.size_with_layout(layout));
             keeps.then_some(&**a)
         }
-        ExprKind::Builtin(Builtin::Hint, args) if args[1..].iter().all(|e| inert(e, layout)) => {
+        ExprKind::Builtin(Builtin::Hint | Builtin::Expect, args)
+            if args[1..].iter().all(|e| inert(e, layout)) =>
+        {
             Some(&args[0])
         }
         _ => None,
@@ -134,6 +136,41 @@ pub(super) fn int_comparison<'e, 'a>(
     match &strip_truth(e, layout).kind {
         ExprKind::Binary(op, a, b) if op.is_comparison() && !a.ty.is_float() => Some((*op, a, b)),
         _ => None,
+    }
+}
+
+/// Keep the likely-success path of an unsigned range check on a newly
+/// assigned value in fallthrough order. Reverse postorder visits the
+/// second edge first in the final layout.
+pub(super) fn expected_fallthrough<'e, 'a>(
+    expression: &'e Expr<'a>,
+    layout: CDataLayout,
+) -> Option<(BinOp, &'e Expr<'a>, &'e Expr<'a>)> {
+    let ExprKind::Builtin(Builtin::Expect, args) = expression.kind else {
+        return None;
+    };
+    if fold_int(&args[1], FOLD_DEPTH, layout) != Some(1) {
+        return None;
+    }
+    let mut cond = same_truth(expression, layout)?;
+    let mut negate = true;
+    loop {
+        cond = strip_truth(cond, layout);
+        match cond.kind {
+            ExprKind::Unary(UnOp::Not, inner) => {
+                cond = inner;
+                negate = !negate;
+            }
+            ExprKind::Binary(op @ (BinOp::Lt | BinOp::Le), a, b)
+                if negate
+                    && a.ty.int_kind().is_some_and(|kind| !kind.signed())
+                    && matches!(strip_truth(a, layout).kind, ExprKind::Assign(..))
+                    && fold_int(b, FOLD_DEPTH, layout).is_some_and(|bound| bound >= 0) =>
+            {
+                return Some((negated(op), a, b));
+            }
+            _ => return None,
+        }
     }
 }
 

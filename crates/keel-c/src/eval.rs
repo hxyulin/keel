@@ -292,7 +292,7 @@ fn fold(cx: &Eval<'_>, e: &Expr<'_>, comma: Comma) -> Option<Const> {
             };
             Const::Float(if *offset == 0 { r } else { i })
         }
-        ExprKind::Builtin(Builtin::Hint | Builtin::AssumeAligned(_), args) => {
+        ExprKind::Builtin(Builtin::Hint | Builtin::Expect | Builtin::AssumeAligned(_), args) => {
             let value = constant(&args[0])?;
             for arg in &args[1..] {
                 constant(arg)?;

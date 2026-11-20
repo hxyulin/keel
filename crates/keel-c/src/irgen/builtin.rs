@@ -113,7 +113,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(None);
         }
         // The expectation is usually a literal, with nothing to evaluate.
-        if op == Builtin::Hint {
+        if matches!(op, Builtin::Hint | Builtin::Expect) {
             let v = self.val(&args[0])?;
             for a in &args[1..] {
                 self.discard(a)?;
@@ -370,7 +370,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 overflow
             }
             Builtin::GenericOverflow(op) => self.generic_overflow(op, args, &vals, e.loc)?,
-            Builtin::Hint => vals[0],
+            Builtin::Hint | Builtin::Expect => vals[0],
             Builtin::Prefetch => unreachable!("prefetch lowered before value operands"),
             Builtin::AssumeAligned(alignment) => {
                 // Keep the contract local to this expression's SSA result.

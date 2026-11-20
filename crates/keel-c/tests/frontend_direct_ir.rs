@@ -224,6 +224,25 @@ fn truth_tests_branch_on_the_comparison() {
 }
 
 #[test]
+fn likely_unsigned_assignment_checks_fall_through() {
+    let src = "unsigned long next(void); long hint(void);\n\
+               unsigned long literal(void) { unsigned long n; \
+                   if (__builtin_expect(!!((n = next()) <= 9), 1)) return n; return n + 1; }\n\
+               unsigned long dynamic(void) { unsigned long n; \
+                   if (__builtin_expect(!!((n = next()) <= 9), hint())) return n; return n + 1; }";
+    for debug in [false, true] {
+        let ir = ir(src, debug);
+        let f = body(&ir, "literal");
+        assert_eq!(count(f, "call"), 1, "{f}");
+        let comparison = if debug { "icmp.ule" } else { "icmp.ugt" };
+        assert!(f.contains(comparison), "{f}");
+        let f = body(&ir, "dynamic");
+        assert_eq!(count(f, "call"), 2, "{f}");
+        assert_eq!(count(f, "icmp"), 2, "{f}");
+    }
+}
+
+#[test]
 fn float_and_narrowing_truth_tests_keep_their_conversions() {
     let src = "int not_float(double a, double b) { return !(a < b); }\n\
                int narrow(long x) { if ((int)x) return 1; return 0; }\n\
@@ -313,7 +332,17 @@ struct in { char c; int b; long l; };
 struct out { int a; struct in in; struct in arr[3]; };
 struct bf { unsigned low : 3, mid : 5, : 16, top : 8; int slow : 4, : 20, stop : 8; };
 
+static void checked_digit(int ch) {
+    unsigned long n;
+    if (__builtin_expect(!!((n = (unsigned long)(ch++ - '0')) <= 9), 1))
+        printf("digit %lu %d\n", n, ch);
+    else
+        printf("other %lu %d\n", n, ch);
+}
+
 int main(void) {
+    for (int ch = '0' - 1; ch <= '9' + 1; ch += (ch == '0' ? 9 : 1))
+        checked_digit(ch + vz);
     printf("%d %d %d\n", (signed char)200, (unsigned char)-1, (short)70000);
     printf("%u %u %u\n", 0u - 1u, (unsigned)-1 >> 31, 1u << 31);
     printf("%d %d %u\n", -7 / 2, -7 % 2, 7u / 2u);

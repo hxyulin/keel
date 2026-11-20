@@ -48,7 +48,7 @@ impl<'a> Parser<'a> {
             }
             "va_start" | "va_arg" | "va_end" | "va_copy" => self.va_builtin(base, loc),
             "offsetof" => self.offsetof(loc),
-            "expect" => self.builtin_call(Builtin::Hint, &[LONG, LONG], LONG, loc),
+            "expect" => self.builtin_call(Builtin::Expect, &[LONG, LONG], LONG, loc),
             "prefetch" => self.prefetch(loc),
             "expect_with_probability" => self.expect_with_probability(loc),
             "assume_aligned" => self.assume_aligned(loc),
