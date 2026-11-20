@@ -180,7 +180,7 @@ pub struct Selection {
     allocation_folds: HashMap<Inst, Vec<Value>>,
     /// Copy and scalar ABI register affinities, never constraints.
     pub hints: Hints,
-    /// Keep heavily used values and coalesce spill homes on x86 dispatch edges.
+    /// Keep heavily used values and coalesce spill homes on dense dispatch edges.
     pub(crate) large_dispatch_allocation: bool,
     /// The cover that claimed each root instruction, indexed by instruction.
     owners: Vec<Option<Cover>>,

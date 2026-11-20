@@ -494,6 +494,17 @@ impl Covers {
             )
         };
         selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
+        if func.num_blocks() >= 64 {
+            // A switch-only dispatch block has its own allocation behavior.
+            // Qualify a single dense switch that shares a block with work.
+            let mut switches = func.blocks().filter_map(|block| {
+                let insts = func.block_insts(block);
+                let &last = insts.last()?;
+                crate::dispatch_tail::is_large_dense_switch(func, last).then_some(insts.len() > 1)
+            });
+            selection.large_dispatch_allocation =
+                switches.next() == Some(true) && switches.next().is_none();
+        }
         let on = |cover| selection.enabled(cover);
         let [
             abs,
