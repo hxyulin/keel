@@ -44,7 +44,7 @@ fn after_call<'a>(text: &'a str, function: &str, callee: &str) -> &'a str {
 }
 
 #[test]
-fn fixed_destinations_recompute_addresses_and_pointer_arguments_keep_the_save() {
+fn fixed_integer_pairs_use_frame_offsets_and_pointer_arguments_keep_the_save() {
     let m = keel_ir::parse(SOURCE).unwrap();
     for sel in [SelectionTier::Baseline, SelectionTier::Full] {
         for alloc in [AllocationTier::Fast, AllocationTier::Full] {
@@ -52,11 +52,16 @@ fn fixed_destinations_recompute_addresses_and_pointer_arguments_keep_the_save() 
                 let (text, _) = compile(&m, sel, alloc, pools);
                 for (f, callee) in [
                     ("fixed_pair", "make_pair"),
-                    ("fixed_hfa", "make_hfa"),
-                    ("fixed_nine", "make_nine"),
                     ("dynamic", "make_pair"),
                     ("overlap", "increment"),
+                    ("indirect", "r10"),
                 ] {
+                    assert!(
+                        after_call(&text, f, callee).starts_with("mov\tqword ptr [rbp"),
+                        "{f}: {text}"
+                    );
+                }
+                for (f, callee) in [("fixed_hfa", "make_hfa"), ("fixed_nine", "make_nine")] {
                     assert!(
                         after_call(&text, f, callee).starts_with("lea\tr11, ["),
                         "{f}: {text}"

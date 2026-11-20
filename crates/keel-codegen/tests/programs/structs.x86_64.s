@@ -1568,9 +1568,8 @@
 	# call @k_make_s16(v1, v0)
 	mov	rdi, rbx
 	call	"k_make_s16"
-	lea	r11, [rbp + -88]
-	mov	qword ptr [r11], rax
-	mov	qword ptr [r11 + 8], rdx
+	mov	qword ptr [rbp + -88], rax
+	mov	qword ptr [rbp + -80], rdx
 	# v2 = stack_addr ss1
 	lea	r13, [rbp + -72]
 	# call @k_make_big(v2, v0)
@@ -1578,12 +1577,8 @@
 	mov	rsi, rbx
 	call	"k_make_big"
 	# v3 = call @k_s16(v1)
-	mov	rax, qword ptr [r12]
-	mov	qword ptr [rbp + -104], rax
-	mov	rax, qword ptr [r12 + 8]
-	mov	qword ptr [rbp + -96], rax
-	mov	rdi, qword ptr [rbp + -104]
-	mov	rsi, qword ptr [rbp + -96]
+	mov	rdi, qword ptr [rbp + -88]
+	mov	rsi, qword ptr [rbp + -80]
 	call	"k_s16"
 	mov	rbx, rax
 	# v4 = call @k_big(v2)

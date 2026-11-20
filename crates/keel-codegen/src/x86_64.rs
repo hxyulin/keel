@@ -971,6 +971,22 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
     }
 }
 
+fn integer_pair_registers(regs: &[sysv::RegPiece], layout: &Layout) -> Option<[u8; 2]> {
+    match regs {
+        [
+            sysv::RegPiece {
+                offset: 0,
+                loc: Loc::Reg(lo),
+            },
+            sysv::RegPiece {
+                offset: 8,
+                loc: Loc::Reg(hi),
+            },
+        ] if layout.size() == 16 => Some([*lo, *hi]),
+        _ => None,
+    }
+}
+
 enum AggregateResult<'a> {
     /// The pieces, the layout, and the frame offset of a fixed destination,
     /// whose address is computed again after the call instead of being kept
@@ -2572,8 +2588,19 @@ impl<'a> FunctionCompiler<'a> {
                     staged += ty.bytes().unwrap() / 8;
                 }
                 ArgLoc::InRegs(regs) => {
+                    let layout = layout.expect("a struct");
+                    if let Some(registers) = integer_pair_registers(&regs, layout)
+                        && let Some(slot) = self.fixed_pair_source(arg)
+                    {
+                        // A fixed local home is disjoint from outgoing
+                        // arguments and copy staging. The parallel copy can
+                        // read its two words directly into ABI registers.
+                        moves.push((Loc::Reg(registers[0]), Loc::Stack(slot)));
+                        moves.push((Loc::Reg(registers[1]), Loc::Stack(slot + 1)));
+                        continue;
+                    }
                     let p = self.use_reg(arg, S1);
-                    let size = layout.expect("a struct").size();
+                    let size = layout.size();
                     for sysv::RegPiece { offset, loc: r } in regs {
                         self.load_chunk(S0, p, offset, (size - offset).min(8));
                         self.emit(Opcode::Mov, [asm_arg(self.slot(staged)), asm_arg(r64(0))]);
@@ -2670,6 +2697,17 @@ impl<'a> FunctionCompiler<'a> {
         stack_slot(self.func, sret).map(|slot| self.stack_slot_offsets[slot])
     }
 
+    fn fixed_pair_source(&self, addr: Value) -> Option<u32> {
+        let slot = stack_slot(self.func, addr)?;
+        if self.func.stack_slot(keel_ir::StackSlot::new(slot)).size < 16 {
+            return None;
+        }
+        let offset = self.stack_slot_offsets[slot].checked_sub(self.spill_base)?;
+        (offset.is_multiple_of(8))
+            .then(|| u32::try_from(offset / 8).ok())
+            .flatten()
+    }
+
     /// Moves a call's results to their places: [`Self::call_result`] for
     /// at most one, and one parallel copy out of their return registers for
     /// several, which may be allocatable and land in each other's registers.
@@ -2722,6 +2760,19 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(Opcode::Fstp, [asm_arg(sized(memory(r64(S3), 0), 80))]);
         }
         if let Some(AggregateResult::Registers(regs, layout, fixed)) = sret {
+            if let Some(home) = fixed
+                && let Some([lo, hi]) = integer_pair_registers(&regs, layout)
+            {
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(sized(self.frame(home), 64)), asm_arg(r64(lo))],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(sized(self.frame(home + 8), 64)), asm_arg(r64(hi))],
+                );
+                return;
+            }
             if let Some(offset) = fixed {
                 let at = self.frame(offset);
                 self.emit(Opcode::Lea, [asm_arg(r64(S3)), asm_arg(at)]);
