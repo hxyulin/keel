@@ -404,6 +404,7 @@ pub(crate) static STACK_FORWARD: &dyn Pass = &BuiltinPass::new(
             f,
             context.layout,
             context.target == VectorTarget::Aarch64Neon,
+            context.target == VectorTarget::X86Sse2,
         )
     },
 );

@@ -15,7 +15,7 @@ use keel_ir::{
 
 /// Forwarding without a pointer layout.
 pub fn run(func: &mut Function) -> bool {
-    run_with_layout(func, None, false)
+    run_with_layout(func, None, false, false)
 }
 
 /// [`DataLayout::NATIVE64`] has eight-byte integral addresses: storing an i64
@@ -27,6 +27,7 @@ pub(crate) fn run_with_layout(
     func: &mut Function,
     layout: Option<DataLayout>,
     fp_bits: bool,
+    native_i64x2: bool,
 ) -> bool {
     // Every rewrite below starts from a slot address.
     if func.num_stack_slots() == 0 {
@@ -414,6 +415,25 @@ pub(crate) fn run_with_layout(
                             );
                             func.set_inst_loc(widened, loc);
                             Some(func.first_result(widened))
+                        })
+                        .or_else(|| {
+                            if !native_i64x2
+                                || local_only
+                                || offset != 0
+                                || sizes[&slot] != 16
+                                || ty != Type::Vector(VectorType::I64x2)
+                                || flags.align > func.stack_slot(slot).align
+                            {
+                                return None;
+                            }
+                            // The exact facts cover both lanes in this block.
+                            // Packing them avoids a wider reload after two stores.
+                            let low = *exact.get(&(slot, 0, Type::I64))?;
+                            let high = *exact.get(&(slot, 8, Type::I64))?;
+                            let at = InsertPoint::Before(inst);
+                            let loc = func.inst_loc(inst);
+                            let vector = func.ins(at).loc(loc).vsplat(ty, low);
+                            Some(func.ins(at).loc(loc).vinsert(vector, high, 1))
                         })
                         .or_else(|| {
                             let width = integer_width(ty)?;

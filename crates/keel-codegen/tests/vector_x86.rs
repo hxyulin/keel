@@ -762,6 +762,61 @@ fn packed_splats_use_sse2_without_stack_staging() {
 }
 
 #[test]
+fn packed_i64_insert_preserves_the_other_lane() {
+    let source = "func @insert(ptr, i64, i64, ptr) {
+block0(v0: ptr, v1: i64, v2: i64, v3: ptr):
+ v4 = load.i64x2 align 1 v0
+ v5 = vinsert v4, v1, 0
+ v6 = vinsert v4, v2, 1
+ store align 1 v5, v3
+ v7 = iconst.i64 16
+ v8 = ptradd v3, v7
+ store align 1 v6, v8
+ return
+}";
+    let oracle = r#"
+typedef __UINT64_TYPE__ U64;
+extern void insert(const U64 *, U64, U64, U64 *);
+int main(void) {
+    U64 input[2] = {0x0123456789abcdefULL, 0xffff0000ff00ff00ULL};
+    U64 low = 0x8000000000000000ULL, high = 0xfedcba9876543210ULL;
+    U64 out[4] = {0};
+    insert(input, low, high, out);
+    return out[0] != low || out[1] != input[1] || out[2] != input[0] || out[3] != high;
+}
+"#;
+    let features = Features::default();
+    for (name, pools) in [
+        ("registers", &keel_codegen::x86_64::REGISTERS),
+        ("spills", &SPILLED),
+    ] {
+        let (text, program) = compile_with_pools(
+            source,
+            SelectionTier::Baseline,
+            AllocationTier::Full,
+            pools,
+            features,
+        );
+        assert!(
+            text.contains("movsd\txmm") && text.contains("punpcklqdq\txmm"),
+            "{text}"
+        );
+        if name == "registers" {
+            assert!(!text.contains("xmmword ptr [rbp"), "{text}");
+        }
+        if native::active() {
+            let object =
+                keel_asm::x86::assemble_program_object_with_features(&program, features).unwrap();
+            native_program!(name)
+                .file("oracle.c", oracle)
+                .file("insert.o", object)
+                .link(["-O2", "-msse2", "-mno-avx", "oracle.c", "insert.o"])
+                .check();
+        }
+    }
+}
+
+#[test]
 fn interleaved_dwords_and_v1_multiply_use_packed_recipes_with_live_inputs() {
     let source = "func @shuffle(ptr,ptr,ptr) {
 block0(v0:ptr,v1:ptr,v2:ptr):

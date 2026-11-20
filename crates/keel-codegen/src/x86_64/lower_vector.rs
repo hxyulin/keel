@@ -99,6 +99,26 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Movq, [asm_arg(r64(d)), asm_arg(xmm(source))]);
                 self.def_done(result, d);
             }
+            InstData::VectorInsert {
+                args: [vector, scalar],
+                lane,
+            } => {
+                let source = self.use_freg(vector, FS0);
+                let scalar = self.use_reg(scalar, S0);
+                let d = self.def_freg(result);
+                if d != source {
+                    self.emit(Opcode::Movaps, [asm_arg(xmm(d)), asm_arg(xmm(source))]);
+                }
+                self.emit(Opcode::Movq, [asm_arg(xmm(FS1)), asm_arg(r64(scalar))]);
+                // Register MOVSD preserves the destination's upper lane.
+                let insert = if lane == 0 {
+                    Opcode::Movsd
+                } else {
+                    Opcode::Punpcklqdq
+                };
+                self.emit(insert, [asm_arg(xmm(d)), asm_arg(xmm(FS1))]);
+                self.def_done(result, d);
+            }
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
             InstData::VectorReduce {
                 op: keel_ir::VectorReduceOp::Add,
@@ -106,7 +126,6 @@ impl FunctionCompiler<'_> {
             } => self.vector_reduce_add(arg, result),
             InstData::VectorUnary { .. }
             | InstData::VectorReduce { .. }
-            | InstData::VectorInsert { .. }
             | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
             _ => unreachable!("not a vector instruction"),
         }

@@ -94,6 +94,50 @@ block0(v0: f64):
 }
 
 #[test]
+fn x86_packs_two_complete_private_stack_lanes() {
+    use keel_opt::VectorTarget::{Portable, X86Sse2};
+
+    let source = "decl @inspect(ptr)
+func @pack(i64, i64) -> i64x2 {
+ ss0 = stack_slot 16, align 16
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ v3 = iconst.i64 8
+ v4 = ptradd v2, v3
+ store v0, v2
+ store v1, v4
+ v5 = load.i64x2 align 16 v2
+ return v5
+}";
+    let forward = |source: &str, target| {
+        let mut module = keel_ir::parse(source).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["stack-forward"], target).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        module
+    };
+    let module = forward(source, X86Sse2);
+    assert_eq!(loads(&module), 0, "{module}");
+    let text = module.to_string();
+    assert!(text.contains("vsplat.i64x2 v0"), "{text}");
+    assert!(text.contains(", v1, 1"), "{text}");
+    assert!(text.contains("vinsert"), "{text}");
+    assert!(!text.contains("store "), "{text}");
+    assert_eq!(loads(&forward(source, Portable)), 1);
+    for source in [
+        source.replace("store v0", "store volatile v0"),
+        source.replace("align 16 v2", "align 32 v2"),
+        source.replace(" v5 = load", " call @inspect(v2)\n v5 = load"),
+        source.replace(
+            " store v1, v4",
+            " store v1, v4\n v6 = iconst.i32 -1\n store v6, v4",
+        ),
+    ] {
+        let module = forward(&source, X86Sse2);
+        assert_eq!(loads(&module), 1, "{module}");
+    }
+}
+
+#[test]
 fn forwards_partial_union_write_and_removes_private_stores() {
     let m = run("func @f(i32) -> i64 {
  ss0 = stack_slot 8, align 8

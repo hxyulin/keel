@@ -256,7 +256,7 @@ pub(super) fn lower(func: &Function, features: keel_asm_ir::x86::Features) -> Co
                 func.resolve(args[0]) == func.resolve(args[1]),
             )
             .is_some(),
-            InstData::VectorExtract { arg, .. } => {
+            InstData::VectorExtract { arg, .. } | InstData::VectorInsert { args: [arg, _], .. } => {
                 func.value_type(*arg) == Type::Vector(VectorType::I64x2)
             }
             InstData::VectorBinary { op, args } => {
