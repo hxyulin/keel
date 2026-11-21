@@ -14,6 +14,8 @@ pub(super) struct Plan {
     flags: Vec<(usize, u8)>,
     initializers: Vec<(PhysReg, usize)>,
     text: String,
+    /// A read-only bit test whose inputs can use reserved scratch registers.
+    bit_test_flag: Option<u8>,
     /// Registers overwritten by operand staging or the template, in slot order.
     pub saved_regs: Vec<u8>,
     pub bytes: usize,
@@ -32,14 +34,15 @@ pub(super) fn plan(
     module: &Module,
     func: &Function,
     inst: Inst,
-    frame: Option<u8>,
+    shape: &plan::VectorShape,
     unique: u64,
-    simd_bits: u16,
     avx512f: bool,
+    compact_bit_test: bool,
 ) -> Result<Plan, String> {
     let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
         unreachable!("inline asm planning requires an inline asm instruction");
     };
+    let frame = shape.frame_register;
     for (&constraint, &arg) in asm.inputs.iter().zip(args) {
         if constraint == Constraint::Imm
             && let Some((symbol, _)) = keel_ir::symbolic_immediate(func, arg)
@@ -240,6 +243,7 @@ pub(super) fn plan(
         }
     }
     let text = substitute(func, asm, args, &regs, unique)?;
+    let bit_test_flag = compact_bit_test.then(|| bit_test_flag(asm, &ops)).flatten();
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
     let mut overwritten = [[false; 32]; 2];
@@ -264,7 +268,7 @@ pub(super) fn plan(
     let simd_bits = if saved_simd.iter().any(|&r| r >= 16) {
         512
     } else {
-        simd_bits
+        shape.simd_bits
     };
     let simd_home = saved_regs.len() * 8;
     let mut bytes = simd_home + saved_simd.len() * usize::from(simd_bits / 8);
@@ -291,7 +295,7 @@ pub(super) fn plan(
         .enumerate()
         .map(|(i, &(_, ty))| home(ty, regs[i]))
         .collect();
-    if saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
+    if bit_test_flag.is_some() || saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
         bytes = 0;
     }
     // Common output validates scoped source with the assembler's stateful
@@ -310,6 +314,7 @@ pub(super) fn plan(
             })
             .collect(),
         text,
+        bit_test_flag,
         saved_regs,
         saved_simd,
         simd_bits,
@@ -318,6 +323,36 @@ pub(super) fn plan(
         outputs,
         bytes,
     })
+}
+
+fn bit_test_flag(asm: &InlineAsm, operands: &[Constraint]) -> Option<u8> {
+    let [
+        Constraint::Flag(cc @ (2 | 3)),
+        Constraint::Mem,
+        Constraint::Reg | Constraint::Imm,
+    ] = *operands
+    else {
+        return None;
+    };
+    if asm
+        .clobbers
+        .iter()
+        .any(|clobber| matches!(clobber, AsmClobber::Reg(_)))
+    {
+        return None;
+    }
+    let template = asm.template.trim();
+    let code = if let Some((code, comment)) = template.split_once("/*") {
+        if comment.strip_suffix("*/")?.contains("*/") {
+            return None;
+        }
+        code.trim()
+    } else {
+        template
+    };
+    let (opcode, operands) = code.split_once(|c: char| c.is_ascii_whitespace())?;
+    let (bit, memory) = operands.split_once(',')?;
+    (opcode == "btq" && bit.trim() == "%2" && memory.trim() == "%1").then_some(cc)
 }
 
 fn substitute(
@@ -493,6 +528,23 @@ impl FunctionCompiler<'_> {
             .inline_asm_plans
             .remove(&inst)
             .expect("asm checked before emission");
+        if let Some(cc) = plan.bit_test_flag {
+            // The only assigned registers are the reserved RAX and RCX.
+            // A bit test reads them without changing either register.
+            for &(register, argument) in &plan.initializers {
+                self.emit_move(Loc::Reg(register.num), self.loc(args[argument]));
+            }
+            self.out
+                .inline_assembly(&plan.text, self.features, &self.func.name);
+            let result = self.func.first_result(inst);
+            if self.defined(result).is_some() {
+                let dst = self.def_reg(Some(result));
+                self.emit(Opcode::Setcc(cc), [asm_arg(r8(dst))]);
+                self.emit(Opcode::Movzx, [asm_arg(r32(dst)), asm_arg(r8(dst))]);
+                self.def_done(Some(result), dst);
+            }
+            return;
+        }
         if plan.bytes == 0 {
             self.out
                 .inline_assembly(&plan.text, self.features, &self.func.name);

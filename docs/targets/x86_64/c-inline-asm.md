@@ -251,6 +251,12 @@ frame. This includes `asm volatile("sti" ::: "memory")`, compiler-only memory
 barriers and immediate-only templates. The assembler still validates their
 instructions and target features.
 
+Size emission also skips staging for a single `btq` with a read-only memory
+operand, a register or immediate bit index, and a carry or inverted-carry
+output. The input registers are reserved by the backend and `SETcc` writes
+the result directly to a register. The memory operand and declared clobbers
+keep their ordinary effects.
+
 Substituted text remains an explicit fragment in the enclosing object program.
 The shared assembler processes directives, macro state, labels, relocations and
 CPU-feature legality when it consumes that program. Emitting assembly text alone

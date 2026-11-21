@@ -108,6 +108,70 @@ fn selective_preservation_keeps_transport_parity_and_exports_runtime_cases() {
     }
 }
 
+#[test]
+fn size_bit_test_uses_register_flag_output_and_preserves_live_inputs() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
+
+    let source = r#"
+func @bit_test(ptr, i64) -> i64 {
+entry(v0: ptr, v1: i64):
+ v2 = asm " btq  %2,%1\n\t/* output condition code c*/\n", "=@ccb,m,rI,~{memory}"(v0, v1) -> i8
+ v3 = uext.i64 v2
+ v4 = iadd v1, v3
+ return v4
+}
+"#;
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let target = Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    for (name, pools) in [
+        ("registers", &keel_codegen::x86_64::REGISTERS),
+        ("spills", &empty),
+    ] {
+        let request = Request::new(
+            target,
+            CodegenPipeline {
+                selector: &SelectionTier::Full,
+                allocator: &AllocationTier::Compact,
+            },
+        )
+        .emission(options)
+        .pools(pools);
+        let text = request.text(&module).unwrap();
+        assert!(
+            text.lines()
+                .any(|line| line.contains("setb") && !line.contains("ptr")),
+            "{text}"
+        );
+        let bytes =
+            keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+        assert_eq!(bytes, keel_asm::assemble_source_for(target, &text).unwrap());
+        native_program!(name)
+            .file("bit.o", bytes)
+            .file(
+                "driver.c",
+                "\
+extern long bit_test(unsigned long *, long);
+int main(void) {
+    unsigned long words[] = {1UL << 63, 1};
+    return !(bit_test(words, 0) == 0 && bit_test(words, 63) == 64 &&
+             bit_test(words, 64) == 65 && bit_test(words, 65) == 65 &&
+             bit_test(words + 1, -1) == 0);
+}",
+            )
+            .link(["driver.c", "bit.o"])
+            .check();
+    }
+}
+
 struct RematConstants;
 impl RegisterAllocator for RematConstants {
     fn name(&self) -> &'static str {

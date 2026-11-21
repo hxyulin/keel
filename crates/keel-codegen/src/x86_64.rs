@@ -1226,8 +1226,15 @@ impl<'a> FunctionCompiler<'a> {
             plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?;
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
         let system = plan::SystemSlots::plan(func, present, features, spills.end);
+        let compact_bit_test = goal == crate::CodegenGoal::Size
+            && pools
+                .caller_saved
+                .iter()
+                .chain(pools.callee_saved)
+                .all(|&r| r != S0 && r != S1);
         let inline_asm_plans =
-            plan::plan_inline_asm(module, func, present, &shape, features).map_err(err)?;
+            plan::plan_inline_asm(module, func, present, &shape, features, compact_bit_test)
+                .map_err(err)?;
         let asm_bytes = inline_asm_plans
             .values()
             .map(|p| p.bytes)
