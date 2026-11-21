@@ -433,6 +433,11 @@ Each accessed field must have an exact, non-volatile load or store and a
 known value on every incoming path. Calls and escaping home addresses retain
 ordinary lowering.
 
+Incoming eight-byte byval copies in integer registers can also supply scalar
+loads directly. The backend checks the ABI locations of all parameters and only
+removes the copy when its address stays private and every access is a
+non-volatile load within a register word.
+
 Ordinary C calls also pass two-word integer arguments directly from SSA when
 each copy is a private 16-byte slot with both words stored in the call's block.
 For a pair spilled as a unit before a later scalar claims the last integer
@@ -492,6 +497,9 @@ addition to the Size IR pipeline:
   observers.
 - Omit unused call-alignment padding in leaves with no calls, local storage,
   stack observers, TLS helper, debug information or stack realignment.
+- Combine single-use integer masks compared with zero into `test`. Use the
+  narrowest width that preserves the zero check and keep wide masks that
+  cannot use a sign-extended immediate on the ordinary path.
 - Use one-byte `leave` instead of `mov rsp, rbp; pop rbp` when no other
   callee-saved registers need restoring.
 - Share one return epilogue when the function saves registers and has

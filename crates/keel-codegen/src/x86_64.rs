@@ -1260,7 +1260,7 @@ impl<'a> FunctionCompiler<'a> {
         let bounded_speed = goal == crate::CodegenGoal::Speed
             && pipeline.allocator.name() == "bounded"
             && module.files.is_empty();
-        let mut covers = plan::Covers::select(func, pipeline, &facts, bounded_speed);
+        let mut covers = plan::Covers::select(func, pipeline, &facts, bounded_speed, goal);
         if pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
             && !func.attrs.optnone
         {
@@ -4463,10 +4463,9 @@ impl<'a> FunctionCompiler<'a> {
                 unreachable!("ZF-only mask test")
             };
             let a = self.use_reg(source, S0);
-            self.emit(
-                Opcode::Test,
-                [asm_arg(reg(a, Type::I32)), asm_arg(mask as i32)],
-            );
+            let ty = plan::mask_test_type(self.ty(source), mask, self.goal)
+                .expect("selected mask test has an encodable immediate");
+            self.emit(Opcode::Test, [asm_arg(reg(a, ty)), asm_arg(mask as i32)]);
             return cond_code(cond);
         }
         if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {

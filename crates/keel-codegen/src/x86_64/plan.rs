@@ -474,6 +474,28 @@ fn prefers_dispatch_allocation(func: &Function) -> bool {
         .any(|&pred| dom.dominates(block, pred))
 }
 
+pub(super) fn mask_test_type(ty: Type, mask: i64, goal: crate::CodegenGoal) -> Option<Type> {
+    if goal != crate::CodegenGoal::Size {
+        return (ty == Type::I32).then_some(Type::I32);
+    }
+    let bits = if ty == Type::I32 {
+        u64::from(mask as u32)
+    } else {
+        mask as u64
+    };
+    // Only ZF is observed. Narrowing the operand is exact when the mask has
+    // no set bits above that width. A 64-bit TEST sign-extends its imm32.
+    if u8::try_from(bits).is_ok() {
+        Some(Type::I8)
+    } else if u16::try_from(bits).is_ok() {
+        Some(Type::I16)
+    } else if u32::try_from(bits).is_ok() {
+        Some(Type::I32)
+    } else {
+        i32::try_from(mask).ok().map(|_| Type::I64)
+    }
+}
+
 /// The selection and the x86 covers layered on it, each keyed by the
 /// instruction it replaces.
 pub(super) struct Covers {
@@ -491,6 +513,7 @@ impl Covers {
         pipeline: &crate::CodegenPipeline<'_>,
         facts: &crate::kinds::FunctionFacts<'_>,
         across_stack_addr: bool,
+        goal: crate::CodegenGoal,
     ) -> Self {
         let (present, uses) = (facts.kinds, &facts.machine_uses);
         let mut selection = pipeline.selector.select_with_uses(
@@ -524,7 +547,9 @@ impl Covers {
         .map(on);
         let signed_byte = on(Cover::X86SignedByteLoad);
         if present.compare && mask_tests {
-            selection.fold_mask_tests(func, uses, Cover::X86MaskTest, |ty, _| ty == Type::I32);
+            selection.fold_mask_tests(func, uses, Cover::X86MaskTest, |ty, mask| {
+                mask_test_type(ty, mask, goal).is_some()
+            });
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.

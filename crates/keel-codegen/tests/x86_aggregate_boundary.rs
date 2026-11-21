@@ -32,6 +32,23 @@ block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: ptr, v6: i64):
  v8 = xor v7, v6
  return v8
 }
+func @read_byval_word(ptr byval {i32, i32}, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+ v2 = iconst.i64 4
+ v3 = ptradd v0, v2
+ v4 = load.i32 align 4 v3
+ v5 = uext.i64 v4
+ v6 = xor v5, v1
+ return v6
+}
+func @write_byval_word(ptr byval {i64}, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+ v2 = load.i64 v0
+ v3 = iadd v1, v2
+ store v3, v0
+ v4 = load.i64 volatile v0
+ return v4
+}
 "#;
 const OUTGOING_PAIRS: &str = r#"
 decl @take_outgoing(i64, ptr byval [2 x i64], ptr byval [2 x i64], ptr byval [2 x i64], i64, i64) -> i64 cc(c)
@@ -114,6 +131,13 @@ block0(v0: i128):
                 };
                 let text =
                     keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                let (_, word) = text.split_once("\n\"read_byval_word\":").unwrap();
+                let (word, written) = word.split_once("\n\"write_byval_word\":").unwrap();
+                let (written, _) = written.split_once("\n\"outgoing_pair_moves\":").unwrap();
+                if std::ptr::eq(pools, &keel_codegen::x86_64::REGISTERS) {
+                    assert!(!word.contains("[rbp + -"), "{word}");
+                }
+                assert!(written.contains("[rbp + -"), "{written}");
                 let outgoing = text.split_once("\n\"outgoing_pair_moves\":").unwrap().1;
                 let (outgoing, escaped) = outgoing.split_once("\n\"outgoing_escapes\":").unwrap();
                 assert!(!outgoing.contains("stack_addr"), "{outgoing}");
@@ -142,6 +166,9 @@ typedef struct { uint64_t lo,hi; } P;
 extern P JS_Call(void *,P,P,int,P *), JS_Call_mut(void *,P,P,int,P *), JS_Call_alias(void *,P,P,int,P *);
 extern uint64_t read_byval_registers(P,uint64_t,P,uint64_t,uint64_t);
 extern uint64_t read_byval_rolled(uint64_t,uint64_t,uint64_t,uint64_t,uint64_t,P,uint64_t);
+typedef struct { uint32_t lo,hi; } W;
+typedef struct { uint64_t value; } Word;
+extern uint64_t read_byval_word(W,uint64_t), write_byval_word(Word,uint64_t);
 typedef unsigned __int128 U;
 extern U shl64(U), ushr64(U);
 extern __int128 sshr64(__int128);
@@ -169,6 +196,8 @@ int main(void) {
   if(read_byval_registers(a,b.lo,b,v.lo,v.hi)!=(a.lo^(uint32_t)b.hi^a.hi)+b.lo+v.lo+v.hi)
       abort();
   if(read_byval_rolled(x,x,x,x,x,a,b.lo)!=(a.lo^b.lo)) abort();
+  if(read_byval_word((W){(uint32_t)x,(uint32_t)(x>>32)},b.lo)!=((x>>32)^b.lo)) abort();
+  if(write_byval_word((Word){x},b.lo)!=x+b.lo) abort();
   uint64_t y=b.lo, sum=x+y, bits=x^y;
   if(outgoing_pair_moves(x,y)!=take_outgoing(sum,(P){x,y},(P){y,sum},(P){x,bits},bits,y))
       abort();

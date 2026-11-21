@@ -1,4 +1,4 @@
-//! Use the incoming integer registers for immutable, nonescaping byval pairs.
+//! Use the incoming integer registers for immutable, nonescaping byval copies.
 //! The backend-local signature must preserve every argument location.
 use crate::regalloc::Loc;
 use keel_ir::fxhash::FxHashMap;
@@ -10,6 +10,7 @@ use std::borrow::Cow;
 
 #[derive(Default)]
 struct Reads {
+    words: usize,
     offsets: Vec<Inst>,
     loads: Vec<(Inst, usize, Type)>,
     escaped: bool,
@@ -22,23 +23,23 @@ pub(crate) struct Placement<L> {
 }
 
 pub(crate) trait ArgumentLocation: PartialEq {
-    fn pair_registers(&self) -> Option<[Loc; 2]>;
+    fn aggregate_registers(&self, words: usize) -> Option<(Loc, Option<Loc>)>;
     fn scalar_register(&self) -> Option<Loc>;
 }
 
 impl<L: ArgumentLocation> Placement<L> {
-    fn preserves(&self, replacement: &Self, split: &[bool]) -> bool {
+    fn preserves(&self, replacement: &Self, split: &[usize]) -> bool {
         if self.stack != replacement.stack || self.stack_align != replacement.stack_align {
             return false;
         }
 
         let mut new_locations = replacement.locs.iter();
-        for (&split, old) in split.iter().zip(&self.locs) {
-            if split {
-                let Some(registers) = old.pair_registers() else {
+        for (&words, old) in split.iter().zip(&self.locs) {
+            if words != 0 {
+                let Some((low, high)) = old.aggregate_registers(words) else {
                     return false;
                 };
-                for register in registers {
+                for register in std::iter::once(low).chain(high) {
                     if new_locations.next().and_then(L::scalar_register) != Some(register) {
                         return false;
                     }
@@ -48,6 +49,14 @@ impl<L: ArgumentLocation> Placement<L> {
             }
         }
         new_locations.next().is_none()
+    }
+}
+
+fn byval_words(param: &AbiParam) -> usize {
+    match &param.purpose {
+        Purpose::ByVal(layout) if layout.checked_size() == Some(8) && layout.align() <= 8 => 1,
+        Purpose::ByVal(layout) if crate::aggregate_results::is_integer_pair(layout) => 2,
+        _ => 0,
     }
 }
 
@@ -70,10 +79,7 @@ pub(crate) fn promote<L: ArgumentLocation>(
         || !f.restrict_params.is_empty()
         || !f.attrs.contract.parameters.is_empty()
         || !f.attrs.contract.parameter_ranges.is_empty()
-        || !f.sig.params.iter().any(|p| {
-            matches!(&p.purpose,
-            Purpose::ByVal(l) if crate::aggregate_results::is_integer_pair(l))
-        })
+        || !f.sig.params.iter().any(|p| byval_words(p) != 0)
     {
         return Cow::Borrowed(f);
     }
@@ -90,10 +96,9 @@ pub(crate) fn promote<L: ArgumentLocation>(
         .enumerate()
     {
         reads.push(Reads::default());
-        if matches!(&param.purpose, Purpose::ByVal(l) if crate::aggregate_results::is_integer_pair(l))
-            && loc.pair_registers().is_some()
-            && f.resolve(v) == v
-        {
+        let words = byval_words(param);
+        if loc.aggregate_registers(words).is_some() && f.resolve(v) == v {
+            reads[index].words = words;
             addresses.insert(v, (index, 0));
         }
     }
@@ -121,7 +126,8 @@ pub(crate) fn promote<L: ArgumentLocation>(
             args: [base, delta],
         } = *data
             && let Some(&(param, 0)) = addresses.get(&f.resolve(base))
-            && let Some(offset @ 0..=15) = crate::fold::iconst(f, delta)
+            && let Some(offset) = crate::fold::iconst(f, delta)
+            && (0..(reads[param].words * 8) as i64).contains(&offset)
         {
             let v = f.first_result(inst);
             if f.resolve(v) == v {
@@ -168,17 +174,23 @@ pub(crate) fn promote<L: ArgumentLocation>(
     }
     let split: Vec<_> = reads
         .iter()
-        .map(|r| !r.escaped && !r.loads.is_empty())
+        .map(|r| {
+            if r.escaped || r.loads.is_empty() {
+                0
+            } else {
+                r.words
+            }
+        })
         .collect();
-    if !split.iter().any(|&yes| yes) {
+    if !split.iter().any(|&words| words != 0) {
         return Cow::Borrowed(f);
     }
     let mut sig = f.sig.clone();
     sig.params.clear();
-    for (&need, p) in split.iter().zip(&f.sig.params) {
-        if need {
+    for (&words, p) in split.iter().zip(&f.sig.params) {
+        if words != 0 {
             sig.params
-                .extend([AbiParam::new(Type::I64), AbiParam::new(Type::I64)]);
+                .extend(std::iter::repeat_n(AbiParam::new(Type::I64), words));
         } else {
             sig.params.push(p.clone());
         }
@@ -192,21 +204,23 @@ pub(crate) fn promote<L: ArgumentLocation>(
         out.remove_block_param(entry, i);
     }
     out.sig = sig;
-    for (&v, (&need, reads)) in params.iter().zip(split.iter().zip(reads)) {
-        if !need {
+    for (&v, (&words, reads)) in params.iter().zip(split.iter().zip(reads)) {
+        if words == 0 {
             let new = out.append_block_param(entry, f.value_type(v));
             if f.resolve(v) == v {
                 out.replace_all_uses(v, new);
             }
             continue;
         }
-        let lanes = [
-            out.append_block_param(entry, Type::I64),
-            out.append_block_param(entry, Type::I64),
-        ];
+        let low = out.append_block_param(entry, Type::I64);
+        let high = (words == 2).then(|| out.append_block_param(entry, Type::I64));
         for (load, offset, ty) in reads.loads {
             let at = InsertPoint::Before(load);
-            let mut bits = lanes[offset / 8];
+            let mut bits = if offset < 8 {
+                low
+            } else {
+                high.expect("a load beyond the first word requires a second register")
+            };
             let shift = (offset % 8) * 8;
             if shift != 0 {
                 let k = out.insert_inst(at, InstData::iconst(Type::I64, shift as i64));

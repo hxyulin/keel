@@ -1,8 +1,8 @@
 //! Literal i32 AND/zero tests: register-only, ZF-only, allocation-visible leaves.
 use crate::codegen::{Case, EMPTY};
-use keel_asm_ir::x86::{CpuLevel, Features};
+use keel_asm_ir::x86::{CpuLevel, Features, Register};
 use keel_codegen::{
-    InstructionSelector, SelectionTier,
+    CodegenGoal, CodegenPipeline, EmissionOptions, InstructionSelector, Request, SelectionTier,
     regalloc::{AllocationTier, Constraint, OperandKind, Pools, ValuePart},
     select::{Selection, Target},
 };
@@ -36,6 +36,91 @@ block3(v7: i32):
             "return v7"
         }
     )
+}
+
+#[test]
+fn size_tests_use_the_narrowest_exact_width() {
+    use keel_test_support::native_program;
+
+    let masks: [(&str, i64, Option<u16>); 5] = [
+        ("byte_mask", 255, Some(8)),
+        ("short_mask", 512, Some(16)),
+        ("unsigned_mask", 0x8000_0000, Some(32)),
+        ("negative_mask", -97, Some(64)),
+        ("wide_mask", 1 << 45, None),
+    ];
+    let mut source = String::new();
+    for (name, mask, _) in masks {
+        source.push_str(&format!(
+            "func @{name}(i64) -> i32 cc(c) {{
+block0(v0: i64):
+    v1 = iconst.i64 {mask}
+    v2 = and v0, v1
+    v3 = iconst.i64 0
+    v4 = icmp.ne v2, v3
+    v5 = uext.i32 v4
+    return v5
+}}
+"
+        ));
+    }
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = keel_codegen::Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let text = request.text(&module).unwrap();
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    for (name, _, width) in masks {
+        let (_, body) = text.split_once(&format!("\"{name}\":")).unwrap();
+        let (body, _) = body.split_once(".size").unwrap();
+        let test_width = body.lines().find_map(|line| {
+            let (reg, imm) = line.trim_start().strip_prefix("test")?.split_once(',')?;
+            imm.trim().parse::<i64>().ok()?;
+            Some(Register::parse(reg.trim())?.width)
+        });
+        assert_eq!(test_width, width, "{body}");
+        let has_and = body
+            .lines()
+            .any(|line| line.trim_start().starts_with("and"));
+        assert_eq!(has_and, width.is_none(), "{body}");
+    }
+    native_program!("size-mask-width")
+        .file("masks.o", object)
+        .file(
+            "oracle.c",
+            r#"
+#include <stdint.h>
+int byte_mask(uint64_t), short_mask(uint64_t), unsigned_mask(uint64_t);
+int negative_mask(uint64_t), wide_mask(uint64_t);
+int main(void) {
+    for (unsigned bit = 0; bit < 64; ++bit) {
+        uint64_t x = UINT64_C(1) << bit;
+        if (byte_mask(x) != !!(x & 255) ||
+            short_mask(x) != !!(x & 512) ||
+            unsigned_mask(x) != !!(x & UINT64_C(0x80000000)) ||
+            negative_mask(x) != !!(x & (uint64_t)-97) ||
+            wide_mask(x) != !!(x & (UINT64_C(1) << 45))) return 1;
+    }
+    return 0;
+}
+"#,
+        )
+        .link(["oracle.c", "masks.o"])
+        .check();
 }
 fn compile(
     src: &str,

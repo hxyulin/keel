@@ -1,6 +1,7 @@
 //! Size limits, callee profitability and the cost of inlining one callee.
 use super::clone::{byval_copy_chunks, inline_stack_slots};
-use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, Intrinsic, Purpose, Type};
+use keel_ir::fxhash::FxHashMap;
+use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, Intrinsic, Purpose, Type, ValueDef};
 
 /// The instructions an intrinsic in a priority or cheap-helper callee adds
 /// beyond its own, or `None` when it can become a call. Codegen calls libc
@@ -941,6 +942,11 @@ pub(super) fn size_bytes_fit(f: &Function, target: crate::VectorTarget, removabl
     }
     let limit = match target {
         crate::VectorTarget::Aarch64Neon => 16,
+        // These hinted private helpers always pay for an out-of-line frame.
+        // Keep the wider allowance confined to builds that require that frame.
+        crate::VectorTarget::X86Sse2 if f.local && f.attrs.inlinehint && f.attrs.frame_pointer => {
+            96
+        }
         crate::VectorTarget::X86Sse2 => 32,
         crate::VectorTarget::Portable => return true,
     };
@@ -955,11 +961,45 @@ fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
         _ => return None,
     };
     let mut bytes = 0usize;
+    let mut x86_immediates = FxHashMap::default();
     for (count, inst) in code_insts(f).enumerate() {
         if count >= 128 {
             return None;
         }
-        bytes += match f.inst_data(inst) {
+        let data = f.inst_data(inst);
+        if !arm {
+            let mut immediate = match *data {
+                InstData::Binary {
+                    op:
+                        BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::And | BinaryOp::Or | BinaryOp::Xor,
+                    args,
+                }
+                | InstData::Icmp { args, .. } => Some(f.resolve(args[1])),
+                _ => None,
+            };
+            data.for_each_operand(|operand| {
+                let value = f.resolve(operand);
+                if let ValueDef::Result(def, _) = f.value_def(value)
+                    && let InstData::Iconst {
+                        ty: Type::I32 | Type::I64,
+                        imm,
+                    } = f.inst_data(def)
+                    && i8::try_from(*imm).is_ok()
+                {
+                    // The usual six-byte instruction allowance includes an
+                    // imm8. A register use still needs the constant's own bytes.
+                    let folded = Some(value) == immediate;
+                    if folded {
+                        immediate = None;
+                    }
+                    x86_immediates
+                        .entry(value)
+                        .and_modify(|all| *all &= folded)
+                        .or_insert(folded);
+                }
+            });
+        }
+        bytes += match data {
             InstData::InlineAsm { .. } | InstData::Intrinsic { .. } => return None,
             InstData::Iconst { imm, ty } if arm => {
                 let bits = if *ty == keel_ir::Type::I64 { 64 } else { 32 };
@@ -996,7 +1036,7 @@ fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
             }
         };
     }
-    Some(bytes)
+    Some(bytes - 10 * x86_immediates.values().filter(|&&folded| folded).count())
 }
 
 #[cfg(test)]
@@ -1014,6 +1054,25 @@ mod byte_tests {
         assert_eq!(target_bytes(f, crate::VectorTarget::Portable), None);
     }
     #[test]
+    fn x86_short_immediates_do_not_need_a_separate_move() {
+        let source = "func @test(ptr byval [1 x i64]) -> i32 cc(c) {
+block0(v0: ptr):
+ v1 = load.i64 v0
+ v2 = iconst.i64 -97
+ v3 = and v1, v2
+ v4 = iconst.i64 0
+ v5 = icmp.eq v3, v4
+ v6 = uext.i32 v5
+ return v6
+}";
+        let target = crate::VectorTarget::X86Sse2;
+        let module = keel_ir::parse(source).unwrap();
+        assert!(size_bytes_fit(&module.functions[0], target, false));
+        let register_use = source.replace("v3 = and v1, v2", "v3 = and v2, v1");
+        let module = keel_ir::parse(&register_use).unwrap();
+        assert!(!size_bytes_fit(&module.functions[0], target, false));
+    }
+    #[test]
     fn removable_body_does_not_need_a_byte_allowance() {
         let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
         assert!(size_bytes_fit(
@@ -1021,6 +1080,26 @@ mod byte_tests {
             crate::VectorTarget::Aarch64Neon,
             true
         ));
+    }
+    #[test]
+    fn x86_framed_local_inline_hints_get_more_room() {
+        let source = "func @f(i64, i64) -> i64 cc(c) inlinehint frame_pointer local {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    v3 = xor v2, v1
+    v4 = isub v3, v0
+    v5 = and v4, v1
+    v6 = or v5, v0
+    v7 = iadd v6, v1
+    return v7
+}";
+        let target = crate::VectorTarget::X86Sse2;
+        let module = keel_ir::parse(source).unwrap();
+        assert!(size_bytes_fit(&module.functions[0], target, false));
+        for attribute in [" inlinehint", " frame_pointer", " local"] {
+            let module = keel_ir::parse(&source.replace(attribute, "")).unwrap();
+            assert!(!size_bytes_fit(&module.functions[0], target, false));
+        }
     }
     #[test]
     fn negative_constant_uses_movn_allowance() {

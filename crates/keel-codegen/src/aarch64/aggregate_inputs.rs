@@ -5,11 +5,12 @@ use keel_ir::{Function, InstData, Purpose};
 use std::borrow::Cow;
 
 impl ArgumentLocation for ArgLoc {
-    fn pair_registers(&self) -> Option<[Loc; 2]> {
-        if let Self::InRegs(parts) = self
+    fn aggregate_registers(&self, words: usize) -> Option<(Loc, Option<Loc>)> {
+        if words == 2
+            && let Self::InRegs(parts) = self
             && let [low @ Loc::Reg(_), high @ Loc::Reg(_)] = parts.as_slice()
         {
-            Some([*low, *high])
+            Some((*low, Some(*high)))
         } else {
             None
         }

@@ -166,9 +166,12 @@ epilogue has at least three instructions.
 Optional Size inlining also uses a target byte estimate. It scans at most
 128 IR instructions, estimates fixed
 four-byte AArch64 instructions (including wide-constant materialization), and
-uses bounded x86 instruction allowances. Duplicated bodies have a 16-byte
-allowance on AArch64 and a 32-byte allowance on x86-64. Removable
-single-use private bodies bypass this filter because their out-of-line code
+uses bounded x86 instruction allowances. The x86 estimate includes short
+integer immediates in their consuming instructions when every use can encode
+them. Duplicated bodies have a 16-byte allowance on AArch64 and a 32-byte
+allowance on x86-64. Private x86-64 helpers with an inline hint and a required
+frame pointer get 96 bytes to account for the out-of-line call and frame.
+Removable single-use private bodies bypass this filter because their out-of-line code
 disappears. Inline assembly and intrinsics have no estimate and remain calls.
 Portable targets keep the existing IR policy. Required inlining and flatten
 retain their contracts. This admission filter can reduce text while adding
