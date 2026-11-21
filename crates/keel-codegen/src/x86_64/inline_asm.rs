@@ -22,7 +22,9 @@ pub(super) struct Plan {
     saved_simd: Vec<u8>,
     simd_home: usize,
     simd_bits: u16,
-    inputs: Vec<Home>,
+    /// Staging homes for mixed-register templates. A direct scalar template
+    /// reads the original registers from the preserved homes instead.
+    inputs: Option<Vec<Home>>,
     outputs: Vec<Home>,
 }
 
@@ -37,7 +39,7 @@ pub(super) fn plan(
     shape: &plan::VectorShape,
     unique: u64,
     avx512f: bool,
-    compact_bit_test: bool,
+    compact_inputs: bool,
 ) -> Result<Plan, String> {
     let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
         unreachable!("inline asm planning requires an inline asm instruction");
@@ -243,7 +245,7 @@ pub(super) fn plan(
         }
     }
     let text = substitute(func, asm, args, &regs, unique)?;
-    let bit_test_flag = compact_bit_test.then(|| bit_test_flag(asm, &ops)).flatten();
+    let bit_test_flag = compact_inputs.then(|| bit_test_flag(asm, &ops)).flatten();
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
     let mut overwritten = [[false; 32]; 2];
@@ -284,11 +286,13 @@ pub(super) fn plan(
         };
         Home { offset, bits }
     };
-    let inputs = args
-        .iter()
-        .enumerate()
-        .map(|(i, &arg)| home(func.value_type(func.resolve(arg)), regs[n + i]))
-        .collect();
+    // Scalar inputs can read the original registers from the preserved homes.
+    let inputs = (!compact_inputs || !saved_simd.is_empty()).then(|| {
+        args.iter()
+            .enumerate()
+            .map(|(i, &arg)| home(func.value_type(func.resolve(arg)), regs[n + i]))
+            .collect()
+    });
     let outputs = asm
         .outputs
         .iter()
@@ -523,6 +527,71 @@ fn substitute(
 }
 
 impl FunctionCompiler<'_> {
+    fn stage_asm_inputs(&mut self, plan: &Plan, inputs: &[Home], args: &[Value], home: usize) {
+        let mem = |this: &Self, slot: Home| sized(this.frame(home + slot.offset), slot.bits);
+        let n = plan.outputs.len();
+        for (i, &arg) in args.iter().enumerate() {
+            let Some(reg) = plan.regs[n + i] else {
+                continue;
+            };
+            let dst = mem(self, inputs[i]);
+            if reg.float {
+                // Sources are snapshotted before any asm register is initialized.
+                let bits = inputs[i].bits;
+                match self.loc(arg) {
+                    Loc::FReg(r) => self.emit(
+                        move_bits(bits),
+                        [asm_arg(dst), asm_arg(simd_width(r, bits))],
+                    ),
+                    Loc::Stack(slot) => {
+                        self.emit(
+                            move_bits(bits),
+                            [
+                                asm_arg(simd_width(FS0, bits)),
+                                asm_arg(sized(self.slot(slot), bits)),
+                            ],
+                        );
+                        self.emit(
+                            move_bits(bits),
+                            [asm_arg(dst), asm_arg(simd_width(FS0, bits))],
+                        );
+                    }
+                    _ => unreachable!("SIMD asm input has a SIMD location"),
+                }
+            } else {
+                match self.loc(arg) {
+                    Loc::Reg(r) => {
+                        if let Ok(slot) = plan.saved_regs.binary_search(&r) {
+                            self.emit(
+                                Opcode::Mov,
+                                [
+                                    asm_arg(r64(S0)),
+                                    asm_arg(sized(self.frame(home + 8 * slot), 64)),
+                                ],
+                            );
+                        } else {
+                            self.emit_move(Loc::Reg(S0), Loc::Reg(r));
+                        }
+                    }
+                    src => self.emit_move(Loc::Reg(S0), src),
+                }
+                self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
+            }
+        }
+        for &(r, i) in &plan.initializers {
+            let src = mem(self, inputs[i]);
+            if r.float {
+                let bits = if r.num >= 16 { 512 } else { inputs[i].bits };
+                self.emit(
+                    move_bits(bits),
+                    [asm_arg(simd_width(r.num, bits)), asm_arg(sized(src, bits))],
+                );
+            } else {
+                self.emit(Opcode::Mov, [asm_arg(r64(r.num)), asm_arg(src)]);
+            }
+        }
+    }
+
     pub(super) fn native_inline_asm(&mut self, inst: Inst, args: &[Value]) {
         let plan = self
             .inline_asm_plans
@@ -571,69 +640,29 @@ impl FunctionCompiler<'_> {
                 ],
             );
         }
-        let n = plan.outputs.len();
-        for (i, &arg) in args.iter().enumerate() {
-            let Some(reg) = plan.regs[n + i] else {
-                continue;
-            };
-            let dst = mem(self, plan.inputs[i]);
-            if reg.float {
-                // Sources are snapshotted before any asm register is initialized.
-                let bits = plan.inputs[i].bits;
-                match self.loc(arg) {
-                    Loc::FReg(r) => self.emit(
-                        move_bits(bits),
-                        [asm_arg(dst), asm_arg(simd_width(r, bits))],
-                    ),
-                    Loc::Stack(slot) => {
-                        self.emit(
-                            move_bits(bits),
-                            [
-                                asm_arg(simd_width(FS0, bits)),
-                                asm_arg(sized(self.slot(slot), bits)),
-                            ],
-                        );
-                        self.emit(
-                            move_bits(bits),
-                            [asm_arg(dst), asm_arg(simd_width(FS0, bits))],
-                        );
-                    }
-                    _ => unreachable!("SIMD asm input has a SIMD location"),
+        if let Some(inputs) = &plan.inputs {
+            self.stage_asm_inputs(&plan, inputs, args, home);
+        } else {
+            for &(register, argument) in &plan.initializers {
+                let dst = Loc::Reg(register.num);
+                let src = self.loc(args[argument]);
+                if src == dst {
+                    // Distinct initializers have distinct destinations.
+                    continue;
                 }
-            } else {
-                match self.loc(arg) {
-                    Loc::Reg(r) => {
-                        if let Ok(slot) = plan.saved_regs.binary_search(&r) {
-                            self.emit(
-                                Opcode::Mov,
-                                [
-                                    asm_arg(r64(S0)),
-                                    asm_arg(sized(self.frame(home + 8 * slot), 64)),
-                                ],
-                            );
-                        } else {
-                            self.emit_move(Loc::Reg(S0), Loc::Reg(r));
-                        }
-                    }
-                    src => self.emit_move(Loc::Reg(S0), src),
-                }
-                self.emit(Opcode::Mov, [asm_arg(dst), asm_arg(r64(S0))]);
-            }
-        }
-        for &(r, i) in &plan.initializers {
-            let src = mem(self, plan.inputs[i]);
-            if r.float {
-                let bits = if r.num >= 16 {
-                    512
+                if let Loc::Reg(r) = src
+                    && let Ok(slot) = plan.saved_regs.binary_search(&r)
+                {
+                    self.emit(
+                        Opcode::Mov,
+                        [
+                            asm_arg(r64(register.num)),
+                            asm_arg(sized(self.frame(home + 8 * slot), 64)),
+                        ],
+                    );
                 } else {
-                    plan.inputs[i].bits
-                };
-                self.emit(
-                    move_bits(bits),
-                    [asm_arg(simd_width(r.num, bits)), asm_arg(sized(src, bits))],
-                );
-            } else {
-                self.emit(Opcode::Mov, [asm_arg(r64(r.num)), asm_arg(src)]);
+                    self.emit_move(dst, src);
+                }
             }
         }
         for &(i, _) in &plan.flags {

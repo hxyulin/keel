@@ -1,4 +1,4 @@
-//! Keep two-word aggregate wrappers in SSA after proving identical SysV
+//! Keep small integer aggregate wrappers in SSA after proving identical SysV
 //! placements. This is backend-local: public signatures and binding stay intact.
 //! Only private virtual homes may be accessed; no pointer substitution, capture
 //! assumption, external memory access, or movement across a trapping read occurs.
@@ -6,17 +6,52 @@ use super::sysv::{self, ArgLoc, RegPiece, Slot};
 use crate::regalloc::Loc;
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{
-    AbiParam, BinaryOp, CallConv, ConvertOp, Function, InstData, Purpose, Signature, Type, Value,
+    AbiParam, BinaryOp, CallConv, ConvertOp, Function, InstData, Layout, Purpose, Signature,
+    Symbol, Type, Value,
 };
 
-fn signature(old: &Signature) -> Option<Signature> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IntegerAggregate {
+    Word,
+    Pair,
+}
+
+impl IntegerAggregate {
+    fn of(layout: &Layout) -> Option<Self> {
+        if crate::aggregate_results::is_integer_pair(layout) {
+            Some(Self::Pair)
+        } else if matches!(layout, Layout::Array(t, 1) if **t == Layout::Scalar(Type::I32))
+            || matches!(layout, Layout::Struct(fields) if fields.as_slice() == [Layout::Scalar(Type::I32)])
+        {
+            Some(Self::Word)
+        } else {
+            None
+        }
+    }
+
+    fn scalar(self) -> Type {
+        match self {
+            Self::Word => Type::I32,
+            Self::Pair => Type::I128,
+        }
+    }
+
+    fn field(self) -> Type {
+        match self {
+            Self::Word => Type::I32,
+            Self::Pair => Type::I64,
+        }
+    }
+}
+
+fn signature(old: &Signature, aggregate: IntegerAggregate) -> Option<Signature> {
     if old.cc != CallConv::C
         || old.variadic
         || old.returns_twice
         || old.x86_vector_abi.is_some()
         || !old.returns.is_empty()
         || old.params.len() > 16
-        || !matches!(&old.params.first()?.purpose, Purpose::Sret(l) if crate::aggregate_results::is_integer_pair(l))
+        || !matches!(&old.params.first()?.purpose, Purpose::Sret(l) if IntegerAggregate::of(l) == Some(aggregate))
     {
         return None;
     }
@@ -24,8 +59,8 @@ fn signature(old: &Signature) -> Option<Signature> {
     new.params = old.params[1..]
         .iter()
         .map(|p| match &p.purpose {
-            Purpose::ByVal(l) if crate::aggregate_results::is_integer_pair(l) => {
-                Some(AbiParam::new(Type::I128))
+            Purpose::ByVal(l) if IntegerAggregate::of(l) == Some(aggregate) => {
+                Some(AbiParam::new(aggregate.scalar()))
             }
             Purpose::Normal
                 if matches!(
@@ -38,7 +73,7 @@ fn signature(old: &Signature) -> Option<Signature> {
             _ => None,
         })
         .collect::<Option<_>>()?;
-    new.returns = vec![AbiParam::new(Type::I128)];
+    new.returns = vec![AbiParam::new(aggregate.scalar())];
     let placement = |s: &Signature| {
         sysv::signature_arg_locs(
             s,
@@ -50,16 +85,38 @@ fn signature(old: &Signature) -> Option<Signature> {
     };
     let before = placement(old);
     let after = placement(&new);
+    let return_pieces = [
+        RegPiece {
+            offset: 0,
+            loc: Loc::Reg(sysv::RAX),
+        },
+        RegPiece {
+            offset: 8,
+            loc: Loc::Reg(sysv::RDX),
+        },
+    ];
+    let pieces = if aggregate == IntegerAggregate::Word {
+        1
+    } else {
+        2
+    };
     if before.stack != after.stack
         || before.stack_align != after.stack_align
         || before.ints != after.ints
         || before.floats != after.floats
-        || !matches!(&before.locs[0], ArgLoc::SretRegs(r) if r.as_slice() == [RegPiece { offset: 0, loc: Loc::Reg(sysv::RAX) }, RegPiece { offset: 8, loc: Loc::Reg(sysv::RDX) }])
+        || !matches!(&before.locs[0], ArgLoc::SretRegs(r) if r.as_slice() == &return_pieces[..pieces])
     {
         return None;
     }
     for (a, b) in before.locs[1..].iter().zip(&after.locs) {
         let same = match (a, b) {
+            (ArgLoc::InRegs(r), ArgLoc::Value(Slot::Regs(reg, None))) => {
+                r.as_slice()
+                    == [RegPiece {
+                        offset: 0,
+                        loc: *reg,
+                    }]
+            }
             (ArgLoc::InRegs(r), ArgLoc::Value(Slot::Regs(lo, Some(hi)))) => {
                 r.as_slice()
                     == [
@@ -165,7 +222,16 @@ impl Builder {
 }
 
 pub(super) fn lower(old: &Function) -> Option<Function> {
-    if old.blocks().count() > 4
+    let Purpose::Sret(layout) = &old.sig.params.first()?.purpose else {
+        return None;
+    };
+    let aggregate = IntegerAggregate::of(layout)?;
+    let block_limit = if aggregate == IntegerAggregate::Word {
+        8
+    } else {
+        4
+    };
+    if old.blocks().take(block_limit + 1).count() > block_limit
         || old.layout_insts().count() > 256
         || old.num_values() > 1024
         || old.num_stack_slots() > 32
@@ -174,7 +240,12 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
         || old.debug_return.is_some()
         || old.debug_loc.is_some()
         || !old.debug_vars.is_empty()
-        || !old.debug_scopes.is_empty()
+        || match aggregate {
+            // The caller excludes debug emission. C IR may still carry
+            // lexical scopes without locations or variables in this case.
+            IntegerAggregate::Word => old.attrs.optnone || !old.attrs.contract.is_unknown(),
+            IntegerAggregate::Pair => !old.debug_scopes.is_empty(),
+        }
     {
         return None;
     }
@@ -192,9 +263,9 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
     {
         return None;
     }
-    let sig = signature(&old.sig)?;
-    if old.blocks().count() != 1 {
-        return lower_branches(old, sig);
+    let sig = signature(&old.sig, aggregate)?;
+    if aggregate == IntegerAggregate::Word || old.blocks().count() != 1 {
+        return lower_branches(old, sig, aggregate);
     }
     let mut f = Function::new(&old.name, sig);
     f.attrs = old.attrs.clone();
@@ -317,7 +388,7 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
                     return None;
                 }
                 let decl = old.callee(*func);
-                let sig = signature(&decl.sig)?;
+                let sig = signature(&decl.sig, IntegerAggregate::Pair)?;
                 let (id, off) = address(args[0], &b)?;
                 if off % 8 != 0 || off + 16 > b.objects[id].len() * 8 {
                     return None;
@@ -393,11 +464,19 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
 // Scalarize only acyclic leaves. Virtual homes must agree at joins; differing
 // contents fall back to the ordinary ABI rather than synthesizing memory phis.
 // External loads/stores stay at the same instruction on the same CFG path.
-fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
+fn lower_branches(old: &Function, sig: Signature, aggregate: IntegerAggregate) -> Option<Function> {
     use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-    if old.blocks().count() > 4 || old.layout_insts().count() > 64 {
+    if old.layout_insts().take(65).count() > 64 {
         return None;
     }
+    let field = aggregate.field();
+    let field_bytes = field.bytes()?;
+    let width = field_bytes as usize;
+    let fields = if aggregate == IntegerAggregate::Word {
+        1
+    } else {
+        2
+    };
     let cfg = ControlFlowGraph::compute(old);
     let dom = DominatorTree::compute(old, &cfg);
     let order = dom.rpo();
@@ -431,19 +510,22 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
         constants: FxHashMap::default(),
     };
     let params = old.block_params(entry);
-    let result_home = b.object(2);
+    let result_home = b.object(fields);
     b.addresses.insert(params[0], (result_home, 0));
     for (&v, p) in params[1..].iter().zip(&old.sig.params[1..]) {
         let ty = if matches!(p.purpose, Purpose::ByVal(_)) {
-            Type::I128
+            aggregate.scalar()
         } else {
             p.ty
         };
         let new = b.f.append_block_param(b.block, ty);
         if matches!(p.purpose, Purpose::ByVal(_)) {
-            let words = b.split(new);
-            let id = b.object(2);
-            b.objects[id] = words.map(Some).to_vec();
+            let id = b.object(fields);
+            if aggregate == IntegerAggregate::Word {
+                b.objects[id][0] = Some(new);
+            } else {
+                b.objects[id] = b.split(new).map(Some).to_vec();
+            }
             b.addresses.insert(v, (id, 0));
         } else {
             b.values.insert(v, new);
@@ -453,10 +535,10 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
     let mut slots = FxHashMap::default();
     for (slot, data) in old.stack_slots() {
         let size = data.size as usize;
-        if size == 0 || size > 64 || !size.is_multiple_of(8) {
+        if size == 0 || size > 64 || !size.is_multiple_of(width) {
             return None;
         }
-        slots.insert(slot, b.object(size / 8));
+        slots.insert(slot, b.object(size / width));
     }
     for &block in &order[1..] {
         for &v in old.block_params(block) {
@@ -496,6 +578,13 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
                     b.constants.insert(v, *imm);
                     produced = Some(v);
                 }
+                InstData::SymbolAddr {
+                    symbol: Symbol::Data(symbol),
+                } if aggregate == IntegerAggregate::Word => {
+                    let name = old.symbol_name(Symbol::Data(*symbol));
+                    let symbol = Symbol::Data(b.f.import_data(name));
+                    produced = Some(b.emit(InstData::SymbolAddr { symbol }));
+                }
                 InstData::Binary {
                     op: BinaryOp::Ptradd,
                     args,
@@ -503,20 +592,23 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
                     let (id, offset) = address(args[0], &b)?;
                     let n = usize::try_from(*b.constants.get(&scalar(args[1], &b)?)?).ok()?;
                     let offset = offset.checked_add(n)?;
-                    if offset > b.objects[id].len() * 8 {
+                    if offset > b.objects[id].len() * width {
                         return None;
                     }
                     b.addresses.insert(old.first_result(i), (id, offset));
                 }
                 InstData::Load { ty, addr, flags } if address(*addr, &b).is_some() => {
-                    if !matches!(ty, Type::I64 | Type::Ptr) || flags.volatile || flags.align > 8 {
+                    if !(*ty == field || field == Type::I64 && *ty == Type::Ptr)
+                        || flags.volatile
+                        || flags.align > field_bytes
+                    {
                         return None;
                     }
                     let (id, offset) = address(*addr, &b)?;
-                    if offset % 8 != 0 {
+                    if offset % width != 0 {
                         return None;
                     }
-                    let word = (*b.objects[id].get(offset / 8)?)?;
+                    let word = (*b.objects[id].get(offset / width)?)?;
                     produced = Some(if *ty == Type::Ptr {
                         b.emit(InstData::Convert {
                             op: ConvertOp::IntToPtr,
@@ -528,18 +620,22 @@ fn lower_branches(old: &Function, sig: Signature) -> Option<Function> {
                     });
                 }
                 InstData::Store { addr, value, flags } if address(*addr, &b).is_some() => {
-                    if flags.volatile || flags.align > 8 {
+                    if flags.volatile || flags.align > field_bytes {
                         return None;
                     }
                     let (id, offset) = address(*addr, &b)?;
                     let value = scalar(*value, &b)?;
-                    if offset % 8 != 0 || b.f.value_type(value) != Type::I64 {
+                    if offset % width != 0 || b.f.value_type(value) != field {
                         return None;
                     }
-                    *b.objects[id].get_mut(offset / 8)? = Some(value);
+                    *b.objects[id].get_mut(offset / width)? = Some(value);
                 }
                 InstData::Return { args } if args.is_empty() => {
-                    let result = b.packed(result_home, 0)?;
+                    let result = if aggregate == IntegerAggregate::Word {
+                        b.objects[result_home][0]?
+                    } else {
+                        b.packed(result_home, 0)?
+                    };
                     b.f.append_inst(b.block, InstData::Return { args: vec![result] });
                 }
                 InstData::Load {
@@ -724,19 +820,19 @@ mod tests {
         changed.params.extend(vec![AbiParam::new(Type::I64); 7]);
         changed.params.push(sig.params[2].clone());
         // Seven integers place a pair at +8 in the original ABI, +16 as i128.
-        assert!(signature(&changed).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
         let mut aligned = changed.clone();
         aligned.params.remove(1);
-        assert!(signature(&aligned).is_some());
+        assert!(signature(&aligned, IntegerAggregate::Pair).is_some());
         let mut debug = source(SOURCE);
         debug.debug_scopes.push(None);
         assert!(lower(&debug).is_none());
         let mut changed = sig.clone();
         changed.params[2].purpose =
             Purpose::ByVal(Layout::Array(Box::new(Layout::Scalar(Type::F64)), 2));
-        assert!(signature(&changed).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
         let mut changed = sig;
         changed.variadic = true;
-        assert!(signature(&changed).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
     }
 }

@@ -172,6 +172,59 @@ int main(void) {
     }
 }
 
+#[test]
+fn size_scalar_inputs_swap_fixed_registers_from_preserved_homes() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
+
+    let source = r#"
+func @fixed_swap(i64, i64) -> i64 {
+entry(v0:i64, v1:i64):
+ v2 = asm "subq %q2, %q0", "={rdi},0,{rsi},~{cc}"(v1, v0) -> i64
+ v3 = iadd v2, v1
+ return v3
+}
+"#;
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let allocator = keel_codegen::regalloc::CallSiteAllocator {
+        base: AllocationTier::Compact,
+    };
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &allocator,
+        },
+    )
+    .emission(options);
+    let text = request.text(&module).unwrap();
+    assert!(
+        text.contains("mov\trdi, qword ptr") && text.contains("mov\trsi, qword ptr"),
+        "{text}"
+    );
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    native_program!("size-asm-fixed-swap")
+        .file("fixed.o", object)
+        .file(
+            "oracle.c",
+            "\
+extern unsigned long fixed_swap(unsigned long, unsigned long);
+int main(void) {
+    return !(fixed_swap(2, 17) == 32 && fixed_swap(~0UL, 0) == 1);
+}",
+        )
+        .link(["oracle.c", "fixed.o"])
+        .check();
+}
+
 struct RematConstants;
 impl RegisterAllocator for RematConstants {
     fn name(&self) -> &'static str {

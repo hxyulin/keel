@@ -792,7 +792,7 @@ pub(super) fn plan_inline_asm(
     present: crate::kinds::InstKinds,
     shape: &VectorShape,
     features: keel_asm_ir::x86::Features,
-    compact_bit_test: bool,
+    compact_inputs: bool,
 ) -> Result<HashMap<Inst, inline_asm::Plan>, String> {
     let mut function_index = None;
     let mut inline_asm_plans = HashMap::default();
@@ -815,7 +815,7 @@ pub(super) fn plan_inline_asm(
                 shape,
                 (function_index << 32) | inst.index() as u64,
                 features.avx512f,
-                compact_bit_test,
+                compact_inputs,
             )?;
             inline_asm_plans.insert(inst, plan);
         }

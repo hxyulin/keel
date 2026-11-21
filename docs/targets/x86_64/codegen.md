@@ -413,6 +413,12 @@ accesses, captured addresses, several or indirect calls, variadic calls, frame
 observers and debugger-visible functions use ordinary lowering. The temporary
 i128 function never replaces the public module function.
 
+Small acyclic C leaves also keep `[1 x i32]` or `{i32}` aggregate inputs and
+results in registers when the SysV locations match those of scalar `i32`.
+Each accessed field must have an exact, non-volatile load or store and a
+known value on every incoming path. Calls and escaping home addresses retain
+ordinary lowering.
+
 Ordinary C calls also pass two-word integer arguments directly from SSA when
 each copy is a private 16-byte slot with both words stored in the call's block.
 For a pair spilled as a unit before a later scalar claims the last integer

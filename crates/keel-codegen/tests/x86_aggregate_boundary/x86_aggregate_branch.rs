@@ -4,6 +4,99 @@ use keel_codegen::{
 };
 
 #[test]
+fn single_integer_field_keeps_the_c_abi_without_stack_homes() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
+    use keel_test_support::native_program;
+
+    let module = keel_ir::parse(
+        r#"
+data @invalid = align 4 { i32 0 }
+data @identity = align 4 { i32 0 }
+func @map_word(ptr sret {i32}, ptr, ptr, ptr byval {i32}) cc(c) {
+    ss0 = stack_slot 4, align 4
+    dscope ds0
+block0(v0: ptr, v1: ptr, v2: ptr, v3: ptr):
+    v4 = symbol_addr @identity
+    v5 = icmp.eq v1, v4
+    brif v5, block1, block2
+block1:
+    v6 = load.i32 v3
+    store v6, v0
+    return
+block2:
+    v7 = symbol_addr @invalid
+    v8 = icmp.eq v1, v7
+    brif v8, block3, block4
+block3:
+    v9 = iconst.i32 -1
+    store v9, v0
+    return
+block4:
+    v10 = icmp.eq v2, v4
+    brif v10, block5, block6
+block5:
+    v11 = load.i32 v3
+    jump block7(v11)
+block6:
+    v12 = load.i32 v3
+    jump block7(v12)
+block7(v13: i32):
+    store v13, v0
+    return
+}
+"#,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let text = request.text(&module).unwrap();
+    assert!(
+        !text.contains("ptr [rbp") && !text.contains("ptr [rsp"),
+        "{text}"
+    );
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    native_program!("single-integer-field")
+        .file("map.o", object)
+        .file(
+            "oracle.c",
+            "\
+typedef struct { unsigned bits; } Word;
+extern int invalid;
+extern int identity;
+extern Word map_word(const int *, const int *, Word);
+int main(void) {
+    int other = 0;
+    unsigned payloads[] = {0, 1, 0x80000000u, 0xffffffffu};
+    for (unsigned i = 0; i < 4; ++i) {
+        Word w = {payloads[i]};
+        if (map_word(&invalid, &other, w).bits != 0xffffffffu ||
+            map_word(&identity, &other, w).bits != w.bits ||
+            map_word(&other, &identity, w).bits != w.bits ||
+            map_word(&other, &other, w).bits != w.bits) return 1;
+    }
+    return 0;
+}",
+        )
+        .link(["oracle.c", "map.o"])
+        .check();
+}
+
+#[test]
 fn branching_aggregate_keeps_native_parity_and_c_abi() {
     let source = include_str!("../fixtures/aggregate-branch.keel");
     let module = keel_ir::parse(source).unwrap();

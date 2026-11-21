@@ -251,6 +251,10 @@ frame. This includes `asm volatile("sti" ::: "memory")`, compiler-only memory
 barriers and immediate-only templates. The assembler still validates their
 instructions and target features.
 
+For scalar templates under the Size goal, initializers load from spill slots
+and preserved register homes directly. This keeps the original sources for
+fixed-register cycles while avoiding a second set of input slots.
+
 Size emission also skips staging for a single `btq` with a read-only memory
 operand, a register or immediate bit index, and a carry or inverted-carry
 output. The input registers are reserved by the backend and `SETcc` writes
