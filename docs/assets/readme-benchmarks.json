@@ -1,31 +1,183 @@
 {
   "schema": 2,
-  "date": "2026-11-05",
-  "machine": "Apple M5 Max \u00b7 macOS 27",
-  "source_commit": "8226e95c0043b2f7066a58834047779cbb194c02",
-  "statistic": "median of 7 runs",
+  "date": "2026-11-21",
+  "source_commit": "811c69a17ff8078bfe162219b6b65564188735f9",
   "sources": {
-    "compiler": {
-      "path": "docs/benchmarks/compiler-20261105.json",
-      "sha256": "98ccb643a7ae3ddaf4df80bb142bf54a351a8d92079cf3d84488a62c9ebd9b6f"
-    },
-    "tools": {
-      "path": "docs/benchmarks/assembly-link-20261105.json",
-      "sha256": "5aadbd2a16b4b56c6e1c14138c5b148e6c3f964aa7a37be8f7e82261cc1c1822"
-    },
-    "runtime": {
-      "path": "docs/benchmarks/runtime-20261105.json",
-      "sha256": "ac86b21d95883ae1410653fd289570605685c3513fed9c0cfdf3a76645cf6e1f"
-    },
-    "kernel": {
-      "path": "docs/benchmarks/linux-kernel.json",
-      "sha256": "32955973013bb1b43309fe010868eaf9958ed124ea40fbab469788b76aa6d17d"
+    "checkpoint": {
+      "path": "docs/benchmarks/checkpoint-20261121.json",
+      "sha256": "0ef4ba4f1d15d23636a67a0dcc90bdb440b7b0e0f3f5ce79b5eea1eaa2bdcacf"
     }
   },
   "charts": [
     {
+      "id": "runtime",
+      "kind": "ratio",
+      "title": "Application runtime with Keel -O",
+      "reference": "Clang -O2",
+      "statistic": "7 paired wall-time rounds",
+      "rows": [
+        {
+          "label": "Lua",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "lua",
+            "geomean_ratio"
+          ],
+          "value": 1.1708174462111054
+        },
+        {
+          "label": "SQLite",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "sqlite",
+            "geomean_ratio"
+          ],
+          "value": 1.1985687667145344
+        },
+        {
+          "label": "LZ4",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "lz4",
+            "geomean_ratio"
+          ],
+          "value": 1.0741059433498314
+        },
+        {
+          "label": "yyjson",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "yyjson",
+            "geomean_ratio"
+          ],
+          "value": 1.0885343993365224
+        },
+        {
+          "label": "QuickJS",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "quickjs",
+            "geomean_ratio"
+          ],
+          "value": 1.131845282981632
+        },
+        {
+          "label": "Zstd",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "apple-m5-max",
+            "apps",
+            "zstd",
+            "geomean_ratio"
+          ],
+          "value": 1.0251196511149252
+        }
+      ],
+      "machine": "Apple M5 Max · macOS"
+    },
+    {
+      "id": "runtime-x86",
+      "kind": "ratio",
+      "title": "Application runtime with Keel -O",
+      "reference": "Clang -O2",
+      "statistic": "7 paired wall-time rounds",
+      "rows": [
+        {
+          "label": "Lua",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "lua",
+            "geomean_ratio"
+          ],
+          "value": 1.2083780916457565
+        },
+        {
+          "label": "SQLite",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "sqlite",
+            "geomean_ratio"
+          ],
+          "value": 1.2514963293352417
+        },
+        {
+          "label": "LZ4",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "lz4",
+            "geomean_ratio"
+          ],
+          "value": 0.9142068986352968
+        },
+        {
+          "label": "yyjson",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "yyjson",
+            "geomean_ratio"
+          ],
+          "value": 1.0849600272554405
+        },
+        {
+          "label": "QuickJS",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "quickjs",
+            "geomean_ratio"
+          ],
+          "value": 1.289238050361007
+        },
+        {
+          "label": "Zstd",
+          "source": "checkpoint",
+          "pointer": [
+            "runtime",
+            "amd-zen5-linux",
+            "apps",
+            "zstd",
+            "geomean_ratio"
+          ],
+          "value": 1.0556016589706858
+        }
+      ],
+      "machine": "AMD Zen 5 · Linux"
+    },
+    {
       "id": "c-object",
-      "title": "C source \u2192 object file",
+      "title": "C source to object file",
+      "machine": "Core i7-1360P · Linux",
+      "statistic": "median of 7 runs",
       "unit": "ms",
       "headline": {
         "fast": "Keel -O",
@@ -34,54 +186,64 @@
       "rows": [
         {
           "label": "Keel",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "c_to_object",
             "keel-raw",
             "median_ms"
           ],
-          "median_ms": 4.579208,
+          "median_ms": 4.893738,
           "keel": true
         },
         {
           "label": "Keel -O",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "c_to_object",
             "keel-O",
             "median_ms"
           ],
-          "median_ms": 6.073167,
+          "median_ms": 7.774199,
           "keel": true
         },
         {
           "label": "Clang -O0",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "c_to_object",
             "clang-O0",
             "median_ms"
           ],
-          "median_ms": 16.186125,
+          "median_ms": 20.62196,
           "keel": false
         },
         {
           "label": "Clang -O2",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "c_to_object",
             "clang-O2",
             "median_ms"
           ],
-          "median_ms": 41.151625,
+          "median_ms": 85.508937,
           "keel": false
         }
       ]
     },
     {
       "id": "ir-object",
-      "title": "Keel IR \u2192 object file (backend only)",
-      "unit": "us",
+      "title": "Optimized Keel IR to object",
+      "machine": "Core i7-1360P · Linux",
+      "statistic": "7 in-process runs",
+      "unit": "ms",
       "headline": {
         "fast": "Keel full",
         "slow": "Cranelift speed"
@@ -89,65 +251,102 @@
       "rows": [
         {
           "label": "Keel baseline",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "ir_to_object",
-            "inputs",
-            0,
+            "O",
             "configs",
             "keel-baseline",
             "median_ms"
           ],
-          "median_ms": 0.415374,
+          "median_ms": 1.481988,
           "keel": true
         },
         {
           "label": "Keel full",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "ir_to_object",
-            "inputs",
-            0,
+            "O",
             "configs",
             "keel-full",
             "median_ms"
           ],
-          "median_ms": 0.473584,
+          "median_ms": 1.531394,
           "keel": true
         },
         {
           "label": "Cranelift none",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "ir_to_object",
-            "inputs",
-            0,
+            "O",
             "configs",
             "clif-none",
             "median_ms"
           ],
-          "median_ms": 0.764875,
+          "median_ms": 1.835643,
           "keel": false
         },
         {
           "label": "Cranelift speed",
-          "source": "compiler",
+          "source": "checkpoint",
           "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
             "ir_to_object",
-            "inputs",
-            0,
+            "O",
             "configs",
             "clif-speed",
             "median_ms"
           ],
-          "median_ms": 1.039542,
+          "median_ms": 2.476981,
           "keel": false
         }
       ]
     },
     {
+      "id": "cranelift-runtime",
+      "kind": "ratio",
+      "summary": false,
+      "title": "Keel runtime on the same optimized IR",
+      "reference": "Cranelift speed",
+      "machine": "21 kernels per host",
+      "statistic": "geometric mean of paired ratios",
+      "rows": [
+        {
+          "label": "x86-64 Linux",
+          "source": "checkpoint",
+          "pointer": [
+            "compiler",
+            "intel-13th-gen-linux",
+            "keel_over_clif_speed"
+          ],
+          "value": 0.9624328585088784
+        },
+        {
+          "label": "AArch64 macOS",
+          "source": "checkpoint",
+          "pointer": [
+            "compiler",
+            "apple-m5-max",
+            "keel_over_clif_speed"
+          ],
+          "value": 0.896166375343583
+        }
+      ]
+    },
+    {
       "id": "assembly",
-      "title": "Assembly \u2192 object file",
+      "title": "Assembly to Mach-O object",
+      "machine": "Apple M5 Max · macOS",
+      "statistic": "median of 7 runs",
       "unit": "ms",
       "headline": {
         "fast": "keel asm",
@@ -156,42 +355,50 @@
       "rows": [
         {
           "label": "keel asm",
-          "source": "tools",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "assembly",
             "median_ms",
             "keel"
           ],
-          "median_ms": 6.176208,
+          "median_ms": 7.180625,
           "keel": true
         },
         {
           "label": "clang -cc1as",
-          "source": "tools",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "assembly",
             "median_ms",
             "clang-cc1as"
           ],
-          "median_ms": 17.261125,
+          "median_ms": 19.637042,
           "keel": false
         },
         {
           "label": "clang -c",
-          "source": "tools",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "assembly",
             "median_ms",
             "clang-driver"
           ],
-          "median_ms": 23.4905,
+          "median_ms": 26.284083,
           "keel": false
         }
       ]
     },
     {
       "id": "link",
-      "title": "Objects \u2192 signed executable",
+      "title": "Mach-O objects to signed executable",
+      "machine": "Apple M5 Max · macOS",
+      "statistic": "median of 7 runs",
       "unit": "ms",
       "headline": {
         "fast": "keel link",
@@ -200,259 +407,94 @@
       "rows": [
         {
           "label": "keel link",
-          "source": "tools",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "link",
             "median_ms",
             "keel"
           ],
-          "median_ms": 16.73325,
+          "median_ms": 4.822208,
           "keel": true
         },
         {
           "label": "Apple ld",
-          "source": "tools",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "link",
             "median_ms",
             "apple-ld"
           ],
-          "median_ms": 14.691125,
+          "median_ms": 15.321291,
           "keel": false
         },
         {
-          "label": "clang",
-          "source": "tools",
+          "label": "clang driver",
+          "source": "checkpoint",
           "pointer": [
+            "toolchain",
+            "apple-m5-max",
             "link",
             "median_ms",
             "clang-driver"
           ],
-          "median_ms": 22.384625,
+          "median_ms": 23.556917,
           "keel": false
         }
       ]
     },
     {
-      "id": "runtime",
-      "kind": "ratio",
-      "title": "Run time of Keel -O programs",
-      "reference": "Clang -O2",
-      "statistic": "median of 7 paired runs",
+      "id": "link-elf",
+      "title": "ELF objects to glibc executable",
+      "machine": "AMD Zen 5 · Linux",
+      "statistic": "median of 11 runs",
+      "unit": "ms",
+      "headline": {
+        "fast": "keel link",
+        "slow": "LLVM ld.lld"
+      },
       "rows": [
         {
-          "label": "Lua",
-          "source": "runtime",
+          "label": "keel link",
+          "source": "checkpoint",
           "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "lua",
-            "geomean_ratio"
-          ],
-          "value": 1.2244885866692825
-        },
-        {
-          "label": "SQLite",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "sqlite",
-            "geomean_ratio"
-          ],
-          "value": 1.3486312538853984
-        },
-        {
-          "label": "LZ4",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "lz4",
-            "geomean_ratio"
-          ],
-          "value": 1.4888258868902
-        },
-        {
-          "label": "yyjson",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "yyjson",
-            "geomean_ratio"
-          ],
-          "value": 1.6512201003062918
-        },
-        {
-          "label": "QuickJS",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "quickjs",
-            "geomean_ratio"
-          ],
-          "value": 1.4350868916258555
-        },
-        {
-          "label": "Zstd",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "apple-m5-max",
-            "apps",
-            "zstd",
-            "geomean_ratio"
-          ],
-          "value": 1.1547752015711106
-        }
-      ]
-    },
-    {
-      "id": "runtime-x86",
-      "kind": "ratio",
-      "title": "Run time of Keel -O programs",
-      "reference": "Clang -O2",
-      "statistic": "median of 7 paired runs",
-      "rows": [
-        {
-          "label": "Lua",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
+            "toolchain",
             "amd-zen5-linux",
-            "apps",
-            "lua",
-            "geomean_ratio"
+            "link",
+            "median_ms",
+            "keel"
           ],
-          "value": 1.3300577018431416
+          "median_ms": 2.968813,
+          "keel": true
         },
         {
-          "label": "SQLite",
-          "source": "runtime",
+          "label": "GNU ld.bfd",
+          "source": "checkpoint",
           "pointer": [
-            "hosts",
+            "toolchain",
             "amd-zen5-linux",
-            "apps",
-            "sqlite",
-            "geomean_ratio"
+            "link",
+            "median_ms",
+            "ld.bfd"
           ],
-          "value": 1.3562387458655372
+          "median_ms": 5.999709,
+          "keel": false
         },
         {
-          "label": "LZ4",
-          "source": "runtime",
+          "label": "LLVM ld.lld",
+          "source": "checkpoint",
           "pointer": [
-            "hosts",
+            "toolchain",
             "amd-zen5-linux",
-            "apps",
-            "lz4",
-            "geomean_ratio"
+            "link",
+            "median_ms",
+            "ld.lld"
           ],
-          "value": 1.1764198141825462
-        },
-        {
-          "label": "yyjson",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "amd-zen5-linux",
-            "apps",
-            "yyjson",
-            "geomean_ratio"
-          ],
-          "value": 1.2529530956764718
-        },
-        {
-          "label": "QuickJS",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "amd-zen5-linux",
-            "apps",
-            "quickjs",
-            "geomean_ratio"
-          ],
-          "value": 1.87757844852038
-        },
-        {
-          "label": "Zstd",
-          "source": "runtime",
-          "pointer": [
-            "hosts",
-            "amd-zen5-linux",
-            "apps",
-            "zstd",
-            "geomean_ratio"
-          ],
-          "value": 1.209247114530165
-        }
-      ],
-      "machine": "AMD Zen 5 desktop \u00b7 Linux"
-    },
-    {
-      "id": "kernel-runtime",
-      "kind": "ratio",
-      "title": "Pinned Linux v6.12 kernel workloads",
-      "reference": "GCC 14.4 -Os",
-      "machine": "Ryzen 9 9950X3D \u00b7 KVM \u00b7 1 vCPU",
-      "statistic": "median of 9 paired runs",
-      "rows": [
-        {
-          "label": "getpid",
-          "source": "kernel",
-          "pointer": [
-            "summary",
-            "getpid",
-            "median_paired_keel_over_gcc"
-          ],
-          "value": 1.5217021418927381
-        },
-        {
-          "label": "Open/read/close",
-          "source": "kernel",
-          "pointer": [
-            "summary",
-            "open_read_close",
-            "median_paired_keel_over_gcc"
-          ],
-          "value": 2.3827530981929526
-        },
-        {
-          "label": "Page faults + protect",
-          "source": "kernel",
-          "pointer": [
-            "summary",
-            "page_fault_mprotect",
-            "median_paired_keel_over_gcc"
-          ],
-          "value": 2.16605608629925
-        },
-        {
-          "label": "Fork/COW/wait",
-          "source": "kernel",
-          "pointer": [
-            "summary",
-            "fork_cow_wait",
-            "median_paired_keel_over_gcc"
-          ],
-          "value": 2.0628116077624488
-        },
-        {
-          "label": "Pipe ping-pong",
-          "source": "kernel",
-          "pointer": [
-            "summary",
-            "pipe_pingpong",
-            "median_paired_keel_over_gcc"
-          ],
-          "value": 1.7442515457135088
+          "median_ms": 6.599531,
+          "keel": false
         }
       ]
     }

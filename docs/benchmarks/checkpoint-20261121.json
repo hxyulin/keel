@@ -1,0 +1,5878 @@
+{
+  "schema": 1,
+  "source_commit": "811c69a17ff8078bfe162219b6b65564188735f9",
+  "date": "2026-11-21",
+  "runtime": {
+    "apple-m5-max": {
+      "target": "aarch64-apple-darwin",
+      "platform": "Darwin 27.2.0 Darwin Kernel Version 27.2.0: Wed Oct 14 23:47:58 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_T6050 arm64",
+      "clang": "Apple clang version 21.0.0 (clang-2100.4.1.1)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+      "report_sha256": "3068cb054e4f39dab1b3c12f7311a40cf7841bc49876666df12435903e405c79",
+      "date_epoch": 1795233270,
+      "apps": {
+        "lua": {
+          "workloads": {
+            "fib": {
+              "keel_over_clang": 1.133621469803223,
+              "control_over_clang": 0.9986178897834067,
+              "workload_sha256": "b70fecd066a5030e553f4733802cbe8f2d9b869fac5312100a8b82e8243205e7",
+              "output_sha256": "cd02788b7048b882e6cf1f6b40668e345631ec416845c2c70bb1efd312a21d8b",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    61.648334,
+                    61.710708000000004,
+                    61.119833,
+                    61.821083,
+                    60.378167000000005,
+                    63.302709,
+                    62.006417
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    69.885875,
+                    68.873417,
+                    71.886416,
+                    70.222042,
+                    71.929625,
+                    64.93629200000001,
+                    69.15995799999999
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "997d2c1c49ac6c5a92e23b39207b0e6f0bc33fef559659bbc6e84b62e3848064"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    61.277583,
+                    61.625417,
+                    62.272792,
+                    62.95608299999999,
+                    59.880875,
+                    61.170291,
+                    63.57112500000001
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                }
+              }
+            },
+            "sort": {
+              "keel_over_clang": 1.147125028909363,
+              "control_over_clang": 0.9788910914160991,
+              "workload_sha256": "e2c1a371be0d22b3ee321dcce74a3b73d1563219198adcabab802ee43dd2d18e",
+              "output_sha256": "4f158d6d3792ec7677f8ccfb193e7bfad1d412eb074b408a30c72a474f7ab994",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    63.206165999999996,
+                    64.620583,
+                    65.885334,
+                    64.16945799999999,
+                    63.494042,
+                    63.627375,
+                    64.37049999999999
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    72.505375,
+                    72.571208,
+                    70.375667,
+                    78.852542,
+                    72.218875,
+                    77.013625,
+                    74.77737499999999
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "997d2c1c49ac6c5a92e23b39207b0e6f0bc33fef559659bbc6e84b62e3848064"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    64.462083,
+                    62.50375,
+                    64.37675,
+                    64.144375,
+                    63.6035,
+                    62.024416,
+                    63.011708999999996
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                }
+              }
+            },
+            "string": {
+              "keel_over_clang": 1.214795403155165,
+              "control_over_clang": 1.0244149743747704,
+              "workload_sha256": "6b3d14dadd772e26f3849df2c8fb51c0e9304c6e8aaa3958d3cf2aeb61669d1a",
+              "output_sha256": "2c09513eed4a3f7904af018aaad8037977e0923cfd71b6a599d6299a0329233d",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    106.816083,
+                    92.14,
+                    85.640917,
+                    85.90675,
+                    90.494125,
+                    92.967167,
+                    93.199584
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    112.669541,
+                    114.02383400000001,
+                    97.69979199999999,
+                    104.35912499999999,
+                    128.923583,
+                    118.583583,
+                    104.247542
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "997d2c1c49ac6c5a92e23b39207b0e6f0bc33fef559659bbc6e84b62e3848064"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    135.60475,
+                    92.656125,
+                    88.671833,
+                    83.15966700000001,
+                    101.561792,
+                    95.236958,
+                    84.704333
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                }
+              }
+            },
+            "float": {
+              "keel_over_clang": 1.189528310840309,
+              "control_over_clang": 1.0131733853882938,
+              "workload_sha256": "e61b8b6508196cc9ad0ef3b84399f2b76b21f00eeaf8b7d64c9e89a9201289d0",
+              "output_sha256": "4a9e1c1901b5da02ce9872b564fa8d3a817a4e66bf7eaf6f0e270a9f192fd835",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    164.634375,
+                    166.46975,
+                    164.958334,
+                    167.49941600000002,
+                    169.78258399999999,
+                    165.21,
+                    170.050208
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    195.83724999999998,
+                    201.997208,
+                    195.101042,
+                    200.029416,
+                    198.30183300000002,
+                    205.87975,
+                    198.397417
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "997d2c1c49ac6c5a92e23b39207b0e6f0bc33fef559659bbc6e84b62e3848064"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    175.350583,
+                    166.453459,
+                    178.7625,
+                    166.580583,
+                    166.22175000000001,
+                    167.38637500000002,
+                    173.027458
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "c860bc847b401d352581a8754c8a74d938889eb2e843f0cf17f4d4d21344677c"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.1708174462111054
+        },
+        "lz4": {
+          "workloads": {
+            "compress": {
+              "keel_over_clang": 1.077349833906061,
+              "control_over_clang": 0.9935909943378086,
+              "workload_sha256": "bf544bfea166e253c00c4b9f8f5c1ba00310a0902dabae115ed1f95b1f7b3fbe",
+              "output_sha256": "bb3b783440c615c0945a0e6b9ae3d87c2c3affb4ab2e25d66b15907a3f319a0c",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    29.779542,
+                    29.642792,
+                    32.738917,
+                    30.575208,
+                    30.4485,
+                    29.414417,
+                    29.418291999999997
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "a2030acf222798be75d711de4c250f52ca290c5a883a63d24f9985a70f80a578"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    31.434334,
+                    31.579875,
+                    34.840500000000006,
+                    34.04625,
+                    33.131875,
+                    32.493375,
+                    31.693792
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "1a712fee4f46f6adb0c5b4c9ecec3b1bf942186ba615483ef604fd9d6e4d43ca"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    29.655959,
+                    29.234291,
+                    29.919958,
+                    29.909042,
+                    30.816084,
+                    29.359584,
+                    29.22975
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "a2030acf222798be75d711de4c250f52ca290c5a883a63d24f9985a70f80a578"
+                }
+              }
+            },
+            "decompress": {
+              "keel_over_clang": 1.070871820118578,
+              "control_over_clang": 0.9927862539664749,
+              "workload_sha256": "cd465be1a52f3042124349aa262ecb1558b6c01cde1d2a788495e5e2ef7b0e1a",
+              "output_sha256": "d251ca9fbaaa95a4c9dce718bd4c8c54ac8968fe79aac2f8356efaa18d9b2c4c",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    15.739416999999998,
+                    15.652667,
+                    15.149958,
+                    14.971417,
+                    15.107209,
+                    15.344584,
+                    15.115625000000001
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "a2030acf222798be75d711de4c250f52ca290c5a883a63d24f9985a70f80a578"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    16.879667,
+                    16.762,
+                    15.946834,
+                    16.326458,
+                    16.788,
+                    16.289499999999997,
+                    16.183583000000002
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "1a712fee4f46f6adb0c5b4c9ecec3b1bf942186ba615483ef604fd9d6e4d43ca"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    15.575541,
+                    15.462625000000001,
+                    15.586083,
+                    14.863417,
+                    15.248291,
+                    15.382333,
+                    14.971042
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "a2030acf222798be75d711de4c250f52ca290c5a883a63d24f9985a70f80a578"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.0741059433498314
+        },
+        "quickjs": {
+          "workloads": {
+            "fib": {
+              "keel_over_clang": 1.0971792127454847,
+              "control_over_clang": 1.0353864828452208,
+              "workload_sha256": "c19670ffa6a2fe5d494204a0d6659098177d3afb29462528d283a28b77deee97",
+              "output_sha256": "9d61f0433d405f6583b7c3ca5c2046c2badd8c951f36cd2032efc2f7fc68bf11",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    38.225500000000004,
+                    38.229916,
+                    37.611125,
+                    37.899916,
+                    39.136666,
+                    38.081458,
+                    39.115084
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    41.306125,
+                    41.441625,
+                    42.817625,
+                    41.583,
+                    44.422292,
+                    41.487125,
+                    43.575375
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "fc7830d2cd7d34ec92fbb89643dd836265ab01bea2fe37e60f78862f4d4c1db7"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    39.578165999999996,
+                    38.230208000000005,
+                    39.124417,
+                    39.321583,
+                    38.233125,
+                    38.0555,
+                    40.688125
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                }
+              }
+            },
+            "sort": {
+              "keel_over_clang": 1.0449914204434956,
+              "control_over_clang": 0.9972160611133896,
+              "workload_sha256": "4f7eb67a5037c3901f7ebe1f12302b2acb0eeb7aec39125d4869165f0beb89b6",
+              "output_sha256": "d50720839d3415ddcfa81315bcfea867c9760b6f52d81106104d535ab12cd946",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    120.35629200000001,
+                    112.703208,
+                    110.659875,
+                    113.33737500000001,
+                    110.5535,
+                    109.786208,
+                    110.140708
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    114.004166,
+                    113.816625,
+                    123.76650000000001,
+                    115.39345800000001,
+                    115.527459,
+                    117.59124999999999,
+                    119.64504199999999
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "fc7830d2cd7d34ec92fbb89643dd836265ab01bea2fe37e60f78862f4d4c1db7"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    109.272792,
+                    107.931208,
+                    111.23575,
+                    111.00737500000001,
+                    114.142333,
+                    112.865625,
+                    109.83408299999999
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                }
+              }
+            },
+            "string": {
+              "keel_over_clang": 1.2646516065847044,
+              "control_over_clang": 1.0518218271648168,
+              "workload_sha256": "d2566bbd53a2b1205e1a77f96aa16f0c4647681f92163fa0300dd6ff20f1eef7",
+              "output_sha256": "bde58dce27dfd866df9df89e037c5ea3aabe255a8ac94cc039cc4d6296b9117a",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    273.425125,
+                    280.799667,
+                    270.33175,
+                    267.138667,
+                    267.67095800000004,
+                    271.465917,
+                    268.87479199999996
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    340.25816599999996,
+                    355.11375,
+                    339.533541,
+                    341.133917,
+                    336.39575,
+                    346.847625,
+                    352.953709
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "fc7830d2cd7d34ec92fbb89643dd836265ab01bea2fe37e60f78862f4d4c1db7"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    269.483459,
+                    298.73575,
+                    330.017208,
+                    269.941417,
+                    284.091042,
+                    279.582584,
+                    282.808375
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b3ee5b8dfdd130868888f4d543cec3063cf834fb10636326aa68ff50db3bf35d"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.131845282981632
+        },
+        "sqlite": {
+          "workloads": {
+            "queries": {
+              "keel_over_clang": 1.1985687667145344,
+              "control_over_clang": 0.9983865208777972,
+              "workload_sha256": "3638100269a00bb3ee315d687b6bad27ff6466081b5581169506bdde1a71765b",
+              "output_sha256": "4f0493bded8ab090cfe6eee7acbd280710853df87da00fd98d47ab72ba61b0b9",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    253.52829100000002,
+                    239.6955,
+                    252.55520799999996,
+                    247.530292,
+                    240.03533399999998,
+                    241.841916,
+                    239.105875
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "30e2a0129b041411497ca25570bdc601fbd185daf56a521c2eb358bc5c10fae2"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    291.512416,
+                    292.983292,
+                    293.082542,
+                    298.409959,
+                    287.175208,
+                    289.864167,
+                    288.828666
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "070359c5b92d6e4b662896b3eb7b0dcc5f6c513bbe9124064ab1b9039462ea4c"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    241.264875,
+                    240.302458,
+                    239.652875,
+                    238.034625,
+                    239.648042,
+                    247.984333,
+                    242.462041
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "30e2a0129b041411497ca25570bdc601fbd185daf56a521c2eb358bc5c10fae2"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.1985687667145344
+        },
+        "yyjson": {
+          "workloads": {
+            "api": {
+              "keel_over_clang": 1.1125549423706298,
+              "control_over_clang": 1.0011913851059817,
+              "workload_sha256": "ceb5fe9a606f964674ff8653785f7032daa0865ad39cef9c024e3cf4d2aa9dc7",
+              "output_sha256": "9831ea43267ebde6e98754ac0f70c7a362b044d3e2cc045dedcd1727ea3fd889",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    45.117166,
+                    45.0475,
+                    45.057417,
+                    44.765541999999996,
+                    45.044542,
+                    45.089375000000004,
+                    45.076459
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    50.935834,
+                    50.521875,
+                    50.035375,
+                    49.804125,
+                    49.718667,
+                    50.00875,
+                    50.775875
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "e70f1ea2f1b4dcbd6d493013e7dccaaf4e62c6a1f5210b24e4341d4fe265510f"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    45.100125,
+                    45.031333,
+                    45.109417,
+                    44.818875,
+                    45.218916,
+                    45.262375,
+                    45.9735
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                }
+              }
+            },
+            "config": {
+              "keel_over_clang": 1.1402592712469033,
+              "control_over_clang": 0.9953441839797574,
+              "workload_sha256": "23d2d5d27a7c1ea9eab668585c70b29a8445b36d745af91abf62ba935318d5af",
+              "output_sha256": "46e0d30b2ab7cfbc1558e75da340f17f283f5ae8f86731dac05cc0ccd39f8c73",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    16.995541,
+                    17.254333,
+                    17.019750000000002,
+                    17.052457999999998,
+                    17.212167,
+                    17.000999999999998,
+                    17.173375
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    19.447583,
+                    19.658292,
+                    19.261750000000003,
+                    19.641708,
+                    19.626333,
+                    19.426958000000003,
+                    19.572292
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "e70f1ea2f1b4dcbd6d493013e7dccaaf4e62c6a1f5210b24e4341d4fe265510f"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    16.972958,
+                    17.174,
+                    17.297041999999998,
+                    17.236666,
+                    17.056291,
+                    16.91975,
+                    16.910166
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                }
+              }
+            },
+            "telemetry": {
+              "keel_over_clang": 1.0167200648912986,
+              "control_over_clang": 0.9926283314524906,
+              "workload_sha256": "c124467127e4b482a1198661515056ec694d73010250fddb88da730575747943",
+              "output_sha256": "d257aae73b7bc664f60d98eae5a053be8f0612ec38a1d418629d0bfded13dacb",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    31.276084,
+                    31.340374999999998,
+                    31.471708,
+                    31.84825,
+                    33.243583,
+                    32.367875,
+                    31.358584
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    32.081958,
+                    32.084542,
+                    31.997917,
+                    31.781917,
+                    34.218083,
+                    32.475790999999994,
+                    31.742791999999998
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "e70f1ea2f1b4dcbd6d493013e7dccaaf4e62c6a1f5210b24e4341d4fe265510f"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    31.467542,
+                    31.432125,
+                    31.239709,
+                    31.467624999999998,
+                    32.140708,
+                    31.845832999999995,
+                    31.14125
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "09f292ae4d29b369a4436833f1f63b29c155935d6c00382d63eb422032c2905b"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.0885343993365224
+        },
+        "zstd": {
+          "workloads": {
+            "compress": {
+              "keel_over_clang": 1.0697952885389386,
+              "control_over_clang": 0.997939979341196,
+              "workload_sha256": "33d1a485c17170b49ca958e4e3486bb6e44772efcb77a18266d368e3c80e3485",
+              "output_sha256": "ea361d49ffb88abdf3ef49b135782ef17f33a75437996867a22f29097bd7dc5f",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    80.978417,
+                    82.733791,
+                    79.53699999999999,
+                    80.37929100000001,
+                    80.474542,
+                    79.662125,
+                    80.61975000000001
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "ea3052ecf8e7bffc0604b4b43351cc40cdba41ed1db13672ad2547d518279a83"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    90.777417,
+                    87.085459,
+                    89.43604199999999,
+                    92.579792,
+                    83.23383299999999,
+                    85.222166,
+                    80.898583
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "2573229d1b7d781dabd5689f5b8fbbf98f247bf9b9b84c43a7e338e8c38d090e"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    80.069375,
+                    86.28045800000001,
+                    80.046167,
+                    80.213708,
+                    76.627208,
+                    80.516709,
+                    72.73925
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "ea3052ecf8e7bffc0604b4b43351cc40cdba41ed1db13672ad2547d518279a83"
+                }
+              }
+            },
+            "decompress": {
+              "keel_over_clang": 0.9823097094933,
+              "control_over_clang": 0.9972200487648805,
+              "workload_sha256": "44751113a195fd546b0abb382002f5dc242db1bf52a0a2e99c9e251700dab433",
+              "output_sha256": "01c90b6b813e6b468e4f9a494fc9728b97d92f32f386de284671a41342b2e814",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    137.68287500000002,
+                    133.84575,
+                    134.042,
+                    137.68125,
+                    138.256666,
+                    135.95850000000002,
+                    135.187209
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "ea3052ecf8e7bffc0604b4b43351cc40cdba41ed1db13672ad2547d518279a83"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    132.380459,
+                    131.770208,
+                    131.79670800000002,
+                    133.178125,
+                    134.92000000000002,
+                    134.673292,
+                    132.79570800000002
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "2573229d1b7d781dabd5689f5b8fbbf98f247bf9b9b84c43a7e338e8c38d090e"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    134.721,
+                    133.927709,
+                    134.134709,
+                    134.08904199999998,
+                    137.551875,
+                    135.580542,
+                    134.857667
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "ea3052ecf8e7bffc0604b4b43351cc40cdba41ed1db13672ad2547d518279a83"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.0251196511149252
+        }
+      },
+      "geomean_ratio": 1.1132700030404614
+    },
+    "amd-zen5-linux": {
+      "target": "x86_64-unknown-linux-gnu",
+      "platform": "Linux 7.3.5-1-cachyos #1 SMP PREEMPT_DYNAMIC Tue, 17 Nov 2026 19:45:21 +0000 x86_64",
+      "clang": "clang version 23.1.5\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin",
+      "report_sha256": "93e2f9a69bba5e5ad7583467f140b6587fe75b8e5cdca2778d7e9c1f48f1d6f4",
+      "date_epoch": 1795233583,
+      "apps": {
+        "lua": {
+          "workloads": {
+            "fib": {
+              "keel_over_clang": 1.1095345291404461,
+              "control_over_clang": 0.9968087433649612,
+              "workload_sha256": "b70fecd066a5030e553f4733802cbe8f2d9b869fac5312100a8b82e8243205e7",
+              "output_sha256": "cd02788b7048b882e6cf1f6b40668e345631ec416845c2c70bb1efd312a21d8b",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    64.641897,
+                    63.831990000000005,
+                    63.549713999999994,
+                    63.37115,
+                    63.169506,
+                    63.641755999999994,
+                    63.932182000000005
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    76.47865900000001,
+                    70.44823,
+                    70.510602,
+                    71.21696700000001,
+                    70.284737,
+                    70.42241100000001,
+                    70.61606400000001
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "107e5f0c72e99b37754e04b3f735ac151bf87d92275a49b4bde778909b111d64"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    63.518564,
+                    64.926844,
+                    63.177436,
+                    64.493674,
+                    62.91738099999999,
+                    63.547703999999996,
+                    63.72815799999999
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                }
+              }
+            },
+            "sort": {
+              "keel_over_clang": 1.230008075575767,
+              "control_over_clang": 0.9989383172277447,
+              "workload_sha256": "e2c1a371be0d22b3ee321dcce74a3b73d1563219198adcabab802ee43dd2d18e",
+              "output_sha256": "4f158d6d3792ec7677f8ccfb193e7bfad1d412eb074b408a30c72a474f7ab994",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    59.195452,
+                    57.750681,
+                    57.644038,
+                    56.859912,
+                    57.171138000000006,
+                    56.990294,
+                    58.285772
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    70.65685500000001,
+                    71.033804,
+                    70.651036,
+                    70.70946599999999,
+                    70.541133,
+                    70.640535,
+                    70.639225
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "107e5f0c72e99b37754e04b3f735ac151bf87d92275a49b4bde778909b111d64"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    57.733720000000005,
+                    57.028805,
+                    57.706029,
+                    57.151548000000005,
+                    56.949042999999996,
+                    57.27261,
+                    58.223891
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                }
+              }
+            },
+            "string": {
+              "keel_over_clang": 1.2000672150317107,
+              "control_over_clang": 0.9985477137908646,
+              "workload_sha256": "6b3d14dadd772e26f3849df2c8fb51c0e9304c6e8aaa3958d3cf2aeb61669d1a",
+              "output_sha256": "2c09513eed4a3f7904af018aaad8037977e0923cfd71b6a599d6299a0329233d",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    80.208249,
+                    79.261989,
+                    80.350022,
+                    79.71230899999999,
+                    80.770331,
+                    80.599118,
+                    79.731529
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    96.25528999999999,
+                    98.289005,
+                    102.299,
+                    94.607336,
+                    95.25531,
+                    95.153148,
+                    95.943564
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "107e5f0c72e99b37754e04b3f735ac151bf87d92275a49b4bde778909b111d64"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    82.911107,
+                    79.85153100000001,
+                    78.33892,
+                    80.20827899999999,
+                    80.464275,
+                    80.156508,
+                    79.61573600000001
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                }
+              }
+            },
+            "float": {
+              "keel_over_clang": 1.30183821128085,
+              "control_over_clang": 0.9853355205593087,
+              "workload_sha256": "e61b8b6508196cc9ad0ef3b84399f2b76b21f00eeaf8b7d64c9e89a9201289d0",
+              "output_sha256": "4a9e1c1901b5da02ce9872b564fa8d3a817a4e66bf7eaf6f0e270a9f192fd835",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    188.894586,
+                    180.238282,
+                    188.391565,
+                    182.66080300000002,
+                    182.353967,
+                    210.617369,
+                    197.376827
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    241.353983,
+                    240.95183600000001,
+                    245.255338,
+                    244.750337,
+                    245.64012599999998,
+                    241.58788,
+                    245.809321
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "107e5f0c72e99b37754e04b3f735ac151bf87d92275a49b4bde778909b111d64"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    179.451515,
+                    190.5216,
+                    188.872196,
+                    192.614955,
+                    179.679841,
+                    182.750986,
+                    187.111178
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b41d29396eed296f4eaae7834808327003d62c9d76811f8235970b6499c7d1bc"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.2083780916457565
+        },
+        "lz4": {
+          "workloads": {
+            "compress": {
+              "keel_over_clang": 0.8397197326349841,
+              "control_over_clang": 0.99864389265637,
+              "workload_sha256": "bf544bfea166e253c00c4b9f8f5c1ba00310a0902dabae115ed1f95b1f7b3fbe",
+              "output_sha256": "bb3b783440c615c0945a0e6b9ae3d87c2c3affb4ab2e25d66b15907a3f319a0c",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    43.473227,
+                    33.287869,
+                    33.255959000000004,
+                    33.360191,
+                    37.544551000000006,
+                    33.520115000000004,
+                    35.514057
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "2caab8e66d287bcf8e24a0f572b09ebef274d563dccbec05deb43a74e6a40c20"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    27.734171,
+                    28.813794,
+                    27.925684999999998,
+                    28.756043,
+                    28.564049,
+                    28.694171,
+                    28.10367
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "880bcc383bb6089514b475880a95e4d1b8c5789cc6750980d20286baf91403d1"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    34.030356,
+                    33.374922,
+                    33.338620999999996,
+                    33.314951,
+                    33.405972,
+                    33.832141,
+                    33.33259
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "2caab8e66d287bcf8e24a0f572b09ebef274d563dccbec05deb43a74e6a40c20"
+                }
+              }
+            },
+            "decompress": {
+              "keel_over_clang": 0.9953014333601097,
+              "control_over_clang": 1.0005686750533362,
+              "workload_sha256": "cd465be1a52f3042124349aa262ecb1558b6c01cde1d2a788495e5e2ef7b0e1a",
+              "output_sha256": "d251ca9fbaaa95a4c9dce718bd4c8c54ac8968fe79aac2f8356efaa18d9b2c4c",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    13.507688,
+                    13.688812,
+                    13.614771,
+                    13.527788000000001,
+                    13.60649,
+                    13.640571000000001,
+                    13.593
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "2caab8e66d287bcf8e24a0f572b09ebef274d563dccbec05deb43a74e6a40c20"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    13.707532,
+                    13.471607,
+                    13.63965,
+                    13.428797,
+                    13.542558999999999,
+                    13.481686999999999,
+                    13.535988
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "880bcc383bb6089514b475880a95e4d1b8c5789cc6750980d20286baf91403d1"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    13.470687,
+                    13.473727,
+                    13.62697,
+                    13.537179,
+                    13.748422999999999,
+                    13.550809000000001,
+                    13.60073
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "2caab8e66d287bcf8e24a0f572b09ebef274d563dccbec05deb43a74e6a40c20"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 0.9142068986352968
+        },
+        "quickjs": {
+          "workloads": {
+            "fib": {
+              "keel_over_clang": 1.2932557244108747,
+              "control_over_clang": 0.9607820416914861,
+              "workload_sha256": "64238cfb0b5192ee4d3ba75ff2ebe1a723f527b2d7926be0a568436eb981fdc6",
+              "output_sha256": "9d61f0433d405f6583b7c3ca5c2046c2badd8c951f36cd2032efc2f7fc68bf11",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    37.95167,
+                    37.334626,
+                    37.391577000000005,
+                    37.97333,
+                    37.730725,
+                    37.979690000000005,
+                    36.634382
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    48.667618000000004,
+                    48.362331000000005,
+                    48.356871000000005,
+                    49.160708,
+                    48.603756999999995,
+                    48.882592,
+                    48.44717300000001
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "197a04eb1ec3cf147abe8ea860fd120a23fcefedfc62e66955b6b06ccab12a7a"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    35.947517,
+                    37.106482,
+                    35.992498,
+                    36.08285,
+                    36.251003,
+                    35.864825,
+                    36.446977
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                }
+              }
+            },
+            "sort": {
+              "keel_over_clang": 1.2241139323371426,
+              "control_over_clang": 0.9918245955269173,
+              "workload_sha256": "11b55ff36c88cd61a2ca614ef1bc6a38ec11cd79597a5c0b18a93e305a63e6c3",
+              "output_sha256": "d50720839d3415ddcfa81315bcfea867c9760b6f52d81106104d535ab12cd946",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    105.045321,
+                    104.65395199999999,
+                    104.004129,
+                    108.646468,
+                    104.784785,
+                    104.493459,
+                    105.910439
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    132.947035,
+                    128.793137,
+                    131.21377900000002,
+                    127.72134399999999,
+                    127.50768000000001,
+                    127.91189899999999,
+                    126.82943599999999
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "197a04eb1ec3cf147abe8ea860fd120a23fcefedfc62e66955b6b06ccab12a7a"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    104.15129200000001,
+                    104.333305,
+                    105.309516,
+                    104.179442,
+                    103.92812699999999,
+                    108.159877,
+                    103.896636
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                }
+              }
+            },
+            "string": {
+              "keel_over_clang": 1.3536085653681074,
+              "control_over_clang": 0.9987615571961153,
+              "workload_sha256": "97614c16f052494515e22fd45eb9174386ebc6db9c9e8f8b341154301ace1667",
+              "output_sha256": "bde58dce27dfd866df9df89e037c5ea3aabe255a8ac94cc039cc4d6296b9117a",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    189.116655,
+                    193.860386,
+                    193.55909,
+                    192.413525,
+                    190.80422099999998,
+                    192.928377,
+                    191.153209
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    256.725257,
+                    263.28434699999997,
+                    258.034116,
+                    259.206931,
+                    260.56391,
+                    258.071247,
+                    258.746621
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "197a04eb1ec3cf147abe8ea860fd120a23fcefedfc62e66955b6b06ccab12a7a"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    187.329577,
+                    193.62030099999998,
+                    192.983947,
+                    191.893744,
+                    192.056687,
+                    195.747827,
+                    193.370406
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "dc89a5f28293c90182f4d3a0b570e3fc59e98e338298639055d34b9dcb923ad2"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.289238050361007
+        },
+        "sqlite": {
+          "workloads": {
+            "queries": {
+              "keel_over_clang": 1.2514963293352417,
+              "control_over_clang": 0.9906673691740657,
+              "workload_sha256": "3638100269a00bb3ee315d687b6bad27ff6466081b5581169506bdde1a71765b",
+              "output_sha256": "4f0493bded8ab090cfe6eee7acbd280710853df87da00fd98d47ab72ba61b0b9",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    238.62802499999998,
+                    242.203752,
+                    241.00338599999998,
+                    238.99785400000002,
+                    235.16883199999998,
+                    236.184954,
+                    238.03877400000002
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "b458ca55981a785a7e1266ca57a0328f86a39ac529e0eaeb3d5e7ebee163c081"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    306.599506,
+                    300.64172,
+                    297.433922,
+                    299.104937,
+                    299.918265,
+                    296.54476400000004,
+                    296.37672
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "78637725c24208aec164a976f61a3f461bbf937fef845bccae88675f9985e391"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    237.89937,
+                    235.54007900000002,
+                    237.099683,
+                    234.55563800000002,
+                    234.939477,
+                    238.489123,
+                    235.817246
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "b458ca55981a785a7e1266ca57a0328f86a39ac529e0eaeb3d5e7ebee163c081"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.2514963293352417
+        },
+        "yyjson": {
+          "workloads": {
+            "api": {
+              "keel_over_clang": 1.0457511282243435,
+              "control_over_clang": 0.9999359273066168,
+              "workload_sha256": "c29b7bb1c97651337702082e8e90696c270b8ef371af1e56d620fed909e51495",
+              "output_sha256": "9831ea43267ebde6e98754ac0f70c7a362b044d3e2cc045dedcd1727ea3fd889",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    41.245211,
+                    41.125178999999996,
+                    41.961096000000005,
+                    41.275922,
+                    41.2032,
+                    41.248041,
+                    41.185539
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    43.08828,
+                    43.157771999999994,
+                    43.363196,
+                    43.164342000000005,
+                    43.100051,
+                    43.141002,
+                    43.018249000000004
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "b6310d20d47231ef4355714746421d7b56d0ad4d8ed83b704e3034f970778974"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    41.21167,
+                    41.422575,
+                    41.20759,
+                    41.330242000000005,
+                    41.200559999999996,
+                    41.19911,
+                    41.220801
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                }
+              }
+            },
+            "config": {
+              "keel_over_clang": 1.0572002798983526,
+              "control_over_clang": 1.0010699984121112,
+              "workload_sha256": "227f859e315af6a147c49466dc1953e7059ed599e1a1d75941c177a1ec58098b",
+              "output_sha256": "46e0d30b2ab7cfbc1558e75da340f17f283f5ae8f86731dac05cc0ccd39f8c73",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    13.850686,
+                    13.824805000000001,
+                    13.823385,
+                    13.875036999999999,
+                    13.811695,
+                    13.852876,
+                    13.846984999999998
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    14.628922000000001,
+                    14.700454,
+                    14.609672,
+                    14.668693,
+                    14.613783,
+                    14.709524,
+                    14.635163
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "b6310d20d47231ef4355714746421d7b56d0ad4d8ed83b704e3034f970778974"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    13.861856000000001,
+                    13.931137999999999,
+                    13.838176,
+                    13.886037,
+                    13.836225,
+                    13.844855999999998,
+                    13.919377
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                }
+              }
+            },
+            "telemetry": {
+              "keel_over_clang": 1.1551958035807814,
+              "control_over_clang": 1.0005759326907824,
+              "workload_sha256": "297130f50245714393e31768e220c3168f46014991a81902dc1061122ed2bb61",
+              "output_sha256": "d257aae73b7bc664f60d98eae5a053be8f0612ec38a1d418629d0bfded13dacb",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    25.938795,
+                    25.947074,
+                    25.935414,
+                    25.981395,
+                    25.904443,
+                    26.138418,
+                    26.151248
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    29.934219000000002,
+                    29.973951,
+                    29.98234,
+                    30.019581,
+                    30.075682,
+                    30.035652,
+                    30.037042
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "b6310d20d47231ef4355714746421d7b56d0ad4d8ed83b704e3034f970778974"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    25.953734,
+                    25.979095,
+                    25.969855,
+                    26.039387,
+                    25.917064,
+                    25.984825999999998,
+                    26.102968
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "171fb667ffc4b04e417be43352251cf11a60769ec2cc74d31ed4e09ecf367d66"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.0849600272554405
+        },
+        "zstd": {
+          "workloads": {
+            "compress": {
+              "keel_over_clang": 1.1140724694523476,
+              "control_over_clang": 0.9957765914581712,
+              "workload_sha256": "33d1a485c17170b49ca958e4e3486bb6e44772efcb77a18266d368e3c80e3485",
+              "output_sha256": "ea361d49ffb88abdf3ef49b135782ef17f33a75437996867a22f29097bd7dc5f",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    70.261002,
+                    70.094748,
+                    70.087338,
+                    70.15328899999999,
+                    70.141909,
+                    70.882785,
+                    70.318642
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "94e5c2aaad305b8dad0ddf43727074d151abe5ade5024ef6680f502ecbf63540"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    77.833613,
+                    78.09062899999999,
+                    78.252972,
+                    77.821993,
+                    78.17177,
+                    77.429265,
+                    78.513238
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "4f6413b6b9ec68a8486de24740800744ddb8c33ffaed36bdb1df1d84f3894f75"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    71.097779,
+                    69.98624600000001,
+                    69.654128,
+                    69.857003,
+                    69.736701,
+                    69.397223,
+                    70.140389
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "94e5c2aaad305b8dad0ddf43727074d151abe5ade5024ef6680f502ecbf63540"
+                }
+              }
+            },
+            "decompress": {
+              "keel_over_clang": 1.0001996216363067,
+              "control_over_clang": 0.9991093536310727,
+              "workload_sha256": "44751113a195fd546b0abb382002f5dc242db1bf52a0a2e99c9e251700dab433",
+              "output_sha256": "01c90b6b813e6b468e4f9a494fc9728b97d92f32f386de284671a41342b2e814",
+              "configurations": {
+                "clang-O2": {
+                  "samples_ms": [
+                    164.265761,
+                    164.186989,
+                    167.49760999999998,
+                    164.151939,
+                    164.18566900000002,
+                    164.824343,
+                    164.24476099999998
+                  ],
+                  "positions": [
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1,
+                    0
+                  ],
+                  "binary_sha256": "94e5c2aaad305b8dad0ddf43727074d151abe5ade5024ef6680f502ecbf63540"
+                },
+                "keel-O": {
+                  "samples_ms": [
+                    164.29855199999997,
+                    164.24939999999998,
+                    164.515986,
+                    164.22423999999998,
+                    164.22046,
+                    164.361693,
+                    164.234451
+                  ],
+                  "positions": [
+                    1,
+                    0,
+                    2,
+                    1,
+                    2,
+                    0,
+                    1
+                  ],
+                  "binary_sha256": "4f6413b6b9ec68a8486de24740800744ddb8c33ffaed36bdb1df1d84f3894f75"
+                },
+                "__identical-control": {
+                  "samples_ms": [
+                    164.140538,
+                    164.066007,
+                    164.283221,
+                    164.20711,
+                    164.00346599999997,
+                    164.066077,
+                    164.098477
+                  ],
+                  "positions": [
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    2,
+                    2
+                  ],
+                  "binary_sha256": "94e5c2aaad305b8dad0ddf43727074d151abe5ade5024ef6680f502ecbf63540"
+                }
+              }
+            }
+          },
+          "geomean_ratio": 1.0556016589706858
+        }
+      },
+      "geomean_ratio": 1.1262997100298318
+    }
+  },
+  "compiler": {
+    "apple-m5-max": {
+      "report_sha256": "4422327f180d8a89d471dd6e4908fe2231156bc04ae683ccf9e11b88062325cf",
+      "clang": "Apple clang version 21.0.0 (clang-2100.4.1.1)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+      "target": "aarch64-apple-darwin",
+      "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B123\n",
+      "load_start": [
+        11.2958984375,
+        14.92919921875,
+        10.86962890625
+      ],
+      "load_end": [
+        10.20849609375,
+        14.44677734375,
+        10.7900390625
+      ],
+      "binary_sha256": {
+        "keel": "8cb0cc32efc102ed8d890e3a60538be244c269957718a5459b8066b0fed94e7d",
+        "keel-cranelift-bench": "81caacd3d0a3cf13dd6da45ff36e54022c4b7b17453709c2634ecaf138f053a9",
+        "clang": "ed6f5284033aa2aae6a58427c25ba3ab119947b40365627b24e5d51a4b70a1cd"
+      },
+      "inputs_sha256": {
+        "crates/keel-cranelift/kernels/kernels.c": "145a70a771624858c8c2638bbd598037c88627f9f0c79d3699eb179186dd56da",
+        "crates/keel-cranelift/kernels/driver.c": "bdb3fc85b14014929539e1488f5a55f5e69c0cb1a1c41f15608162785b4806f4"
+      },
+      "locks_sha256": {
+        "Cargo.lock": "6407f72eecef92ba1adcca8edb409d5ad97259e55d920901f61ceb7972b69653",
+        "crates/keel-cranelift/Cargo.lock": "406d1d30285be013e1b8410d5a7d091396d0f8d9650b32662619942cbfcc2eb0"
+      },
+      "ir_sha256": {
+        "raw": "017e686ea4894b7df2452f35d6324e712d676f4b236fe319eca487c7f0692d6f",
+        "O": "bff6dd81dbfff1f5c5d1c3fcd7535f996c56b8e60dc7d06e7927e9eadd513a89"
+      },
+      "objects_sha256": {
+        "keel-raw": "d312b48b30625bf3a2aef69e65dbe7b12dac84a53ad6253442cbbf64eeb4edfa",
+        "keel-O": "6cfd02d89f915547fcaa35931b1bb2a293c4e2f60ea6388bdc9f03935a834425",
+        "clang-O0": "6bddd9dfe2ad2d5b608e9f85e1ff9dcc9ae4f61cda7423876d11dfb9a7011dd0",
+        "clang-O2": "b5d8758fe3dc435d2070bdc00a945e7f4353277d11385365b2e3375da49db13f",
+        "raw-keel-baseline": "d312b48b30625bf3a2aef69e65dbe7b12dac84a53ad6253442cbbf64eeb4edfa",
+        "raw-keel-full": "b4c2168eb73982401596a60caaffc9290880655a5e653e1a89bfbe16bf9cf38b",
+        "raw-clif-none": "8bbe0b876898ada6611b2471f98e6d7823eca22a53cbd991ebfc6926a8ae639e",
+        "raw-clif-speed": "bd1794b171cf6ad1bfd506ce9dd3e0076fd6c0f45fd70c1f33b80accb87f407d",
+        "O-keel-baseline": "900158fccdb39a385efdfe3adedca843d1787dc17046638656c66084d532f68f",
+        "O-keel-full": "c82de3b0586db9efa383e014494b112ece50ece6a9e5d9e2610da69a2d18c7ed",
+        "O-clif-none": "df0931cd57b52c5fb8c160f3e94e0fe1d12161c2ac919427f9a1138f47f12cf0",
+        "O-clif-speed": "89b0334a31e29a07b46826d80a4bcc6e3f5e161f986d17f289d2ccfc7e47ec59"
+      },
+      "c_orders_including_warmups": [
+        [
+          "clang-O2",
+          "keel-raw",
+          "clang-O0",
+          "keel-O"
+        ],
+        [
+          "keel-O",
+          "keel-raw",
+          "clang-O2",
+          "clang-O0"
+        ],
+        [
+          "clang-O2",
+          "keel-raw",
+          "clang-O0",
+          "keel-O"
+        ],
+        [
+          "clang-O2",
+          "clang-O0",
+          "keel-O",
+          "keel-raw"
+        ],
+        [
+          "keel-O",
+          "keel-raw",
+          "clang-O0",
+          "clang-O2"
+        ],
+        [
+          "keel-raw",
+          "clang-O0",
+          "clang-O2",
+          "keel-O"
+        ],
+        [
+          "keel-raw",
+          "keel-O",
+          "clang-O0",
+          "clang-O2"
+        ],
+        [
+          "keel-raw",
+          "clang-O2",
+          "keel-O",
+          "clang-O0"
+        ],
+        [
+          "keel-O",
+          "clang-O2",
+          "keel-raw",
+          "clang-O0"
+        ]
+      ],
+      "c_to_object": {
+        "keel-raw": {
+          "median_ms": 4.903625,
+          "samples_ns": [
+            4903625,
+            4773750,
+            5094709,
+            5039792,
+            4673208,
+            4810416,
+            5004917
+          ],
+          "object_bytes": 9030
+        },
+        "keel-O": {
+          "median_ms": 6.934208,
+          "samples_ns": [
+            6934208,
+            6991583,
+            6709625,
+            7053542,
+            6835709,
+            6954958,
+            6763417
+          ],
+          "object_bytes": 9536
+        },
+        "clang-O0": {
+          "median_ms": 17.995542,
+          "samples_ns": [
+            17680792,
+            18099292,
+            17995542,
+            18833417,
+            18339958,
+            17974917,
+            17705209
+          ],
+          "object_bytes": 8872
+        },
+        "clang-O2": {
+          "median_ms": 43.971709,
+          "samples_ns": [
+            44630667,
+            43719834,
+            43856084,
+            45216750,
+            43971709,
+            44478958,
+            43570375
+          ],
+          "object_bytes": 7304
+        }
+      },
+      "ir_to_object": {
+        "raw": {
+          "functions": 31,
+          "configs": {
+            "keel-baseline": {
+              "median_ms": 0.420083,
+              "samples_ns": [
+                444458,
+                512542,
+                449126,
+                420083,
+                409083,
+                386417,
+                368541
+              ],
+              "object_bytes": 9030,
+              "fnv64": "57fc31ffaa944734"
+            },
+            "keel-full": {
+              "median_ms": 0.467375,
+              "samples_ns": [
+                470250,
+                496250,
+                467375,
+                494334,
+                451584,
+                434958,
+                408958
+              ],
+              "object_bytes": 8366,
+              "fnv64": "ed5ffca3a2df056a"
+            },
+            "clif-none": {
+              "median_ms": 0.803625,
+              "samples_ns": [
+                803625,
+                939918,
+                813625,
+                790959,
+                799751,
+                804250,
+                761917
+              ],
+              "object_bytes": 5376,
+              "fnv64": "6e5f01d14c830ba6"
+            },
+            "clif-speed": {
+              "median_ms": 1.063416,
+              "samples_ns": [
+                1063416,
+                1087459,
+                1122750,
+                1027417,
+                1049876,
+                1015833,
+                1082166
+              ],
+              "object_bytes": 5120,
+              "fnv64": "3af629b13150f80a"
+            }
+          }
+        },
+        "O": {
+          "functions": 31,
+          "configs": {
+            "keel-baseline": {
+              "median_ms": 0.555416,
+              "samples_ns": [
+                561333,
+                572833,
+                555416,
+                565084,
+                550291,
+                500041,
+                487125
+              ],
+              "object_bytes": 10248,
+              "fnv64": "1db1abdb6d9fc833"
+            },
+            "keel-full": {
+              "median_ms": 0.587291,
+              "samples_ns": [
+                593959,
+                636542,
+                579666,
+                646542,
+                587291,
+                548959,
+                510209
+              ],
+              "object_bytes": 9528,
+              "fnv64": "b50fc6ca6a14c96b"
+            },
+            "clif-none": {
+              "median_ms": 0.981583,
+              "samples_ns": [
+                981583,
+                1125002,
+                1007416,
+                974333,
+                950292,
+                1000876,
+                937166
+              ],
+              "object_bytes": 6288,
+              "fnv64": "aca5abc61e5838a7"
+            },
+            "clif-speed": {
+              "median_ms": 1.35875,
+              "samples_ns": [
+                1342750,
+                1440543,
+                1420167,
+                1351958,
+                1317917,
+                1424249,
+                1358750
+              ],
+              "object_bytes": 6336,
+              "fnv64": "522ddb9794270ad4"
+            }
+          }
+        }
+      },
+      "kernels": {
+        "logic": {
+          "reps": 8514,
+          "checksum": "5b1153a451dd3cb4",
+          "samples_ns": {
+            "clang-O2": [
+              6139959,
+              6124625,
+              6086333,
+              6100750,
+              6112209,
+              6121042,
+              6105708
+            ],
+            "raw-keel-full": [
+              16661750,
+              16400750,
+              16625000,
+              16749167,
+              16624375,
+              16767042,
+              16709125
+            ],
+            "raw-clif-speed": [
+              13738292,
+              13704750,
+              14149708,
+              14154458,
+              13743917,
+              13858375,
+              13773292
+            ],
+            "O-keel-full": [
+              4082542,
+              4069291,
+              4086917,
+              4082000,
+              4074417,
+              4102083,
+              4083000
+            ],
+            "O-clif-speed": [
+              4074125,
+              4087042,
+              4065792,
+              4087709,
+              4098000,
+              4077083,
+              4080708
+            ],
+            "control": [
+              4090750,
+              4081083,
+              4077042,
+              4074000,
+              4066750,
+              4077208,
+              4089375
+            ]
+          },
+          "keel_over_clif_speed": 1.0005616672400965,
+          "keel_over_clang": 0.6687185171645942,
+          "control_over_keel": 0.9981182583913232
+        },
+        "fnv1a": {
+          "reps": 5260,
+          "checksum": "00000913796c0aa8",
+          "samples_ns": {
+            "clang-O2": [
+              19821583,
+              19996541,
+              20079125,
+              20040708,
+              20053375,
+              19978125,
+              19876084
+            ],
+            "raw-keel-full": [
+              19881208,
+              20051292,
+              20040083,
+              19960375,
+              19952333,
+              20002083,
+              19929625
+            ],
+            "raw-clif-speed": [
+              19978458,
+              19946167,
+              20176667,
+              20147083,
+              20019417,
+              20008833,
+              19980959
+            ],
+            "O-keel-full": [
+              19931458,
+              19925375,
+              20040000,
+              20622042,
+              20010958,
+              19949375,
+              19877459
+            ],
+            "O-clif-speed": [
+              19914667,
+              20042084,
+              20047458,
+              19963042,
+              20002209,
+              19934166,
+              19921208
+            ],
+            "control": [
+              19846083,
+              19995166,
+              20022708,
+              20081000,
+              19937375,
+              19959167,
+              19924792
+            ]
+          },
+          "keel_over_clif_speed": 1.0004374016889834,
+          "keel_over_clang": 0.9985609260128265,
+          "control_over_keel": 0.999137125748503
+        },
+        "crc32": {
+          "reps": 257,
+          "checksum": "000000bcf05c6d45",
+          "samples_ns": {
+            "clang-O2": [
+              12973583,
+              13000125,
+              13003375,
+              13003458,
+              12973708,
+              12995000,
+              13021333
+            ],
+            "raw-keel-full": [
+              20130667,
+              20060875,
+              20160500,
+              20177375,
+              20121750,
+              20094958,
+              20102125
+            ],
+            "raw-clif-speed": [
+              13012000,
+              13005750,
+              13032000,
+              13057916,
+              13049417,
+              13020833,
+              12965709
+            ],
+            "O-keel-full": [
+              13081792,
+              13164542,
+              13173542,
+              13185792,
+              13184583,
+              13158875,
+              13146250
+            ],
+            "O-clif-speed": [
+              13027291,
+              13015833,
+              13022959,
+              13069291,
+              12994000,
+              13021166,
+              13004625
+            ],
+            "control": [
+              13143417,
+              13157333,
+              13192334,
+              13247417,
+              13219208,
+              13142750,
+              13140334
+            ]
+          },
+          "keel_over_clif_speed": 1.0108903563155416,
+          "keel_over_clang": 1.0126473399294238,
+          "control_over_keel": 1.0014264956228174
+        },
+        "sieve": {
+          "reps": 179,
+          "checksum": "000000000011de4a",
+          "samples_ns": {
+            "clang-O2": [
+              14351292,
+              14372291,
+              14386792,
+              14423625,
+              14439333,
+              14333417,
+              14438667
+            ],
+            "raw-keel-full": [
+              10610041,
+              10972458,
+              11138333,
+              11382292,
+              11391791,
+              11029167,
+              11028333
+            ],
+            "raw-clif-speed": [
+              16973625,
+              16256292,
+              16402250,
+              16557708,
+              17268792,
+              16857459,
+              16290208
+            ],
+            "O-keel-full": [
+              16871042,
+              16717416,
+              16205834,
+              16158625,
+              16173500,
+              16407417,
+              16100125
+            ],
+            "O-clif-speed": [
+              16526875,
+              15795833,
+              16192833,
+              15827208,
+              16370416,
+              16118584,
+              16156125
+            ],
+            "control": [
+              16166209,
+              16106292,
+              16423833,
+              16265917,
+              16111792,
+              16179041,
+              16120792
+            ]
+          },
+          "keel_over_clif_speed": 1.0179192539493545,
+          "keel_over_clang": 1.1264383331600263,
+          "control_over_keel": 0.9961846229944045
+        },
+        "matmul": {
+          "reps": 159,
+          "checksum": "fffffffffe95162d",
+          "samples_ns": {
+            "clang-O2": [
+              8901917,
+              8928917,
+              8932625,
+              8927625,
+              8892833,
+              8928459,
+              8897541
+            ],
+            "raw-keel-full": [
+              19976084,
+              20022375,
+              19992875,
+              19961500,
+              20023792,
+              19979209,
+              20056875
+            ],
+            "raw-clif-speed": [
+              16484541,
+              17749500,
+              16444708,
+              16482042,
+              16995708,
+              16489875,
+              17764417
+            ],
+            "O-keel-full": [
+              2923209,
+              2897375,
+              2906500,
+              2891625,
+              2905167,
+              2899916,
+              2910375
+            ],
+            "O-clif-speed": [
+              2925708,
+              2935542,
+              3333250,
+              3265833,
+              2942625,
+              2951084,
+              3311833
+            ],
+            "control": [
+              2920583,
+              2899583,
+              2903291,
+              2904417,
+              2908459,
+              2891333,
+              2899792
+            ]
+          },
+          "keel_over_clif_speed": 0.9826612864967584,
+          "keel_over_clang": 0.32538027735408126,
+          "control_over_keel": 0.9991016721691812
+        },
+        "dot": {
+          "reps": 7669,
+          "checksum": "91b3338048b44735",
+          "samples_ns": {
+            "clang-O2": [
+              15647875,
+              15667250,
+              15735625,
+              15702583,
+              16162542,
+              15775916,
+              15695959
+            ],
+            "raw-keel-full": [
+              19485792,
+              19584916,
+              19560084,
+              19618042,
+              19633041,
+              19594125,
+              19673333
+            ],
+            "raw-clif-speed": [
+              20128333,
+              20054792,
+              20129458,
+              20199417,
+              20250833,
+              20102500,
+              20190334
+            ],
+            "O-keel-full": [
+              18114583,
+              18136250,
+              18158209,
+              18063958,
+              18114542,
+              18135000,
+              18129292
+            ],
+            "O-clif-speed": [
+              18177750,
+              18170708,
+              18213458,
+              18208500,
+              18261166,
+              18200958,
+              18167625
+            ],
+            "control": [
+              18105084,
+              18113125,
+              18121959,
+              18233667,
+              18191708,
+              18230459,
+              18205750
+            ]
+          },
+          "keel_over_clif_speed": 0.9965250374771355,
+          "keel_over_clang": 1.1539553719664772,
+          "control_over_keel": 1.0042173737396916
+        },
+        "saxpy": {
+          "reps": 13545,
+          "checksum": "0000000544128747",
+          "samples_ns": {
+            "clang-O2": [
+              2479333,
+              2489250,
+              2483958,
+              2486500,
+              2490458,
+              2485750,
+              2480250
+            ],
+            "raw-keel-full": [
+              19501333,
+              19539500,
+              19566000,
+              19531334,
+              19495500,
+              19440417,
+              19529916
+            ],
+            "raw-clif-speed": [
+              14403083,
+              14130333,
+              13278709,
+              14095833,
+              15226333,
+              13202583,
+              14124792
+            ],
+            "O-keel-full": [
+              3479583,
+              3458083,
+              3440625,
+              3420667,
+              3446291,
+              3437167,
+              3459250
+            ],
+            "O-clif-speed": [
+              3759083,
+              3743625,
+              3781500,
+              3760042,
+              3745500,
+              3782416,
+              3766500
+            ],
+            "control": [
+              3450458,
+              3463167,
+              3468333,
+              3413542,
+              3439791,
+              3427334,
+              3457958
+            ]
+          },
+          "keel_over_clif_speed": 0.9184255940528342,
+          "keel_over_clang": 1.3851381545098589,
+          "control_over_keel": 0.9981139143502391
+        },
+        "divmix": {
+          "reps": 2806,
+          "checksum": "1a16828cc8717318",
+          "samples_ns": {
+            "clang-O2": [
+              13755084,
+              13724833,
+              13751875,
+              13757792,
+              13765834,
+              13732708,
+              13716292
+            ],
+            "raw-keel-full": [
+              19801041,
+              19750500,
+              19353209,
+              19855209,
+              18788667,
+              19794750,
+              19813958
+            ],
+            "raw-clif-speed": [
+              18606000,
+              18544625,
+              18576875,
+              18644083,
+              18535333,
+              18541917,
+              18745542
+            ],
+            "O-keel-full": [
+              18815250,
+              18851875,
+              18892500,
+              18825542,
+              18863166,
+              18832959,
+              18641625
+            ],
+            "O-clif-speed": [
+              17221333,
+              17272000,
+              17299334,
+              17292416,
+              17308375,
+              17291667,
+              17330666
+            ],
+            "control": [
+              18852125,
+              18776625,
+              18842458,
+              18847583,
+              18858709,
+              18789375,
+              18683917
+            ]
+          },
+          "keel_over_clif_speed": 1.0898288256407664,
+          "keel_over_clang": 1.3702886436085167,
+          "control_over_keel": 0.9997637194095625
+        },
+        "gcd": {
+          "reps": 49,
+          "checksum": "0a2b649d6aa024b8",
+          "samples_ns": {
+            "clang-O2": [
+              19878417,
+              19872834,
+              19861208,
+              19893167,
+              19874709,
+              19929750,
+              19919875
+            ],
+            "raw-keel-full": [
+              20169625,
+              20167875,
+              20093834,
+              20177667,
+              20098500,
+              20111125,
+              20081750
+            ],
+            "raw-clif-speed": [
+              20077166,
+              20092125,
+              19976667,
+              20146250,
+              20085250,
+              19913375,
+              20019667
+            ],
+            "O-keel-full": [
+              19920917,
+              19882000,
+              19843542,
+              19837167,
+              19891042,
+              19837792,
+              19760375
+            ],
+            "O-clif-speed": [
+              19893333,
+              20031334,
+              20025833,
+              20023250,
+              20166834,
+              20119084,
+              20057666
+            ],
+            "control": [
+              19835666,
+              19894459,
+              19774250,
+              19868875,
+              19892250,
+              19902458,
+              19868708
+            ]
+          },
+          "keel_over_clif_speed": 0.9907066535152885,
+          "keel_over_clang": 0.9991105274160564,
+          "control_over_keel": 1.0006266472185896
+        },
+        "isort": {
+          "reps": 151,
+          "checksum": "ffffffc0588648d4",
+          "samples_ns": {
+            "clang-O2": [
+              10971083,
+              11039416,
+              11061875,
+              11022959,
+              11015791,
+              11068500,
+              11098417
+            ],
+            "raw-keel-full": [
+              17445292,
+              17459583,
+              17723542,
+              17486167,
+              17270167,
+              17625125,
+              17433875
+            ],
+            "raw-clif-speed": [
+              20021417,
+              20070042,
+              20082291,
+              20077375,
+              20049333,
+              20100666,
+              20089125
+            ],
+            "O-keel-full": [
+              11534875,
+              11004750,
+              11506917,
+              10972583,
+              11109584,
+              11023166,
+              11060708
+            ],
+            "O-clif-speed": [
+              11671542,
+              11814750,
+              11691000,
+              11393500,
+              11693042,
+              11624333,
+              11728833
+            ],
+            "control": [
+              11013708,
+              11055916,
+              11053750,
+              11662125,
+              11021084,
+              10971750,
+              11027791
+            ]
+          },
+          "keel_over_clif_speed": 0.9501021205602442,
+          "keel_over_clang": 0.996859797655963,
+          "control_over_keel": 0.9953356413211958
+        },
+        "qsort": {
+          "reps": 223,
+          "checksum": "cc409affb3b1c310",
+          "samples_ns": {
+            "clang-O2": [
+              11481625,
+              9036541,
+              9121166,
+              9158375,
+              9488458,
+              9255416,
+              9046542
+            ],
+            "raw-keel-full": [
+              14840125,
+              17760042,
+              17785583,
+              12637209,
+              16155541,
+              15814000,
+              15717375
+            ],
+            "raw-clif-speed": [
+              10274000,
+              10804875,
+              12677667,
+              10818834,
+              10339792,
+              11480791,
+              9866458
+            ],
+            "O-keel-full": [
+              10963375,
+              10596833,
+              10216750,
+              10441208,
+              10415500,
+              10261500,
+              11052542
+            ],
+            "O-clif-speed": [
+              11616000,
+              10353500,
+              10196625,
+              10207541,
+              11049584,
+              11082417,
+              11846542
+            ],
+            "control": [
+              10882708,
+              9959250,
+              10799291,
+              11155708,
+              11095333,
+              15604542,
+              12454833
+            ]
+          },
+          "keel_over_clif_speed": 0.9438167183195593,
+          "keel_over_clang": 1.120114467821329,
+          "control_over_keel": 1.0652712783831788
+        },
+        "interp": {
+          "reps": 64,
+          "checksum": "ce72c124bf467519",
+          "samples_ns": {
+            "clang-O2": [
+              19190500,
+              19218625,
+              19119625,
+              19206666,
+              19201125,
+              19111042,
+              19113917
+            ],
+            "raw-keel-full": [
+              19518333,
+              19540292,
+              19541500,
+              19491708,
+              19558875,
+              19414208,
+              19403333
+            ],
+            "raw-clif-speed": [
+              19502833,
+              19354250,
+              19553208,
+              19434833,
+              19306250,
+              19348584,
+              19369667
+            ],
+            "O-keel-full": [
+              19576084,
+              19515917,
+              19527917,
+              19575041,
+              19474583,
+              19492792,
+              19404084
+            ],
+            "O-clif-speed": [
+              19460750,
+              19383875,
+              19463125,
+              19437333,
+              19564625,
+              19330625,
+              19438958
+            ],
+            "control": [
+              19560792,
+              19525125,
+              19510000,
+              19471041,
+              19580625,
+              19451041,
+              19490125
+            ]
+          },
+          "keel_over_clif_speed": 1.0059264930693832,
+          "keel_over_clang": 1.019179539020463,
+          "control_over_keel": 0.9992188427470989
+        },
+        "classify": {
+          "reps": 2288,
+          "checksum": "ffffffffff8c67f0",
+          "samples_ns": {
+            "clang-O2": [
+              9080125,
+              9032458,
+              9012167,
+              9009459,
+              8994917,
+              9000333,
+              8967417
+            ],
+            "raw-keel-full": [
+              15444791,
+              15242459,
+              15132292,
+              15319459,
+              16093542,
+              15079084,
+              15148292
+            ],
+            "raw-clif-speed": [
+              16839666,
+              16589459,
+              18521125,
+              17086000,
+              16216375,
+              16657708,
+              17086125
+            ],
+            "O-keel-full": [
+              14647000,
+              14984875,
+              14718042,
+              15060625,
+              14740125,
+              14750750,
+              14552875
+            ],
+            "O-clif-speed": [
+              16613125,
+              16213625,
+              16113667,
+              16198375,
+              16126292,
+              16431208,
+              15940417
+            ],
+            "control": [
+              14582833,
+              14652416,
+              14932250,
+              14561458,
+              14686458,
+              14832416,
+              14810750
+            ]
+          },
+          "keel_over_clif_speed": 0.9133887401297296,
+          "keel_over_clang": 1.6387171777127014,
+          "control_over_keel": 0.9963591217849238
+        },
+        "bits": {
+          "reps": 4750,
+          "checksum": "73848cbf96b48334",
+          "samples_ns": {
+            "clang-O2": [
+              18998417,
+              19033250,
+              18990000,
+              19070666,
+              19089250,
+              19056625,
+              19050000
+            ],
+            "raw-keel-full": [
+              19082916,
+              19013167,
+              18999458,
+              19013542,
+              19173959,
+              18994375,
+              19144250
+            ],
+            "raw-clif-speed": [
+              19010167,
+              19003459,
+              20022542,
+              19386583,
+              19516000,
+              19382375,
+              19286958
+            ],
+            "O-keel-full": [
+              14662458,
+              14732583,
+              14823250,
+              14730291,
+              14754167,
+              14814667,
+              14716208
+            ],
+            "O-clif-speed": [
+              14510792,
+              14385334,
+              14515500,
+              14481333,
+              14520333,
+              14514875,
+              14517500
+            ],
+            "control": [
+              14704375,
+              14693584,
+              14701125,
+              14749459,
+              14782417,
+              14717833,
+              14703041
+            ]
+          },
+          "keel_over_clif_speed": 1.0171916494151472,
+          "keel_over_clang": 0.772904488128135,
+          "control_over_keel": 0.9991052722277369
+        },
+        "narrow": {
+          "reps": 1139,
+          "checksum": "00000009a3a289c0",
+          "samples_ns": {
+            "clang-O2": [
+              1364375,
+              1368375,
+              1364834,
+              1370625,
+              1366750,
+              1362959,
+              1370667
+            ],
+            "raw-keel-full": [
+              19503250,
+              19398459,
+              19504125,
+              19526917,
+              19797666,
+              20367375,
+              20062334
+            ],
+            "raw-clif-speed": [
+              11173916,
+              12011375,
+              12038916,
+              9930000,
+              9741167,
+              10881000,
+              12123208
+            ],
+            "O-keel-full": [
+              10266667,
+              10305458,
+              9533667,
+              10742625,
+              10523959,
+              10458500,
+              9453042
+            ],
+            "O-clif-speed": [
+              10319625,
+              10192000,
+              12403667,
+              10592833,
+              12196625,
+              10175000,
+              10647291
+            ],
+            "control": [
+              9932541,
+              9882125,
+              9995625,
+              9913167,
+              10361875,
+              10037375,
+              10143417
+            ]
+          },
+          "keel_over_clif_speed": 0.9948682243783084,
+          "keel_over_clang": 7.5311650680551745,
+          "control_over_keel": 0.9674552607969071
+        },
+        "fconv": {
+          "reps": 1997,
+          "checksum": "0006d05640cedf1e",
+          "samples_ns": {
+            "clang-O2": [
+              10395208,
+              10440375,
+              10414000,
+              10369000,
+              10366708,
+              10353917,
+              10415792
+            ],
+            "raw-keel-full": [
+              12774791,
+              13069209,
+              12760584,
+              11959666,
+              12963459,
+              12665958,
+              12581708
+            ],
+            "raw-clif-speed": [
+              11013000,
+              11414583,
+              11509250,
+              12115167,
+              11046209,
+              11159250,
+              11895000
+            ],
+            "O-keel-full": [
+              10809042,
+              10814750,
+              10739458,
+              10832541,
+              10767833,
+              10780375,
+              10704917
+            ],
+            "O-clif-speed": [
+              19481959,
+              17467292,
+              14452333,
+              17168333,
+              15495083,
+              18029458,
+              15889250
+            ],
+            "control": [
+              10773292,
+              10796750,
+              10806625,
+              10778541,
+              10696583,
+              10773375,
+              10733625
+            ]
+          },
+          "keel_over_clif_speed": 0.6309605597701303,
+          "keel_over_clang": 1.0386935756269011,
+          "control_over_keel": 0.9983356064633949
+        },
+        "collatz": {
+          "reps": 138,
+          "checksum": "00000000012270e1",
+          "samples_ns": {
+            "clang-O2": [
+              14249875,
+              14321458,
+              14334333,
+              14251250,
+              14218292,
+              14221916,
+              14249000
+            ],
+            "raw-keel-full": [
+              12984208,
+              13127375,
+              12834292,
+              12754583,
+              13062791,
+              13736459,
+              12820250
+            ],
+            "raw-clif-speed": [
+              19147958,
+              18914041,
+              19772167,
+              19233000,
+              19146791,
+              19146083,
+              19709625
+            ],
+            "O-keel-full": [
+              14531541,
+              14070750,
+              14619792,
+              14312292,
+              14191125,
+              14513292,
+              14366458
+            ],
+            "O-clif-speed": [
+              14139584,
+              13714500,
+              13546458,
+              14176584,
+              13703292,
+              13969500,
+              14064417
+            ],
+            "control": [
+              14216375,
+              14724209,
+              13810125,
+              14133750,
+              14239709,
+              14063500,
+              14021458
+            ]
+          },
+          "keel_over_clif_speed": 1.0277205467996795,
+          "keel_over_clang": 1.0082432451400098,
+          "control_over_keel": 0.9783115913171219
+        },
+        "copy": {
+          "reps": 2612,
+          "checksum": "da9fe9ca4fa00608",
+          "samples_ns": {
+            "clang-O2": [
+              10740208,
+              11709000,
+              10703500,
+              10704250,
+              10710875,
+              10712208,
+              10694084
+            ],
+            "raw-keel-full": [
+              20083792,
+              19934416,
+              20009375,
+              19920208,
+              19953791,
+              19967083,
+              19970125
+            ],
+            "raw-clif-speed": [
+              20002541,
+              19934459,
+              19953584,
+              19988250,
+              19935458,
+              20055000,
+              20099125
+            ],
+            "O-keel-full": [
+              10211834,
+              10200666,
+              10191750,
+              10159125,
+              10166041,
+              10170834,
+              10167792
+            ],
+            "O-clif-speed": [
+              10132166,
+              10094375,
+              10092000,
+              10093709,
+              10058625,
+              10092500,
+              10111083
+            ],
+            "control": [
+              10208584,
+              10175709,
+              10185959,
+              10195084,
+              10153250,
+              10153792,
+              10184458
+            ]
+          },
+          "keel_over_clif_speed": 1.0078628794672333,
+          "keel_over_clang": 0.9494619596632179,
+          "control_over_keel": 0.9994317953246499
+        },
+        "dispatch": {
+          "reps": 787,
+          "checksum": "c08223daa52acb2e",
+          "samples_ns": {
+            "clang-O2": [
+              16083708,
+              16294292,
+              16105875,
+              15991084,
+              16288209,
+              16133125,
+              16265750
+            ],
+            "raw-keel-full": [
+              19308500,
+              19656042,
+              18794250,
+              20381708,
+              20524917,
+              20592292,
+              19538875
+            ],
+            "raw-clif-speed": [
+              14617250,
+              15491542,
+              15287459,
+              14791417,
+              14693833,
+              15292000,
+              15398667
+            ],
+            "O-keel-full": [
+              3318833,
+              3395500,
+              3439417,
+              3462500,
+              3310250,
+              3425375,
+              3332916
+            ],
+            "O-clif-speed": [
+              12855167,
+              13119792,
+              12314542,
+              12399708,
+              13140667,
+              12258125,
+              13265333
+            ],
+            "control": [
+              3392000,
+              3397917,
+              3329167,
+              3400458,
+              3348167,
+              3483125,
+              3447834
+            ]
+          },
+          "keel_over_clif_speed": 0.2588074567035819,
+          "keel_over_clang": 0.20838585683870156,
+          "control_over_keel": 1.0114544218714598
+        },
+        "names": {
+          "reps": 4514,
+          "checksum": "cdec832596ded3ee",
+          "samples_ns": {
+            "clang-O2": [
+              14756000,
+              14729792,
+              14723375,
+              14753167,
+              14762792,
+              14696917,
+              14697625
+            ],
+            "raw-keel-full": [
+              19608542,
+              19511833,
+              19546083,
+              19595084,
+              19652542,
+              19630500,
+              19667625
+            ],
+            "raw-clif-speed": [
+              19634959,
+              19580459,
+              19571500,
+              19604417,
+              19712458,
+              19636666,
+              19536250
+            ],
+            "O-keel-full": [
+              19571458,
+              19577417,
+              19553416,
+              19500416,
+              19550584,
+              19647375,
+              19534917
+            ],
+            "O-clif-speed": [
+              19767417,
+              19757125,
+              19744667,
+              19769417,
+              19768958,
+              19754583,
+              19690459
+            ],
+            "control": [
+              19536875,
+              19510084,
+              19548042,
+              19590292,
+              19634167,
+              19529792,
+              19564250
+            ]
+          },
+          "keel_over_clif_speed": 0.9903137895412467,
+          "keel_over_clang": 1.3280525694686172,
+          "control_over_keel": 0.9997251631121641
+        },
+        "stackobj": {
+          "reps": 2860,
+          "checksum": "3d9d2bacecac1b30",
+          "samples_ns": {
+            "clang-O2": [
+              2059667,
+              2045750,
+              2043625,
+              2068333,
+              2054167,
+              2053250,
+              2070292
+            ],
+            "raw-keel-full": [
+              13707084,
+              13939250,
+              13939500,
+              14517291,
+              13321750,
+              12871375,
+              14510125
+            ],
+            "raw-clif-speed": [
+              17038125,
+              19502042,
+              15337583,
+              17637708,
+              17597417,
+              18615375,
+              19710708
+            ],
+            "O-keel-full": [
+              1720125,
+              1722458,
+              1721458,
+              1707875,
+              1712750,
+              1722333,
+              1707792
+            ],
+            "O-clif-speed": [
+              2389708,
+              2392208,
+              2388166,
+              2395875,
+              2404792,
+              2405042,
+              2398208
+            ],
+            "control": [
+              1718417,
+              1743000,
+              1714541,
+              1724125,
+              1725917,
+              1714250,
+              1711042
+            ]
+          },
+          "keel_over_clif_speed": 0.7161342712518118,
+          "keel_over_clang": 0.8351471378625768,
+          "control_over_keel": 1.001903042056644
+        }
+      },
+      "keel_over_clif_speed": 0.896166375343583,
+      "keel_over_clang": 1.0145006047035101
+    },
+    "intel-13th-gen-linux": {
+      "report_sha256": "150658df7398ce8473104d52db079dfde8805223327cd2cd8d1d9100d555c12f",
+      "clang": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-18/bin\n",
+      "target": "x86_64-unknown-linux-gnu",
+      "os": "Linux 7.0.0-34-generic\n",
+      "load_start": [
+        5.71142578125,
+        2.12353515625,
+        0.9423828125
+      ],
+      "load_end": [
+        4.37353515625,
+        2.0498046875,
+        0.9443359375
+      ],
+      "binary_sha256": {
+        "keel": "6aa204aa07e651cb7be8f9518c3a1f44796f990790eeb4a46d90cfefb1d1dca9",
+        "keel-cranelift-bench": "22d4b6f9230bb9fe0704d5135ed34a2659ee47361ae9c65234ed4dc1b18ab59a",
+        "clang": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+      },
+      "inputs_sha256": {
+        "crates/keel-cranelift/kernels/kernels.c": "145a70a771624858c8c2638bbd598037c88627f9f0c79d3699eb179186dd56da",
+        "crates/keel-cranelift/kernels/driver.c": "bdb3fc85b14014929539e1488f5a55f5e69c0cb1a1c41f15608162785b4806f4"
+      },
+      "locks_sha256": {
+        "Cargo.lock": "6407f72eecef92ba1adcca8edb409d5ad97259e55d920901f61ceb7972b69653",
+        "crates/keel-cranelift/Cargo.lock": "406d1d30285be013e1b8410d5a7d091396d0f8d9650b32662619942cbfcc2eb0"
+      },
+      "ir_sha256": {
+        "raw": "017e686ea4894b7df2452f35d6324e712d676f4b236fe319eca487c7f0692d6f",
+        "O": "28e74e2530631afbd5e8a42fa7d47ec047a1129d15f1cec9d362aee841e415ac"
+      },
+      "objects_sha256": {
+        "keel-raw": "7e00e76f84578d8ced25b194efe2c1ebd5b7e71ec4bddde0f0bd75cf51abcee8",
+        "keel-O": "8ee5cbe188b334fdefbaad2aa1cea54120ab516e7baf05f45f1e5c800b02e1d8",
+        "clang-O0": "01d6a0474a1f74dc2edf4a7293cb76cf1bf8cd7edb5d5c5c4138ef45c9cbcefd",
+        "clang-O2": "65ff62c0e6177e46e522058d03efcbdeab32ae5eaafcd60a92141b15ed2d6f3f",
+        "raw-keel-baseline": "7e00e76f84578d8ced25b194efe2c1ebd5b7e71ec4bddde0f0bd75cf51abcee8",
+        "raw-keel-full": "e9f646958402ff0dd8b86e9da5f4bd7681bf90408ca6e592bb84a7f665c9616d",
+        "raw-clif-none": "31bb044a7529917c80ff7990946eb0c9bd5689fc7660555c2373d8ea5ba96522",
+        "raw-clif-speed": "33b76e24e08372fdb563e1b1f54e9cc9900c08f7ad46a046bf250f0b9d005cb0",
+        "O-keel-baseline": "526b8a491eda139ae6f578ea0c9e5e81e62c713ba1e3772a53d2fb762b3d9bcc",
+        "O-keel-full": "3e41a2e5995143140c6fee136dbc373da7c1eff3bd94f719fcf3225edb2cf9a8",
+        "O-clif-none": "b9a3f21ace97197bf30f55f9646bb657bae36fccb3211bdfddbf7aa1a3ea6513",
+        "O-clif-speed": "df50655815376647b7e1dd59769ce9dc0edb72efb3a8debffd9ccee19120fa5d"
+      },
+      "c_orders_including_warmups": [
+        [
+          "clang-O2",
+          "keel-raw",
+          "clang-O0",
+          "keel-O"
+        ],
+        [
+          "keel-O",
+          "keel-raw",
+          "clang-O2",
+          "clang-O0"
+        ],
+        [
+          "clang-O2",
+          "keel-raw",
+          "clang-O0",
+          "keel-O"
+        ],
+        [
+          "clang-O2",
+          "clang-O0",
+          "keel-O",
+          "keel-raw"
+        ],
+        [
+          "keel-O",
+          "keel-raw",
+          "clang-O0",
+          "clang-O2"
+        ],
+        [
+          "keel-raw",
+          "clang-O0",
+          "clang-O2",
+          "keel-O"
+        ],
+        [
+          "keel-raw",
+          "keel-O",
+          "clang-O0",
+          "clang-O2"
+        ],
+        [
+          "keel-raw",
+          "clang-O2",
+          "keel-O",
+          "clang-O0"
+        ],
+        [
+          "keel-O",
+          "clang-O2",
+          "keel-raw",
+          "clang-O0"
+        ]
+      ],
+      "c_to_object": {
+        "keel-raw": {
+          "median_ms": 4.893738,
+          "samples_ns": [
+            4896130,
+            4713546,
+            4364580,
+            5105380,
+            4687630,
+            5024268,
+            4893738
+          ],
+          "object_bytes": 9552
+        },
+        "keel-O": {
+          "median_ms": 7.774199,
+          "samples_ns": [
+            7783894,
+            7654292,
+            7033542,
+            7861882,
+            7206736,
+            7774199,
+            7892942
+          ],
+          "object_bytes": 9864
+        },
+        "clang-O0": {
+          "median_ms": 20.62196,
+          "samples_ns": [
+            20621960,
+            20476745,
+            20796497,
+            20290693,
+            20984699,
+            20482516,
+            20711682
+          ],
+          "object_bytes": 10568
+        },
+        "clang-O2": {
+          "median_ms": 85.508937,
+          "samples_ns": [
+            85631357,
+            86197272,
+            85314891,
+            85780399,
+            84771482,
+            85508937,
+            85280607
+          ],
+          "object_bytes": 11128
+        }
+      },
+      "ir_to_object": {
+        "raw": {
+          "functions": 31,
+          "configs": {
+            "keel-baseline": {
+              "median_ms": 1.340889,
+              "samples_ns": [
+                1274811,
+                1344698,
+                1335408,
+                1345536,
+                1340889,
+                1357014,
+                1293855
+              ],
+              "object_bytes": 9552,
+              "fnv64": "c25b20a0ce56fc2e"
+            },
+            "keel-full": {
+              "median_ms": 1.343952,
+              "samples_ns": [
+                1362664,
+                1336382,
+                1343952,
+                1387904,
+                1343891,
+                1392133,
+                1339707
+              ],
+              "object_bytes": 9048,
+              "fnv64": "a3ff2cf006d12aca"
+            },
+            "clif-none": {
+              "median_ms": 1.589909,
+              "samples_ns": [
+                1574575,
+                1589909,
+                1607429,
+                1583293,
+                1698672,
+                1580993,
+                1622157
+              ],
+              "object_bytes": 7072,
+              "fnv64": "0396e6572a570dd6"
+            },
+            "clif-speed": {
+              "median_ms": 2.136558,
+              "samples_ns": [
+                2086678,
+                2152655,
+                2136558,
+                2149553,
+                2102479,
+                2175815,
+                2049518
+              ],
+              "object_bytes": 6968,
+              "fnv64": "206a8f77872c95ba"
+            }
+          }
+        },
+        "O": {
+          "functions": 30,
+          "configs": {
+            "keel-baseline": {
+              "median_ms": 1.481988,
+              "samples_ns": [
+                1480709,
+                1481988,
+                1454826,
+                1493748,
+                1525921,
+                1533591,
+                1464887
+              ],
+              "object_bytes": 10504,
+              "fnv64": "2b6cf2366f9fbe3b"
+            },
+            "keel-full": {
+              "median_ms": 1.531394,
+              "samples_ns": [
+                1499164,
+                1585050,
+                1529484,
+                1544850,
+                1528424,
+                1531394,
+                1548726
+              ],
+              "object_bytes": 9864,
+              "fnv64": "6e56fad9b26ea4cc"
+            },
+            "clif-none": {
+              "median_ms": 1.835643,
+              "samples_ns": [
+                1833016,
+                1782352,
+                1895421,
+                1835643,
+                1844146,
+                1886318,
+                1823752
+              ],
+              "object_bytes": 8080,
+              "fnv64": "8e091ca3c48d86ae"
+            },
+            "clif-speed": {
+              "median_ms": 2.476981,
+              "samples_ns": [
+                2451699,
+                2487666,
+                2476981,
+                2451319,
+                2461239,
+                2484258,
+                2501307
+              ],
+              "object_bytes": 8152,
+              "fnv64": "721a59ba5734c58d"
+            }
+          }
+        }
+      },
+      "kernels": {
+        "logic": {
+          "reps": 7504,
+          "checksum": "5071e50d30475a20",
+          "samples_ns": {
+            "clang-O2": [
+              6842901,
+              6663984,
+              6792252,
+              7044447,
+              6702230,
+              6576959,
+              6661418
+            ],
+            "raw-keel-full": [
+              18987511,
+              18994503,
+              18872946,
+              18738785,
+              18913275,
+              18899335,
+              19020640
+            ],
+            "raw-clif-speed": [
+              19967450,
+              19847718,
+              19920966,
+              19770085,
+              19726382,
+              19750798,
+              19904321
+            ],
+            "O-keel-full": [
+              5931190,
+              5917894,
+              5819165,
+              6110357,
+              5949600,
+              5950504,
+              5935195
+            ],
+            "O-clif-speed": [
+              4413486,
+              4491489,
+              4254695,
+              4247224,
+              4324419,
+              4541110,
+              4363430
+            ],
+            "control": [
+              5965468,
+              5873993,
+              5856132,
+              5957805,
+              5886924,
+              6267537,
+              5827634
+            ]
+          },
+          "keel_over_clif_speed": 1.3602131809150142,
+          "keel_over_clang": 0.8877045401306729,
+          "control_over_keel": 0.9925816515131903
+        },
+        "fnv1a": {
+          "reps": 5653,
+          "checksum": "000009c112819866",
+          "samples_ns": {
+            "clang-O2": [
+              18409723,
+              18446839,
+              18431446,
+              18422088,
+              18421348,
+              18407719,
+              18408782
+            ],
+            "raw-keel-full": [
+              18481869,
+              18464996,
+              18467552,
+              18464547,
+              18487201,
+              18475057,
+              18479939
+            ],
+            "raw-clif-speed": [
+              18435261,
+              18435634,
+              18437242,
+              18433423,
+              18432198,
+              18458539,
+              18436339
+            ],
+            "O-keel-full": [
+              18406172,
+              18405800,
+              18401411,
+              18400484,
+              18407464,
+              18404939,
+              18410960
+            ],
+            "O-clif-speed": [
+              18486734,
+              18482950,
+              18481724,
+              18488078,
+              18483153,
+              18482326,
+              18480786
+            ],
+            "control": [
+              18400220,
+              18402068,
+              18404164,
+              18400369,
+              18408928,
+              18405705,
+              18402640
+            ]
+          },
+          "keel_over_clif_speed": 0.9958129187852222,
+          "keel_over_clang": 0.9992463092277504,
+          "control_over_keel": 0.9999937501643978
+        },
+        "crc32": {
+          "reps": 294,
+          "checksum": "000000d823e63f3e",
+          "samples_ns": {
+            "clang-O2": [
+              13792128,
+              13791449,
+              13792768,
+              13786603,
+              13793507,
+              13787506,
+              13791804
+            ],
+            "raw-keel-full": [
+              19896912,
+              19888677,
+              19891678,
+              19952491,
+              19887580,
+              19921424,
+              19892205
+            ],
+            "raw-clif-speed": [
+              13792213,
+              13786384,
+              13785783,
+              13790953,
+              13792026,
+              14199839,
+              13789681
+            ],
+            "O-keel-full": [
+              13797437,
+              13808896,
+              13802725,
+              13801249,
+              13788111,
+              13794721,
+              13793939
+            ],
+            "O-clif-speed": [
+              13793782,
+              13799102,
+              13806465,
+              13795086,
+              13814591,
+              13794353,
+              13805331
+            ],
+            "control": [
+              13803250,
+              13798862,
+              13798740,
+              13798547,
+              13785067,
+              13793832,
+              13793437
+            ]
+          },
+          "keel_over_clif_speed": 1.000026677583211,
+          "keel_over_clang": 1.0005232998629339,
+          "control_over_keel": 0.9998042206180034
+        },
+        "sieve": {
+          "reps": 166,
+          "checksum": "0000000000109214",
+          "samples_ns": {
+            "clang-O2": [
+              16831832,
+              16774987,
+              16789031,
+              16851578,
+              16800221,
+              16857439,
+              16771387
+            ],
+            "raw-keel-full": [
+              18208833,
+              18151398,
+              19051181,
+              18078991,
+              18127488,
+              18386018,
+              17990208
+            ],
+            "raw-clif-speed": [
+              19523282,
+              20184504,
+              20231134,
+              20127984,
+              19977396,
+              20224352,
+              20341388
+            ],
+            "O-keel-full": [
+              17694428,
+              17929713,
+              17709811,
+              17707299,
+              17915184,
+              17737545,
+              17486397
+            ],
+            "O-clif-speed": [
+              18122642,
+              18090476,
+              18207567,
+              18272047,
+              18143120,
+              18144402,
+              18303848
+            ],
+            "control": [
+              17716321,
+              17730928,
+              17741489,
+              17806458,
+              17424703,
+              17704215,
+              17724933
+            ]
+          },
+          "keel_over_clif_speed": 0.9763713259909896,
+          "keel_over_clang": 1.0522087607732111,
+          "control_over_keel": 1.0012372821545856
+        },
+        "matmul": {
+          "reps": 75,
+          "checksum": "000000000203bb44",
+          "samples_ns": {
+            "clang-O2": [
+              3965708,
+              3962854,
+              3964482,
+              3977049,
+              3971209,
+              3967950,
+              4004713
+            ],
+            "raw-keel-full": [
+              19912005,
+              19910268,
+              19901929,
+              19914064,
+              19929466,
+              19921097,
+              19886037
+            ],
+            "raw-clif-speed": [
+              14180485,
+              14195922,
+              14203691,
+              14156287,
+              14174154,
+              14128219,
+              14123325
+            ],
+            "O-keel-full": [
+              12126696,
+              12020586,
+              12079426,
+              12091782,
+              12114076,
+              12158044,
+              11844745
+            ],
+            "O-clif-speed": [
+              7985466,
+              8461966,
+              8806044,
+              8129353,
+              8133519,
+              8614636,
+              8626286
+            ],
+            "control": [
+              11978602,
+              11783036,
+              12126789,
+              11914673,
+              12120993,
+              11924081,
+              12042872
+            ]
+          },
+          "keel_over_clif_speed": 1.4205429329307162,
+          "keel_over_clang": 3.0469115511181535,
+          "control_over_keel": 0.9877877700570707
+        },
+        "dot": {
+          "reps": 11097,
+          "checksum": "27f2f24316fc1d99",
+          "samples_ns": {
+            "clang-O2": [
+              18012717,
+              18031450,
+              18032706,
+              18038086,
+              17994267,
+              18040397,
+              18029573
+            ],
+            "raw-keel-full": [
+              19427984,
+              19731401,
+              19703475,
+              19958079,
+              19485217,
+              19621401,
+              19690411
+            ],
+            "raw-clif-speed": [
+              18252563,
+              18434426,
+              18399053,
+              18495610,
+              18340738,
+              18645353,
+              18459650
+            ],
+            "O-keel-full": [
+              19165506,
+              19277299,
+              19086991,
+              19078510,
+              19110406,
+              19412459,
+              19311245
+            ],
+            "O-clif-speed": [
+              18172881,
+              18198058,
+              18213284,
+              18170386,
+              18241122,
+              18164594,
+              18166833
+            ],
+            "control": [
+              19404442,
+              19132249,
+              19505457,
+              19088006,
+              19333651,
+              19231746,
+              19248342
+            ]
+          },
+          "keel_over_clif_speed": 1.0546212237894477,
+          "keel_over_clang": 1.0639986183094976,
+          "control_over_keel": 1.0004977327894056
+        },
+        "saxpy": {
+          "reps": 8100,
+          "checksum": "fffffffff259f9e7",
+          "samples_ns": {
+            "clang-O2": [
+              1777669,
+              1757921,
+              1788387,
+              1805401,
+              1829542,
+              1797835,
+              2411100
+            ],
+            "raw-keel-full": [
+              20887863,
+              21181519,
+              20993059,
+              21140423,
+              21112100,
+              21171940,
+              21181748
+            ],
+            "raw-clif-speed": [
+              9733062,
+              9870009,
+              9302282,
+              9484234,
+              9414314,
+              9210245,
+              10020542
+            ],
+            "O-keel-full": [
+              3874090,
+              4000922,
+              3758680,
+              3866614,
+              3862788,
+              4019416,
+              3833403
+            ],
+            "O-clif-speed": [
+              3628612,
+              3091796,
+              3174347,
+              3116764,
+              3298175,
+              3154235,
+              3141631
+            ],
+            "control": [
+              3761118,
+              3784451,
+              3766632,
+              3893051,
+              3910935,
+              3987401,
+              3758598
+            ]
+          },
+          "keel_over_clif_speed": 1.2201951788736487,
+          "keel_over_clang": 2.1416926211960665,
+          "control_over_keel": 0.9920349125345572
+        },
+        "divmix": {
+          "reps": 809,
+          "checksum": "0756c66441741884",
+          "samples_ns": {
+            "clang-O2": [
+              13313573,
+              13306100,
+              13303270,
+              13309763,
+              13303077,
+              13305078,
+              13312524
+            ],
+            "raw-keel-full": [
+              19953559,
+              19948906,
+              19951163,
+              19965171,
+              19947263,
+              19948559,
+              19944098
+            ],
+            "raw-clif-speed": [
+              19947619,
+              19952958,
+              19971593,
+              19946515,
+              19951463,
+              19947790,
+              19947189
+            ],
+            "O-keel-full": [
+              13306673,
+              13307101,
+              13311526,
+              13310236,
+              13305786,
+              13305115,
+              13305874
+            ],
+            "O-clif-speed": [
+              13323825,
+              13307359,
+              13306514,
+              13303325,
+              13304585,
+              13307467,
+              13303501
+            ],
+            "control": [
+              13303838,
+              13326184,
+              13311066,
+              13309834,
+              13311685,
+              13358822,
+              13309521
+            ]
+          },
+          "keel_over_clif_speed": 1.0000902696326117,
+          "keel_over_clang": 1.000035537822875,
+          "control_over_keel": 1.0002740894735664
+        },
+        "gcd": {
+          "reps": 39,
+          "checksum": "c96674a7162bde88",
+          "samples_ns": {
+            "clang-O2": [
+              17306750,
+              17343528,
+              17359817,
+              17252226,
+              17303541,
+              17285722,
+              17269660
+            ],
+            "raw-keel-full": [
+              19876254,
+              19881518,
+              19889126,
+              19905281,
+              19849984,
+              19917312,
+              19891053
+            ],
+            "raw-clif-speed": [
+              20153122,
+              20213471,
+              20164141,
+              20141122,
+              20170776,
+              20142857,
+              20137108
+            ],
+            "O-keel-full": [
+              20036907,
+              20027003,
+              20032487,
+              20027124,
+              20035433,
+              20011866,
+              20022997
+            ],
+            "O-clif-speed": [
+              20183821,
+              20183087,
+              20186850,
+              20168669,
+              20184777,
+              20134792,
+              20217422
+            ],
+            "control": [
+              20032013,
+              20028857,
+              20034977,
+              20014319,
+              20026426,
+              19989535,
+              20032802
+            ]
+          },
+          "keel_over_clif_speed": 0.9926011568024754,
+          "keel_over_clang": 1.1577509931096248,
+          "control_over_keel": 0.9997557507253989
+        },
+        "isort": {
+          "reps": 118,
+          "checksum": "ffffffcc68e4dcd7",
+          "samples_ns": {
+            "clang-O2": [
+              9862177,
+              9993206,
+              9975110,
+              9906922,
+              9926926,
+              9978028,
+              9978237
+            ],
+            "raw-keel-full": [
+              20123229,
+              20074552,
+              20294217,
+              20010397,
+              20296646,
+              20222390,
+              20142653
+            ],
+            "raw-clif-speed": [
+              10255947,
+              10420418,
+              10412460,
+              10442040,
+              10380952,
+              10354127,
+              10621164
+            ],
+            "O-keel-full": [
+              10222485,
+              10156942,
+              10270373,
+              10226850,
+              10315756,
+              10148643,
+              10171911
+            ],
+            "O-clif-speed": [
+              9674045,
+              9781997,
+              9628505,
+              9663405,
+              9765042,
+              9657247,
+              9804532
+            ],
+            "control": [
+              10129565,
+              10146053,
+              10227392,
+              10166999,
+              10208049,
+              10194448,
+              10212674
+            ]
+          },
+          "keel_over_clif_speed": 1.056396480424764,
+          "keel_over_clang": 1.0295999743361226,
+          "control_over_keel": 0.9958150497552524
+        },
+        "qsort": {
+          "reps": 120,
+          "checksum": "d5502ff0da7e47ea",
+          "samples_ns": {
+            "clang-O2": [
+              15477146,
+              15649702,
+              15228559,
+              15796741,
+              15311333,
+              15075145,
+              15323460
+            ],
+            "raw-keel-full": [
+              19355848,
+              19082410,
+              19060435,
+              18930739,
+              19129377,
+              19241677,
+              19275809
+            ],
+            "raw-clif-speed": [
+              16829531,
+              16809493,
+              16748681,
+              16796424,
+              16678383,
+              16696000,
+              16748760
+            ],
+            "O-keel-full": [
+              19683677,
+              19328147,
+              19524670,
+              19633383,
+              19704219,
+              19438508,
+              19454788
+            ],
+            "O-clif-speed": [
+              17752871,
+              17538176,
+              17658664,
+              17583103,
+              17739968,
+              17900538,
+              17656230
+            ],
+            "control": [
+              19376817,
+              19443848,
+              19428131,
+              19628919,
+              19551350,
+              19400925,
+              19455020
+            ]
+          },
+          "keel_over_clif_speed": 1.1056708480324446,
+          "keel_over_clang": 1.2717898377388182,
+          "control_over_keel": 0.9980665697182108
+        },
+        "interp": {
+          "reps": 51,
+          "checksum": "f1d40273c7884f31",
+          "samples_ns": {
+            "clang-O2": [
+              18557677,
+              18571170,
+              18567330,
+              18570828,
+              18720382,
+              18566481,
+              18564519
+            ],
+            "raw-keel-full": [
+              19707682,
+              19683526,
+              19708506,
+              19701496,
+              19706580,
+              19696388,
+              19669268
+            ],
+            "raw-clif-speed": [
+              19809117,
+              19806014,
+              19814188,
+              19810244,
+              19802977,
+              19837606,
+              19811232
+            ],
+            "O-keel-full": [
+              19667768,
+              19670915,
+              19673553,
+              19666862,
+              19669961,
+              19683844,
+              19669695
+            ],
+            "O-clif-speed": [
+              19801885,
+              19765952,
+              19795898,
+              19793529,
+              19803174,
+              19814158,
+              19816980
+            ],
+            "control": [
+              19694916,
+              19670041,
+              19665595,
+              19664755,
+              19708678,
+              19670026,
+              19669617
+            ]
+          },
+          "keel_over_clif_speed": 0.993423187601512,
+          "keel_over_clang": 1.0595316258934584,
+          "control_over_keel": 0.9999555689199002
+        },
+        "classify": {
+          "reps": 1258,
+          "checksum": "ffffffffffc0718a",
+          "samples_ns": {
+            "clang-O2": [
+              5821264,
+              5820525,
+              5830032,
+              5828914,
+              5824048,
+              5835628,
+              5823730
+            ],
+            "raw-keel-full": [
+              19540217,
+              19531093,
+              19561289,
+              19564762,
+              19533328,
+              19546315,
+              19586422
+            ],
+            "raw-clif-speed": [
+              10740318,
+              10700772,
+              10588386,
+              10762998,
+              10649482,
+              10658602,
+              10661975
+            ],
+            "O-keel-full": [
+              9347016,
+              9643375,
+              9069540,
+              8897102,
+              9836064,
+              9453217,
+              8919970
+            ],
+            "O-clif-speed": [
+              11270000,
+              11286371,
+              11208453,
+              11190830,
+              11143954,
+              11135919,
+              11327498
+            ],
+            "control": [
+              9741223,
+              9593456,
+              9951613,
+              8931007,
+              9161927,
+              9471050,
+              9076525
+            ]
+          },
+          "keel_over_clif_speed": 0.8293714285714285,
+          "keel_over_clang": 1.6056677724975195,
+          "control_over_keel": 1.003810791423994
+        },
+        "bits": {
+          "reps": 1621,
+          "checksum": "389d4811bd3d2bce",
+          "samples_ns": {
+            "clang-O2": [
+              9952014,
+              9957163,
+              9987170,
+              9970741,
+              10040011,
+              10021438,
+              9976577
+            ],
+            "raw-keel-full": [
+              20417168,
+              20477181,
+              20502381,
+              20535395,
+              20373292,
+              20634212,
+              20443949
+            ],
+            "raw-clif-speed": [
+              16984428,
+              17064760,
+              16980808,
+              16988342,
+              17143140,
+              17188746,
+              17041271
+            ],
+            "O-keel-full": [
+              13198229,
+              13258850,
+              13245237,
+              13199686,
+              13192822,
+              13303697,
+              13262410
+            ],
+            "O-clif-speed": [
+              11454318,
+              11861027,
+              11416799,
+              11467957,
+              11447432,
+              11436711,
+              11442554
+            ],
+            "control": [
+              13215849,
+              13240034,
+              13155533,
+              13258472,
+              13255553,
+              13245914,
+              13244939
+            ]
+          },
+          "keel_over_clif_speed": 1.1524700037528068,
+          "keel_over_clang": 1.3262252469918907,
+          "control_over_keel": 0.9986826677805919
+        },
+        "narrow": {
+          "reps": 826,
+          "checksum": "00000006fd85d480",
+          "samples_ns": {
+            "clang-O2": [
+              4323654,
+              4316155,
+              4316836,
+              4316148,
+              4342389,
+              4326691,
+              4307883
+            ],
+            "raw-keel-full": [
+              14151526,
+              14055956,
+              14132790,
+              14082387,
+              14215295,
+              14271859,
+              14268754
+            ],
+            "raw-clif-speed": [
+              12835827,
+              13147258,
+              13163477,
+              13435068,
+              13211171,
+              12897626,
+              13315500
+            ],
+            "O-keel-full": [
+              19915402,
+              20034372,
+              19832437,
+              19853836,
+              20040752,
+              20156037,
+              19877495
+            ],
+            "O-clif-speed": [
+              13270262,
+              13461639,
+              13014915,
+              13443203,
+              13301831,
+              12986909,
+              12923265
+            ],
+            "control": [
+              19934903,
+              19908068,
+              19699915,
+              19802534,
+              19892667,
+              20009422,
+              19933681
+            ]
+          },
+          "keel_over_clif_speed": 1.5066160440619039,
+          "keel_over_clang": 4.614214220766906,
+          "control_over_keel": 0.9936956346822351
+        },
+        "fconv": {
+          "reps": 898,
+          "checksum": "00031062445e902c",
+          "samples_ns": {
+            "clang-O2": [
+              9406702,
+              9406211,
+              9390191,
+              9378888,
+              9415628,
+              9399027,
+              9400980
+            ],
+            "raw-keel-full": [
+              19551725,
+              19271815,
+              19129094,
+              19098915,
+              19459100,
+              19261505,
+              18843524
+            ],
+            "raw-clif-speed": [
+              17460074,
+              17546854,
+              17420122,
+              17237613,
+              17543939,
+              17274633,
+              17546945
+            ],
+            "O-keel-full": [
+              15384105,
+              15855628,
+              15833740,
+              15587884,
+              15537231,
+              15424604,
+              15670183
+            ],
+            "O-clif-speed": [
+              17138814,
+              17019256,
+              16925304,
+              17511856,
+              17201441,
+              17074567,
+              17188518
+            ],
+            "control": [
+              15757977,
+              15587823,
+              14839495,
+              15887672,
+              15490776,
+              14947355,
+              15717773
+            ]
+          },
+          "keel_over_clif_speed": 0.9033672127673867,
+          "keel_over_clang": 1.6620183544147238,
+          "control_over_keel": 0.9970100850016326
+        },
+        "collatz": {
+          "reps": 93,
+          "checksum": "0000000000c24982",
+          "samples_ns": {
+            "clang-O2": [
+              10902873,
+              10919045,
+              10977323,
+              10911008,
+              10979228,
+              10916566,
+              10898117
+            ],
+            "raw-keel-full": [
+              14686639,
+              14654064,
+              14694474,
+              14615120,
+              14683895,
+              14766750,
+              14662033
+            ],
+            "raw-clif-speed": [
+              20198103,
+              20196866,
+              20198233,
+              20203844,
+              20176661,
+              20207537,
+              20208010
+            ],
+            "O-keel-full": [
+              17488561,
+              17288133,
+              17411673,
+              17373993,
+              17509272,
+              17493184,
+              17441001
+            ],
+            "O-clif-speed": [
+              15085361,
+              15105914,
+              15065287,
+              15121402,
+              15071815,
+              15044760,
+              15056709
+            ],
+            "control": [
+              17425865,
+              17442951,
+              17457775,
+              17404834,
+              17358406,
+              17505471,
+              16884035
+            ]
+          },
+          "keel_over_clif_speed": 1.1583541263897708,
+          "keel_over_clang": 1.594763493389517,
+          "control_over_keel": 1.00070238785575
+        },
+        "copy": {
+          "reps": 3041,
+          "checksum": "74d43f86e230feca",
+          "samples_ns": {
+            "clang-O2": [
+              15004036,
+              15008533,
+              15008741,
+              15005386,
+              14998736,
+              15000983,
+              15004201
+            ],
+            "raw-keel-full": [
+              19949494,
+              19973753,
+              19955156,
+              19955291,
+              20371770,
+              19966628,
+              19958537
+            ],
+            "raw-clif-speed": [
+              19923144,
+              19926973,
+              19934729,
+              19919156,
+              19929768,
+              19923241,
+              19927581
+            ],
+            "O-keel-full": [
+              10128027,
+              10119742,
+              10107342,
+              10107258,
+              10113582,
+              10125546,
+              10109180
+            ],
+            "O-clif-speed": [
+              10082565,
+              10081989,
+              10078906,
+              10085498,
+              10081099,
+              10080205,
+              10096582
+            ],
+            "control": [
+              10120847,
+              10123010,
+              10123673,
+              10128552,
+              10128918,
+              10106162,
+              10113246
+            ]
+          },
+          "keel_over_clif_speed": 1.0032221685353948,
+          "keel_over_clang": 0.6742658992721008,
+          "control_over_keel": 1.0004022086855708
+        },
+        "dispatch": {
+          "reps": 800,
+          "checksum": "fa561962f9378940",
+          "samples_ns": {
+            "clang-O2": [
+              15327120,
+              14662504,
+              15610726,
+              14612946,
+              14702733,
+              15058353,
+              15435702
+            ],
+            "raw-keel-full": [
+              18832819,
+              18744814,
+              19167033,
+              18720012,
+              18648318,
+              18613793,
+              18940163
+            ],
+            "raw-clif-speed": [
+              19607042,
+              19565910,
+              18854978,
+              19600602,
+              19654575,
+              19699593,
+              19010323
+            ],
+            "O-keel-full": [
+              4665313,
+              4696567,
+              4488410,
+              4647924,
+              4382521,
+              4284199,
+              4730741
+            ],
+            "O-clif-speed": [
+              13320112,
+              13561535,
+              13506629,
+              13688313,
+              13489403,
+              13721543,
+              13341026
+            ],
+            "control": [
+              4481293,
+              4850739,
+              4392441,
+              4567099,
+              4481799,
+              4485240,
+              4625723
+            ]
+          },
+          "keel_over_clif_speed": 0.339554187575927,
+          "keel_over_clang": 0.3043828847167635,
+          "control_over_keel": 0.9826105160067161
+        },
+        "names": {
+          "reps": 5084,
+          "checksum": "822f3d9e2488a204",
+          "samples_ns": {
+            "clang-O2": [
+              14618622,
+              14615126,
+              14610759,
+              14618960,
+              14618191,
+              14626550,
+              14612934
+            ],
+            "raw-keel-full": [
+              19024485,
+              19020405,
+              19030538,
+              19013572,
+              19024620,
+              19023530,
+              19025221
+            ],
+            "raw-clif-speed": [
+              19511275,
+              19618385,
+              19208454,
+              20602721,
+              19538080,
+              19728847,
+              19607122
+            ],
+            "O-keel-full": [
+              18980153,
+              18969810,
+              18971399,
+              18970283,
+              18971515,
+              18985133,
+              18973533
+            ],
+            "O-clif-speed": [
+              20844642,
+              21041367,
+              20917789,
+              20931680,
+              19417462,
+              21087447,
+              20910844
+            ],
+            "control": [
+              18988800,
+              18968536,
+              18975328,
+              18974759,
+              18975510,
+              18973743,
+              18969547
+            ]
+          },
+          "keel_over_clif_speed": 0.9069504907999598,
+          "keel_over_clang": 1.2979911872587861,
+          "control_over_keel": 1.0002071012264304
+        },
+        "stackobj": {
+          "reps": 1777,
+          "checksum": "d6706c807a58aca4",
+          "samples_ns": {
+            "clang-O2": [
+              7967162,
+              8029463,
+              8004020,
+              7999022,
+              7908996,
+              7986791,
+              8001873
+            ],
+            "raw-keel-full": [
+              17113837,
+              16845914,
+              16542117,
+              16907975,
+              16346901,
+              16678501,
+              16716399
+            ],
+            "raw-clif-speed": [
+              17893829,
+              18090598,
+              17948710,
+              17937989,
+              18094903,
+              18200954,
+              18104830
+            ],
+            "O-keel-full": [
+              1729608,
+              1761058,
+              1727781,
+              1741601,
+              1733431,
+              1730972,
+              1731186
+            ],
+            "O-clif-speed": [
+              5011154,
+              5016774,
+              5019267,
+              5017344,
+              5012821,
+              5019301,
+              5021020
+            ],
+            "control": [
+              1749637,
+              1735764,
+              1725587,
+              1730078,
+              1736528,
+              1732161,
+              1761385
+            ]
+          },
+          "keel_over_clif_speed": 0.34515163573101126,
+          "keel_over_clang": 0.21709210883373528,
+          "control_over_keel": 1.0006868973039424
+        }
+      },
+      "keel_over_clif_speed": 0.9624328585088784,
+      "keel_over_clang": 1.1400655910100752
+    }
+  },
+  "toolchain": {
+    "apple-m5-max": {
+      "report_sha256": "2c3f411d9d1d5bed18b0294912cb2b3f4bfd8444bbb73bb8b321fc7497f70ffd",
+      "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+      "clang": "Apple clang version 21.0.0 (clang-2100.4.1.1)\nTarget: arm64-apple-darwin27.2.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin\n",
+      "tools": {
+        "keel": {
+          "sha256": "8cb0cc32efc102ed8d890e3a60538be244c269957718a5459b8066b0fed94e7d"
+        },
+        "clang": {
+          "sha256": "ed6f5284033aa2aae6a58427c25ba3ab119947b40365627b24e5d51a4b70a1cd"
+        },
+        "ld": {
+          "sha256": "7f7041b1bb30e5e6a815a55edf374065d5c82e1ab93f84d5b6ed5656ded24bcf"
+        },
+        "selected_clang": {
+          "sha256": "fc5e3cbba6ad54059295cad716aacb05ace8235f5f7a6031f1d8c15d24bd6d66"
+        }
+      },
+      "objects": [
+        {
+          "sha256": "ce1f4576450855d03bacc00c143220be84aca9570296613e40fd6c99304a4cd6",
+          "bytes": 3504,
+          "name": "kernels-clang-cc1as.o"
+        },
+        {
+          "sha256": "52dd33b2a5e3608ad435b8661db053a2d99e22554f01f438376546ad30c9242b",
+          "bytes": 5592,
+          "name": "driver-clang-cc1as.o"
+        }
+      ],
+      "harness_sha256": "7525df13b765bb31bd7281858750b9405546c853e0d3838c3c1b99246a9865f4",
+      "checks_per_executable": 48,
+      "executables": {
+        "keel": {
+          "bytes": 51280,
+          "sha256": "e1159c00fe1995166849d7ad9ae70210abe1233c00467fdf5478b1e6ffd3a3d2"
+        },
+        "keel-dead-strip": {
+          "bytes": 51280,
+          "sha256": "e1159c00fe1995166849d7ad9ae70210abe1233c00467fdf5478b1e6ffd3a3d2"
+        },
+        "apple-ld": {
+          "bytes": 51440,
+          "sha256": "ae7888bebeed1d9021fbed7d472762aaa0e387e558186d04194a35d9a7ff73fb"
+        },
+        "apple-ld-dead-strip": {
+          "bytes": 51448,
+          "sha256": "f8c9f0dde108f5f3a7be45ba6f3f33e7ee0ef0b849730f255a22582a992a3339"
+        },
+        "clang-driver": {
+          "bytes": 51440,
+          "sha256": "01b328728d29295d377a7762e713c5b378223fa3da5555ee49982cd135d2e3d9"
+        }
+      },
+      "assembly": {
+        "samples_ms": {
+          "keel": [
+            7.499667,
+            6.892292,
+            7.078458,
+            7.112042,
+            7.182166,
+            7.180625,
+            7.410458
+          ],
+          "clang-cc1as": [
+            19.441667,
+            18.886834,
+            19.74075,
+            19.577041,
+            19.699,
+            19.886666,
+            19.637042
+          ],
+          "clang-driver": [
+            26.877167,
+            26.284083,
+            26.308417,
+            26.23375,
+            26.18225,
+            26.208708,
+            26.983958
+          ]
+        },
+        "median_ms": {
+          "keel": 7.180625,
+          "clang-cc1as": 19.637042,
+          "clang-driver": 26.284083
+        },
+        "orders_including_warmups": [
+          [
+            "clang-cc1as",
+            "keel",
+            "clang-driver"
+          ],
+          [
+            "clang-cc1as",
+            "keel",
+            "clang-driver"
+          ],
+          [
+            "clang-driver",
+            "keel",
+            "clang-cc1as"
+          ],
+          [
+            "clang-cc1as",
+            "clang-driver",
+            "keel"
+          ],
+          [
+            "clang-cc1as",
+            "keel",
+            "clang-driver"
+          ],
+          [
+            "keel",
+            "clang-driver",
+            "clang-cc1as"
+          ],
+          [
+            "clang-driver",
+            "keel",
+            "clang-cc1as"
+          ],
+          [
+            "clang-driver",
+            "clang-cc1as",
+            "keel"
+          ],
+          [
+            "keel",
+            "clang-driver",
+            "clang-cc1as"
+          ]
+        ]
+      },
+      "link": {
+        "samples_ms": {
+          "keel": [
+            4.726416,
+            4.657333,
+            4.976791,
+            4.138875,
+            4.976,
+            4.822208,
+            5.03025
+          ],
+          "keel-dead-strip": [
+            4.802667,
+            4.526333,
+            4.666625,
+            4.926958,
+            4.798709,
+            4.886375,
+            4.7505
+          ],
+          "apple-ld": [
+            15.019083,
+            15.467916,
+            15.413625,
+            15.321291,
+            15.750916,
+            15.077834,
+            14.787417
+          ],
+          "apple-ld-dead-strip": [
+            15.598167,
+            15.114625,
+            15.02675,
+            15.180625,
+            15.167625,
+            15.327083,
+            14.897709
+          ],
+          "clang-driver": [
+            23.320291,
+            23.276334,
+            23.556917,
+            23.814542,
+            24.119542,
+            23.455417,
+            23.79275
+          ]
+        },
+        "median_ms": {
+          "keel": 4.822208,
+          "keel-dead-strip": 4.798709,
+          "apple-ld": 15.321291,
+          "apple-ld-dead-strip": 15.167625,
+          "clang-driver": 23.556917
+        },
+        "orders_including_warmups": [
+          [
+            "keel",
+            "apple-ld-dead-strip",
+            "keel-dead-strip",
+            "apple-ld",
+            "clang-driver"
+          ],
+          [
+            "keel-dead-strip",
+            "apple-ld-dead-strip",
+            "keel",
+            "clang-driver",
+            "apple-ld"
+          ],
+          [
+            "apple-ld",
+            "keel-dead-strip",
+            "clang-driver",
+            "keel",
+            "apple-ld-dead-strip"
+          ],
+          [
+            "apple-ld",
+            "apple-ld-dead-strip",
+            "keel",
+            "keel-dead-strip",
+            "clang-driver"
+          ],
+          [
+            "keel-dead-strip",
+            "apple-ld-dead-strip",
+            "clang-driver",
+            "apple-ld",
+            "keel"
+          ],
+          [
+            "keel",
+            "apple-ld-dead-strip",
+            "keel-dead-strip",
+            "apple-ld",
+            "clang-driver"
+          ],
+          [
+            "apple-ld",
+            "apple-ld-dead-strip",
+            "keel-dead-strip",
+            "clang-driver",
+            "keel"
+          ],
+          [
+            "apple-ld",
+            "clang-driver",
+            "keel-dead-strip",
+            "apple-ld-dead-strip",
+            "keel"
+          ],
+          [
+            "apple-ld-dead-strip",
+            "keel-dead-strip",
+            "apple-ld",
+            "keel",
+            "clang-driver"
+          ]
+        ]
+      }
+    },
+    "amd-zen5-linux": {
+      "report_sha256": "9c2af23b1b8d41e982aa93b75edb7a0cff8a714aa9e059efe39910a2f58968f5",
+      "platform": "Linux-7.3.5-1-cachyos-x86_64-with-glibc2.44",
+      "clang": "clang version 23.1.5\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin\n",
+      "tools": {
+        "keel": {
+          "sha256": "256a44d52ec3ebb78f1b83e5c7a49e186a277dbb8bc5621890919c9ce98fa981",
+          "version": "811c69a17ff8078bfe162219b6b65564188735f9"
+        },
+        "ld.bfd": {
+          "sha256": "239eadb638b144619992d527efbd85cb545977807cee349606b8ade9bc0a47aa",
+          "version": "GNU ld (GNU Binutils) 2.47\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty."
+        },
+        "ld.lld": {
+          "sha256": "365a9cbdeee6a63efbd64ce9c12243ee26dcd0763849ba1b176c4df7f9fc5e19",
+          "version": "LLD 23.1.5 (compatible with GNU linkers)"
+        }
+      },
+      "objects": [
+        {
+          "name": "crt1.o",
+          "sha256": "10ac96ba393f9812f1fa92b6a393a08c4b6f38e6d178320a4f258b4c2454b1ca",
+          "bytes": 2416
+        },
+        {
+          "name": "crti.o",
+          "sha256": "caf7f0c99019735e97e9bfabf52c376e86e1ef92d1b53a63c36a5bc2688e8fcc",
+          "bytes": 1240
+        },
+        {
+          "name": "kernels.o",
+          "sha256": "5325b2c3cc713d1886343cb138e9196f269bdde129c7f56de2021ebdd6be41b9",
+          "bytes": 3928
+        },
+        {
+          "name": "driver.o",
+          "sha256": "1d40123046a755dbeba1209198e524130343b9324e73693429656c09927f8340",
+          "bytes": 7104
+        },
+        {
+          "name": "libc.so.6",
+          "sha256": "911cf3db7875760dc893b464ae89bddd4f697a377c710ffc13b84f67cbe1237b",
+          "bytes": 2370976
+        },
+        {
+          "name": "crtn.o",
+          "sha256": "71236f0a232a3686adf2319f3ae172831e8fd8166b9f0764ed184bc4df11be3c",
+          "bytes": 808
+        }
+      ],
+      "harness_sha256": "481cfe1935641d33ed0e2b407be78d8acc7cd7f8cecc0d40de0fdf105dedcb82",
+      "checks_per_executable": 48,
+      "executables": {
+        "keel": {
+          "bytes": 17352,
+          "sha256": "067f89ccf05d213e698ecedf6dff94a91e75330a10e67ec40e405f9b1441863b"
+        },
+        "ld.bfd": {
+          "bytes": 16736,
+          "sha256": "9c6d2c9b3fd3da6a4c5a12c8024de624a8c504d92c720fc6289a43d3bc800413"
+        },
+        "ld.lld": {
+          "bytes": 11616,
+          "sha256": "9f4bc82cb8a8b364f1cc77e9a244d982b22c1cfe5ff1c0d2c081b6c938f2167e"
+        }
+      },
+      "link": {
+        "samples_ms": {
+          "keel": [
+            2.965564,
+            2.956043,
+            2.902433,
+            2.993064,
+            2.968813,
+            3.135237,
+            3.020305,
+            3.073776,
+            2.975074,
+            2.951973,
+            2.953983
+          ],
+          "ld.bfd": [
+            5.997428,
+            5.948698,
+            5.969487,
+            6.06588,
+            5.999709,
+            6.043629,
+            6.145011,
+            6.127792,
+            6.013669,
+            5.997618,
+            5.939968
+          ],
+          "ld.lld": [
+            6.55668,
+            6.54823,
+            6.681383,
+            6.568521,
+            6.52204,
+            6.599531,
+            7.866229,
+            7.47387,
+            6.627252,
+            6.623752,
+            6.495799
+          ]
+        },
+        "median_ms": {
+          "keel": 2.968813,
+          "ld.bfd": 5.999709,
+          "ld.lld": 6.599531
+        },
+        "orders_including_warmups": [
+          [
+            "ld.bfd",
+            "keel",
+            "ld.lld"
+          ],
+          [
+            "ld.bfd",
+            "keel",
+            "ld.lld"
+          ],
+          [
+            "ld.lld",
+            "keel",
+            "ld.bfd"
+          ],
+          [
+            "ld.bfd",
+            "ld.lld",
+            "keel"
+          ],
+          [
+            "ld.bfd",
+            "keel",
+            "ld.lld"
+          ],
+          [
+            "keel",
+            "ld.lld",
+            "ld.bfd"
+          ],
+          [
+            "ld.lld",
+            "keel",
+            "ld.bfd"
+          ],
+          [
+            "ld.lld",
+            "ld.bfd",
+            "keel"
+          ],
+          [
+            "keel",
+            "ld.lld",
+            "ld.bfd"
+          ],
+          [
+            "keel",
+            "ld.bfd",
+            "ld.lld"
+          ],
+          [
+            "keel",
+            "ld.lld",
+            "ld.bfd"
+          ],
+          [
+            "keel",
+            "ld.lld",
+            "ld.bfd"
+          ],
+          [
+            "ld.bfd",
+            "ld.lld",
+            "keel"
+          ]
+        ]
+      }
+    }
+  }
+}

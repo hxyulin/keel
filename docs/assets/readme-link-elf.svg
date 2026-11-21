@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="247" viewBox="0 0 720 247" role="img" aria-labelledby="link-elf-t link-elf-d">
+<style>
+svg{--surface:#fff;--ink:#000;--ink-2:#525252;--grid:#e5e5e5;--keel:#0056d6;--other:#737373;--on-blue:#fff}
+@media (prefers-color-scheme:dark){svg{--surface:#000;--ink:#fff;--ink-2:#a3a3a3;--grid:#262626;--keel:#5b9dff;--other:#737373;--on-blue:#000}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+.number{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
+</style>
+<title id="link-elf-t">ELF objects to glibc executable (lower is better)</title>
+<desc id="link-elf-d">keel link: 2.97 ms; GNU ld.bfd: 6.00 ms; LLVM ld.lld: 6.60 ms. keel link is 2.2× faster than LLVM ld.lld. AMD Zen 5 · Linux, median of 11 runs.</desc>
+<rect width="720" height="247" fill="var(--surface)"/>
+<text x="26" y="44" font-size="21" font-weight="680">ELF objects to glibc executable</text>
+<text class="muted" x="26" y="66" font-size="13">AMD Zen 5 · Linux · median of 11 runs</text>
+<text class="number" x="694" y="43" font-size="23" font-weight="700" text-anchor="end">2.22× faster</text>
+<text class="muted" x="694" y="64" font-size="11" text-anchor="end">keel link vs LLVM ld.lld</text>
+<path d="M178.0 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="178.0" y="211" font-size="12" text-anchor="middle">0</text>
+<path d="M286.5 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="286.5" y="211" font-size="12" text-anchor="middle">2</text>
+<path d="M395.0 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="395.0" y="211" font-size="12" text-anchor="middle">4</text>
+<path d="M503.5 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="503.5" y="211" font-size="12" text-anchor="middle">6</text>
+<path d="M612.0 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="612.0" y="211" font-size="12" text-anchor="middle">8</text>
+<text class="muted" x="395.0" y="232" font-size="13" text-anchor="middle">Wall time (ms) · lower is better</text>
+<text x="26" y="109" font-size="15" font-weight="600">keel link</text>
+<path d="M178.0 104H339.1" stroke="var(--keel)" stroke-width="12"/>
+<text class="number" x="694" y="109" font-size="14" text-anchor="end" font-weight="600">2.97 ms</text>
+<text x="26" y="145" font-size="15">GNU ld.bfd</text>
+<path d="M178.0 140H503.5" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="145" font-size="14" text-anchor="end">6.00 ms</text>
+<text x="26" y="181" font-size="15">LLVM ld.lld</text>
+<path d="M178.0 176H536.0" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="181" font-size="14" text-anchor="end">6.60 ms</text>
+</svg>

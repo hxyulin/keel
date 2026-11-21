@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="229" viewBox="0 0 720 229" role="img" aria-labelledby="cranelift-runtime-t cranelift-runtime-d">
+<style>
+svg{--surface:#fff;--ink:#000;--ink-2:#525252;--grid:#e5e5e5;--keel:#0056d6;--other:#737373;--on-blue:#fff}
+@media (prefers-color-scheme:dark){svg{--surface:#000;--ink:#fff;--ink-2:#a3a3a3;--grid:#262626;--keel:#5b9dff;--other:#737373;--on-blue:#000}}
+text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
+.muted{fill:var(--ink-2)}
+.number{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
+</style>
+<title id="cranelift-runtime-t">Keel runtime on the same optimized IR (lower is better)</title>
+<desc id="cranelift-runtime-d">x86-64 Linux: 0.96×; AArch64 macOS: 0.90× 21 kernels per host, geometric mean of paired ratios.</desc>
+<rect width="720" height="229" fill="var(--surface)"/>
+<text x="26" y="44" font-size="21" font-weight="680">Keel runtime on the same optimized IR</text>
+<text class="muted" x="26" y="66" font-size="13">21 kernels per host · geometric mean of paired ratios</text>
+<path d="M178.0 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="178.0" y="193" font-size="12" text-anchor="middle">0.875×</text>
+<path d="M250.3 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="250.3" y="193" font-size="12" text-anchor="middle">0.9×</text>
+<path d="M322.7 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="322.7" y="193" font-size="12" text-anchor="middle">0.925×</text>
+<path d="M395.0 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="395.0" y="193" font-size="12" text-anchor="middle">0.95×</text>
+<path d="M467.3 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="467.3" y="193" font-size="12" text-anchor="middle">0.975×</text>
+<path d="M539.7 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="539.7" y="193" font-size="12" text-anchor="middle">1×</text>
+<path d="M612.0 104V176" stroke="var(--grid)"/>
+<text class="muted number" x="612.0" y="193" font-size="12" text-anchor="middle">1.025×</text>
+<text class="muted" x="395.0" y="214" font-size="13" text-anchor="middle">Run time relative to Cranelift speed · lower is better</text>
+<path d="M539.7 94V176" stroke="var(--ink-2)" stroke-dasharray="3 3"/>
+<text class="muted" x="539.7" y="89" font-size="11" text-anchor="middle">Cranelift speed</text>
+<text x="26" y="127" font-size="15" font-weight="600">x86-64 Linux</text>
+<path d="M539.7 122H431.0" stroke="var(--keel)" stroke-width="3"/>
+<circle cx="431.0" cy="122" r="5" fill="var(--keel)"/>
+<text class="number" x="694" y="127" font-size="14" text-anchor="end" font-weight="600">0.96×</text>
+<text x="26" y="163" font-size="15" font-weight="600">AArch64 macOS</text>
+<path d="M539.7 158H239.2" stroke="var(--keel)" stroke-width="3"/>
+<circle cx="239.2" cy="158" r="5" fill="var(--keel)"/>
+<text class="number" x="694" y="163" font-size="14" text-anchor="end" font-weight="600">0.90×</text>
+</svg>

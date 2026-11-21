@@ -1,37 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="248" viewBox="0 0 720 248" role="img" aria-labelledby="link-t link-d">
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="247" viewBox="0 0 720 247" role="img" aria-labelledby="link-t link-d">
 <style>
-svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
-@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+svg{--surface:#fff;--ink:#000;--ink-2:#525252;--grid:#e5e5e5;--keel:#0056d6;--other:#737373;--on-blue:#fff}
+@media (prefers-color-scheme:dark){svg{--surface:#000;--ink:#fff;--ink-2:#a3a3a3;--grid:#262626;--keel:#5b9dff;--other:#737373;--on-blue:#000}}
 text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 .muted{fill:var(--ink-2)}
+.number{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
 </style>
-<title id="link-t">Objects → signed executable (lower is better)</title>
-<desc id="link-d">keel link: 16.7 ms; Apple ld: 14.7 ms; clang: 22.4 ms. keel link is 1.1× slower than Apple ld. Apple M5 Max · macOS 27, median of 7 runs.</desc>
-<rect width="720" height="248" rx="10" fill="var(--surface)"/>
-<text x="24" y="38" font-size="18" font-weight="650">Objects → signed executable</text>
-<text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 runs</text>
-<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">1.1× slower</text>
-<text class="muted" x="696" y="60" font-size="12" text-anchor="end">keel link vs Apple ld</text>
-<path d="M174.0 78V186" stroke="var(--grid)"/>
-<text class="muted" x="174.0" y="202" font-size="11" text-anchor="middle">0</text>
-<path d="M261.6 78V186" stroke="var(--grid)"/>
-<text class="muted" x="261.6" y="202" font-size="11" text-anchor="middle">5</text>
-<path d="M349.2 78V186" stroke="var(--grid)"/>
-<text class="muted" x="349.2" y="202" font-size="11" text-anchor="middle">10</text>
-<path d="M436.8 78V186" stroke="var(--grid)"/>
-<text class="muted" x="436.8" y="202" font-size="11" text-anchor="middle">15</text>
-<path d="M524.4 78V186" stroke="var(--grid)"/>
-<text class="muted" x="524.4" y="202" font-size="11" text-anchor="middle">20</text>
-<path d="M612.0 78V186" stroke="var(--grid)"/>
-<text class="muted" x="612.0" y="202" font-size="11" text-anchor="middle">25</text>
-<text class="muted" x="393.0" y="226" font-size="12" text-anchor="middle">Wall time (ms) · lower is better</text>
-<text x="162" y="101.0" font-size="13" text-anchor="end" font-weight="600">keel link</text>
-<path d="M174 87.0h289.17a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-289.17z" fill="var(--keel)"/>
-<text x="475.17" y="101.0" font-size="12" font-weight="600">16.7 ms</text>
-<text x="162" y="135.0" font-size="13" text-anchor="end">Apple ld</text>
-<path d="M174 121.0h253.39a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-253.39z" fill="var(--other)"/>
-<text x="439.39" y="135.0" font-size="12">14.7 ms</text>
-<text x="162" y="169.0" font-size="13" text-anchor="end">clang</text>
-<path d="M174 155.0h388.18a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-388.18z" fill="var(--other)"/>
-<text x="574.18" y="169.0" font-size="12">22.4 ms</text>
+<title id="link-t">Mach-O objects to signed executable (lower is better)</title>
+<desc id="link-d">keel link: 4.82 ms; Apple ld: 15.3 ms; clang driver: 23.6 ms. keel link is 3.2× faster than Apple ld. Apple M5 Max · macOS, median of 7 runs.</desc>
+<rect width="720" height="247" fill="var(--surface)"/>
+<text x="26" y="44" font-size="21" font-weight="680">Mach-O objects to signed executable</text>
+<text class="muted" x="26" y="66" font-size="13">Apple M5 Max · macOS · median of 7 runs</text>
+<text class="number" x="694" y="43" font-size="23" font-weight="700" text-anchor="end">3.18× faster</text>
+<text class="muted" x="694" y="64" font-size="11" text-anchor="end">keel link vs Apple ld</text>
+<path d="M178.0 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="178.0" y="211" font-size="12" text-anchor="middle">0</text>
+<path d="M264.8 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="264.8" y="211" font-size="12" text-anchor="middle">5</text>
+<path d="M351.6 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="351.6" y="211" font-size="12" text-anchor="middle">10</text>
+<path d="M438.4 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="438.4" y="211" font-size="12" text-anchor="middle">15</text>
+<path d="M525.2 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="525.2" y="211" font-size="12" text-anchor="middle">20</text>
+<path d="M612.0 86V194" stroke="var(--grid)"/>
+<text class="muted number" x="612.0" y="211" font-size="12" text-anchor="middle">25</text>
+<text class="muted" x="395.0" y="232" font-size="13" text-anchor="middle">Wall time (ms) · lower is better</text>
+<text x="26" y="109" font-size="15" font-weight="600">keel link</text>
+<path d="M178.0 104H261.7" stroke="var(--keel)" stroke-width="12"/>
+<text class="number" x="694" y="109" font-size="14" text-anchor="end" font-weight="600">4.82 ms</text>
+<text x="26" y="145" font-size="15">Apple ld</text>
+<path d="M178.0 140H444.0" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="145" font-size="14" text-anchor="end">15.3 ms</text>
+<text x="26" y="181" font-size="15">clang driver</text>
+<path d="M178.0 176H586.9" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="181" font-size="14" text-anchor="end">23.6 ms</text>
 </svg>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Current macOS arm64 CLI assembly/link sample."""
+"""Compare native command-line assemblers and linkers on macOS or Linux."""
 import argparse
 import hashlib
 import importlib.util
@@ -37,6 +37,107 @@ def run(argv, *, quiet=False):
     return p.stdout.decode()
 
 
+def linux_link(a, out, keel):
+    """Link the same Clang-built objects and glibc startup files with each tool."""
+    clang = Path(shutil.which('clang')).resolve()
+    tools = {'keel': keel}
+    for name in ('ld.bfd', 'ld.lld', 'mold'):
+        if path := shutil.which(name):
+            tools[name] = Path(path).absolute()
+    require(len(tools) >= 2, 'install an ELF comparison linker')
+    triple = 'x86_64-unknown-linux-gnu'
+    interpreter = '/lib64/ld-linux-x86-64.so.2'
+    require(Path(interpreter).is_file(), 'the glibc ELF interpreter is required')
+    report = {
+        'schema': 1,
+        'source_commit': run(['git', 'rev-parse', 'HEAD']).strip(),
+        'platform': platform.platform(),
+        'cpu': next(line.split(':', 1)[1].strip() for line in Path('/proc/cpuinfo').read_text().splitlines()
+                    if line.startswith('model name')),
+        'affinity': sorted(os.sched_getaffinity(0)),
+        'load_before': os.getloadavg(),
+        'clang_version': run([clang, '--version']),
+        'harness_sha256': sha(__file__),
+        'warmups': 2,
+        'rounds': 11,
+        'seed': 20261024,
+    }
+    sources = {
+        'kernels': ROOT / 'crates/keel/tests/fixtures/runtime-kernels.c',
+        'driver': ROOT / 'suite/linker/fixtures/driver.c',
+    }
+    application_objects = []
+    build_commands = []
+    for name, source in sources.items():
+        obj = out / f'{name}.o'
+        command = [str(clang), '-target', triple, '-O0', '-fPIC', '-c', str(source), '-o', str(obj)]
+        run(command, quiet=True)
+        build_commands.append(command)
+        application_objects.append(obj)
+
+    def glibc_file(name):
+        path = Path(run([clang, f'-print-file-name={name}']).strip())
+        require(path.is_absolute() and path.is_file(), f'Clang did not locate {name}')
+        return path.resolve()
+
+    # Use the actual DSO rather than the distribution's libc.so linker script.
+    inputs = [glibc_file('crt1.o'), glibc_file('crti.o'), *application_objects,
+              glibc_file('libc.so.6'), glibc_file('crtn.o')]
+    commands = {name: [str(tool), *(['link', '--target', triple] if name == 'keel' else []),
+                       '--dynamic-linker', interpreter, *map(str, inputs), '-o', str(out / 'program')]
+                for name, tool in tools.items()}
+    report['build_commands'] = build_commands
+    report['sources'] = {str(p.relative_to(ROOT)): sha(p) for p in sources.values()}
+    report['tools'] = {'keel': {'sha256': sha(keel), 'version': report['source_commit']}}
+    report['tools'].update({name: {'sha256': sha(tool), 'version': run([tool, '--version']).strip()}
+                            for name, tool in tools.items() if name != 'keel'})
+    frozen_inputs = {p: sha(p) for p in inputs}
+    report['objects'] = [{'name': p.name, 'sha256': digest, 'bytes': p.stat().st_size}
+                         for p, digest in frozen_inputs.items()]
+
+    sys.path.insert(0, str(ROOT / 'suite/linker/fixtures'))
+    import oracle
+
+    seed = report['seed']
+    lengths = (0, 1, 33, 257)
+    answers = [(n, oracle.reference(*oracle.inputs(n, seed))) for n in lengths]
+    verified = {}
+    for name, command in commands.items():
+        exe = out / f'link-{name}'
+        run([*command[:-1], exe], quiet=True)
+        for n, cases in answers:
+            for case, expected in cases.items():
+                result = json.loads(run([exe, 'check', case, n, 1, seed, expected]))
+                require(result['result'] == expected, f'{name}: {case} length {n}: oracle mismatch')
+        verified[name] = {'bytes': exe.stat().st_size, 'sha256': sha(exe)}
+    report['correctness'] = {'passed': True, 'checks_per_executable': sum(len(c) for _, c in answers),
+                             'lengths': lengths, 'verified_output': verified}
+
+    orders = []
+    samples = {name: [] for name in commands}
+    rng = random.Random(seed)
+    if not a.correctness_only:
+        for round_no in range(report['warmups'] + report['rounds']):
+            order = list(commands)
+            rng.shuffle(order)
+            orders.append(order)
+            for name in order:
+                start = time.perf_counter_ns()
+                run(commands[name], quiet=True)
+                elapsed = time.perf_counter_ns() - start
+                if round_no >= report['warmups']:
+                    samples[name].append(elapsed / 1e6)
+    report['link'] = {'commands': commands, 'orders_including_warmups': orders, 'samples_ms': samples,
+                      'median_ms': {name: statistics.median(values) for name, values in samples.items() if values}}
+    report['load_after'] = os.getloadavg()
+    for path, digest in frozen_inputs.items():
+        require(sha(path) == digest, f'input changed during timing: {path}')
+    for name, path in tools.items():
+        require(sha(path) == report['tools'][name]['sha256'], f'linker changed during timing: {name}')
+    (out / 'raw.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps(report['correctness'] if a.correctness_only else report['link']['median_ms'], indent=2))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--keel', type=Path, required=True)
@@ -46,6 +147,9 @@ def main():
     out = a.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     keel = a.keel.resolve()
+    if (platform.system(), platform.machine()) == ('Linux', 'x86_64'):
+        linux_link(a, out, keel)
+        return
     clang = Path(shutil.which('clang')).resolve()
     selected_clang = Path(run(['xcrun', '--find', 'clang']).strip()).resolve()
     ld = Path(run(['xcrun', '--find', 'ld']).strip()).resolve()

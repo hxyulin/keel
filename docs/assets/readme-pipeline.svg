@@ -1,9 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="720" height="204" viewBox="0 0 720 204" role="img" aria-labelledby="pipeline-t pipeline-d">
 <style>
-svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
-@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+svg{--surface:#fff;--ink:#000;--ink-2:#525252;--grid:#e5e5e5;--keel:#0056d6;--other:#737373;--on-blue:#fff}
+@media (prefers-color-scheme:dark){svg{--surface:#000;--ink:#fff;--ink-2:#a3a3a3;--grid:#262626;--keel:#5b9dff;--other:#737373;--on-blue:#000}}
 text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 .muted{fill:var(--ink-2)}
+.number{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
 rect.stage{fill:none;stroke:var(--ink-2);stroke-width:1.25}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 </style>
@@ -34,13 +35,13 @@ rect.stage{fill:none;stroke:var(--ink-2);stroke-width:1.25}
 <path d="M674 52.0H696" stroke="var(--ink-2)" stroke-width="1.25" marker-end="url(#arrow)"/>
 <text class="muted mono" x="685.0" y="44.0" font-size="10" text-anchor="middle">exe</text>
 <rect x="64" y="100" width="474" height="20" rx="4" fill="var(--keel)"/>
-<text class="mono" x="301.0" y="114" font-size="12" text-anchor="middle" style="fill:#fff">keel cc</text>
+<text class="mono" x="301.0" y="114" font-size="12" text-anchor="middle" style="fill:var(--on-blue)">keel cc</text>
 <rect x="194" y="130" width="344" height="20" rx="4" fill="var(--keel)"/>
-<text class="mono" x="366.0" y="144" font-size="12" text-anchor="middle" style="fill:#fff">keel compile</text>
+<text class="mono" x="366.0" y="144" font-size="12" text-anchor="middle" style="fill:var(--on-blue)">keel compile</text>
 <rect x="194" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
-<text class="mono" x="236.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel opt</text>
+<text class="mono" x="236.0" y="174" font-size="12" text-anchor="middle" style="fill:var(--on-blue)">keel opt</text>
 <rect x="454" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
-<text class="mono" x="496.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel asm</text>
+<text class="mono" x="496.0" y="174" font-size="12" text-anchor="middle" style="fill:var(--on-blue)">keel asm</text>
 <rect x="584" y="160" width="84" height="20" rx="4" fill="var(--keel)"/>
-<text class="mono" x="626.0" y="174" font-size="12" text-anchor="middle" style="fill:#fff">keel link</text>
+<text class="mono" x="626.0" y="174" font-size="12" text-anchor="middle" style="fill:var(--on-blue)">keel link</text>
 </svg>

@@ -1,40 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="282" viewBox="0 0 720 282" role="img" aria-labelledby="ir-object-t ir-object-d">
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="283" viewBox="0 0 720 283" role="img" aria-labelledby="ir-object-t ir-object-d">
 <style>
-svg{--surface:#fcfcfb;--ink:#0b0b0b;--ink-2:#52514e;--grid:#e4e3df;--keel:#2a78d6;--other:#a3a29b}
-@media (prefers-color-scheme:dark){svg{--surface:#1a1a19;--ink:#f0efec;--ink-2:#c3c2b7;--grid:#3a3935;--keel:#3987e5;--other:#6f6e68}}
+svg{--surface:#fff;--ink:#000;--ink-2:#525252;--grid:#e5e5e5;--keel:#0056d6;--other:#737373;--on-blue:#fff}
+@media (prefers-color-scheme:dark){svg{--surface:#000;--ink:#fff;--ink-2:#a3a3a3;--grid:#262626;--keel:#5b9dff;--other:#737373;--on-blue:#000}}
 text{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;fill:var(--ink)}
 .muted{fill:var(--ink-2)}
+.number{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}
 </style>
-<title id="ir-object-t">Keel IR → object file (backend only) (lower is better)</title>
-<desc id="ir-object-d">Keel baseline: 415 µs; Keel full: 474 µs; Cranelift none: 765 µs; Cranelift speed: 1040 µs. Keel full is 2.2× faster than Cranelift speed. Apple M5 Max · macOS 27, median of 7 runs.</desc>
-<rect width="720" height="282" rx="10" fill="var(--surface)"/>
-<text x="24" y="38" font-size="18" font-weight="650">Keel IR → object file (backend only)</text>
-<text class="muted" x="24" y="60" font-size="12">Apple M5 Max · macOS 27 · median of 7 runs</text>
-<text x="696" y="40" font-size="26" font-weight="700" text-anchor="end">2.2× faster</text>
-<text class="muted" x="696" y="60" font-size="12" text-anchor="end">Keel full vs Cranelift speed</text>
-<path d="M174.0 78V220" stroke="var(--grid)"/>
-<text class="muted" x="174.0" y="236" font-size="11" text-anchor="middle">0</text>
-<path d="M261.6 78V220" stroke="var(--grid)"/>
-<text class="muted" x="261.6" y="236" font-size="11" text-anchor="middle">250</text>
-<path d="M349.2 78V220" stroke="var(--grid)"/>
-<text class="muted" x="349.2" y="236" font-size="11" text-anchor="middle">500</text>
-<path d="M436.8 78V220" stroke="var(--grid)"/>
-<text class="muted" x="436.8" y="236" font-size="11" text-anchor="middle">750</text>
-<path d="M524.4 78V220" stroke="var(--grid)"/>
-<text class="muted" x="524.4" y="236" font-size="11" text-anchor="middle">1000</text>
-<path d="M612.0 78V220" stroke="var(--grid)"/>
-<text class="muted" x="612.0" y="236" font-size="11" text-anchor="middle">1250</text>
-<text class="muted" x="393.0" y="260" font-size="12" text-anchor="middle">Wall time (µs) · lower is better</text>
-<text x="162" y="101.0" font-size="13" text-anchor="end" font-weight="600">Keel baseline</text>
-<path d="M174 87.0h141.55a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-141.55z" fill="var(--keel)"/>
-<text x="327.55" y="101.0" font-size="12" font-weight="600">415 µs</text>
-<text x="162" y="135.0" font-size="13" text-anchor="end" font-weight="600">Keel full</text>
-<path d="M174 121.0h161.94a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-161.94z" fill="var(--keel)"/>
-<text x="347.94" y="135.0" font-size="12" font-weight="600">474 µs</text>
-<text x="162" y="169.0" font-size="13" text-anchor="end">Cranelift none</text>
-<path d="M174 155.0h264.01a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-264.01z" fill="var(--other)"/>
-<text x="450.01" y="169.0" font-size="12">765 µs</text>
-<text x="162" y="203.0" font-size="13" text-anchor="end">Cranelift speed</text>
-<path d="M174 189.0h360.26a4 4 0 0 1 4 4v12a4 4 0 0 1 -4 4h-360.26z" fill="var(--other)"/>
-<text x="546.26" y="203.0" font-size="12">1040 µs</text>
+<title id="ir-object-t">Optimized Keel IR to object (lower is better)</title>
+<desc id="ir-object-d">Keel baseline: 1.48 ms; Keel full: 1.53 ms; Cranelift none: 1.84 ms; Cranelift speed: 2.48 ms. Keel full is 1.6× faster than Cranelift speed. Core i7-1360P · Linux, 7 in-process runs.</desc>
+<rect width="720" height="283" fill="var(--surface)"/>
+<text x="26" y="44" font-size="21" font-weight="680">Optimized Keel IR to object</text>
+<text class="muted" x="26" y="66" font-size="13">Core i7-1360P · Linux · 7 in-process runs</text>
+<text class="number" x="694" y="43" font-size="23" font-weight="700" text-anchor="end">1.62× faster</text>
+<text class="muted" x="694" y="64" font-size="11" text-anchor="end">Keel full vs Cranelift speed</text>
+<path d="M178.0 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="178.0" y="247" font-size="12" text-anchor="middle">0</text>
+<path d="M264.8 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="264.8" y="247" font-size="12" text-anchor="middle">0.5</text>
+<path d="M351.6 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="351.6" y="247" font-size="12" text-anchor="middle">1</text>
+<path d="M438.4 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="438.4" y="247" font-size="12" text-anchor="middle">1.5</text>
+<path d="M525.2 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="525.2" y="247" font-size="12" text-anchor="middle">2</text>
+<path d="M612.0 86V230" stroke="var(--grid)"/>
+<text class="muted number" x="612.0" y="247" font-size="12" text-anchor="middle">2.5</text>
+<text class="muted" x="395.0" y="268" font-size="13" text-anchor="middle">Wall time (ms) · lower is better</text>
+<text x="26" y="109" font-size="15" font-weight="600">Keel baseline</text>
+<path d="M178.0 104H435.3" stroke="var(--keel)" stroke-width="12"/>
+<text class="number" x="694" y="109" font-size="14" text-anchor="end" font-weight="600">1.48 ms</text>
+<text x="26" y="145" font-size="15" font-weight="600">Keel full</text>
+<path d="M178.0 140H443.8" stroke="var(--keel)" stroke-width="12"/>
+<text class="number" x="694" y="145" font-size="14" text-anchor="end" font-weight="600">1.53 ms</text>
+<text x="26" y="181" font-size="15">Cranelift none</text>
+<path d="M178.0 176H496.7" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="181" font-size="14" text-anchor="end">1.84 ms</text>
+<text x="26" y="217" font-size="15">Cranelift speed</text>
+<path d="M178.0 212H608.0" stroke="var(--other)" stroke-width="12"/>
+<text class="number" x="694" y="217" font-size="14" text-anchor="end">2.48 ms</text>
 </svg>
