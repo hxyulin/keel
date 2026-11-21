@@ -40,6 +40,92 @@ fn goto_outputs_reach_all_successors_after_register_restoration() {
     );
 }
 
+#[test]
+fn kernel_size_goto_branches_directly_with_register_or_spilled_inputs() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request, x86_64::CodeModel};
+
+    let module = compile(
+        r#"
+        long store_if_positive(long value, long *dst, long live) {
+            asm goto("testq %1,%1; js %l[negative]; movq %1,%0"
+                     : "=m"(*dst) : "r"(value) : "cc" : negative);
+            return *dst + live;
+        negative:
+            return *dst - live;
+        }
+        long writeback(long value) {
+            asm goto("addq $7,%0; js %l[negative]"
+                     : "+r"(value) : : "cc" : negative);
+            return value + 3;
+        negative:
+            return value - 2;
+        }
+        "#,
+    )
+    .unwrap();
+    let empty = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let features = Features::for_level(CpuLevel::V1);
+    let selector = FeatureSelector {
+        inner: &SelectionTier::Full,
+        features,
+    };
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &AllocationTier::Compact,
+    };
+    let mut emission = EmissionOptions::default();
+    emission.goal = CodegenGoal::Size;
+    emission.x86_code_model = Some(CodeModel::Kernel);
+    for (label, pools) in [
+        ("registers", &keel_codegen::x86_64::REGISTERS),
+        ("spills", &empty),
+    ] {
+        let request = Request::new(Target::X86_64LinuxGnu, pipeline)
+            .pools(pools)
+            .emission(emission);
+        let text = request.text(&module).unwrap();
+        let (store, writeback) = text.split_once("\"writeback\":").unwrap();
+        assert!(store.contains("js \".Lstore_if_positive_block"), "{store}");
+        let trampoline =
+            |line: &str| line.starts_with(".Lkeel_asm_goto_") && line.ends_with("_end:");
+        assert!(!store.lines().any(trampoline), "{store}");
+        assert!(writeback.lines().any(trampoline), "{writeback}");
+        let object = keel_asm::x86::assemble_program_object_with_features(
+            &request.program(&module).unwrap(),
+            features,
+        )
+        .unwrap();
+        assert_eq!(
+            object,
+            keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
+        );
+        let name = format!("kernel-size-goto-{label}");
+        keel_test_support::native_program!(name)
+            .file(
+                "main.c",
+                r#"
+                long store_if_positive(long, long *, long);
+                long writeback(long);
+                int main(void) {
+                    long dst = 17;
+                    if (store_if_positive(-4, &dst, 8) != 9 || dst != 17) return 1;
+                    if (store_if_positive(4, &dst, 8) != 12 || dst != 4) return 2;
+                    if (writeback(-10) != -5 || writeback(2) != 12) return 3;
+                    return 0;
+                }
+                "#,
+            )
+            .file("goto.o", object)
+            .link(["-O2", "-no-pie", "main.c", "goto.o"])
+            .check();
+    }
+}
+
 /// Checks object parity across codegen choices and links each distinct
 /// object with `main`, which must exit zero and print `stdout` if given.
 fn check_codegen(source: &str, prefix: &str, main: &str, stdout: Option<&str>) {

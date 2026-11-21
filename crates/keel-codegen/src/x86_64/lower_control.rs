@@ -119,7 +119,15 @@ impl FunctionCompiler<'_> {
                 arg,
                 ref dests,
                 ref cases,
-            } => self.switch(inst, arg, dests, cases, false),
+            } => {
+                if self.direct_asm_switch.take() == Some(inst) {
+                    let default = &dests[0];
+                    self.block_args(default, 0);
+                    self.branch_unless_next(default.block);
+                } else {
+                    self.switch(inst, arg, dests, cases, false);
+                }
+            }
             InstData::Trap => self.emit(Opcode::Ud2, []),
             InstData::Return { ref args } => {
                 if self.named.locs.first() == Some(&ArgLoc::SretX87) {

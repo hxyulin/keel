@@ -1107,6 +1107,7 @@ struct FunctionCompiler<'a> {
     string_io_programs: HashMap<Inst, keel_asm_ir::Program>,
     inline_asm_home: Option<usize>,
     inline_asm_plans: HashMap<Inst, inline_asm::Plan>,
+    direct_asm_switch: Option<Inst>,
     /// Emission consumes `inline_asm_plans`; this keeps whether there were any.
     has_inline_asm: bool,
     rflags_home: Option<usize>,
@@ -1301,12 +1302,30 @@ impl<'a> FunctionCompiler<'a> {
                 .iter()
                 .chain(pools.callee_saved)
                 .all(|&r| r != S0 && r != S1);
-        let inline_asm_plans =
-            plan::plan_inline_asm(module, func, present, &shape, features, compact_inputs)
-                .map_err(err)?;
+        let scratch_mask = (1 << S0) | (1 << S1) | (1 << S2);
+        let goto_context = (kernel_size
+            && present.inline_asm
+            && module.files.is_empty()
+            && bare_label(&func.name)
+            && alloc.mentioned_gprs() & scratch_mask == 0)
+            .then_some(inline_asm::GotoContext {
+                allocation: &alloc,
+                facts: &facts,
+                selection: &covers.selection,
+            });
+        let inline_asm_plans = plan::plan_inline_asm(
+            module,
+            func,
+            present,
+            &shape,
+            features,
+            compact_inputs,
+            goto_context.as_ref(),
+        )
+        .map_err(err)?;
         let asm_bytes = inline_asm_plans
             .values()
-            .map(|p| p.bytes)
+            .map(inline_asm::Plan::bytes)
             .max()
             .unwrap_or(0);
         let inline_asm_home = (asm_bytes != 0).then_some(system.end.next_multiple_of(8));
@@ -1403,6 +1422,7 @@ impl<'a> FunctionCompiler<'a> {
             inline_asm_home,
             has_inline_asm: !inline_asm_plans.is_empty(),
             inline_asm_plans,
+            direct_asm_switch: None,
             rflags_home: system.rflags_home,
             rflags_programs: HashMap::default(),
             sret_ptr: calls.sret_ptr,

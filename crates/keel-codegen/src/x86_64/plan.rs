@@ -1063,14 +1063,19 @@ pub(super) fn plan_inline_asm(
     shape: &VectorShape,
     features: keel_asm_ir::x86::Features,
     compact_inputs: bool,
+    goto_context: Option<&inline_asm::GotoContext<'_>>,
 ) -> Result<HashMap<Inst, inline_asm::Plan>, String> {
     let mut function_index = None;
     let mut inline_asm_plans = HashMap::default();
     if !present.inline_asm {
         return Ok(inline_asm_plans);
     }
-    for (_, inst) in func.layout_insts() {
-        if matches!(func.inst_data(inst), InstData::InlineAsm { .. }) {
+    for block in func.blocks() {
+        let insts = func.block_insts(block);
+        for (index, &inst) in insts.iter().enumerate() {
+            if !matches!(func.inst_data(inst), InstData::InlineAsm { .. }) {
+                continue;
+            }
             let function_index = *function_index.get_or_insert_with(|| {
                 module
                     .functions
@@ -1083,9 +1088,12 @@ pub(super) fn plan_inline_asm(
                 func,
                 inst,
                 shape,
-                (function_index << 32) | inst.index() as u64,
-                features.avx512f,
-                compact_inputs,
+                inline_asm::PlanOptions {
+                    unique: (function_index << 32) | inst.index() as u64,
+                    avx512f: features.avx512f,
+                    compact_inputs,
+                    direct_goto: goto_context.zip(insts.get(index + 1).copied()),
+                },
             )?;
             inline_asm_plans.insert(inst, plan);
         }
@@ -1113,7 +1121,7 @@ pub(super) fn saved_registers(
     }
     for plan in inline_asm_plans.values() {
         for r in [3, 12, 13, 14, 15] {
-            if plan.saved_regs.contains(&r) && !saved.contains(&r) {
+            if plan.saved_regs().contains(&r) && !saved.contains(&r) {
                 saved.push(r);
             }
         }
