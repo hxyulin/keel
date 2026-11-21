@@ -3169,6 +3169,13 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if self.saved.is_empty() {
+            if self.size_preset && self.short_frame && self.frame_size == 0 && !self.has_inline_asm
+            {
+                // RSP still points at the saved RBP. POP is the same length
+                // as LEAVE and does not copy the frame pointer to RSP.
+                self.emit(Opcode::Pop, [asm_arg(r64(5))]);
+                return;
+            }
             if self.goal == crate::CodegenGoal::Size {
                 self.emit(Opcode::Leave, []);
                 return;

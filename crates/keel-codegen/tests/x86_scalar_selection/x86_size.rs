@@ -291,7 +291,7 @@ fn smaller_layout_frames_and_shared_returns_preserve_transport_parity() {
                     assert!(!text.contains(".p2align\t4"), "{text}");
                     assert!(!text.contains(".p2align\t5"), "{text}");
                     assert!(!function(&text, "leaf").contains("rbp"), "{text}");
-                    assert!(function(&text, "call_only").contains("leave"), "{text}");
+                    assert!(function(&text, "call_only").contains("pop\trbp"), "{text}");
                     let shared = function(&text, "choose");
                     assert_eq!(shared.matches("\tret\n").count(), 1, "{text}");
                     assert!(shared.contains(".Lchoose_return"), "{text}");

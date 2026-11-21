@@ -517,8 +517,9 @@ addition to the Size IR pipeline:
 - Combine single-use integer masks compared with zero into `test`. Use the
   narrowest width that preserves the zero check and keep wide masks that
   cannot use a sign-extended immediate on the ordinary path.
-- Use one-byte `leave` instead of `mov rsp, rbp; pop rbp` when no other
-  callee-saved registers need restoring.
+- Use one-byte `pop rbp` when a fixed empty frame leaves RSP at the saved
+  frame pointer. Use one-byte `leave` when RSP also needs restoring and
+  there are no other callee-saved registers to restore.
 - Share one return epilogue when the function saves registers and has
   several returns. Each redirected return replaces at least seven bytes with a
   jump of at most five.

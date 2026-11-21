@@ -107,6 +107,32 @@ block0(v0: ptr, v1: ptr, v2: ptr):
 }
 
 #[test]
+fn size_restores_a_fixed_empty_frame_with_a_single_pop() {
+    use keel_codegen::{CodegenGoal, CodegenPipeline, EmissionOptions, Request, Target};
+
+    let fixed = LEAF.replace("cc(c)", "cc(c) frame_pointer");
+    let dynamic = fixed.replace(
+        " v1 = iconst",
+        " v3 = intrinsic stack_alloc(v0)\n v1 = iconst",
+    );
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        Target::X86_64LinuxGnu,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let fixed = request.text(&crate::codegen::parse(&fixed)).unwrap();
+    assert!(fixed.contains("\tpop\trbp"), "{fixed}");
+    assert!(!fixed.contains("\tleave"), "{fixed}");
+    let dynamic = request.text(&crate::codegen::parse(&dynamic)).unwrap();
+    assert!(dynamic.contains("\tleave"), "{dynamic}");
+}
+
+#[test]
 fn stack_users_observers_and_hidden_calls_retain_frames() {
     let inserted = |inst: &str| LEAF.replace(" v1 = iconst", &format!(" {inst}\n v1 = iconst"));
     let mut sources = vec![
