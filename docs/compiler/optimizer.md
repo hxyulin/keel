@@ -567,8 +567,9 @@ skips an eight-byte-element copy when its byte count is zero. The pass only
 applies when both kinds are present, and it keeps the original intrinsic for
 all other lengths.
 
-In the Full native pipeline, `loop-copy` uses `trap_ub` or `notrap` to widen a forward
-word copy to 32-byte chunks when the destination is at least 32 bytes ahead
+In the Full native pipeline, `loop-rotate` can expose a single-block word copy
+for `loop-copy`. The latter uses `trap_ub` or `notrap` to widen a forward word
+copy to 32-byte chunks when the destination is at least 32 bytes ahead
 of the source. It leaves a final scalar iteration and preserves the scalar
 path for shorter distances, including overlapping copies that repeat bytes.
 The pass also broadcasts an eight-byte pattern from a fixed stack slot to
@@ -883,7 +884,9 @@ excluded. The signature and call arguments stay; the body is not inlined or
 cloned. `empty-calls` removes calls proven to have no effect, and
 `unused-functions` removes functions that optimization made unreachable. Both
 treat constructors, destructors, address references, relocations and assembly
-references as roots. Balanced, Size and Full run them late.
+references as roots. Balanced, Size and Full run them late. Full also runs
+`unused-functions` after its first inlining and cleanup round so unreachable
+helpers do not enter the remaining rounds.
 The opt-in `compact-unused-functions` pass first compacts callee declarations that no
 layout instruction references. This lets it discard inlined private Fast bodies
 without leaving imports that require their local definitions. Surviving calls

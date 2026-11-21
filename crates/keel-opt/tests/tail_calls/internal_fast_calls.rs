@@ -81,8 +81,14 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
             "thread-entry-status",
         ])
         .unwrap();
-    assert_eq!(pipeline.last(), Some(&"tail-calls"));
-    assert_eq!(pipeline[pipeline.len() - 2], "internal-fast-calls");
+    assert!(pipeline.ends_with(&[
+        "dce",
+        "unused-functions",
+        "private-aggregate-cleanup",
+        "fast-math",
+        "internal-fast-calls",
+        "tail-calls",
+    ]));
     assert_eq!(
         pipeline
             .iter()
@@ -90,9 +96,6 @@ fn full_finalizes_private_transport_after_cleanup_and_fast_retains_its_schedule(
             .count(),
         1
     );
-    assert_eq!(pipeline[pipeline.len() - 3], "fast-math");
-    assert_eq!(pipeline[pipeline.len() - 4], "private-aggregate-cleanup");
-    assert_eq!(pipeline[pipeline.len() - 5], "dce");
     let source = SOURCE.replace("cc(c) local", "cc(c) noinline local");
     for tier in [OptimizationTier::Fast, OptimizationTier::Full] {
         let mut m = parse(&source).unwrap();

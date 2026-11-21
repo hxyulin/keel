@@ -902,6 +902,7 @@ const FULL_EPILOGUE: [&str; 41] = [
     "dce",
     "loop-reduce-multi",
     "loop-unroll",
+    // Rotation exposes single-block word copies that loop-copy can widen.
     "loop-rotate",
     "loop-copy",
     "phi-simplify",
@@ -965,6 +966,9 @@ const FULL_PARTS: &[&[&str]] = &[
     // The first memory expansion exposes reads of immutable literal bytes.
     &["constant-data"],
     &FULL_ROUND_CLEANUP,
+    // Retire helpers made unreachable by the first inlining round before
+    // building the remaining templates. The epilogue handles later changes.
+    &["unused-functions"],
     &FULL_ROUND,
     &FULL_ROUND,
     &FULL_EPILOGUE,
