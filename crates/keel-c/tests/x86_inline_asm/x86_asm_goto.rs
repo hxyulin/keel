@@ -41,8 +41,8 @@ fn goto_outputs_reach_all_successors_after_register_restoration() {
 }
 
 #[test]
-fn kernel_size_goto_branches_directly_with_register_or_spilled_inputs() {
-    use keel_codegen::{CodegenGoal, EmissionOptions, Request, x86_64::CodeModel};
+fn size_goto_branches_directly_with_register_or_spilled_inputs() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request};
 
     let module = compile(
         r#"
@@ -80,7 +80,6 @@ fn kernel_size_goto_branches_directly_with_register_or_spilled_inputs() {
     };
     let mut emission = EmissionOptions::default();
     emission.goal = CodegenGoal::Size;
-    emission.x86_code_model = Some(CodeModel::Kernel);
     for (label, pools) in [
         ("registers", &keel_codegen::x86_64::REGISTERS),
         ("spills", &empty),
@@ -104,7 +103,7 @@ fn kernel_size_goto_branches_directly_with_register_or_spilled_inputs() {
             object,
             keel_asm::x86::assemble_object_with_features(&text, features).unwrap()
         );
-        let name = format!("kernel-size-goto-{label}");
+        let name = format!("size-goto-{label}");
         keel_test_support::native_program!(name)
             .file(
                 "main.c",

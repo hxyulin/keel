@@ -33,74 +33,7 @@ impl FunctionCompiler<'_> {
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
-                let name = func.symbol_name(symbol);
-                let thread_local = self
-                    .symbols
-                    .data_object(name)
-                    .is_some_and(|d| d.thread_local);
-                // A thread's copies of the thread-locals are at fixed
-                // offsets from its thread pointer, the base of fs, whose
-                // first word points to itself. An executable knows the
-                // offsets of its own at link time (local-exec); others come
-                // from the GOT (initial-exec).
-                let defined = self.symbols.defines(name);
-                // Intel operand syntax reserves names such as `offset`, `ptr`
-                // and register names. Quoting keeps C symbols unambiguous.
-                let name = name.to_owned();
-                if !thread_local && self.code_model != CodeModel::PositionIndependent {
-                    let destination = match self.code_model {
-                        CodeModel::Small => r32(d),
-                        CodeModel::Kernel => r64(d),
-                        CodeModel::PositionIndependent => unreachable!("static address branch"),
-                    };
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(destination),
-                            asm_arg(symbol_address(&name, Modifier::None)),
-                        ],
-                    );
-                } else if thread_local && defined {
-                    self.emit(
-                        Opcode::Mov,
-                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
-                    );
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(symbol_memory(r64(d), &name, Modifier::TpOff)),
-                        ],
-                    );
-                } else if thread_local {
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64)),
-                        ],
-                    );
-                    self.emit(
-                        Opcode::Add,
-                        [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
-                    );
-                } else if defined {
-                    self.emit(
-                        Opcode::Lea,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(symbol_memory(rip(), &name, Modifier::None)),
-                        ],
-                    );
-                } else {
-                    self.emit(
-                        Opcode::Mov,
-                        [
-                            asm_arg(r64(d)),
-                            asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64)),
-                        ],
-                    );
-                }
+                self.materialize_symbol(d, symbol);
                 self.def_done(result, d);
             }
             InstData::StackAddr { slot } => {
@@ -110,6 +43,77 @@ impl FunctionCompiler<'_> {
                 self.def_done(result, d);
             }
             _ => unreachable!("not a constant or address"),
+        }
+    }
+
+    pub(super) fn materialize_symbol(&mut self, d: u8, symbol: keel_ir::Symbol) {
+        let name = self.func.symbol_name(symbol);
+        let thread_local = self
+            .symbols
+            .data_object(name)
+            .is_some_and(|d| d.thread_local);
+        // A thread's copies of the thread-locals are at fixed
+        // offsets from its thread pointer, the base of fs, whose
+        // first word points to itself. An executable knows the
+        // offsets of its own at link time (local-exec); others come
+        // from the GOT (initial-exec).
+        let defined = self.symbols.defines(name);
+        // Intel operand syntax reserves names such as `offset`, `ptr`
+        // and register names. Quoting keeps C symbols unambiguous.
+        let name = name.to_owned();
+        if !thread_local && self.code_model != CodeModel::PositionIndependent {
+            let destination = match self.code_model {
+                CodeModel::Small => r32(d),
+                CodeModel::Kernel => r64(d),
+                CodeModel::PositionIndependent => unreachable!("static address branch"),
+            };
+            self.emit(
+                Opcode::Mov,
+                [
+                    asm_arg(destination),
+                    asm_arg(symbol_address(&name, Modifier::None)),
+                ],
+            );
+        } else if thread_local && defined {
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
+            );
+            self.emit(
+                Opcode::Lea,
+                [
+                    asm_arg(r64(d)),
+                    asm_arg(symbol_memory(r64(d), &name, Modifier::TpOff)),
+                ],
+            );
+        } else if thread_local {
+            self.emit(
+                Opcode::Mov,
+                [
+                    asm_arg(r64(d)),
+                    asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64)),
+                ],
+            );
+            self.emit(
+                Opcode::Add,
+                [asm_arg(r64(d)), asm_arg(sized(fs_zero(), 64))],
+            );
+        } else if defined {
+            self.emit(
+                Opcode::Lea,
+                [
+                    asm_arg(r64(d)),
+                    asm_arg(symbol_memory(rip(), &name, Modifier::None)),
+                ],
+            );
+        } else {
+            self.emit(
+                Opcode::Mov,
+                [
+                    asm_arg(r64(d)),
+                    asm_arg(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64)),
+                ],
+            );
         }
     }
 

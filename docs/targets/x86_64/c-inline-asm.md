@@ -331,13 +331,18 @@ output twice. Input expressions and output addresses are evaluated once.
 All asm remains pinned, including an empty template. Duplicate destinations
 and backward edges use the ordinary C label machinery.
 
-Each label reference names an assembly-local trampoline. The trampoline writes
-an early-clobber selector output with `MOV` and converges with fallthrough
+The frontend lowers each label reference to an assembly-local trampoline.
+The trampoline writes an early-clobber selector output with `MOV` and converges with fallthrough
 before the backend restores GPR homes. An ordinary IR switch then selects the
 C successor. This exposes every possible C edge to SSA, optimization and
 liveness without allowing a raw assembly branch to bypass restoration.
 `%=` gives each emitted instance distinct labels, including cloned inline
 helpers. Label addresses in metadata also name these restoration trampolines.
+
+Size emission can branch to the C block directly when there is one label,
+the template has no register outputs or register clobbers, and the taken edge
+needs no copies. Read-only operands use their allocated registers or reserved
+scratch registers for spills.
 
 Register, flag and memory outputs use the same operand contracts as fallthrough
 asm. Real register outputs are written back after restoration and before C

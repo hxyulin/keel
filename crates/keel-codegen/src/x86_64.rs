@@ -1053,7 +1053,7 @@ enum AggregateResult<'a> {
 struct FunctionCompiler<'a> {
     goal: crate::CodegenGoal,
     short_frame: bool,
-    kernel_immediates: plan::KernelImmediates,
+    size_immediates: plan::SizeImmediates,
     forwarded_returns: HashSet<Inst>,
     /// One return site owns the epilogue when sharing beats even near jumps.
     shared_return: Option<Inst>,
@@ -1266,15 +1266,20 @@ impl<'a> FunctionCompiler<'a> {
         {
             plan::prefer_abi_gprs(func, &named, &mut covers.selection);
         }
-        let kernel_size = goal == crate::CodegenGoal::Size
-            && emission.x86_code_model == Some(CodeModel::Kernel)
-            && !func.attrs.optnone;
-        let kernel_immediates = if kernel_size && module.files.is_empty() {
-            plan::KernelImmediates::select(func, symbols, &facts, &shape, &mut covers.selection)
+        let size_optimized = goal == crate::CodegenGoal::Size && !func.attrs.optnone;
+        let size_immediates = if size_optimized && module.files.is_empty() {
+            plan::SizeImmediates::select(
+                func,
+                symbols,
+                &facts,
+                &shape,
+                emission.x86_code_model.unwrap_or_default(),
+                &mut covers.selection,
+            )
         } else {
-            plan::KernelImmediates::default()
+            plan::SizeImmediates::default()
         };
-        let mut forwarded = if kernel_size && !shape.wide_vectors && module.files.is_empty() {
+        let mut forwarded = if size_optimized && !shape.wide_vectors && module.files.is_empty() {
             plan::forwarded_returns(func, &facts, &mut covers.selection, pipeline)
         } else {
             Vec::new()
@@ -1303,7 +1308,7 @@ impl<'a> FunctionCompiler<'a> {
                 .chain(pools.callee_saved)
                 .all(|&r| r != S0 && r != S1);
         let scratch_mask = (1 << S0) | (1 << S1) | (1 << S2);
-        let goto_context = (kernel_size
+        let goto_context = (size_optimized
             && present.inline_asm
             && module.files.is_empty()
             && bare_label(&func.name)
@@ -1431,11 +1436,12 @@ impl<'a> FunctionCompiler<'a> {
             named,
             frame_size,
             frameless,
-            short_frame: kernel_size
+            short_frame: size_optimized
+                && (!features.avx512f || func.attrs.x86_no_sse)
                 && !frameless
                 && shape.frame_register.is_none()
-                && plan::has_fixed_kernel_frame(func, present),
-            kernel_immediates,
+                && plan::has_fixed_frame(func, present),
+            size_immediates,
             forwarded_returns: forwarded.into_iter().map(|site| site.ret).collect(),
             register_only_frame,
             saved,
@@ -4335,7 +4341,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         };
         let compact_table = (self.goal == crate::CodegenGoal::Size
-            && self.code_model == CodeModel::Kernel
+            && !self.func.attrs.optnone
             && self.func.attrs.cold
             && !replica
             && plan.jump_table()

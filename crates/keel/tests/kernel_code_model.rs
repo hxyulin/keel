@@ -234,7 +234,7 @@ fn kernel_memory_expansion_keeps_small_copies_in_general_registers() {
 }
 
 #[test]
-fn kernel_size_codegen_shortens_static_frames_and_call_sequences() {
+fn size_codegen_obeys_frame_abi_and_symbol_ranges() {
     use std::fmt::Write as _;
 
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kernel-size");
@@ -279,26 +279,24 @@ fn kernel_size_codegen_shortens_static_frames_and_call_sequences() {
     source.push_str("default: return input + 9; } }");
     fs::write(&input, source).unwrap();
 
-    let compile = |extra: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_keel"))
-            .args([
-                "cc",
-                "--target",
-                "x86_64-linux-gnu",
-                "--code-model",
-                "kernel",
-                "--link-intent",
-                "executable",
-                "-mno-sse",
-                "-mstack-alignment=8",
-                "-Os",
-                "-fno-omit-frame-pointer",
-                "-fno-optimize-sibling-calls",
-            ])
-            .args(extra)
-            .arg(&input)
-            .output()
-            .unwrap();
+    let compile = |model: &str, extra: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));
+        command.args([
+            "cc",
+            "--target",
+            "x86_64-linux-gnu",
+            "--code-model",
+            model,
+            "--link-intent",
+            "executable",
+            "-Os",
+            "-fno-omit-frame-pointer",
+            "-fno-optimize-sibling-calls",
+        ]);
+        if model == "kernel" {
+            command.args(["-mno-sse", "-mstack-alignment=8"]);
+        }
+        let output = command.args(extra).arg(&input).output().unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -306,54 +304,71 @@ fn kernel_size_codegen_shortens_static_frames_and_call_sequences() {
         );
         output.stdout
     };
-    let asm = String::from_utf8(compile(&[])).unwrap();
-    let body = |name: &str| {
-        asm.split_once(&format!("\"{name}\":"))
-            .unwrap()
-            .1
-            .split_once(&format!(".size \"{name}\""))
-            .unwrap()
-            .0
-    };
-    assert!(
-        body("fixed_frame").contains("[rsp +"),
-        "{}",
-        body("fixed_frame")
-    );
-    assert!(
-        body("fixed_frame").contains("[rbp +"),
-        "{}",
-        body("fixed_frame")
-    );
-    assert!(body("store_address").contains("], offset \"cache\""));
-    let copy = body("copy_in");
-    let move_source = copy.find("mov\trsi, rdi").unwrap();
-    let move_symbol = copy.find("mov\trdi, offset \"cache\"").unwrap();
-    assert!(move_source < move_symbol, "{copy}");
-    assert!(copy.contains("mov\tedx, 96"), "{copy}");
-    let after_call = body("pass_result").split_once("@PLT").unwrap().1;
-    assert!(!after_call.contains("rax"), "{after_call}");
-    let after_clobber = body("keep_result").rsplit_once("@PLT").unwrap().1;
-    assert!(after_clobber.contains("mov\trax,"), "{after_clobber}");
-    assert!(body("dispatch").contains("movzx\teax, byte ptr"));
+    for (model, address, relocation_type) in [
+        ("pic", "\"cache\"@GOTPCREL", object::elf::R_X86_64_GOTPCREL),
+        (
+            "small",
+            "mov\tedi, offset \"cache\"",
+            object::elf::R_X86_64_32,
+        ),
+        (
+            "kernel",
+            "mov\trdi, offset \"cache\"",
+            object::elf::R_X86_64_32S,
+        ),
+    ] {
+        let asm = String::from_utf8(compile(model, &[])).unwrap();
+        let body = |name: &str| {
+            asm.split_once(&format!("\"{name}\":"))
+                .unwrap()
+                .1
+                .split_once(&format!(".size \"{name}\""))
+                .unwrap()
+                .0
+        };
+        let frame = body("fixed_frame");
+        assert!(
+            frame.contains("[rsp +") && frame.contains("[rbp +"),
+            "{model}: {frame}"
+        );
+        let store = body("store_address");
+        assert_eq!(
+            store.contains("], offset \"cache\""),
+            model == "kernel",
+            "{store}"
+        );
+        let copy = body("copy_in");
+        let move_source = copy.find("mov\trsi, rdi").unwrap();
+        let move_symbol = copy.find(address).unwrap();
+        assert!(move_source < move_symbol, "{copy}");
+        assert!(copy.contains("mov\tedx, 96"), "{copy}");
+        let after_call = body("pass_result").split_once("@PLT").unwrap().1;
+        assert!(!after_call.contains("rax"), "{after_call}");
+        let after_clobber = body("keep_result").rsplit_once("@PLT").unwrap().1;
+        assert!(after_clobber.contains("mov\trax,"), "{after_clobber}");
+        assert!(body("dispatch").contains("movzx\teax, byte ptr"));
 
-    let file_path = dir.join("size.o");
-    compile(&["--emit-object", "-o", file_path.to_str().unwrap()]);
-    let object = fs::read(file_path).unwrap();
-    let from_asm = keel_asm::x86::assemble_object(&asm).unwrap();
-    let structured = object::File::parse(&*object).unwrap();
-    let textual = object::File::parse(&*from_asm).unwrap();
-    let text = structured.section_by_name(".text").unwrap();
-    assert_eq!(
-        text.data().unwrap(),
-        textual.section_by_name(".text").unwrap().data().unwrap()
-    );
-    assert!(text.relocations().any(|(_, relocation)| {
-        relocation.flags()
-            == (object::RelocationFlags::Elf {
-                r_type: object::elf::R_X86_64_32S,
-            })
-    }));
+        let file_path = dir.join("size.o");
+        compile(model, &["--emit-object", "-o", file_path.to_str().unwrap()]);
+        let object = fs::read(file_path).unwrap();
+        let from_asm = keel_asm::x86::assemble_object(&asm).unwrap();
+        let structured = object::File::parse(&*object).unwrap();
+        let textual = object::File::parse(&*from_asm).unwrap();
+        let text = structured.section_by_name(".text").unwrap();
+        assert_eq!(
+            text.data().unwrap(),
+            textual.section_by_name(".text").unwrap().data().unwrap()
+        );
+        assert!(
+            text.relocations().any(|(_, relocation)| {
+                relocation.flags()
+                    == (object::RelocationFlags::Elf {
+                        r_type: relocation_type,
+                    })
+            }),
+            "{model}"
+        );
+    }
 }
 
 #[test]

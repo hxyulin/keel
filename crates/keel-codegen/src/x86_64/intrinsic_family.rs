@@ -529,16 +529,7 @@ impl FunctionCompiler<'_> {
             };
             match *self.func.inst_data(source) {
                 InstData::Iconst { ty, imm } => self.materialize(register, imm, ty),
-                InstData::SymbolAddr { symbol } => self.emit(
-                    Opcode::Mov,
-                    [
-                        asm_arg(r64(register)),
-                        asm_arg(symbol_address(
-                            self.func.symbol_name(symbol),
-                            Modifier::None,
-                        )),
-                    ],
-                ),
+                InstData::SymbolAddr { symbol } => self.materialize_symbol(register, symbol),
                 _ => unreachable!("planned immediate"),
             }
         }
@@ -564,7 +555,7 @@ impl FunctionCompiler<'_> {
             // order. memset's `int c` only uses its low byte, so the
             // unspecified upper bits of the i8 are harmless.
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
-                if let Some(immediates) = self.kernel_immediates.memory_args.get(&inst).copied() {
+                if let Some(immediates) = self.size_immediates.memory_args.get(&inst).copied() {
                     self.move_memory_args(args, immediates);
                 } else {
                     let sig = keel_ir::Signature {

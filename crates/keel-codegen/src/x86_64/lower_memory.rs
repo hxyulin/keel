@@ -33,7 +33,7 @@ impl FunctionCompiler<'_> {
             }
             InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
-                let v = if let Some(symbol) = self.kernel_immediates.stores.get(&inst) {
+                let v = if let Some(symbol) = self.size_immediates.stores.get(&inst) {
                     asm_arg(symbol_address(func.symbol_name(*symbol), Modifier::None))
                 } else if let Some((_, k)) = folded_imm(func, func.inst_data(inst)) {
                     asm_arg(k)

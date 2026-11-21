@@ -497,6 +497,8 @@ addition to the Size IR pipeline:
   observers.
 - Omit unused call-alignment padding in leaves with no calls, local storage,
   stack observers, TLS helper, debug information or stack realignment.
+- Use a short RSP-relative displacement for eligible fixed-frame accesses.
+  Unwinding and inline assembly operands keep using RBP.
 - Combine single-use integer masks compared with zero into `test`. Use the
   narrowest width that preserves the zero check and keep wide masks that
   cannot use a sign-extended immediate on the ordinary path.
@@ -505,6 +507,14 @@ addition to the Size IR pipeline:
 - Share one return epilogue when the function saves registers and has
   several returns. Each redirected return replaces at least seven bytes with a
   jump of at most five.
+- Keep a direct scalar call's result in RAX when the next instruction returns
+  it under the same ABI and no allocator transfer intervenes.
+- Materialize single-use constants and symbol addresses directly in memory
+  libcall argument registers. Symbol addresses follow the selected code model.
+  Stores of a symbolic pointer directly to memory use the kernel model's
+  sign-extended 32-bit relocation.
+- For cold switches with many repeated destinations, use byte indices into a
+  table of relative offsets when the two tables and extra load use fewer bytes.
 - For a large i64 constant whose complement fits in 32 bits, compare the
   assembler's exact encodings of `movabs` and `mov r32, complement; not r64`.
   Choose the latter only when smaller. Both forms preserve flags, including

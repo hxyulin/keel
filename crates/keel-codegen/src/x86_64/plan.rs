@@ -655,21 +655,24 @@ pub(super) fn prefer_abi_gprs(
 }
 
 #[derive(Default)]
-pub(super) struct KernelImmediates {
+pub(super) struct SizeImmediates {
     pub stores: HashMap<Inst, keel_ir::Symbol>,
     pub memory_args: HashMap<Inst, [Option<Value>; 3]>,
 }
 
-impl KernelImmediates {
+impl SizeImmediates {
     pub fn select(
         func: &Function,
         symbols: &crate::symbols::Symbols<'_>,
         facts: &crate::kinds::FunctionFacts<'_>,
         shape: &VectorShape,
+        code_model: CodeModel,
         selection: &mut crate::select::Selection,
     ) -> Self {
         let mut immediates = Self::default();
-        if !facts.kinds.symbol_addr && (!facts.kinds.intrinsic || shape.wide_vectors) {
+        // A pointer store can encode only a sign-extended 32-bit symbol.
+        let symbol_stores = facts.kinds.symbol_addr && code_model == CodeModel::Kernel;
+        if !symbol_stores && (!facts.kinds.intrinsic || shape.wide_vectors) {
             return immediates;
         }
         let static_symbol = |symbol| {
@@ -691,7 +694,7 @@ impl KernelImmediates {
                 .then_some(source)
             };
             match func.inst_data(inst) {
-                &InstData::Store { value, .. } if facts.kinds.symbol_addr => {
+                &InstData::Store { value, .. } if symbol_stores => {
                     let value = func.resolve(value);
                     let Some(source) = source(value, selection) else {
                         continue;
@@ -829,9 +832,8 @@ pub(super) fn returns_preserve_rax(alloc: &Allocation, sites: &[ForwardedReturn]
 
 /// Every ordinary frame reference sees the same rsp after the prologue.
 /// Inline asm operands still use rbp because the template may push registers.
-pub(super) fn has_fixed_kernel_frame(func: &Function, present: crate::kinds::InstKinds) -> bool {
-    func.attrs.x86_no_sse
-        && !func.sig.returns_twice
+pub(super) fn has_fixed_frame(func: &Function, present: crate::kinds::InstKinds) -> bool {
+    !func.sig.returns_twice
         && func.personality.is_none()
         && !present.return_call
         && !present.landing_pad
