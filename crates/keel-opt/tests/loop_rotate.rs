@@ -120,6 +120,17 @@ fn early_return_receives_current_header_values() {
 }
 
 #[test]
+fn unreachable_use_of_the_header_prevents_rotation() {
+    let src = source().replace("return v2\n}", "return v2\nblock5:\n return v2\n}");
+    let mut m = keel_ir::parse(&src).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let before = m.to_string();
+    let pass = keel_opt::find_pass("loop-rotate").unwrap();
+    assert!(!pass.run(&mut m.functions[0], &Default::default()));
+    assert_eq!(before, m.to_string());
+}
+
+#[test]
 fn arithmetic_header_and_shared_tail_keep_existing_edge_arguments() {
     // block4 also has an entry edge: its parameter must keep transporting the
     // original value on that edge and the current iteration on loop exits.

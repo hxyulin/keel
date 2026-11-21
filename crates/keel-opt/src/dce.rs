@@ -15,44 +15,11 @@
 //! some other needed instruction addresses its slot; otherwise nothing
 //! observes the slot, and its markers go with its accesses.
 
-use crate::scratch::Scratch;
+use crate::{incoming_edges::IncomingEdges, scratch::Scratch};
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
-    // Every branch into each block: (branch instruction, destination index),
-    // packed by destination block. Only terminators branch.
-    let mut incoming_start = Scratch::filled(func.num_blocks() + 1, 0u32);
-    for block in func.blocks() {
-        if let Some(&term) = func.block_insts(block).last() {
-            for dest in func.inst_data(term).branch_dests() {
-                incoming_start[dest.block.index() + 1] += 1;
-            }
-        }
-    }
-    for i in 1..incoming_start.len() {
-        incoming_start[i] += incoming_start[i - 1];
-    }
-    let mut fill: Scratch<u32> = Scratch::new();
-    fill.extend_from_slice(&incoming_start);
-    let mut incoming_edges = Scratch::filled(
-        *incoming_start.last().unwrap() as usize,
-        (Inst::new(0), 0usize),
-    );
-    for block in func.blocks() {
-        if let Some(&term) = func.block_insts(block).last() {
-            for (i, dest) in func.inst_data(term).branch_dests().iter().enumerate() {
-                let slot = &mut fill[dest.block.index()];
-                incoming_edges[*slot as usize] = (term, i);
-                *slot += 1;
-            }
-        }
-    }
-    let incoming = |block: Block| {
-        let b = block.index();
-        &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
-    };
-
-    drop(fill);
+    let incoming = IncomingEdges::new(func, |_| {});
     let mut live_value = Scratch::filled(func.num_values(), false);
     let mut live_inst = Scratch::filled(func.num_insts(), false);
     let mut worklist: Scratch<Value> = Scratch::new();
@@ -94,7 +61,7 @@ pub fn run(func: &mut Function) -> bool {
             }
             // A needed parameter needs the argument every branch passes it.
             ValueDef::Param(block, n) => {
-                for &(branch, i) in incoming(block) {
+                for &(branch, i) in incoming.get(block) {
                     let arg = func.inst_data(branch).branch_dests()[i].args[n as usize];
                     enqueue(func, arg, &mut live_value, &mut worklist);
                 }
@@ -130,9 +97,8 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             func.remove_block_param(block, n);
-            for &(branch, i) in incoming(block) {
-                let dests = func.inst_data_mut(branch).branch_dests_mut();
-                dests[i].args.remove(n);
+            for &(branch, edge) in incoming.get(block) {
+                func.remove_branch_arg(branch, edge, n);
             }
             changed = true;
         }

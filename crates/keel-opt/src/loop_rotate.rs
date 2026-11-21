@@ -34,13 +34,12 @@ pub(crate) fn rotate_batched_tail(f: &mut Function, h: Block) -> bool {
     rotate(f, h, true)
 }
 fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
-    let analysis = crate::analysis::get(f);
-    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
-    let hi = f.block_insts(h).to_vec();
-    if hi.len() < 2 || hi.len() > 5 || f.block_params(h).len() > 4 {
+    let Some((&branch, tests)) = f.block_insts(h).split_last() else {
+        return false;
+    };
+    if !(1..=4).contains(&tests.len()) || f.block_params(h).len() > 4 {
         return false;
     }
-    let branch = *hi.last().unwrap();
     let D::Brif { dests, .. } = f.inst_data(branch) else {
         return false;
     };
@@ -48,15 +47,21 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     if body == h
         || exit == h
         || body == exit
-        || cfg.preds(body) != [h]
         || !f.block_params(body).is_empty()
         || !dests[0].args.is_empty()
     {
         return false;
     }
+    let analysis = crate::analysis::get(f);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
+    let preds = cfg.preds(h);
+    // Every external predecessor still goes through the original guard.
+    if (!batched && !(2..=3).contains(&preds.len())) || cfg.preds(body) != [h] {
+        return false;
+    }
     // Only cheap total tests may be duplicated. In particular never duplicate a
     // load, divide, overflow check, call, or debugger location.
-    for &i in &hi[..hi.len() - 1] {
+    for &i in tests {
         if !matches!(
             f.inst_data(i),
             D::Iconst { .. }
@@ -73,18 +78,11 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     }
     // Find the natural loop from its unique backedge. Early returns and the
     // common tail are exits, rather than extra blocks to absorb into the loop.
-    let backedges: Vec<_> = cfg
-        .preds(h)
-        .iter()
-        .copied()
-        .filter(|&b| dom.dominates(h, b))
-        .collect();
-    let [latch] = backedges.as_slice() else {
+    let mut backedges = preds.iter().copied().filter(|&b| dom.dominates(h, b));
+    let Some(latch) = backedges.next() else {
         return false;
     };
-    let latch = *latch;
-    // Every external predecessor still goes through the original guard.
-    if latch == h || (!batched && !(2..=3).contains(&cfg.preds(h).len())) {
+    if latch == h || backedges.next().is_some() {
         return false;
     }
     let Some(&back) = f.block_insts(latch).last() else {
@@ -140,7 +138,7 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     // Forward only values used beyond the old header. Forwarding a test result
     // used only by its branch would force compare materialization in codegen.
     let mut carried = f.block_params(h).to_vec();
-    carried.extend(hi[..hi.len() - 1].iter().map(|&i| f.first_result(i)));
+    carried.extend(tests.iter().map(|&i| f.first_result(i)));
     if f.block_params(h).iter().any(|&v| f.resolve(v) != v) {
         return false;
     }
@@ -151,7 +149,9 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     let mut used = 0u16;
     let mut work = Vec::new();
     for b in f.blocks() {
-        if b == h {
+        // The verifier enforces dominance for reachable uses. Keep scanning
+        // unreachable blocks, whose uses can still rule out rotation.
+        if b == h || (dom.is_reachable(b) && !dom.dominates(h, b)) {
             continue;
         }
         let mut uses_header = false;
@@ -197,6 +197,7 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
         index += 1;
         keep
     });
+    let tests = tests.to_vec();
     let body_map: FxHashMap<_, _> = carried
         .iter()
         .map(|&v| (v, f.append_block_param(body, f.value_type(v))))
@@ -226,7 +227,7 @@ fn rotate(f: &mut Function, h: Block, batched: bool) -> bool {
     let back = *f.block_insts(latch).last().unwrap();
     let args = f.inst_data(back).branch_dests()[0].args.clone();
     let mut next: FxHashMap<Value, Value> = f.block_params(h).iter().copied().zip(args).collect();
-    for &i in &hi[..hi.len() - 1] {
+    for i in tests {
         let mut d = f.inst_data(i).clone();
         d.for_each_operand_mut(|v| {
             *v = next.get(&f.resolve(*v)).copied().unwrap_or(f.resolve(*v));

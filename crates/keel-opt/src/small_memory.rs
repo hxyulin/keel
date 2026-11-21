@@ -1,8 +1,8 @@
 //! Bounded expansion of ordinary memory intrinsics before register allocation.
 use crate::ir_match::int_const;
 use keel_ir::{
-    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic, MemoryFlags,
-    Type, Value, ValueDef, VectorType,
+    BinaryOp, Block, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic,
+    MemoryFlags, Type, Value, ValueDef, VectorType,
 };
 
 /// The limit inside the inlining rounds, where the inliner prices each
@@ -11,6 +11,23 @@ pub(crate) const MAX_BYTES: i64 = 32;
 /// The limit in tiers that do not inline. Balanced and Full measured no
 /// gain from it.
 pub(crate) const LATE_MAX_BYTES: i64 = 128;
+
+/// Branch to `fast` when two I32 accesses can cover exactly `bytes` bytes.
+/// Returns the offset of the last word, which is valid only on that edge.
+pub(crate) fn guard_two_words(
+    f: &mut Function,
+    gate: InsertPoint,
+    bytes: Value,
+    fast: Block,
+    slow: Block,
+) -> Value {
+    let word = f.ins(gate).iconst(Type::I64, 4);
+    let offset = f.ins(gate).isub(bytes, word);
+    // The wrapped subtraction also rejects lengths below one word.
+    let fits = f.ins(gate).icmp(IntCC::Ule, offset, word);
+    f.ins(gate).brif(fits, fast, &[], slow, &[]);
+    offset
+}
 
 /// The length of a memcpy, memmove or memset that [`run`] with this `limit`
 /// replaces with loads and stores: a constant from 0 to `limit` bytes.

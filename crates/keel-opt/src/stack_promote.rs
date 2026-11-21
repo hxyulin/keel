@@ -9,7 +9,7 @@
 //! access to a slot is left, `dce` removes its markers.
 use crate::ir_match::int_const;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value};
+use keel_ir::{BinaryOp, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value};
 
 type Field = (StackSlot, usize, Type);
 
@@ -89,6 +89,10 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
     let mut seen_fields = FxHashSet::default();
     // Each marker's slot, and whether it is a start.
     let mut markers: FxHashMap<_, (StackSlot, bool)> = FxHashMap::default();
+    // Keep each slot's accesses and lifetime markers in layout order. A
+    // field only needs to scan its own slot, and earlier promotions can
+    // remove accesses but do not introduce any new ones.
+    let mut by_slot: FxHashMap<StackSlot, Vec<(Inst, Option<Field>)>> = FxHashMap::default();
     for &i in &insts {
         let d = f.inst_data(i);
         if let Some(slot) = f.lifetime_marker_slot(i) {
@@ -100,8 +104,10 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
                 }
             );
             markers.insert(i, (slot, start));
+            by_slot.entry(slot).or_default().push((i, None));
             continue;
         }
+        let mut access = None;
         d.for_each_operand(|v| {
             let v = f.resolve(v);
             let Some(&(slot, offset)) = addresses.get(&v) else {
@@ -136,15 +142,18 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
                     .checked_add(width(ty))
                     .is_some_and(|end| end <= sizes[&slot])
             {
-                let field = (slot, offset, ty);
-                accesses.insert(i, field);
-                if seen_fields.insert(field) {
-                    fields.push(field);
-                }
+                access = Some((slot, offset, ty));
             } else {
                 escaped.insert(slot);
             }
         });
+        if let Some(field) = access {
+            accesses.insert(i, field);
+            if seen_fields.insert(field) {
+                fields.push(field);
+            }
+            by_slot.entry(field.0).or_default().push((i, Some(field)));
+        }
     }
     if !large && fields.len() > 64 {
         return false;
@@ -162,12 +171,6 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
             splat_byte(f, value).map(|byte| (i, byte))
         })
         .collect();
-    // Group before overlap checks: escaped objects and unrelated slots must
-    // not consume the useful-field budget or induce a quadratic cross product.
-    let mut by_slot: FxHashMap<_, Vec<_>> = FxHashMap::default();
-    for (&i, &field) in &accesses {
-        by_slot.entry(field.0).or_default().push((i, field));
-    }
     let mut eligible: Vec<_> = fields
         .iter()
         .copied()
@@ -176,7 +179,8 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
                 return false;
             }
             let peers = &by_slot[&slot];
-            !peers.iter().any(|&(i, (_, o, t))| {
+            !peers.iter().any(|&(i, other)| {
+                let Some((_, o, t)) = other else { return false };
                 (o, t) != (offset, ty)
                     && offset < o + width(t)
                     && o < offset + width(ty)
@@ -211,23 +215,23 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
         };
         let marker = |i: &_| !markers.is_empty() && markers.get(i).is_some_and(|m| m.0 == field.0);
         let start = |i: keel_ir::Inst| markers.get(&i).is_some_and(|m| m.1);
-        let relevant = |i: &_| accesses.get(i) == Some(&field) || covers(i).is_some() || marker(i);
         let mut relevant_insts = vec![Vec::new(); f.num_blocks()];
         // Whether the field is initialized where each block ends, when the
         // block itself decides it: by a store, or by a marker that clears it.
         let mut exits = vec![None; f.num_blocks()];
         let mut has_load = false;
-        for &b in &blocks {
-            for &i in f.block_insts(b) {
-                if relevant(&i) && !f.is_removed(i) {
-                    relevant_insts[b.index()].push(i);
-                    match f.inst_data(i) {
-                        InstData::Store { .. } => exits[b.index()] = Some(true),
-                        InstData::Load { .. } => has_load = true,
-                        _ if start(i) => exits[b.index()] = Some(false),
-                        _ => {}
-                    }
-                }
+        for &(i, other) in &by_slot[&field.0] {
+            if f.is_removed(i) || (other.is_some() && other != Some(field) && covers(&i).is_none())
+            {
+                continue;
+            }
+            let block = f.inst_block(i).index();
+            relevant_insts[block].push(i);
+            match f.inst_data(i) {
+                InstData::Store { .. } => exits[block] = Some(true),
+                InstData::Load { .. } => has_load = true,
+                _ if start(i) => exits[block] = Some(false),
+                _ => {}
             }
         }
         if !has_load {
@@ -350,7 +354,8 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
     // is dead too. Otherwise keep its complete original byte footprint.
     for i in retained_initializers {
         let &(slot, offset, ty) = &accesses[&i];
-        let still_read = by_slot[&slot].iter().any(|&(other, (_, o, t))| {
+        let still_read = by_slot[&slot].iter().any(|&(other, field)| {
+            let Some((_, o, t)) = field else { return false };
             o < offset + width(ty)
                 && offset < o + width(t)
                 && !f.is_removed(other)

@@ -4,7 +4,7 @@
 //! anchors the parameter. An unanchored cycle is not a copy. Every edge is
 //! considered, including both arms of one branch and unreachable predecessors.
 
-use crate::scratch::Scratch;
+use crate::{incoming_edges::IncomingEdges, scratch::Scratch};
 use keel_ir::dominators::DominatorTree;
 use keel_ir::{Block, EntityRef, Function, Inst, Value, ValueDef};
 
@@ -53,44 +53,13 @@ pub fn run(func: &mut Function) -> bool {
     }
     let analysis = crate::analysis::get(func);
     let dom = &analysis.dom;
-    // Every edge into each block, in layout and branch order, packed by
-    // destination; and the blocks each value is passed to, as lists.
-    let mut incoming_start = Scratch::filled(func.num_blocks() + 1, 0u32);
+    // Record the blocks each value is passed to while indexing the edges.
     let mut users = UserLists::new(func.num_values());
-    // Only terminators branch.
-    for block in func.blocks() {
-        let Some(&inst) = func.block_insts(block).last() else {
-            continue;
-        };
-        for dest in func.inst_data(inst).branch_dests() {
-            incoming_start[dest.block.index() + 1] += 1;
-            for &arg in &dest.args {
-                users.push(func.resolve(arg), dest.block);
-            }
+    let incoming = IncomingEdges::new(func, |dest| {
+        for &arg in &dest.args {
+            users.push(func.resolve(arg), dest.block);
         }
-    }
-    for i in 1..incoming_start.len() {
-        incoming_start[i] += incoming_start[i - 1];
-    }
-    let mut fill: Scratch<u32> = Scratch::new();
-    fill.extend_from_slice(&incoming_start);
-    let mut incoming_edges =
-        Scratch::filled(*incoming_start.last().unwrap() as usize, (Inst::new(0), 0));
-    for block in func.blocks() {
-        let Some(&inst) = func.block_insts(block).last() else {
-            continue;
-        };
-        for (edge, dest) in func.inst_data(inst).branch_dests().iter().enumerate() {
-            let slot = &mut fill[dest.block.index()];
-            incoming_edges[*slot as usize] = (inst, edge);
-            *slot += 1;
-        }
-    }
-    drop(fill);
-    let incoming = |block: Block| {
-        let b = block.index();
-        &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
-    };
+    });
     // The entry's parameters are ABI arguments and must remain in place.
     let mut work: Scratch<Block> = Scratch::new();
     work.extend(dom.rpo().iter().copied().skip(1).rev());
@@ -103,14 +72,15 @@ pub fn run(func: &mut Function) -> bool {
         queued[block.index()] = false;
         for index in (0..func.block_params(block).len()).rev() {
             let param = func.block_params(block)[index];
-            let Some(value) = replacement(func, dom, block, param, index, incoming(block)) else {
+            let Some(value) = replacement(func, dom, block, param, index, incoming.get(block))
+            else {
                 continue;
             };
             if func.resolve(param) == param {
                 func.replace_all_uses(param, value);
             }
             func.remove_block_param(block, index);
-            for &(branch, edge) in incoming(block) {
+            for &(branch, edge) in incoming.get(block) {
                 func.remove_branch_arg(branch, edge, index);
             }
             // The parameter's users now pass `value`.

@@ -1,6 +1,6 @@
 //! Specialize the narrow counts of dynamic record copies in large functions.
 use crate::ir_match::{def, int_const};
-use crate::{OptimizationContext, VectorTarget};
+use crate::{OptimizationContext, VectorTarget, small_memory};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic, MemoryFlags,
     Type, Value, VectorType,
@@ -203,10 +203,7 @@ fn specialize(f: &mut Function, site: CopySite) {
         }
         CopyPath::ShortBuffer => {
             let fast = f.create_block();
-            let four = f.ins(gate).iconst(Type::I64, 4);
-            let offset = f.ins(gate).isub(bytes, four);
-            let short = f.ins(gate).icmp(IntCC::Ule, offset, four);
-            f.ins(gate).brif(short, fast, &[], slow, &[]);
+            let offset = small_memory::guard_two_words(f, gate, bytes, fast, slow);
             let emit = InsertPoint::End(fast);
             let tail_src = f.ins(emit).ptradd(src, offset);
             let tail_dst = f.ins(emit).ptradd(dst, offset);

@@ -1,6 +1,6 @@
 //! Compare short, dynamic byte ranges without calling the runtime.
 use crate::ir_match::{def, int_const};
-use crate::{OptimizationContext, VectorTarget};
+use crate::{OptimizationContext, VectorTarget, small_memory};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic, Type, Value,
 };
@@ -87,11 +87,7 @@ fn specialize(f: &mut Function, inst: Inst, [left, right, size]: [Value; 3], tar
     f.remove_inst(inst);
     f.ins(InsertPoint::End(slow)).jump(tail, &[fallback]);
 
-    let gate = InsertPoint::End(block);
-    let four = f.ins(gate).iconst(Type::I64, 4);
-    let offset = f.ins(gate).isub(size, four);
-    let fits = f.ins(gate).icmp(IntCC::Ule, offset, four);
-    f.ins(gate).brif(fits, fast, &[], slow, &[]);
+    let offset = small_memory::guard_two_words(f, InsertPoint::End(block), size, fast, slow);
 
     let at = InsertPoint::End(fast);
     let left_end = f.ins(at).ptradd(left, offset);

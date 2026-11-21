@@ -47,6 +47,7 @@ pub use inline::{
     required_inline_asm, required_inline_asm_with_c_bodies, required_inline_asm_with_c_definitions,
 };
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
+mod incoming_edges;
 mod instcombine;
 mod internal_fast_calls;
 mod ir_match;
