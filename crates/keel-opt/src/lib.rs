@@ -889,7 +889,7 @@ const FULL_ROUND_CLEANUP: [&str; 10] = [
 
 const FULL_ROUND: [&str; 18] = concat(&[&FULL_ROUND_MEMORY, &FULL_ROUND_CLEANUP]);
 
-const FULL_EPILOGUE: [&str; 42] = [
+const FULL_EPILOGUE: [&str; 41] = [
     "load-reuse",
     "stack-promote-large",
     "phi-simplify",
@@ -919,9 +919,10 @@ const FULL_EPILOGUE: [&str; 42] = [
     "short-memcmp",
     "empty-calls",
     "inline-guards",
+    // Remove dead symbol addresses before computing module reachability.
+    // Dropping unreachable functions does not change liveness in survivors.
     "dce",
     "unused-functions",
-    "dce",
     "private-aggregate-cleanup",
     "fast-math",
     "internal-fast-calls",
