@@ -171,6 +171,33 @@ red zone or SIMD, or qualify kernel ABI, linking or execution. Ordinary probes
 without feature options retain the original policies. Historical reports keep
 their original permissions and remain separate from the named-policy results.
 
+## BLAKE2s compression reference
+
+The [handwritten scalar x86-64 kernel](blake2s-x86_64.s) implements the
+Linux v6.12 `blake2s_compress_generic` ABI. The
+[benchmark driver](blake2s-bench.c) checks 14 hashes against independent
+digests from Python's `hashlib.blake2s`, including unaligned input and cases
+on both sides of a block boundary. An iteration count then times repeated
+64 KiB hashes and prints elapsed nanoseconds and a digest checksum.
+
+On x86-64 Linux, assemble the reference alongside the compiler objects to
+compare. Link each object separately with the same driver. Use the objects
+from the raw replay and its source Clang build for the compiler comparison.
+
+```sh
+fixture=suite/integration/linux-kernel
+mkdir -p target/linux-kernel/blake2s
+cc -c "$fixture/blake2s-x86_64.s" -o target/linux-kernel/blake2s/handwritten.o
+cc -O2 -fno-pie -no-pie -Wl,--wrap=memcpy,-z,noexecstack \
+  "$fixture/blake2s-bench.c" target/linux-kernel/blake2s/handwritten.o \
+  -o target/linux-kernel/blake2s/handwritten
+target/linux-kernel/blake2s/handwritten 1000
+```
+
+The wrapper supplies a scalar `memcpy` for compiler objects that call it.
+Compare checksums before interpreting timings. The handwritten kernel is a
+benchmark reference for user-space timing with this driver.
+
 ## Results and maintenance
 
 Keep source pins, configurations, policies, fixtures and runners in Git.
