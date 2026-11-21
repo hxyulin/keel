@@ -113,7 +113,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(None);
         };
         let literal = &self.g.p.strings[id];
-        if literal.wide || literal.bytes != b"%d\0" {
+        if literal.unit != 1 || literal.bytes != b"%d\0" {
             return Ok(None);
         }
         // The literal format has no other conversions, and every i32 and

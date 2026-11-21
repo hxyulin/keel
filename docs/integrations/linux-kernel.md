@@ -12,10 +12,20 @@ Kernel objects use the [`kernel` code model](../targets/x86_64/codegen.md#code-m
 and the pinned instruction policy. The model materializes symbol addresses as
 sign-extended 32-bit absolute values. Expansion of fixed-size memory intrinsics
 uses scalar chunks so early kernel copies can run before the FPU is enabled.
+The separate [stack alignment flag](../targets/x86_64/codegen.md#stack-alignment)
+matches Kbuild's 8-byte call boundary.
+
+Raw C uses the Kbuild include paths, forced headers, language and character
+flags. `-mno-sse` also makes generated variadic prologues use only the
+integer register bank. `-mskip-rax-setup` suppresses the SSE register count
+at calls in that mode. These flags still allow explicit inline assembly.
+The [raw command replay](../../suite/integration/linux-kernel/README.md#replay-raw-c-commands)
+forwards the saved GCC or Clang C compiler flags. Keel's [warning groups](../frontends/c/README.md#lowering)
+enable the diagnostics it implements.
 
 ```sh
 keel cc -Os --target x86_64-unknown-linux-gnu \
-  --link-intent executable --code-model kernel --cpu-level v1 \
+  --link-intent executable --code-model kernel -mstack-alignment=8 --cpu-level v1 \
   --target-features +popcnt,+rdrand,+rdtscp,+xsave,+clflush,+fsgsbase,+prefetchw,+invpcid,+rdseed,+cx16,+waitpkg \
   -fno-asynchronous-unwind-tables -fno-unwind-tables --emit-object input.i -o input.o
 ```
@@ -24,9 +34,8 @@ Both `-Os` and `-O` support this configuration. Size propagates the constant
 result of the DAX predicate without inlining its loads, so callers can drop the
 branch to the unavailable DAX implementation.
 
-The code model is not stored in IR; apply the flag again when compiling an IR
-file. It does not change the CPU policy or establish a no-SIMD, interrupt-safe
-or unwind contract.
+Apply both the code model and stack alignment flags when compiling an IR file.
+CPU features and unwind output use their own flags.
 
 Two Full optimizer passes remove the FPU signal-frame conversion references
 that the minimal configuration cannot link: `constant-args` proves that the
@@ -83,9 +92,10 @@ takes part in archive selection.
 ## Scope and limits
 
 The vDSO image, real-mode blobs, boot setup, decompressor and initramfs
-preparation come from the reference build. This is not a Kbuild invocation
-from raw source, and other kernel configurations are not covered. Objtool
-still reports warnings for the Keel objects. The QEMU smoke test checks
+preparation come from the reference build. Raw replay runs the compiler
+invocations for the captured C files. Kbuild and its post-compiler tools
+remain external. Objtool still reports warnings for the Keel objects.
+The QEMU smoke test checks
 initramfs ELF reads, mapped-memory data and permissions, fork and stack
 copy-on-write, pipe contents and child exit status, with ordered stage
 markers and exit 33. It does not cover SMP, native hardware, arbitrary FP or

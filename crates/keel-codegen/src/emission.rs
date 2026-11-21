@@ -50,6 +50,8 @@ pub struct EmissionOptions {
     pub unwind_tables: UnwindTables,
     /// Explicit x86-64 address model; other targets reject an explicit value.
     pub x86_code_model: Option<x86_64::CodeModel>,
+    /// Explicit x86-64 call boundary. Defaults to the 16-byte System V boundary.
+    pub x86_stack_alignment: Option<x86_64::StackAlignment>,
     /// On ELF, put each function in its own section, `.text.<name>`, so a
     /// linker's section garbage collection removes functions one by one.
     /// Mach-O linkers split sections at symbols already, so Mach-O ignores
@@ -66,6 +68,34 @@ pub struct EmissionOptions {
     /// the CLI enables it at -O2/-O3. Debug functions, inline assembly and exceptional control flow
     /// retain their original order. Does not change memory operation order.
     pub pressure_schedule: bool,
+    /// Report static frames larger than this limit in module order.
+    pub stack_frame_warning: Option<StackFrameWarning>,
+}
+
+/// A diagnostic callback for the final native frame layout.
+#[derive(Clone, Copy, Debug)]
+pub struct StackFrameWarning {
+    pub limit: usize,
+    /// Function symbol, static frame bytes, and requested limit.
+    pub report: fn(&str, usize, usize),
+}
+
+impl PartialEq for StackFrameWarning {
+    fn eq(&self, other: &Self) -> bool {
+        self.limit == other.limit && std::ptr::fn_addr_eq(self.report, other.report)
+    }
+}
+
+impl Eq for StackFrameWarning {}
+
+impl StackFrameWarning {
+    pub(crate) fn check(self, module: &Module, frames: &[crate::dwarf::FrameDebug]) {
+        for (function, frame) in module.functions.iter().zip(frames) {
+            if frame.static_bytes > self.limit {
+                (self.report)(&function.name, frame.static_bytes, self.limit);
+            }
+        }
+    }
 }
 
 /// The ELF section for function `name`: its `section` attribute, the retain
@@ -146,6 +176,12 @@ pub(crate) fn compile_with_executor<'module>(
         return Err(CodegenError {
             func: "<target>".into(),
             message: "x86 code model requires x86_64-unknown-linux-gnu".into(),
+        });
+    }
+    if options.x86_stack_alignment.is_some() && target != Target::X86_64LinuxGnu {
+        return Err(CodegenError {
+            func: "<target>".into(),
+            message: "x86 stack alignment requires x86_64-unknown-linux-gnu".into(),
         });
     }
     match target {

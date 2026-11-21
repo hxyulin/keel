@@ -14,6 +14,7 @@
 mod aliases;
 mod asm;
 mod registers;
+mod unused;
 
 use crate::arena::BodyArena;
 use crate::ast::*;
@@ -31,11 +32,11 @@ pub type R<T> = Result<T, Error>;
 /// Pointer/array qualifiers in const, volatile, atomic, restrict order.
 type TypeQualifiers = (bool, bool, bool, bool);
 
-/// A string literal: its bytes with the terminator, and whether it is wide.
+/// A string literal's bytes, including its terminator, and element width.
 #[derive(Clone, Debug)]
 pub struct StrLit<'a> {
     pub bytes: &'a [u8],
-    pub wide: bool,
+    pub unit: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,7 +47,7 @@ enum Sym {
     StackPointer,
     /// By index in the typedef table.
     Typedef(usize),
-    Enum(i64, IntKind),
+    Enum(i64, IntKind, Option<usize>),
 }
 
 #[derive(Default, Clone)]
@@ -93,11 +94,14 @@ pub enum TypeMode {
 #[derive(Default, Clone, PartialEq)]
 pub struct Attrs {
     pub nonstring: bool,
+    pub unused: bool,
+    pub uninitialized: bool,
     pub mode: Option<(TypeMode, Loc)>,
     pub vector_size: Option<(u64, Loc)>,
     pub aligned: Option<u64>,
     pub alignas: Option<u64>,
     pub packed: bool,
+    pub designated_init: Option<Loc>,
     pub transparent_union: Option<Loc>,
     pub microsoft_x64: Option<Loc>,
     pub gnu_inline: bool,
@@ -264,7 +268,10 @@ impl Attrs {
             self.alignas = Some(self.alignas.unwrap_or(0).max(a));
         }
         self.nonstring |= other.nonstring;
+        self.unused |= other.unused;
+        self.uninitialized |= other.uninitialized;
         self.packed |= other.packed;
+        self.designated_init = self.designated_init.or(other.designated_init);
         self.transparent_union = self.transparent_union.or(other.transparent_union);
         self.microsoft_x64 = self.microsoft_x64.or(other.microsoft_x64);
         self.gnu_inline |= other.gnu_inline;
@@ -416,6 +423,8 @@ pub(crate) struct SwitchCtx<'a> {
 /// Per-function state.
 pub(crate) struct FuncState<'a> {
     pub locals: Vec<Local<'a>>,
+    unused_objects: Option<unused::Objects>,
+    unused_labels: Option<unused::Labels<'a>>,
     /// Pending captures, consumed by the declaration or type-name expression.
     pub vla_bounds: Vec<(LocalId, Expr<'a>)>,
     pub has_vm: bool,
@@ -429,6 +438,7 @@ pub(crate) struct FuncState<'a> {
     /// Each `label_addrs` entry's number, from 1.
     pub label_addr_numbers: HashMap<&'a str, usize>,
     pub ret: Ty<'a>,
+    ret_enum: Option<usize>,
     pub name: &'a str,
     pub switches: Vec<SwitchCtx<'a>>,
     /// The function's resolved x86 features, when x86 builtin calls in it are
@@ -499,6 +509,10 @@ pub struct Parser<'a> {
     unique: usize,
     pub(crate) target: Target,
     pub(crate) c_layout: CDataLayout,
+    pub(crate) language: crate::LanguageOptions,
+    pub(crate) warnings: Vec<Error>,
+    unused_globals: Option<unused::Objects>,
+    unused_typedefs: Option<unused::Typedefs>,
     /// SysV's `struct __va_list_tag`, once a `va_list` needs it.
     va_list_tag: Option<usize>,
     /// The module's x86 feature baseline, when builtin calls are checked.
@@ -783,8 +797,19 @@ const IGNORED_QUALIFIERS: &[&str] = &[
 ];
 
 impl<'a> Parser<'a> {
-    pub fn new(src: &'a str, path: &str, target: Target, mut text: Strings<'a>) -> Self {
-        let lexer = Lexer::new(src, path, &mut text);
+    #[cfg(any(test, feature = "profile"))]
+    pub fn new(src: &'a str, path: &str, target: Target, text: Strings<'a>) -> Self {
+        Self::with_language(src, path, target, text, crate::LanguageOptions::default())
+    }
+
+    pub fn with_language(
+        src: &'a str,
+        path: &str,
+        target: Target,
+        mut text: Strings<'a>,
+        language: crate::LanguageOptions,
+    ) -> Self {
+        let lexer = Lexer::new(src, path, &mut text).with_character_types(language.character_types);
         let arena = text.arena();
         let mut p = Self {
             lexer,
@@ -826,6 +851,10 @@ impl<'a> Parser<'a> {
             last_params: Vec::new(),
             unique: 0,
             target,
+            language,
+            warnings: Vec::new(),
+            unused_globals: language.unused.track_globals().then(Default::default),
+            unused_typedefs: language.unused.local_typedefs.then(Default::default),
             c_layout: if target == Target::Wasm32UnknownUnknown {
                 CDataLayout::WASM32
             } else {
@@ -837,6 +866,39 @@ impl<'a> Parser<'a> {
         };
         p.fill();
         p
+    }
+
+    pub(crate) fn plain_char(&self) -> Ty<'a> {
+        let signed = self
+            .language
+            .character_types
+            .plain_char_signed
+            .unwrap_or(self.target != Target::Aarch64LinuxGnu);
+        Ty::Int(if signed {
+            IntKind::Char
+        } else {
+            IntKind::UPlainChar
+        })
+    }
+
+    pub(crate) fn wide_unit(&self) -> usize {
+        if self.language.character_types.short_wchar {
+            2
+        } else {
+            4
+        }
+    }
+
+    pub(crate) fn wide_char(&self) -> Ty<'a> {
+        if self.language.character_types.short_wchar {
+            Ty::Int(IntKind::UShort)
+        } else if self.c_layout == CDataLayout::NATIVE_LP64
+            && self.target == Target::Aarch64LinuxGnu
+        {
+            UINT
+        } else {
+            INT
+        }
     }
 
     /// Private model seam for declaration tests and the separately validated
@@ -945,6 +1007,7 @@ impl<'a> Parser<'a> {
             let void_ptr = Ty::Ptr(&Ty::Void);
             self.structs.push(StructDef {
                 transparent_union: false,
+                designated_init: false,
                 tag: Some("__va_list_tag"),
                 is_union: false,
                 members: if self.target == Target::Aarch64LinuxGnu {
@@ -1101,7 +1164,7 @@ impl<'a> Parser<'a> {
             Tok::Punct(p) => format!("`{p}`"),
             Tok::Int { value, .. } => format!("`{value}`"),
             Tok::Float { value, .. } | Tok::Imaginary { value, .. } => format!("`{value}`"),
-            Tok::Char(_) => "a character constant".into(),
+            Tok::Char(_) | Tok::ShortWideChar(_) => "a character constant".into(),
             Tok::BadNumber(text) => format!("invalid number `{text}`"),
             Tok::Str { .. } => "a string".into(),
             Tok::Eof => "the end of the file".into(),
@@ -1337,29 +1400,51 @@ impl<'a> Parser<'a> {
     pub(crate) fn lookup_value(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         match self.lookup(name).cloned() {
             Some(Sym::Local(id)) => {
-                let ty = self.fs.as_ref().unwrap().locals[id].ty;
+                let state = self.fs.as_mut().unwrap();
+                if let Some(objects) = &mut state.unused_objects {
+                    objects.reference(id);
+                }
+                let local = &state.locals[id];
                 Ok(Expr {
                     kind: ExprKind::Local(id),
-                    sugar: self.fs.as_ref().unwrap().locals[id].sugar,
-                    ty,
+                    sugar: local.sugar,
+                    ty: local.ty,
                     loc,
                 })
             }
-            Some(Sym::Global(g)) => Ok(Expr {
-                kind: ExprKind::Global(g),
-                sugar: self.globals[g].sugar,
-                ty: self.globals[g].ty,
-                loc,
-            }),
+            Some(Sym::Global(g)) => {
+                let global = &self.globals[g];
+                if let Some(objects) = &mut self.unused_globals
+                    && (global.ty.func().is_none()
+                        || self
+                            .fs
+                            .as_ref()
+                            .is_none_or(|state| state.name != global.name))
+                {
+                    objects.reference(g);
+                }
+                Ok(Expr {
+                    kind: ExprKind::Global(g),
+                    sugar: global.sugar,
+                    ty: global.ty,
+                    loc,
+                })
+            }
             Some(Sym::StackPointer) => Ok(Expr {
                 kind: ExprKind::Builtin(Builtin::StackPointer, &[]),
                 sugar: Sugar::Plain,
                 ty: ULONG,
                 loc,
             }),
-            Some(Sym::Enum(v, kind)) => Ok(Expr {
+            Some(Sym::Enum(v, kind, id)) => Ok(Expr {
                 kind: ExprKind::Int(v),
-                sugar: Sugar::Plain,
+                sugar: id
+                    .filter(|_| {
+                        self.language.warn_enum_conversion
+                            || self.language.warn_enum_compare
+                            || self.language.warn_enum_compare_conditional
+                    })
+                    .map_or(Sugar::Plain, Sugar::Enumerator),
                 ty: Ty::Int(kind),
                 loc,
             }),
@@ -1386,6 +1471,7 @@ impl<'a> Parser<'a> {
         fs.locals.push(Local {
             asm_register: None,
             nonstring: false,
+            zero_init: false,
             name,
             ty,
             sugar,
@@ -1454,7 +1540,8 @@ impl<'a> Parser<'a> {
         let bytes = self.text.bytes(&bytes);
         let i = self.strings.len();
         ids.insert(bytes, i);
-        self.strings.push(StrLit { bytes, wide });
+        let unit = if wide { self.wide_unit() as u8 } else { 1 };
+        self.strings.push(StrLit { bytes, unit });
         i
     }
 
@@ -1505,6 +1592,12 @@ impl<'a> Parser<'a> {
             }
         }
         self.resolve_aliases()?;
+        if let Some(objects) = self.unused_globals.take() {
+            objects.global_warnings(self.language.unused, &self.globals, &mut self.warnings);
+        }
+        if let Some(typedefs) = self.unused_typedefs.take() {
+            typedefs.emit(&self.typedefs, &mut self.warnings);
+        }
         Ok(())
     }
 
@@ -1762,7 +1855,14 @@ impl<'a> Parser<'a> {
                     sugar: d.sugar,
                     align: attrs.aligned,
                 });
-                self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
+                let id = self.typedefs.len() - 1;
+                if !file_scope
+                    && !attrs.unused
+                    && let Some(typedefs) = &mut self.unused_typedefs
+                {
+                    typedefs.declaration(id, name_loc);
+                }
+                self.bind(name, Sym::Typedef(id));
             } else if let Ty::Func(mut fty) = d.ty {
                 if spec.thread_local {
                     return Err(Error::new(
@@ -1807,6 +1907,18 @@ impl<'a> Parser<'a> {
                         "`_Alignas` cannot apply to a function",
                     ));
                 }
+                let prior = if file_scope
+                    && self.is("{")
+                    && (self.language.warn_missing_declarations
+                        || self.language.warn_missing_prototypes)
+                {
+                    match self.lookup(name) {
+                        Some(Sym::Global(id)) => self.globals[*id].ty.func(),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let g = self
                     .declare_function(name, label, fty, spec, &attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
@@ -1819,8 +1931,28 @@ impl<'a> Parser<'a> {
                     && !returned.is_restrict(&self.typedefs);
                 self.globals[g].sugar = d.sugar;
                 self.symbol_attrs(g, &attrs)?;
+                if let Some(objects) = &mut self.unused_globals {
+                    objects.declaration(g, name_loc, attrs.unused || spec.inline);
+                }
                 self.function_alias(g, attrs, file_scope)?;
                 if file_scope && self.is("{") {
+                    if !self.globals[g].internal && !spec.inline && name != "main" {
+                        let warning = if self.language.warn_missing_prototypes
+                            && !prior.is_some_and(FuncTy::has_prototype)
+                        {
+                            Some(("prototype", "missing-prototypes"))
+                        } else if self.language.warn_missing_declarations && prior.is_none() {
+                            Some(("declaration", "missing-declarations"))
+                        } else {
+                            None
+                        };
+                        if let Some((declaration, option)) = warning {
+                            self.warnings.push(Error::new(
+                                name_loc,
+                                format!("no previous {declaration} for `{name}` [-W{option}]"),
+                            ));
+                        }
+                    }
                     if fty.microsoft_x64 {
                         return Err(Error::new(
                             name_loc,
@@ -1871,8 +2003,11 @@ impl<'a> Parser<'a> {
                 // malloc(sizeof *p)` refers to itself.
                 self.check_nonstring(d.ty, &attrs, name_loc)?;
                 let id = self.new_local(name, d.ty, d.sugar, is_volatile);
+                self.unused_local_declaration(id, name_loc, &attrs);
                 self.fs.as_mut().unwrap().locals[id].asm_register = asm_register;
                 self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
+                self.fs.as_mut().unwrap().locals[id].zero_init =
+                    self.language.zero_auto_vars && !attrs.uninitialized;
                 let align = self.object_alignment(&d.ty, &d.sugar, &attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
@@ -1884,7 +2019,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 if init.is_none() && self.eat("=") {
-                    let (i, complete) = self.initializer(&ty)?;
+                    let (i, complete) = self.initializer(&ty, d.sugar)?;
                     ty = complete;
                     init = Some(i);
                 }
@@ -2075,6 +2210,9 @@ impl<'a> Parser<'a> {
         };
         self.globals[g].nonstring |= d.attrs.nonstring;
         self.symbol_attrs(g, &d.attrs)?;
+        if let Some(objects) = &mut self.unused_globals {
+            objects.declaration(g, name_loc, d.attrs.unused);
+        }
         self.globals[g].align = self.globals[g].align.max(align);
         if inferred_init.is_some() || self.eat("=") {
             let loc = self.loc();
@@ -2087,7 +2225,7 @@ impl<'a> Parser<'a> {
             let ty = self.globals[g].ty;
             let (init, ty) = match inferred_init {
                 Some(init) => (init, ty),
-                None => self.initializer(&ty)?,
+                None => self.initializer(&ty, d.sugar)?,
             };
             let init = self.static_initializer(init);
             let global = &mut self.globals[g];
@@ -2456,6 +2594,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(ploc, "parameter cannot have an initializer"));
                 }
                 self.check_nonstring(ty, &attrs, ploc)?;
+                self.unused_local_declaration(ids[index], ploc, &attrs);
                 let align = self.type_alignment(&ty, &sugar);
                 let local = &mut self.fs.as_mut().unwrap().locals[ids[index]];
                 local.nonstring = attrs.nonstring;
@@ -2533,6 +2672,11 @@ impl<'a> Parser<'a> {
             Error::new(loc, "function definition requires a direct parameter list")
         })?;
         state.ret = fty.ret;
+        if self.language.warn_enum_conversion
+            && let Sugar::Func(returned) = *self.globals[g].sugar.unqualified(&self.typedefs)
+        {
+            state.ret_enum = self.enum_identity(*returned);
+        }
         state.name = name;
         state.x86_features = self.function_x86_features(g, loc);
         let bounds = std::mem::take(&mut state.vla_bounds);
@@ -2558,7 +2702,7 @@ impl<'a> Parser<'a> {
         // function switch back to `arena` (see `declaration`), and on an
         // error the whole tree is dropped.
         self.nodes = unsafe { nodes.get() };
-        let body = self.block_items().map(|body| {
+        let body = self.block_items(false).map(|body| {
             if bounds.is_empty() {
                 return body;
             }
@@ -2583,6 +2727,12 @@ impl<'a> Parser<'a> {
         let body = body?;
         self.pop_scope();
         let fs = self.fs.take().unwrap();
+        if let Some(objects) = fs.unused_objects {
+            objects.local_warnings(self.language.unused, &ids, &fs.locals, &mut self.warnings);
+        }
+        if let Some(labels) = fs.unused_labels {
+            labels.emit(&mut self.warnings);
+        }
         if fs.locals.iter().any(|l| l.cleanup.is_some())
             && let Some((loc, kind)) = fs.cleanup_unsupported_exit
         {
@@ -2848,6 +2998,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                     "gnu_inline" => attrs.gnu_inline = true,
+                    "designated_init" => attrs.designated_init = Some(loc),
                     "transparent_union" => {
                         attrs.transparent_union.get_or_insert(loc);
                     }
@@ -2924,6 +3075,12 @@ impl<'a> Parser<'a> {
                             return Err(self.unexpected("an attribute without arguments"));
                         }
                         attrs.symbol.retain.get_or_insert(loc);
+                    }
+                    "unused" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.unused = true;
                     }
                     "used" => {
                         if self.is("(") {
@@ -3026,6 +3183,12 @@ impl<'a> Parser<'a> {
                         }
                         attrs.nonstring = true;
                     }
+                    "uninitialized" => {
+                        if self.is("(") {
+                            return Err(self.unexpected("an attribute without arguments"));
+                        }
+                        attrs.uninitialized = true;
+                    }
                     "aligned" if self.eat("(") => {
                         let n = self.alignment_constant(false)?;
                         attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(n));
@@ -3074,7 +3237,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Attributes without meaning where they are written.
-    fn ignored_attributes(&mut self) -> R<()> {
+    fn ignored_attributes(&mut self) -> R<Attrs> {
         let mut attrs = Attrs::default();
         self.attributes(&mut attrs)?;
         if let Some(loc) = attrs
@@ -3087,7 +3250,8 @@ impl<'a> Parser<'a> {
                 "type-changing attribute has no type subject",
             ));
         }
-        attrs.no_symbol_attrs()
+        attrs.no_symbol_attrs()?;
+        Ok(attrs)
     }
 
     // ---- types ----
@@ -3307,6 +3471,9 @@ impl<'a> Parser<'a> {
                         _ if counter == 0 && other.is_none() => {
                             if let Some(Sym::Typedef(i)) = self.lookup(word) {
                                 let i = *i;
+                                if let Some(typedefs) = &mut self.unused_typedefs {
+                                    typedefs.reference(i);
+                                }
                                 self.advance();
                                 spec.sugar = Sugar::Typedef(i);
                                 Some(self.typedefs[i].ty)
@@ -3359,6 +3526,12 @@ impl<'a> Parser<'a> {
         use IntKind::*;
         spec.infer = counter == AUTO;
         spec.implicit_int = counter == 0;
+        if spec.implicit_int && self.language.error_implicit_int {
+            return Err(Error::new(
+                loc,
+                "declaration requires a type specifier [-Wimplicit-int]",
+            ));
+        }
         spec.ty = match counter {
             AUTO => Ty::Int(Int), // Replaced after parsing the initializer.
             OTHER => other.unwrap(),
@@ -3366,15 +3539,17 @@ impl<'a> Parser<'a> {
                 if spec.storage == Storage::None && !spec.is_const && !spec.inline {
                     return Err(self.unexpected("a type"));
                 }
+                if self.language.warn_implicit_int {
+                    self.warnings.push(Error::new(
+                        loc,
+                        "declaration defaults to int [-Wimplicit-int]",
+                    ));
+                }
                 Ty::Int(Int)
             }
             VOID => Ty::Void,
             BOOL => Ty::Int(Bool),
-            CHAR => Ty::Int(if self.target == Target::Aarch64LinuxGnu {
-                UPlainChar
-            } else {
-                Char
-            }),
+            CHAR => self.plain_char(),
             c if c == SIGNED + CHAR => Ty::Int(SChar),
             c if c == UNSIGNED + CHAR => Ty::Int(UChar),
             c if c == SHORT
@@ -3487,6 +3662,16 @@ impl<'a> Parser<'a> {
 
     fn apply_type_attrs(&mut self, ty: Ty<'a>, attrs: &mut Attrs) -> R<Ty<'a>> {
         let mut ty = ty;
+        if let Some(loc) = attrs.designated_init.take()
+            && self.language.error_designated_init
+        {
+            match ty {
+                Ty::Struct(id) if !self.structs[id].is_union => {
+                    self.structs[id].designated_init = true;
+                }
+                _ => return Err(Error::new(loc, "designated_init requires a struct type")),
+            }
+        }
         if attrs.microsoft_x64.is_some()
             && let Some(annotated) = self.microsoft_function_type(ty)
         {
@@ -3995,6 +4180,10 @@ impl<'a> Parser<'a> {
             if has_static && len.is_none() && vla.is_none() {
                 return Err(Error::new(loc, "static array parameter requires a bound"));
             }
+            if self.language.warn_vla && vla.is_some() {
+                self.warnings
+                    .push(Error::new(loc, "variable length array [-Wvla]"));
+            }
             self.expect("]")?;
             let (elem, sugar) = self.type_suffix(ty, sugar, attrs)?;
             if !self.complete_vm_element(&elem) {
@@ -4036,6 +4225,8 @@ impl<'a> Parser<'a> {
         self.nodes = self.arena;
         self.fs = Some(FuncState {
             locals: outer.as_ref().map_or_else(Vec::new, |fs| fs.locals.clone()),
+            unused_objects: self.language.unused.track_locals().then(Default::default),
+            unused_labels: self.language.unused.labels.then(Default::default),
             vla_bounds: Vec::new(),
             has_vm: false,
             cleanup_unsupported_exit: None,
@@ -4045,6 +4236,7 @@ impl<'a> Parser<'a> {
             label_addrs: Vec::new(),
             label_addr_numbers: HashMap::default(),
             ret,
+            ret_enum: None,
             name: "",
             switches: Vec::new(),
             x86_features: outer.as_ref().and_then(|fs| fs.x86_features),
@@ -4138,6 +4330,7 @@ impl<'a> Parser<'a> {
             ret,
             params: &[],
             param_quals: &[],
+            param_enums: &[],
             variadic: false,
             form: FunctionForm::Prototype,
         };
@@ -4146,6 +4339,12 @@ impl<'a> Parser<'a> {
         let mut params = Vec::new();
         let mut param_quals = Vec::new();
         self.last_param_ids.clear();
+        if self.language.error_strict_prototypes && (self.is(")") || !self.is_typename()) {
+            return Err(Error::new(
+                self.loc(),
+                "function declaration requires a prototype [-Wstrict-prototypes]",
+            ));
+        }
         if self.eat(")") {
             fty.form = FunctionForm::Unspecified;
             self.last_params = names;
@@ -4180,6 +4379,7 @@ impl<'a> Parser<'a> {
                 fs.locals.push(Local {
                     asm_register: None,
                     nonstring: false,
+                    zero_init: false,
                     name,
                     ty: INT,
                     sugar: Sugar::Plain,
@@ -4308,6 +4508,9 @@ impl<'a> Parser<'a> {
                 .unwrap_or_else(|| self.unique_name(".parameter"));
             self.check_nonstring(ty, &attrs, loc)?;
             let id = self.new_local(name, ty, sugar, array_quals.1);
+            if let Some((_, loc)) = d.name {
+                self.unused_local_declaration(id, loc, &attrs);
+            }
             self.fs.as_mut().unwrap().locals[id].nonstring = attrs.nonstring;
             ids.push(id);
             params.push(self.parameter_signature(ty));
@@ -4318,6 +4521,13 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(")")?;
+        if self.language.warn_enum_conversion {
+            fty.param_enums = self.arena.alloc_slice_fill_iter(
+                names
+                    .iter()
+                    .map(|(_, _, sugar, _)| self.enum_identity(*sugar)),
+            );
+        }
         self.last_params = names;
         self.last_param_ids = ids;
         fty.params = self.arena.alloc_slice_copy(&params);
@@ -4340,6 +4550,7 @@ impl<'a> Parser<'a> {
         let new_struct = |p: &mut Parser<'a>, tag: Option<&'a str>| {
             p.structs.push(StructDef {
                 transparent_union: false,
+                designated_init: false,
                 tag,
                 is_union,
                 members: Vec::new(),
@@ -4363,7 +4574,7 @@ impl<'a> Parser<'a> {
             self.scopes.last_mut().unwrap().tags.insert(tag, Some(id));
             attrs.no_symbol_attrs()?;
             attrs.no_type_attrs()?;
-            return Ok(Ty::Struct(id));
+            return self.apply_type_attrs(Ty::Struct(id), &mut attrs);
         }
         let pack = self.lexer.pack_limit(self.toks[self.pos].pack);
         self.advance();
@@ -4583,6 +4794,12 @@ impl<'a> Parser<'a> {
             return Err(Error::new(loc, "enum tag is already defined in this scope"));
         }
         let mut values = Vec::new();
+        let id = self.enums.len();
+        self.enums.push(EnumDef {
+            tag,
+            ty: INT,
+            values: Vec::new(),
+        });
         let mut next = 0_i128;
         let mut next_kind = IntKind::Int;
         let mut minimum = 0_i128;
@@ -4650,7 +4867,7 @@ impl<'a> Parser<'a> {
                 Some(IntKind::ULLong)
             };
             next_kind = kind.unwrap_or(IntKind::Int);
-            self.bind(name, Sym::Enum(next as i64, next_kind));
+            self.bind(name, Sym::Enum(next as i64, next_kind, Some(id)));
             next += 1;
             if !self.eat(",") {
                 self.expect("}")?;
@@ -4730,12 +4947,12 @@ impl<'a> Parser<'a> {
                     Sym::Enum(
                         value,
                         ty.int_kind().expect("enum representation is integer"),
+                        Some(id),
                     ),
                 );
             }
         }
-        self.enums.push(EnumDef { tag, ty, values });
-        let id = self.enums.len() - 1;
+        self.enums[id] = EnumDef { tag, ty, values };
         if let Some(tag) = tag {
             let scope = self.scopes.last_mut().unwrap();
             scope.tags.insert(tag, None);
@@ -4761,7 +4978,7 @@ impl<'a> Parser<'a> {
 
     /// The items of a `{}` block, after the `{`, in a new scope.
     /// The statements of a block, through the `}`.
-    pub(crate) fn block_items(&mut self) -> R<&'a [Stmt<'a>]> {
+    pub(crate) fn block_items(&mut self, has_result: bool) -> R<&'a [Stmt<'a>]> {
         while self.eat("__label__") {
             loop {
                 let loc = self.loc();
@@ -4786,7 +5003,7 @@ impl<'a> Parser<'a> {
             if self.is_declaration_start() {
                 self.declaration(false, &mut out)?;
             } else {
-                out.push(self.statement()?);
+                out.push(self.statement_item(has_result)?);
             }
             self.release_tokens();
         }
@@ -4820,6 +5037,12 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> R<Stmt<'a>> {
+        self.statement_item(false)
+    }
+
+    /// Defer discarded-value checks for direct items of a statement
+    /// expression until the caller separates its result.
+    fn statement_item(&mut self, defer_value_check: bool) -> R<Stmt<'a>> {
         let loc = self.loc();
         if self.is_fallthrough_attribute() {
             if self.fs.as_ref().is_none_or(|f| f.switches.is_empty()) {
@@ -4849,7 +5072,7 @@ impl<'a> Parser<'a> {
                     "fallthrough must annotate a null statement",
                 ));
             }
-            return Ok(Stmt::Block(&[]));
+            return Ok(Stmt::Fallthrough);
         }
         if let Tok::Ident(word) = self.peek() {
             match word {
@@ -4858,13 +5081,23 @@ impl<'a> Parser<'a> {
                     self.expect("(")?;
                     let cond = self.condition()?;
                     self.expect(")")?;
+                    let empty_then = self.language.warn_empty_body && self.is(";");
+                    let then_loc = self.loc();
                     let then = self.statement()?;
                     let els = if self.eat("else") {
+                        if self.language.warn_empty_body && self.is(";") {
+                            self.warnings
+                                .push(Error::new(self.loc(), "empty else body [-Wempty-body]"));
+                        }
                         {
                             let s = self.statement()?;
                             Some(self.stmt_node(s))
                         }
                     } else {
+                        if empty_then {
+                            self.warnings
+                                .push(Error::new(then_loc, "empty if body [-Wempty-body]"));
+                        }
                         None
                     };
                     return Ok(Stmt::If(cond, self.stmt_node(then), els));
@@ -4903,6 +5136,7 @@ impl<'a> Parser<'a> {
                     } else {
                         let e = self.expr()?;
                         self.expect(";")?;
+                        self.discarded_value(&e);
                         Some(self.stmt_node(Stmt::Expr(e)))
                     };
                     let cond = if self.is(";") {
@@ -4919,6 +5153,7 @@ impl<'a> Parser<'a> {
                     } else {
                         {
                             let e = self.expr()?;
+                            self.discarded_value(&e);
                             Some(self.node(e))
                         }
                     };
@@ -5024,8 +5259,8 @@ impl<'a> Parser<'a> {
                             sw.default = Some(label);
                         }
                     }
-                    let stmt = self.labeled_statement()?;
-                    return Ok(Stmt::Block(self.slice(&[Stmt::Case(label), stmt])));
+                    let stmt = self.labeled_statement(false)?;
+                    return Ok(Stmt::Block(self.slice(&[Stmt::Case(label, loc), stmt])));
                 }
                 "break" | "continue" => {
                     self.advance();
@@ -5038,18 +5273,31 @@ impl<'a> Parser<'a> {
                 }
                 "return" => {
                     self.advance();
+                    let ret = self.fs.as_ref().unwrap().ret;
                     if self.eat(";") {
+                        if ret != Ty::Void {
+                            self.bad_return(
+                                loc,
+                                "non-void function must return a value [-Wreturn-type]",
+                            )?;
+                        }
                         return Ok(Stmt::Return(None, loc));
                     }
                     let e = self.expr()?;
                     self.expect(";")?;
-                    let ret = self.fs.as_ref().unwrap().ret;
                     if ret == Ty::Void {
+                        if e.ty != Ty::Void {
+                            self.bad_return(
+                                loc,
+                                "void function cannot return a value [-Wreturn-type]",
+                            )?;
+                        }
                         // `return f();` in a void function, f returning void.
                         return Ok(Stmt::Block(
                             self.slice(&[Stmt::Expr(e), Stmt::Return(None, loc)]),
                         ));
                     }
+                    self.check_enum_conversion(e, self.fs.as_ref().unwrap().ret_enum);
                     let e = self.convert_for_assign(e, &ret)?;
                     return Ok(Stmt::Return(Some(e), loc));
                 }
@@ -5066,7 +5314,9 @@ impl<'a> Parser<'a> {
                     }
                     let label = self.ident()?;
                     self.expect(";")?;
-                    return Ok(Stmt::Goto(self.resolve_label(label)));
+                    let label = self.resolve_label(label);
+                    self.reference_label(label);
+                    return Ok(Stmt::Goto(label));
                 }
                 "asm" | "__asm" | "__asm__" => {
                     self.require_native_layout(loc, "inline assembly")?;
@@ -5078,9 +5328,17 @@ impl<'a> Parser<'a> {
                     if self.is_fallthrough_attribute() {
                         return Err(Error::new(loc, "fallthrough cannot annotate a label"));
                     }
-                    self.ignored_attributes()?;
+                    let attrs = self.ignored_attributes()?;
                     let label = self.resolve_label(word);
-                    let stmt = self.labeled_statement()?;
+                    if !attrs.unused
+                        && let Some(labels) = self
+                            .fs
+                            .as_mut()
+                            .and_then(|state| state.unused_labels.as_mut())
+                    {
+                        labels.declaration(word, label, loc);
+                    }
+                    let stmt = self.labeled_statement(defer_value_check)?;
                     return Ok(Stmt::Block(self.slice(&[Stmt::Label(label), stmt])));
                 }
                 _ => {}
@@ -5088,7 +5346,7 @@ impl<'a> Parser<'a> {
         }
         if self.eat("{") {
             let scope = self.push_block();
-            let items = self.block_items()?;
+            let items = self.block_items(false)?;
             self.pop_block();
             return Ok(Stmt::Scoped(scope, items));
         }
@@ -5097,12 +5355,25 @@ impl<'a> Parser<'a> {
         }
         let e = self.expr()?;
         self.expect(";")?;
+        if !defer_value_check {
+            self.discarded_value(&e);
+        }
         Ok(Stmt::Expr(e))
+    }
+
+    fn bad_return(&mut self, loc: Loc, message: &str) -> R<()> {
+        if self.language.error_return_type {
+            return Err(Error::new(loc, message));
+        }
+        if self.language.warn_return_type {
+            self.warnings.push(Error::new(loc, message));
+        }
+        Ok(())
     }
 
     /// The statement after a label. C23 allows a declaration there, and
     /// so do compilers in practice; so does this.
-    fn labeled_statement(&mut self) -> R<Stmt<'a>> {
+    fn labeled_statement(&mut self, defer_value_check: bool) -> R<Stmt<'a>> {
         if self.is("}") {
             return Ok(Stmt::Block(&[]));
         }
@@ -5111,7 +5382,7 @@ impl<'a> Parser<'a> {
             self.declaration(false, &mut decls)?;
             return Ok(Stmt::Block(self.finish_stmts(decls)));
         }
-        self.statement()
+        self.statement_item(defer_value_check)
     }
 
     /// A controlling expression: any scalar.
@@ -5282,7 +5553,7 @@ mod tests {
                     let sym = if step % 3 == 0 {
                         Sym::Typedef(step)
                     } else {
-                        Sym::Enum(step as i64, IntKind::Int)
+                        Sym::Enum(step as i64, IntKind::Int, None)
                     };
                     p.bind_at(depth, name, sym);
                     model[depth].insert(name, sym);
@@ -5327,10 +5598,13 @@ mod tests {
         assert_eq!(p.globals.len(), 1);
         for depth in 0..6 {
             p.push_scope();
-            p.bind(object, Sym::Enum(depth, IntKind::Int));
+            p.bind(object, Sym::Enum(depth, IntKind::Int, None));
         }
         for depth in (0..6).rev() {
-            assert_eq!(p.lookup(object), Some(&Sym::Enum(depth, IntKind::Int)));
+            assert_eq!(
+                p.lookup(object),
+                Some(&Sym::Enum(depth, IntKind::Int, None))
+            );
             p.pop_scope();
         }
         assert_eq!(p.lookup(object), Some(&Sym::Global(global)));

@@ -24,7 +24,7 @@ impl ArgumentLocation for ArgLoc {
     }
 }
 
-pub(super) fn promote(f: &Function, debug: bool) -> Cow<'_, Function> {
+pub(super) fn promote(f: &Function, debug: bool, call_alignment: u32) -> Cow<'_, Function> {
     aggregate_inputs::promote(f, debug, |sig| {
         let placement = sysv::signature_arg_locs(
             sig,
@@ -33,10 +33,11 @@ pub(super) fn promote(f: &Function, debug: bool) -> Cow<'_, Function> {
                 .map(|p| sysv::signature_param_kind(sig, p))
                 .collect::<Vec<_>>(),
         );
+        let stack_align = placement.stack_align(call_alignment);
         Placement {
             locs: placement.locs,
             stack: placement.stack,
-            stack_align: placement.stack_align,
+            stack_align,
         }
     })
 }

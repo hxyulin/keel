@@ -157,6 +157,12 @@ subject to the representation safeguards below.
 
 ## Optimizer consumers
 
+`frame_pointer` retains the native frame pointer. `no_sibling_calls`
+disables optional tail-call formation. `conserve_stack` limits estimated
+stack growth during optional inlining. `preserve_memory_faults` keeps
+memory expansion from marking potentially faulting accesses as undefined.
+These policies survive textual IR round trips.
+
 `call-contracts` runs in Basic, Balanced, Size and Full, before their second
 CFG cleanup, which removes newly redundant joins. In the tiers that inline, it
 runs after inlining, so inlined direct calls get the same treatment.

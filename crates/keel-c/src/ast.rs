@@ -347,7 +347,8 @@ pub enum Stmt<'a> {
         labels: usize,
     },
     /// The label of a switch case, by index in its switch.
-    Case(usize),
+    Case(usize, Loc),
+    Fallthrough,
     Break,
     Continue,
     Return(Option<Expr<'a>>, Loc),
@@ -362,6 +363,8 @@ pub struct Local<'a> {
     /// Fixed register used when this local is a direct extended-asm operand.
     pub asm_register: Option<keel_ir::PhysReg>,
     pub nonstring: bool,
+    /// Zero this object when its declaration executes without an initializer.
+    pub zero_init: bool,
     /// The source name; made-up ones, which are not identifiers, have a
     /// `.` (`compound literal.3`).
     pub name: &'a str,

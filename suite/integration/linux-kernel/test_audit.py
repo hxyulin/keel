@@ -13,6 +13,27 @@ spec.loader.exec_module(audit)
 
 
 class AuditTests(unittest.TestCase):
+    def test_replay_keeps_flags_and_redirects_build_side_effects(self):
+        saved = (
+            'clang --target=x86_64-linux-gnu -Wp,-MMD,mm/.page.o.d -Igenerated '
+            '-include config.h -Wall -Wno-unused-parameter -Wextra -Wunused '
+            '-Wfuture-flag -DNAME=\"with spaces\" -save-temps=obj '
+            '-c /source/mm/page.c -o mm/page.o ; ./objtool mm/page.o'
+        )
+        command, dependencies = audit.raw_c_command(
+            saved, Path('/keel'), Path('/out/mm/page.o'), '+popcnt')
+        self.assertEqual(command, [
+            '/keel', 'cc', '--target', 'x86_64-unknown-linux-gnu',
+            '--link-intent', 'executable', '--target-features', '+popcnt',
+            '--target=x86_64-linux-gnu', '-Wp,-MMD,/out/mm/.page.o.d', '-Igenerated',
+            '-include', 'config.h', '-Wall', '-Wno-unused-parameter', '-Wextra',
+            '-Wunused', '-Wfuture-flag', '-DNAME=with spaces', '-save-temps=obj',
+            '-c', '/source/mm/page.c', '-o', '/out/mm/page.o',
+        ])
+        self.assertEqual(dependencies, [Path('/out/mm/.page.o.d')])
+        with self.assertRaises(ValueError):
+            audit.raw_c_command('gcc -c source.c && gcc -o output.o', Path('/keel'), Path('/out/o'), None)
+
     def test_mode_boundaries(self):
         for path, command, source in [
             ('arch/x86/realmode/rm/wakeup.s', 'gcc -m64', ''),

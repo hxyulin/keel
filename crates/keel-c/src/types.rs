@@ -181,7 +181,7 @@ pub enum FunctionForm {
     OldStyleDefinition,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub struct FuncTy<'a> {
     /// Foreign ABI type metadata only; evaluated calls and definitions reject.
     pub microsoft_x64: bool,
@@ -190,8 +190,21 @@ pub struct FuncTy<'a> {
     /// Qualifiers below each parameter's top level, in pointer/array order.
     /// Top-level parameter qualifiers do not participate in compatibility.
     pub param_quals: &'a [&'a [u8]],
+    /// Top-level enum identities for source diagnostics.
+    pub param_enums: &'a [Option<usize>],
     pub variadic: bool,
     pub form: FunctionForm,
+}
+
+impl PartialEq for FuncTy<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.microsoft_x64 == other.microsoft_x64
+            && self.ret == other.ret
+            && self.params == other.params
+            && self.param_quals == other.param_quals
+            && self.variadic == other.variadic
+            && self.form == other.form
+    }
 }
 
 impl FuncTy<'_> {
@@ -236,6 +249,8 @@ pub enum Sugar<'a> {
     Typedef(usize),
     /// The enum by its index in the enum table.
     Enum(usize),
+    /// An enumeration constant with integer type and a source enum identity.
+    Enumerator(usize),
     Const(&'a Sugar<'a>),
     Volatile(&'a Sugar<'a>),
     /// C restrict qualification on this type layer.
@@ -388,6 +403,7 @@ pub struct EnumDef<'a> {
 pub struct StructDef<'a> {
     /// Pointer-only GNU transparent union, passed using its first member ABI.
     pub transparent_union: bool,
+    pub designated_init: bool,
     pub tag: Option<&'a str>,
     pub is_union: bool,
     pub members: Vec<Member<'a>>,
@@ -1355,6 +1371,7 @@ mod layout_tests {
             assert_eq!((size, align), (3 * p, p));
             let record = StructDef {
                 transparent_union: false,
+                designated_init: false,
                 tag: None,
                 is_union: false,
                 members,
@@ -1448,6 +1465,7 @@ mod layout_tests {
             assert_eq!((size, align), expected);
             let defs = [StructDef {
                 transparent_union: false,
+                designated_init: false,
                 tag: None,
                 is_union: false,
                 members,

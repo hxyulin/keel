@@ -17,15 +17,22 @@ pub(super) struct VectorShape {
 }
 
 impl VectorShape {
-    pub fn of(func: &Function, facts: &crate::kinds::FunctionFacts<'_>) -> Self {
+    pub fn of(
+        func: &Function,
+        facts: &crate::kinds::FunctionFacts<'_>,
+        call_alignment: usize,
+    ) -> Self {
         let abi_align = |sig: &keel_ir::Signature| {
             sig.params
                 .iter()
                 .chain(&sig.returns)
-                .filter_map(|p| p.layout())
-                .map(|l| l.align() as usize)
+                .filter_map(|p| {
+                    p.layout()
+                        .map(|l| l.align() as usize)
+                        .or_else(|| matches!(p.ty, Type::I128 | Type::F80).then_some(16))
+                })
                 .max()
-                .unwrap_or(16)
+                .unwrap_or(call_alignment)
         };
         let wrappers = |sig: &keel_ir::Signature| {
             sig.params
@@ -51,13 +58,17 @@ impl VectorShape {
             .chain(func.callees().map(|(_, d)| abi_align(&d.sig)))
             .chain(func.signatures().map(|(_, s)| abi_align(s)))
             .max()
-            .unwrap_or(16);
+            .unwrap_or(call_alignment);
         // The strictest alignment of an argument or `va_arg` aggregate.
         for &inst in &facts.calls {
             let args = func.inst_data(inst).call_args().expect("a call");
-            for i in 0..args.len() {
+            for (i, &arg) in args.iter().enumerate() {
                 if let Some(layout) = args.abi(i).and_then(|p| p.layout()) {
                     abi_align = abi_align.max(layout.align() as usize);
+                } else if call_alignment == 8
+                    && matches!(func.value_type(func.resolve(arg)), Type::I128 | Type::F80)
+                {
+                    abi_align = abi_align.max(16);
                 }
             }
         }
@@ -75,29 +86,39 @@ impl VectorShape {
                 .vector()
                 .map_or(0, |v| v.bytes())
         };
-        let mut simd_bytes = wrapper_bytes.max(16);
-        if (0..func.num_values()).any(|i| vector_bytes(Value::new(i)) > simd_bytes) {
+        let mut vector_align = wrapper_bytes.max(call_alignment as u32);
+        if (0..func.num_values()).any(|i| vector_bytes(Value::new(i)) > vector_align) {
             for block in func.blocks() {
                 for &param in func.block_params(block) {
-                    simd_bytes = simd_bytes.max(vector_bytes(param));
+                    vector_align = vector_align.max(vector_bytes(param));
                 }
                 for &inst in func.block_insts(block) {
                     for &result in func.inst_results(inst) {
-                        simd_bytes = simd_bytes.max(vector_bytes(result));
+                        vector_align = vector_align.max(vector_bytes(result));
                     }
                 }
             }
         }
+        let simd_bytes = vector_align.max(16);
         let simd_bits = (simd_bytes * 8) as u16;
         let wide_vectors = simd_bytes >= 32;
+        // `stack_alloc` promises 16-byte storage, and the variadic SIMD
+        // save area is written with MOVAPS.
+        let local_minimum =
+            if (func.sig.variadic && !func.attrs.x86_no_sse) || facts.kinds.stack_alloc {
+                16
+            } else {
+                call_alignment
+            };
         let frame_align = func
             .stack_slots()
             .map(|(_, s)| s.align as usize)
             .max()
-            .unwrap_or(16)
-            .max(simd_bytes as usize)
+            .unwrap_or(local_minimum)
+            .max(local_minimum)
+            .max(vector_align as usize)
             .max(abi_align);
-        let frame_register = (frame_align > 16).then_some(15);
+        let frame_register = (frame_align > call_alignment).then_some(15);
         Self {
             wrapper_bytes,
             simd_bytes,
@@ -116,6 +137,25 @@ pub(super) fn preflight(
     features: keel_asm_ir::x86::Features,
 ) -> Result<(), String> {
     let not_yet = |what: &str| format!("{what} not supported on x86-64 yet");
+    if func.attrs.x86_no_x87
+        && (func
+            .sig
+            .params
+            .iter()
+            .chain(&func.sig.returns)
+            .any(|p| p.ty == Type::F80)
+            || func.layout_insts().any(|(_, i)| {
+                let mut uses_x87 = func
+                    .inst_results(i)
+                    .iter()
+                    .any(|&v| func.value_type(v) == Type::F80);
+                func.inst_data(i)
+                    .for_each_operand(|v| uses_x87 |= func.value_type(v) == Type::F80);
+                uses_x87
+            }))
+    {
+        return Err("x86 x87 register use is disabled".into());
+    }
     if let Some(error) =
         func.layout_insts().find_map(|(_, i)| {
             match func.inst_data(i) {
@@ -198,6 +238,7 @@ pub(super) fn check_guaranteed_tails(
     func: &Function,
     named: &sysv::Placement,
     present: crate::kinds::InstKinds,
+    call_alignment: usize,
 ) -> Result<(), String> {
     if !present.return_call {
         return Ok(());
@@ -217,12 +258,14 @@ pub(super) fn check_guaranteed_tails(
                 placement.stack
             ));
         }
-        if placement.stack_align > named.stack_align.max(16) {
+        let incoming_alignment = named.stack_align(call_alignment as u32);
+        let outgoing_alignment = placement.stack_align(call_alignment as u32);
+        if outgoing_alignment > incoming_alignment {
             return Err(format!(
                 "`{}`: guaranteed tail requires unsupported incoming stack alignment {} (received {})",
                 func.display_inst(inst),
-                placement.stack_align,
-                named.stack_align.max(16)
+                outgoing_alignment,
+                incoming_alignment,
             ));
         }
         // Logical void is insufficient: aggregate results may use ST0,
@@ -368,10 +411,17 @@ impl CallArea {
                 _ => None,
             });
         }
-        // `movaps` stores need 16-byte alignment.
+        // `movaps` stores need 16-byte alignment. GPR-only varargs
+        // use just the integer portion of the System V save area.
         let reg_save = func.sig.variadic.then(|| {
-            offset = offset.next_multiple_of(16) + 176;
-            offset - 176
+            let (alignment, bytes) = if func.attrs.x86_no_sse {
+                (8, 48)
+            } else {
+                (16, 176)
+            };
+            let base = offset.next_multiple_of(alignment);
+            offset = base + bytes;
+            base
         });
         Self {
             outgoing,
@@ -900,6 +950,7 @@ pub(super) fn frame_size(
     simple_leaf: bool,
     saved: &[u8],
     offset: usize,
+    call_alignment: usize,
 ) -> Result<usize, String> {
     let frame_register = shape.frame_register;
     let frame_size = if goal == crate::CodegenGoal::Size
@@ -909,7 +960,7 @@ pub(super) fn frame_size(
     {
         0
     } else {
-        (offset + 8 * saved.len()).next_multiple_of(16) - 8 * saved.len()
+        (offset + 8 * saved.len()).next_multiple_of(call_alignment) - 8 * saved.len()
             + if frame_register.is_some() {
                 shape.frame_align - 1
             } else {
@@ -934,6 +985,7 @@ pub(super) fn register_only_frame(
 ) -> bool {
     let present = facts.kinds;
     offset == 0
+        && !func.attrs.frame_pointer
         && func.local
         && (2..=3).contains(&func.sig.params.len())
         && func.sig.params[0].ty == Type::Ptr
@@ -980,8 +1032,9 @@ pub(super) fn frameless(
     named: &sysv::Placement,
     saved: &[u8],
 ) -> bool {
-    (func.sig.cc == CallConv::Fast
-        || (func.sig.cc == CallConv::C && (has_vectors || goal == crate::CodegenGoal::Size)))
+    !func.attrs.frame_pointer
+        && (func.sig.cc == CallConv::Fast
+            || (func.sig.cc == CallConv::C && (has_vectors || goal == crate::CodegenGoal::Size)))
         && simple_leaf
         && frame_size == 0
         && named.stack == 0

@@ -612,6 +612,9 @@ impl<'a> Parser<'a> {
             .into_iter()
             .map(|label| self.resolve_label(label))
             .collect();
+        for &label in &goto_labels {
+            self.reference_label(label);
+        }
         Ok(Stmt::Asm(self.nodes.alloc(AsmStmt {
             template: self.text.intern(&template),
             constraints: self.text.intern(&constraints),

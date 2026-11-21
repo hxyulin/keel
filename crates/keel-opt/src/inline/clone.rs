@@ -134,6 +134,7 @@ pub(super) fn two_functions(
 }
 
 pub(super) fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
+    caller.attrs.preserve_memory_faults |= callee.attrs.preserve_memory_faults;
     let InstData::Call { args, .. } = caller.inst_data(call).clone() else {
         unreachable!()
     };

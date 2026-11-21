@@ -1619,8 +1619,15 @@ fn execute_sequence(
                 instcombine::clear_hits();
             }
             let start = reporting.then(Instant::now);
+            let scalar_x86 = context.target == VectorTarget::X86Sse2 && func.attrs.x86_no_sse;
             let function_context = OptimizationContext {
                 canonical: pass.requires_canonical_form(),
+                target: if scalar_x86 {
+                    VectorTarget::Portable
+                } else {
+                    context.target
+                },
+                scalar_memory_expansion: scalar_x86 || context.scalar_memory_expansion,
                 capabilities: if context.target == VectorTarget::X86Sse2 {
                     func.attrs
                         .target_features

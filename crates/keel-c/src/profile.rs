@@ -66,7 +66,7 @@ pub fn compile(
     let start = Instant::now();
     let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .fast_math(opts.fast_math)
-        .run()
+        .run(&mut Vec::new())
         .map_err(|e| diagnostic(&files, e))?;
     crate::apply_function_binding(&mut module, opts.target, crate::FunctionBinding::default());
     crate::finalize_inline_asm(&mut module, &parser)

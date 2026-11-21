@@ -3,7 +3,7 @@ use super::sysv::{self, ArgLoc, RegPiece, Slot};
 use crate::aggregate_outputs::{Plan, is_pair};
 use keel_ir::{AbiParam, CallConv, Signature, Type};
 
-pub(super) fn plan(old: &Signature) -> Option<Plan> {
+pub(super) fn plan(old: &Signature, call_alignment: u32) -> Option<Plan> {
     if old.cc != CallConv::C || old.variadic || old.returns_twice || old.x86_vector_abi.is_some() {
         return None;
     }
@@ -51,7 +51,7 @@ pub(super) fn plan(old: &Signature) -> Option<Plan> {
     }
     let after = placement(&signature);
     if before.stack != after.stack
-        || before.stack_align != after.stack_align
+        || before.stack_align(call_alignment) != after.stack_align(call_alignment)
         || before.ints != after.ints
         || before.floats != after.floats
     {

@@ -2,8 +2,8 @@
 //! Every value has a zero-extended eight-byte home. rax/rcx/rdx compute values;
 //! r10 holds indirect call targets. Failed eligibility publishes no partial output.
 use super::{
-    Cfi, CodeModel, Directive, Expression, Function, Output, Sink, asm_arg, r32, r64, rip, sized,
-    symbol_address, symbol_memory,
+    Cfi, CodeModel, Directive, Expression, Function, Output, Sink, StackAlignment, asm_arg, r32,
+    r64, rip, sized, symbol_address, symbol_memory,
 };
 use keel_ir::{
     ArgExt, BinaryOp, BlockCall, CallArgs, ConvertOp, EntityRef, FuncRef, InstData, IntCC,
@@ -202,6 +202,7 @@ fn encode(
     func: &Function,
     symbols: &crate::symbols::Symbols<'_>,
     model: CodeModel,
+    stack_alignment: StackAlignment,
 ) -> Option<Code> {
     if !scalar_signature(&func.sig) || func.personality.is_some() || !func.debug_vars.is_empty() {
         return None;
@@ -227,16 +228,17 @@ fn encode(
         .unwrap_or(0);
     let mut used = outgoing.checked_add(func.num_values().checked_add(extra)?.checked_mul(8)?)?;
     let mut slots = vec![0; func.num_stack_slots()];
+    let alignment = stack_alignment.bytes();
     for (slot, data) in func.stack_slots() {
-        if data.align == 0 || !data.align.is_power_of_two() || data.align > 16 {
+        if !data.align.is_power_of_two() || data.align as usize > alignment {
             return None;
         }
         used = used.checked_add(data.align as usize - 1)? & !(data.align as usize - 1);
         slots[slot.index()] = u32::try_from(used).ok()?;
         used = used.checked_add(data.size as usize)?;
     }
-    // Entry rsp is 8 mod 16. Allocating 8 mod 16 makes fixed slots 16-aligned.
-    let frame = (used.checked_add(8)?.checked_add(15)? & !15).checked_sub(8)?;
+    // Include the return address when rounding from the caller's boundary.
+    let frame = used.checked_add(8)?.checked_next_multiple_of(alignment)? - 8;
     if frame > i32::MAX as usize / 2 {
         return None;
     }
@@ -703,10 +705,16 @@ pub(super) fn emit(
     symbols: &crate::symbols::Symbols<'_>,
     out: &mut Output,
     emission: crate::EmissionOptions,
-) -> bool {
-    let Some(code) = encode(func, symbols, emission.x86_code_model.unwrap_or_default()) else {
-        return false;
-    };
+) -> Option<usize> {
+    if func.attrs.frame_pointer {
+        return None;
+    }
+    let code = encode(
+        func,
+        symbols,
+        emission.x86_code_model.unwrap_or_default(),
+        emission.x86_stack_alignment.unwrap_or_default(),
+    )?;
     super::function_entry(
         func,
         out,
@@ -764,7 +772,7 @@ pub(super) fn emit(
         expression: Expression::difference(".", &func.name),
     });
     crate::backend_profile::count(crate::backend_profile::Counter::DirectFunctions);
-    true
+    Some(code.frame as usize)
 }
 
 #[cfg(test)]

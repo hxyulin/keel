@@ -149,7 +149,8 @@ fn statement(s: &Stmt<'_>, sizes: &[u64]) -> R<()> {
             statement(body, sizes)
         }
         Stmt::Declare(_)
-        | Stmt::Case(_)
+        | Stmt::Case(..)
+        | Stmt::Fallthrough
         | Stmt::Break
         | Stmt::Continue
         | Stmt::Return(None, _)
@@ -362,7 +363,7 @@ pub(crate) fn lower(src: &str, debug: bool) -> R<Module> {
     )?;
     let files = p.take_files();
     let funcs = std::mem::take(&mut p.funcs);
-    let module = Gen::new(&p, funcs, &files, debug).run()?;
+    let module = Gen::new(&p, funcs, &files, debug).run(&mut Vec::new())?;
     keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).map_err(|e| {
         Error::new(
             Loc::default(),

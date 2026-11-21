@@ -39,8 +39,33 @@ pub struct PreprocessOptions {
     pub dump_macros: bool,
 }
 
+/// GCC and Clang dialect options for raw source preprocessing.
+#[derive(Clone, Debug, Default)]
+pub struct PreprocessDialect {
+    /// Exclude the standard compiler and system header search directories.
+    pub no_standard_includes: bool,
+    /// Include these files in order, after command-line definitions.
+    pub forced_includes: Vec<PathBuf>,
+    /// Prefix replacements for names expanded by file-name macros.
+    pub macro_prefix_maps: Vec<(String, String)>,
+    /// Select the GNU C11 macro environment.
+    pub gnu11: bool,
+    /// Reject expansions of the three predefined date and time macros.
+    pub error_date_time: bool,
+    /// Report undefined identifiers used as zero in conditional expressions.
+    pub warn_undefined: bool,
+    /// Overrides also used by the language parser when compiling this input.
+    pub character_types: crate::CharacterTypes,
+}
+
 /// A file name. The tokens of one file share it through a thin pointer.
 type FileName<'a> = &'a &'a str;
+
+#[derive(Default)]
+struct Dependencies {
+    seen: HashSet<FileId>,
+    paths: Vec<PathBuf>,
+}
 /// The macro names whose expansion produced a token, which it must not
 /// expand again, behind a thin pointer.
 type HideSet<'a> = &'a &'a [&'a str];
@@ -152,8 +177,16 @@ impl PreprocessCache {
         path: &str,
         options: &PreprocessOptions,
     ) -> Result<String, Diagnostic> {
-        preprocess_inner::<false>(src, path, options, Some(self), STREAM_CHUNK_TOKENS)
-            .map(|(text, _)| text)
+        preprocess_inner::<false>(
+            src,
+            path,
+            options,
+            &PreprocessDialect::default(),
+            Some(self),
+            STREAM_CHUNK_TOKENS,
+            None,
+        )
+        .map(|(text, _)| text)
     }
 }
 
@@ -210,7 +243,49 @@ pub fn preprocess(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<String, Diagnostic> {
-    preprocess_inner::<false>(src, path, options, None, STREAM_CHUNK_TOKENS).map(|(text, _)| text)
+    preprocess_inner::<false>(
+        src,
+        path,
+        options,
+        &PreprocessDialect::default(),
+        None,
+        STREAM_CHUNK_TOKENS,
+        None,
+    )
+    .map(|(text, _)| text)
+}
+
+/// Optional outputs from preprocessing one source file.
+#[derive(Debug, Default)]
+pub struct PreprocessArtifacts {
+    /// The source and non-system includes for a Make-style dependency rule.
+    pub dependencies: Option<Vec<PathBuf>>,
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// Preprocess C and collect diagnostics and requested dependencies.
+pub fn preprocess_with_artifacts(
+    src: &str,
+    path: &str,
+    options: &PreprocessOptions,
+    dialect: &PreprocessDialect,
+    cache: Option<&mut PreprocessCache>,
+    collect_dependencies: bool,
+) -> Result<(String, PreprocessArtifacts), Diagnostic> {
+    let mut artifacts = PreprocessArtifacts {
+        dependencies: collect_dependencies.then(|| vec![PathBuf::from(path)]),
+        warnings: Vec::new(),
+    };
+    let (text, _) = preprocess_inner::<false>(
+        src,
+        path,
+        options,
+        dialect,
+        cache,
+        STREAM_CHUNK_TOKENS,
+        Some(&mut artifacts),
+    )?;
+    Ok((text, artifacts))
 }
 
 /// Counters are collected only by the profiling entry point; the ordinary
@@ -236,14 +311,24 @@ pub fn preprocess_with_stats(
     path: &str,
     options: &PreprocessOptions,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
-    preprocess_inner::<true>(src, path, options, None, STREAM_CHUNK_TOKENS)
+    preprocess_inner::<true>(
+        src,
+        path,
+        options,
+        &PreprocessDialect::default(),
+        None,
+        STREAM_CHUNK_TOKENS,
+        None,
+    )
 }
 fn preprocess_inner<const TRACK: bool>(
     src: &str,
     path: &str,
     options: &PreprocessOptions,
+    dialect: &PreprocessDialect,
     batch_cache: Option<&mut PreprocessCache>,
     stream_chunk: usize,
+    artifacts: Option<&mut PreprocessArtifacts>,
 ) -> Result<(String, PreprocessStats), Diagnostic> {
     if options.target == keel_ir::Target::Wasm32UnknownUnknown && options.sysroot.is_some() {
         return Err(Diagnostic {
@@ -263,6 +348,7 @@ fn preprocess_inner<const TRACK: bool>(
         stats: PreprocessStats::default(),
         batch_cache,
         options,
+        dialect,
         stream_chunk,
         in_condition: false,
         // A TU that includes C library headers typically defines 1500 macros.
@@ -273,6 +359,12 @@ fn preprocess_inner<const TRACK: bool>(
         search_dirs: Vec::new(),
         framework_dirs: Vec::new(),
         include_stack: Vec::new(),
+        system_header: false,
+        dependencies: artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.dependencies.as_ref())
+            .map(|_| Dependencies::default()),
+        warnings: Vec::new(),
         once: HashSet::default(),
         paths: Vec::new(),
         path_ids: HashMap::default(),
@@ -287,14 +379,18 @@ fn preprocess_inner<const TRACK: bool>(
         output_next: None,
     };
     let predefined = arena.alloc_str(
-        &crate::predefined_macros(
+        &crate::predefined::predefined_macros_with_character_types(
             options.target,
             options.darwin_deployment.as_deref(),
             options.x86_baseline,
+            dialect.character_types,
         )
         .map_err(|e| pp.error(e))?,
     );
     for line in predefined.lines() {
+        if dialect.gnu11 && line.starts_with("#define __STRICT_ANSI__ ") {
+            continue;
+        }
         pp.define(&scan(
             line.strip_prefix("#define ").unwrap(),
             &"<built-in>",
@@ -315,7 +411,39 @@ fn preprocess_inner<const TRACK: bool>(
         }
     }
     let canonical = pp.canonical_path(Path::new(path));
+    if let Some(deps) = &mut pp.dependencies {
+        deps.seen.insert(canonical);
+    }
+    if !dialect.forced_includes.is_empty() {
+        // Forced includes resolve in the working directory first. Retain
+        // the main file as the bottom of the include stack.
+        pp.include_stack.push((path, None));
+        let at = scan("\"-include\"", &"<command line>", &arena)?[0];
+        for header in &dialect.forced_includes {
+            let header_name = header.to_string_lossy();
+            let include = if header.is_file() {
+                Some(Include {
+                    path: header.clone(),
+                    origin: None,
+                    contents: None,
+                })
+            } else {
+                pp.find_header(&header_name, false, false)
+            }
+            .ok_or_else(|| at.error(format!("forced include `{header_name}` not found")))?;
+            pp.include_file(include, 1, &at)?;
+        }
+        pp.include_stack.pop();
+    }
     pp.file(src, path, canonical, 0, None, false)?;
+    if let Some(artifacts) = artifacts {
+        if let (Some(paths), Some(dependencies)) =
+            (&mut artifacts.dependencies, pp.dependencies.take())
+        {
+            paths.extend(dependencies.paths);
+        }
+        artifacts.warnings = std::mem::take(&mut pp.warnings);
+    }
     let output = if options.dump_macros {
         pp.macro_dump()
     } else {
@@ -333,8 +461,12 @@ struct Preprocessor<'a, const TRACK: bool> {
     arena: &'a Bump,
     sources: &'a typed_arena::Arena<FileSource>,
     options: &'a PreprocessOptions,
+    dialect: &'a PreprocessDialect,
     /// [`STREAM_CHUNK_TOKENS`], or less in tests.
     stream_chunk: usize,
+    system_header: bool,
+    dependencies: Option<Dependencies>,
+    warnings: Vec<Diagnostic>,
     in_condition: bool,
     macros: HashMap<&'a str, &'a Macro<'a>>,
     /// Every name `macros` has held.
@@ -1236,6 +1368,9 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             .extend(self.options.include_dirs.iter().cloned());
         self.search_dirs
             .extend(self.options.system_include_dirs.iter().cloned());
+        if self.dialect.no_standard_includes {
+            return;
+        }
         self.search_dirs.push(crate::headers::ROOT.into());
         if self.options.target == keel_ir::Target::Wasm32UnknownUnknown {
             return;
@@ -1262,6 +1397,14 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             self.framework_dirs
                 .push(root.join("System/Library/Frameworks"));
         }
+    }
+    fn quoted_macro_path(&self, path: &str) -> String {
+        for (from, to) in self.dialect.macro_prefix_maps.iter().rev() {
+            if let Some(suffix) = path.strip_prefix(from) {
+                return quote(&format!("{to}{suffix}"));
+            }
+        }
+        quote(path)
     }
     fn error(&self, message: impl Into<String>) -> Diagnostic {
         Diagnostic {
@@ -1650,7 +1793,21 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             }
             return Ok(());
         }
-        self.flush(&mut state.pending)?;
+        if self.dialect.gnu11
+            && physical.get(1).is_some_and(|t| {
+                matches!(
+                    t.text,
+                    "if" | "ifdef" | "ifndef" | "elif" | "else" | "endif"
+                )
+            })
+            && let Some(start) = self.open_macro_argument(&state.pending)
+        {
+            let invocation = state.pending.split_off(start);
+            self.flush(&mut state.pending)?;
+            state.pending = invocation;
+        } else {
+            self.flush(&mut state.pending)?;
+        }
         // Borrow directive lines unless #line or a cached path alias needs
         // new locations. Inactive ordinary lines require no token copies.
         let physical_line = physical.get(1).map_or(0, |t| t.line);
@@ -1777,6 +1934,30 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         }
         Ok(())
     }
+
+    // GNU permits conditional directives within a macro's arguments. Keep
+    // the unfinished invocation, but expand preceding tokens before the
+    // directive so constructs like __COUNTER__ observe source order.
+    fn open_macro_argument(&self, tokens: &[Token<'a>]) -> Option<usize> {
+        let mut closes = 0;
+        let mut start = None;
+        for (i, t) in tokens.iter().enumerate().rev() {
+            match t.text {
+                ")" => closes += 1,
+                "(" if closes != 0 => closes -= 1,
+                "(" if i > 0 => {
+                    let name = tokens[i - 1].text;
+                    if self.defined.may_contain(name)
+                        && self.macros.get(name).is_some_and(|m| m.params.is_some())
+                    {
+                        start = Some(i - 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        start
+    }
     /// Scans and processes the lines that a kept placeholder stands for, in
     /// the active group of a later inclusion.
     fn skipped_lines(
@@ -1868,6 +2049,17 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             return Ok(());
         }
         let embedded = include.contents.is_some();
+        let system = self.system_header
+            || include
+                .origin
+                .is_some_and(|index| index >= self.options.include_dirs.len());
+        if !system
+            && !embedded
+            && let Some(deps) = &mut self.dependencies
+            && deps.seen.insert(canonical)
+        {
+            deps.paths.push(include.path.clone());
+        }
         let key = (canonical, embedded);
         let source = if CACHE_HEADERS && let Some(&source) = self.file_sources.get(&key) {
             if TRACK {
@@ -1912,7 +2104,10 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
             source
         };
         let path = self.arena.alloc_str(&include.path.to_string_lossy());
-        self.file(source, path, canonical, depth, include.origin, embedded)
+        let inherited_system = std::mem::replace(&mut self.system_header, system);
+        let result = self.file(source, path, canonical, depth, include.origin, embedded);
+        self.system_header = inherited_system;
+        result
     }
     fn find_header(&mut self, name: &str, quoted: bool, next: bool) -> Option<Include> {
         let &(path, origin) = self.include_stack.last()?;
@@ -2011,7 +2206,12 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                         | "_Pragma"
                         | "__has_include"
                         | "__has_include_next"
-                ) || query_builtin(name)))
+                ) || query_builtin(name)
+                    || self.reject_date_time_macro(name)))
+    }
+
+    fn reject_date_time_macro(&self, name: &str) -> bool {
+        self.dialect.error_date_time && matches!(name, "__DATE__" | "__TIME__" | "__TIMESTAMP__")
     }
 }
 #[derive(Hash, PartialEq, Eq)]
@@ -2263,7 +2463,8 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                             | "__has_include"
                             | "__has_include_next"
                             | "_Pragma"
-                    ) || query_builtin(name)))
+                    ) || query_builtin(name)
+                        || self.reject_date_time_macro(name)))
         };
         (macro_definition.is_some() || special()).then_some(macro_definition)
     }
@@ -2339,18 +2540,25 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                 continue;
             }
             let builtin_enabled = macro_definition.is_none() && !self.undefined.contains(name);
+            if builtin_enabled && self.reject_date_time_macro(name) {
+                return Err(t.error(format!(
+                    "expansion of `{name}` prevents reproducible builds [-Wdate-time]"
+                )));
+            }
             let builtin = if builtin_enabled {
                 match name {
                     "__LINE__" => Some(t.line.to_string()),
-                    "__FILE__" => Some(quote(t.file)),
-                    "__BASE_FILE__" => Some(quote(self.include_stack[0].0)),
-                    "__FILE_NAME__" => Some(quote(
-                        Path::new(t.file)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_str()
-                            .unwrap_or(""),
-                    )),
+                    "__FILE__" => Some(self.quoted_macro_path(t.file)),
+                    "__BASE_FILE__" => Some(self.quoted_macro_path(self.include_stack[0].0)),
+                    "__FILE_NAME__" => Some(
+                        self.quoted_macro_path(
+                            Path::new(t.file)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_str()
+                                .unwrap_or(""),
+                        ),
+                    ),
                     "__INCLUDE_LEVEL__" => Some((self.include_stack.len() - 1).to_string()),
                     "__COUNTER__" => {
                         let n = self.counter;
@@ -2435,7 +2643,12 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
                     args.clear();
                 }
                 let fixed = params.len() - usize::from(m.variadic);
-                let omitted = m.variadic && args.len() <= fixed;
+                let omitted = m.variadic
+                    && (args.len() <= fixed
+                        || (self.dialect.gnu11
+                            && fixed == 0
+                            && args.len() == 1
+                            && args[0].is_empty()));
                 if args.len() < fixed || (!m.variadic && args.len() != fixed) {
                     return Err(t.error(format!("wrong number of arguments to macro {name}")));
                 }
@@ -2607,18 +2820,16 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         self.in_condition = true;
         let expanded = self.expand(ts, 0);
         self.in_condition = false;
-        let mut tokens = expanded?;
-        for t in &mut tokens {
-            if ident(t.text) {
-                t.text = "0";
-            }
-        }
+        let tokens = expanded?;
         if tokens.is_empty() {
             return Err(ts[0].error("expected #if expression after expansion"));
         }
         let mut expr = Expression {
             ts: &tokens,
             pos: 0,
+            character_types: self.dialect.character_types,
+            warnings: (self.dialect.warn_undefined && !self.system_header)
+                .then_some(&mut self.warnings),
         };
         let value = expr.eval(0, true)?;
         if expr.pos != tokens.len() {
@@ -2650,11 +2861,13 @@ fn unary(op: UnOp, v: Integer) -> Integer {
     int_const::unary(op, v, Policy::CONSTANT).expect("#if negation wraps")
 }
 
-struct Expression<'t, 'a> {
+struct Expression<'t, 'a, 'd> {
     ts: &'t [Token<'a>],
     pos: usize,
+    character_types: crate::CharacterTypes,
+    warnings: Option<&'d mut Vec<Diagnostic>>,
 }
-impl Expression<'_, '_> {
+impl Expression<'_, '_, '_> {
     fn eval(&mut self, min: u8, live: bool) -> Result<Integer, Diagnostic> {
         let Some(t) = self.ts.get(self.pos) else {
             return Err(self
@@ -2679,7 +2892,15 @@ impl Expression<'_, '_> {
                     _ => boolean(v.is_zero()),
                 }
             }
-            _ => integer(t)?,
+            name if ident(name) => {
+                if live && let Some(warnings) = &mut self.warnings {
+                    warnings.push(
+                        t.error(format!("`{name}` is not defined, evaluates to 0 [-Wundef]")),
+                    );
+                }
+                boolean(false)
+            }
+            _ => integer(t, self.character_types)?,
         };
         while let Some(op) = self.ts.get(self.pos) {
             if op.text == "?" && min <= 1 {
@@ -2774,17 +2995,19 @@ impl Expression<'_, '_> {
         }
     }
 }
-fn integer(t: &Token<'_>) -> Result<Integer, Diagnostic> {
+fn integer(t: &Token<'_>, character_types: crate::CharacterTypes) -> Result<Integer, Diagnostic> {
     if t.text.contains('\'') {
         let arena = Bump::new();
         let mut strings = crate::strings::Strings::new(&arena);
-        let mut files = Vec::new();
-        let tokens = crate::lex::tokenize(t.text, t.file, &mut files, &mut strings)
-            .map_err(|e| t.error(e.message))?;
-        if let crate::lex::Tok::Char(value) = tokens[0].tok {
-            return Ok(IntConst::from_literal(IntTy::INTMAX, value));
-        }
-        return Err(t.error("invalid character constant in #if"));
+        let mut lexer = crate::lex::Lexer::new(t.text, t.file, &mut strings)
+            .with_character_types(character_types);
+        let token = lexer.token(&mut strings).map_err(|e| t.error(e.message))?;
+        let value = match token.tok {
+            crate::lex::Tok::Char(value) => value,
+            crate::lex::Tok::ShortWideChar(value) => i64::from(value),
+            _ => return Err(t.error("invalid character constant in #if")),
+        };
+        return Ok(IntConst::from_literal(IntTy::INTMAX, value));
     }
     let s = &t.text;
     let (radix, start) = if s.starts_with("0x") || s.starts_with("0X") {
@@ -2935,8 +3158,15 @@ mod scanner_tests {
     }
 
     fn chunked(src: &str, chunk: usize) -> String {
-        match preprocess_inner::<false>(src, "chunk.c", &PreprocessOptions::default(), None, chunk)
-        {
+        match preprocess_inner::<false>(
+            src,
+            "chunk.c",
+            &PreprocessOptions::default(),
+            &PreprocessDialect::default(),
+            None,
+            chunk,
+            None,
+        ) {
             Ok((text, _)) => text,
             Err(e) => format!("error {}:{}:{}: {}", e.file, e.line, e.col, e.message),
         }
@@ -3011,8 +3241,16 @@ mod scanner_tests {
         let path = dir.join("main.c");
         let run = |chunk| {
             let opts = PreprocessOptions::default();
-            let (text, _) =
-                preprocess_inner::<false>(src, path.to_str().unwrap(), &opts, None, chunk).unwrap();
+            let (text, _) = preprocess_inner::<false>(
+                src,
+                path.to_str().unwrap(),
+                &opts,
+                &PreprocessDialect::default(),
+                None,
+                chunk,
+                None,
+            )
+            .unwrap();
             text.lines()
                 .filter(|line| !line.starts_with('#'))
                 .flat_map(str::split_whitespace)

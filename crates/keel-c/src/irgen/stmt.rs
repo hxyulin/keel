@@ -17,6 +17,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         match s {
             Stmt::Asm(asm) => {
                 self.ensure_block();
+                self.mark_switch_work();
                 self.set_loc(asm.loc);
                 if !asm.goto_labels.is_empty() && self.has_vm_types() {
                     return Err(Error::new(
@@ -92,11 +93,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Stmt::Expr(e) => {
                 self.ensure_block();
+                self.mark_switch_work();
                 self.set_loc(e.loc);
                 self.full_expression(|fg| fg.discard(e))?;
             }
             Stmt::Init(id, init, loc) => {
                 self.ensure_block();
+                self.mark_switch_work();
                 self.set_loc(*loc);
                 self.full_expression(|fg| fg.init_local(*id, init))?;
                 self.register_cleanup(*id);
@@ -109,6 +112,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // that no assignment reaches already reads as zero.
             Stmt::Declare(id) => {
                 let ty = self.def.locals[*id].ty;
+                let zero_init = self.def.locals[*id].zero_init;
                 if ty.runtime_sized() {
                     self.ensure_block();
                     let bytes = self.runtime_size(&ty)?;
@@ -123,10 +127,19 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.b.def_var(var, addr);
                     self.alignments
                         .insert(addr, self.def.locals[*id].align as u32);
+                    if zero_init {
+                        let zero = self.b.ins().iconst(Type::I8, 0);
+                        self.b
+                            .ins()
+                            .intrinsic(Intrinsic::Memset, &[addr, zero, bytes]);
+                    }
                     self.register_cleanup(*id);
                     return Ok(());
                 }
-                if let Storage::Var(var) = self.locals[*id]
+                if zero_init {
+                    self.ensure_block();
+                    self.init_local(*id, &Init { items: &[] })?;
+                } else if let Storage::Var(var) = self.locals[*id]
                     && (self.loop_depth > 0 || self.labels_placed)
                 {
                     self.ensure_block();
@@ -152,6 +165,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Stmt::If(cond, then, els) => {
                 self.ensure_block();
+                self.mark_switch_work();
                 self.set_loc(cond.loc);
                 let (t, f, end) = (self.new_block(), self.new_block(), self.new_block());
                 self.branch_full(cond, t, f)?;
@@ -177,6 +191,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     (self.new_block(), self.new_block(), self.new_block());
                 self.jump_to(header);
                 self.switch_to(header);
+                self.mark_switch_work();
                 self.set_loc(cond.loc);
                 self.branch_full(cond, body_block, exit)?;
                 self.b.seal_block(body_block);
@@ -195,6 +210,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.jump_to(cond_block);
                 self.b.seal_block(cond_block);
                 self.switch_to(cond_block);
+                self.mark_switch_work();
                 self.set_loc(cond.loc);
                 self.branch_full(cond, body_block, exit)?;
                 self.b.seal_block(body_block);
@@ -221,6 +237,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.switch_to(header);
                 match cond {
                     Some(cond) => {
+                        self.mark_switch_work();
                         self.set_loc(cond.loc);
                         self.branch_full(cond, body_block, exit)?;
                     }
@@ -232,6 +249,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.seal_block(step_block);
                 self.switch_to(step_block);
                 if let Some(step) = step {
+                    self.mark_switch_work();
                     self.set_loc(step.loc);
                     self.full_expression(|fg| fg.emit(step))?;
                 }
@@ -254,6 +272,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     ));
                 }
                 self.ensure_block();
+                self.mark_switch_work();
                 self.set_loc(cond.loc);
                 let value = self.full_expression(|fg| fg.val(cond))?;
                 let blocks: Vec<Block> = (0..*labels).map(|_| self.new_block()).collect();
@@ -298,7 +317,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.terminated = true;
                 self.cases.push(blocks.clone());
                 self.breaks.push((exit, self.exit_actions.len()));
+                if let Some(warnings) = &mut self.switch_warnings {
+                    warnings.enter(&blocks, exit);
+                }
                 self.stmt(body)?;
+                if let Some(warnings) = &mut self.switch_warnings {
+                    warnings.leave();
+                }
                 self.jump_to(exit);
                 self.breaks.pop();
                 self.cases.pop();
@@ -311,11 +336,23 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // A case block's branches are the switch's, built already, and
             // the fall-through into it: sealing it now resolves its reads
             // directly instead of through parameters filled in later.
-            Stmt::Case(label) => {
+            Stmt::Case(label, loc) => {
+                if !self.terminated
+                    && let Some(warnings) = &mut self.switch_warnings
+                {
+                    warnings.case(self.b.current_block(), *loc);
+                }
                 let block = self.cases.last().unwrap()[*label];
                 self.jump_to(block);
                 self.b.seal_block(block);
                 self.switch_to(block);
+            }
+            Stmt::Fallthrough => {
+                if !self.terminated
+                    && let Some(warnings) = &mut self.switch_warnings
+                {
+                    warnings.annotation(self.b.current_block());
+                }
             }
             Stmt::Break => {
                 self.ensure_block();
@@ -364,6 +401,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     ));
                 }
                 self.ensure_block();
+                if let Some(warnings) = &mut self.switch_warnings {
+                    warnings.goto(self.b.current_block());
+                }
                 if self.has_cleanup() {
                     self.emit_exit_actions(self.cleanup_jumps.depth(label))?;
                 }

@@ -208,7 +208,11 @@ impl<'a> Scan<'a, '_> {
                     self.expression(step);
                 }
             }
-            Stmt::Case(_) | Stmt::Break | Stmt::Continue | Stmt::Return(None, _) => {}
+            Stmt::Case(..)
+            | Stmt::Fallthrough
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::Return(None, _) => {}
         }
     }
 

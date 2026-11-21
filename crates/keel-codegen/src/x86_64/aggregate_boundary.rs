@@ -44,7 +44,11 @@ impl IntegerAggregate {
     }
 }
 
-fn signature(old: &Signature, aggregate: IntegerAggregate) -> Option<Signature> {
+fn signature(
+    old: &Signature,
+    aggregate: IntegerAggregate,
+    call_alignment: u32,
+) -> Option<Signature> {
     if old.cc != CallConv::C
         || old.variadic
         || old.returns_twice
@@ -101,7 +105,7 @@ fn signature(old: &Signature, aggregate: IntegerAggregate) -> Option<Signature> 
         2
     };
     if before.stack != after.stack
-        || before.stack_align != after.stack_align
+        || before.stack_align(call_alignment) != after.stack_align(call_alignment)
         || before.ints != after.ints
         || before.floats != after.floats
         || !matches!(&before.locs[0], ArgLoc::SretRegs(r) if r.as_slice() == &return_pieces[..pieces])
@@ -221,7 +225,7 @@ impl Builder {
     }
 }
 
-pub(super) fn lower(old: &Function) -> Option<Function> {
+pub(super) fn lower(old: &Function, call_alignment: u32) -> Option<Function> {
     let Purpose::Sret(layout) = &old.sig.params.first()?.purpose else {
         return None;
     };
@@ -263,7 +267,7 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
     {
         return None;
     }
-    let sig = signature(&old.sig, aggregate)?;
+    let sig = signature(&old.sig, aggregate, call_alignment)?;
     if aggregate == IntegerAggregate::Word || old.blocks().count() != 1 {
         return lower_branches(old, sig, aggregate);
     }
@@ -388,7 +392,7 @@ pub(super) fn lower(old: &Function) -> Option<Function> {
                     return None;
                 }
                 let decl = old.callee(*func);
-                let sig = signature(&decl.sig, IntegerAggregate::Pair)?;
+                let sig = signature(&decl.sig, IntegerAggregate::Pair, call_alignment)?;
                 let (id, off) = address(args[0], &b)?;
                 if off % 8 != 0 || off + 16 > b.objects[id].len() * 8 {
                     return None;
@@ -730,7 +734,7 @@ mod tests {
     #[test]
     fn branching_leaf_eliminates_only_private_homes() {
         let original = source(BRANCH);
-        let f = lower(&original).unwrap();
+        let f = lower(&original, 16).unwrap();
         keel_ir::verify(&f).unwrap();
         assert_eq!(f.sig.returns[0].ty, Type::I128);
         assert_eq!(f.num_stack_slots(), 0);
@@ -759,13 +763,13 @@ mod tests {
             BRANCH.replace(" v9 = icmp.uge v7, v8", " v9 = icmp.eq v0, v2"),
             BRANCH.replace(" jump block2", " jump block1"),
         ] {
-            assert!(lower(&source(&s)).is_none(), "{s}");
+            assert!(lower(&source(&s), 16).is_none(), "{s}");
         }
     }
     #[test]
     fn wrapper_removes_transport_without_changing_the_symbol_or_binding() {
         let original = source(SOURCE);
-        let f = lower(&original).unwrap();
+        let f = lower(&original, 16).unwrap();
         keel_ir::verify(&f).unwrap();
         assert_eq!(f.name, "JS_Call");
         assert!(!f.local);
@@ -802,7 +806,7 @@ mod tests {
             ),
             SOURCE.replace(" cc(c) {", " cc(c) returns_twice {"),
         ] {
-            assert!(lower(&source(&s)).is_none(), "{s}");
+            assert!(lower(&source(&s), 16).is_none(), "{s}");
         }
     }
     #[test]
@@ -810,7 +814,7 @@ mod tests {
         let mut f = source(SOURCE);
         let params = f.block_params(f.entry_block().unwrap()).to_vec();
         f.replace_all_uses(params[2], params[3]);
-        assert!(lower(&f).is_none());
+        assert!(lower(&f, 16).is_none());
     }
     #[test]
     fn placement_check_rejects_stack_alignment_changes_and_non_integer_shapes() {
@@ -820,19 +824,19 @@ mod tests {
         changed.params.extend(vec![AbiParam::new(Type::I64); 7]);
         changed.params.push(sig.params[2].clone());
         // Seven integers place a pair at +8 in the original ABI, +16 as i128.
-        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair, 16).is_none());
         let mut aligned = changed.clone();
         aligned.params.remove(1);
-        assert!(signature(&aligned, IntegerAggregate::Pair).is_some());
+        assert!(signature(&aligned, IntegerAggregate::Pair, 16).is_some());
         let mut debug = source(SOURCE);
         debug.debug_scopes.push(None);
-        assert!(lower(&debug).is_none());
+        assert!(lower(&debug, 16).is_none());
         let mut changed = sig.clone();
         changed.params[2].purpose =
             Purpose::ByVal(Layout::Array(Box::new(Layout::Scalar(Type::F64)), 2));
-        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair, 16).is_none());
         let mut changed = sig;
         changed.variadic = true;
-        assert!(signature(&changed, IntegerAggregate::Pair).is_none());
+        assert!(signature(&changed, IntegerAggregate::Pair, 16).is_none());
     }
 }

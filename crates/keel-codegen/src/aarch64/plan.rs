@@ -784,12 +784,13 @@ pub(super) fn frameless(
     alloc: &Allocation,
     goal: crate::CodegenGoal,
 ) -> bool {
-    (func.sig.cc == CallConv::Fast
-        || (goal == crate::CodegenGoal::Size
-            && !func.attrs.optnone
-            && !func.attrs.naked
-            && !func.attrs.interrupt
-            && !func.sig.returns_twice))
+    !func.attrs.frame_pointer
+        && (func.sig.cc == CallConv::Fast
+            || (goal == crate::CodegenGoal::Size
+                && !func.attrs.optnone
+                && !func.attrs.naked
+                && !func.attrs.interrupt
+                && !func.sig.returns_twice))
         && !has_tls_getter
         && module.files.is_empty()
         && func.personality.is_none()

@@ -11,6 +11,128 @@ mod returns;
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 
 #[test]
+fn x86_eight_byte_calls_preserve_stronger_local_alignment() {
+    use keel_codegen::x86_64::StackAlignment;
+    use keel_test_support::{native, native_program};
+
+    let module = keel_ir::parse(
+        "decl @inspect(ptr, i64) -> i64 cc(c)
+        func @ordinary(i64) -> i64 cc(c) {
+            ss0 = stack_slot 8, align 8
+        block0(v0: i64):
+            v1 = stack_addr ss0
+            store v0, v1
+            v2 = iconst.i64 7
+            v3 = call @inspect(v1, v2)
+            return v3
+        }
+        func @aligned(i64) -> i64 cc(c) {
+            ss0 = stack_slot 8, align 16
+        block0(v0: i64):
+            v1 = stack_addr ss0
+            store v0, v1
+            v2 = iconst.i64 15
+            v3 = call @inspect(v1, v2)
+            return v3
+        }
+        func @dynamic(i64) -> i64 cc(c) {
+        block0(v0: i64):
+            v1 = intrinsic stack_alloc(v0)
+            store v0, v1
+            v2 = iconst.i64 15
+            v3 = call @inspect(v1, v2)
+            return v3
+        }",
+    )
+    .unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Full,
+    };
+    let request = |alignment| {
+        let mut emission = keel_codegen::EmissionOptions::default();
+        emission.x86_stack_alignment = Some(alignment);
+        keel_codegen::Request::new(target, pipeline).emission(emission)
+    };
+    let default = request(StackAlignment::Align16).text(&module).unwrap();
+    assert!(default.contains("\tsub\trsp, 16\n"), "{default}");
+    let request = request(StackAlignment::Align8);
+    let text = request.text(&module).unwrap();
+    assert!(text.contains("\tsub\trsp, 8\n"), "{text}");
+    assert_eq!(text.matches("\tand\trsp, -16\n").count(), 2, "{text}");
+    let bytes = keel_asm::assemble_source_for(target, &text).unwrap();
+    assert_eq!(
+        bytes,
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap()
+    );
+
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) || !native::active() {
+        return;
+    }
+    // Each bridge enters with rsp == 8 mod 16 and calls without pushing
+    // anything. The callee therefore enters at rsp == 0 mod 16.
+    let oracle = r#"
+        .macro bridge target
+        .globl run_\target
+        run_\target:
+            mov $33, %edi
+            call \target
+            ret
+        .endm
+        bridge ordinary
+        bridge aligned
+        bridge dynamic
+        .globl inspect
+        inspect:
+            mov $-1, %rax
+            test %rsi, %rdi
+            jnz 1f
+            mov %rsp, %rax
+            and $15, %eax
+            add (%rdi), %rax
+        1:  ret
+        .section .note.GNU-stack,"",@progbits
+    "#;
+    native_program!("x86-eight-byte-calls")
+        .file("oracle.S", oracle)
+        .file(
+            "main.c",
+            "extern long run_ordinary(void), run_aligned(void), run_dynamic(void);\n\
+             int main(void) { return run_ordinary() != 41 || run_aligned() != 41 || run_dynamic() != 41; }",
+        )
+        .file("frame.o", bytes)
+        .link(["-O2", "main.c", "oracle.S", "frame.o"])
+        .check();
+}
+
+#[test]
+fn x86_tail_call_cannot_raise_the_incoming_eight_byte_boundary() {
+    let module = keel_ir::parse(
+        "decl @callee(ptr byval {i32x4,i64}) cc(c)
+        func @tail(ptr byval [4 x i64]) cc(c) {
+        block0(v0: ptr):
+            return_call @callee(v0)
+        }",
+    )
+    .unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let pipeline = CodegenPipeline {
+        selector: &SelectionTier::Full,
+        allocator: &AllocationTier::Full,
+    };
+    let request = keel_codegen::Request::new(target, pipeline);
+    assert!(request.text(&module).is_ok());
+    let mut emission = keel_codegen::EmissionOptions::default();
+    emission.x86_stack_alignment = Some(keel_codegen::x86_64::StackAlignment::Align8);
+    let error = request.emission(emission).text(&module).unwrap_err();
+    assert!(
+        error.message.contains("stack alignment 16 (received 8)"),
+        "{error}"
+    );
+}
+
+#[test]
 fn x86_local_frame_query_matches_the_out_of_line_frame_after_dynamic_allocation() {
     use keel_test_support::{native, native_program};
 

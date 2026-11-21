@@ -105,7 +105,7 @@ impl<'a> Parser<'a> {
         let feature = string
             .bytes
             .strip_suffix(&[0])
-            .filter(|_| !string.wide)
+            .filter(|_| string.unit == 1)
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
             .and_then(crate::x86_cpu::lookup)
             .ok_or_else(|| Error::new(loc, "unknown CPU capability name"))?;

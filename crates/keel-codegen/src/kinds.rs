@@ -20,6 +20,7 @@ pub(crate) struct InstKinds {
     /// `return_call` or `return_call_indirect`.
     pub return_call: bool,
     pub intrinsic: bool,
+    pub stack_alloc: bool,
     pub symbol_addr: bool,
     /// `umulhi`/`smulhi` or overflowing `umul`/`smul`.
     pub high_multiply: bool,
@@ -108,7 +109,11 @@ fn visit(
         InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
             kinds.return_call = true
         }
-        InstData::Intrinsic { .. } | InstData::X86RflagsRegion { .. } => kinds.intrinsic = true,
+        InstData::Intrinsic { id, .. } => {
+            kinds.intrinsic = true;
+            kinds.stack_alloc |= *id == Intrinsic::StackAlloc;
+        }
+        InstData::X86RflagsRegion { .. } => kinds.intrinsic = true,
         InstData::SymbolAddr { .. } => kinds.symbol_addr = true,
         InstData::Binary {
             op: BinaryOp::Umulhi | BinaryOp::Smulhi,

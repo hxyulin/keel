@@ -507,8 +507,8 @@ pub struct Placement {
     pub locs: Vec<ArgLoc>,
     /// Bytes of stack arguments.
     pub stack: u32,
-    /// Required alignment of the incoming stack argument area.
-    pub stack_align: u32,
+    /// Alignment required by the arguments placed on the stack.
+    stack_arg_align: u32,
     /// General-purpose and vector argument registers used: where a
     /// variadic function's `va_start` begins, and `al` for its callers.
     pub ints: u8,
@@ -556,6 +556,11 @@ pub fn arg_locs(args: &[ArgKind]) -> Placement {
 }
 
 impl Placement {
+    /// Required call boundary, accounting for arguments passed on the stack.
+    pub fn stack_align(&self, minimum: u32) -> u32 {
+        self.stack_arg_align.max(minimum)
+    }
+
     /// Becomes [`arg_locs`] of `args`, reusing the list of locations.
     #[cfg(test)]
     pub fn fill<'a>(&mut self, args: impl IntoIterator<Item = ArgKind<'a>>) {
@@ -591,7 +596,7 @@ impl Placement {
             ArgKind::Sret(layout) => cursor.sret(layout, None),
         }));
         self.stack = cursor.stack;
-        self.stack_align = cursor.stack_align.max(16);
+        self.stack_arg_align = cursor.stack_align;
         self.ints = cursor.ints as u8;
         self.floats = cursor.floats;
     }
@@ -1028,7 +1033,7 @@ mod tests {
         assert_eq!(
             (
                 placement.stack,
-                placement.stack_align,
+                placement.stack_align(16),
                 placement.ints,
                 placement.floats
             ),
@@ -1119,7 +1124,7 @@ mod tests {
         let mut args = vec![ArgKind::Value(wide_ty); 10];
         let p = arg_locs(&args);
         assert_eq!(p.floats, 8);
-        assert_eq!(p.stack_align, 32);
+        assert_eq!(p.stack_align(16), 32);
         assert_eq!(p.locs[7], ArgLoc::Value(Slot::Regs(Loc::FReg(7), None)));
         assert_eq!(p.locs[8], ArgLoc::Value(Slot::Stack(0)));
         assert_eq!(p.locs[9], ArgLoc::Value(Slot::Stack(32)));

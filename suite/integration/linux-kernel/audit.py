@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Capture and probe unchanged Kbuild saved inputs for a 64-bit kernel audit.
+"""Capture, probe and replay Kbuild inputs for the 64-bit kernel audit.
 
-Build with KCFLAGS=-save-temps=obj KAFLAGS=-save-temps=obj first. This does not
-wrap or impersonate GCC, modify Linux inputs, or qualify generated code.
+Build with KCFLAGS=-save-temps=obj KAFLAGS=-save-temps=obj before capture.
 """
 import argparse
 import collections
+import concurrent.futures
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 
 
@@ -133,6 +134,85 @@ def resolve_feature_policy(args):
             raise SystemExit(f'Feature policy {kind} permissions must be unique canonical feature names.')
         features[kind] = ','.join('+' + value for value in values) or None
     return features, {'name': name, 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def raw_c_command(saved, keel, output, features):
+    """Replace the compiler and redirect its artifacts. Forward every flag."""
+    head, _, _ = saved.partition(' ; ')
+    original = shlex.split(head)
+    if not original or original.count('-c') != 1 or original.count('-o') != 1:
+        raise ValueError('Expected one saved Kbuild C compilation with an object output.')
+    if any(arg in (';', '&&', '||', '|', '<', '>') for arg in original):
+        raise ValueError('Unexpected shell operator inside the compiler command.')
+    switches = ['--target', 'x86_64-unknown-linux-gnu', '--link-intent', 'executable']
+    if features is not None:
+        switches += ['--target-features', features]
+    args = original[1:]
+    args[args.index('-o') + 1] = str(output)
+    dependencies = []
+    for index, arg in enumerate(args):
+        if arg.startswith('-Wp,-MMD,'):
+            name = Path(arg.removeprefix('-Wp,-MMD,')).name
+            dep = output.parent / name
+            args[index] = f'-Wp,-MMD,{dep}'
+            dependencies.append(dep)
+    return [str(keel), 'cc', *switches, *args], dependencies
+
+
+def replay_c(args):
+    """Replay one reference build's commands on the manifest's C file list."""
+    args.c_target_features = args.asm_target_features = None
+    features, policy = resolve_feature_policy(args)
+    build, out, keel = args.build.resolve(), args.out.resolve(), args.keel.resolve()
+    if args.jobs < 1 or args.timeout < 1:
+        raise SystemExit('Jobs and timeout must be positive.')
+    manifest = json.loads(args.manifest.read_text())
+    inputs = [row for row in manifest['inputs'] if (row['scope'], row['kind']) == ('kernel64', 'c')]
+    if not inputs:
+        raise SystemExit('The manifest has no 64-bit C inputs.')
+    out.mkdir(parents=True, exist_ok=False)
+
+    def compile_one(row):
+        path = Path(row['path'])
+        output = out / path.with_suffix('.o')
+        output.parent.mkdir(parents=True, exist_ok=True)
+        cmd_path = build / path.with_name('.' + path.stem + '.o.cmd')
+        try:
+            saved = re.search(r'^savedcmd_.*? := (.*)$', cmd_path.read_text(), re.M)
+            if not saved or not re.search(r'(?:^|\s)-D__KERNEL__(?:\s|$)', saved[1]):
+                raise ValueError(f'{cmd_path}: missing saved kernel compiler command.')
+            reason = external_reason(row['path'], saved[1], '')
+            if reason:
+                raise ValueError(f'{cmd_path}: {reason}.')
+            argv, dependencies = raw_c_command(saved[1], keel, output, features['c'])
+            result = subprocess.run(argv, cwd=build, capture_output=True, text=True,
+                                    errors='replace', timeout=args.timeout)
+            record = dict(path=row['path'], argv=argv, returncode=result.returncode,
+                          diagnostic=result.stderr)
+            if result.returncode == 0:
+                artifacts = [output, *dependencies]
+                if '-save-temps=obj' in argv:
+                    artifacts += [output.with_suffix('.i'), output.with_suffix('.s')]
+                for artifact in artifacts:
+                    if not artifact.is_file():
+                        raise ValueError(f'Missing emitted artifact: {artifact}')
+                for dep in dependencies:
+                    if not dep.read_text().startswith(f'{output}:'):
+                        raise ValueError(f'Invalid dependency target: {dep}')
+                record['object_sha256'] = sha(output)
+            return record
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            return dict(path=row['path'], returncode=None, diagnostic=str(error))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
+        results = list(executor.map(compile_one, inputs))
+    accepted = sum(row['returncode'] == 0 for row in results)
+    write(out / 'results.json', dict(schema=1, config_sha256=sha(build / '.config'),
+                                     manifest_sha256=sha(args.manifest), keel_sha256=sha(keel),
+                                     feature_policy=policy, accepted=accepted, inputs=results))
+    print(f'{accepted}/{len(results)} raw C commands compiled.')
+    if accepted != len(results):
+        raise SystemExit(1)
 
 
 def probe(args):
@@ -274,13 +354,20 @@ def main():
     check.add_argument('--feature-policy', type=Path, help='Audit feature-policy JSON; cannot be combined with target-feature overrides.')
     check.add_argument('--asm-target-features', help='Explicit extra assembler features; omit for the pinned v3 policy.')
     check.add_argument('--c-target-features', help='Explicit extra C target features; omit for the pinned v1 policy.')
+    replay = sub.add_parser('replay-c', help='Replay saved GCC or Clang C compiler commands.')
+    for name in ('build', 'manifest', 'keel', 'out'):
+        replay.add_argument('--' + name, type=Path, required=True)
+    replay.add_argument('--jobs', type=int, default=4)
+    replay.add_argument('--timeout', type=int, default=180)
+    replay.add_argument('--feature-policy', type=Path,
+                        default=Path(__file__).with_name('kernel-audit-policy.json'))
     oracle = sub.add_parser('compare')
     oracle.add_argument('--build', type=Path, required=True)
     oracle.add_argument('--probe-out', type=Path, required=True)
     oracle.add_argument('--out', type=Path, required=True)
     oracle.add_argument('--gnu-as', default='as')
     args = parser.parse_args()
-    dict(capture=capture, probe=probe, compare=compare)[args.action](args)
+    {'capture': capture, 'probe': probe, 'compare': compare, 'replay-c': replay_c}[args.action](args)
 
 
 if __name__ == '__main__':

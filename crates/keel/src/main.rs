@@ -34,6 +34,7 @@ use target::{parse_target, resolve_target};
 mod archive;
 mod asm;
 mod asm_metrics;
+mod c_warnings;
 mod disasm;
 mod input;
 mod link;
@@ -87,6 +88,8 @@ const USAGE: &str = "usage:
   -fno-asynchronous-unwind-tables omits optional compiler-generated CFI.
   -funwind-tables requests tables independently; disable both to suppress both requests.
   Unwind flags do not change stack frames, debug info or explicit user assembly CFI.
+  x86-64 stack alignment: -mstack-alignment=8 or -mpreferred-stack-boundary=3
+  selects an 8-byte call boundary. Use =16 or =4 respectively for System V.
   -ffunction-sections and -fdata-sections give each ELF function or data object its own section,
   for the linker's --gc-sections; Mach-O output ignores them.
   Verification of C frontend output and after each pass defaults on with debug
@@ -180,6 +183,7 @@ struct Options {
     function_binding: Option<keel_c::FunctionBinding>,
     link_intent: Option<CLinkIntent>,
     x86_code_model: Option<keel_codegen::x86_64::CodeModel>,
+    x86_stack_alignment: Option<keel_codegen::x86_64::StackAlignment>,
     function_sections: bool,
     data_sections: bool,
     unwind: unwind_options::UnwindOptions,
@@ -194,6 +198,25 @@ struct Options {
     no_decimal_snprintf: bool,
     sysroot: Option<std::path::PathBuf>,
     system_include_dirs: Vec<std::path::PathBuf>,
+    no_standard_includes: bool,
+    forced_includes: Vec<std::path::PathBuf>,
+    macro_prefix_maps: Vec<(String, String)>,
+    dependency_file: Option<String>,
+    save_temps: bool,
+    gnu11: bool,
+    error_date_time: bool,
+    warn_undefined: bool,
+    frame_warning_limit: Option<usize>,
+    c_language: keel_c::LanguageOptions,
+    keep_frame_pointer: bool,
+    no_sibling_calls: bool,
+    conserve_stack: bool,
+    function_alignment: Option<u32>,
+    x86_no_sse: bool,
+    x86_no_x87: bool,
+    x86_skip_rax_setup: bool,
+    x86_no_loop_alignment: bool,
+    pic: bool,
     darwin_deployment: Option<String>,
     include_dirs: Vec<std::path::PathBuf>,
     defines: Vec<(String, Option<String>)>,
@@ -216,6 +239,11 @@ impl Options {
         }
         if self.fast_math && self.math_errno != Some(true) {
             defines.push(("__FAST_MATH__".into(), Some("1".into())));
+        }
+        if self.pic {
+            for name in ["__PIC__", "__pic__"] {
+                defines.push((name.into(), Some("2".into())));
+            }
         }
         // Explicit -D/-U overrides compiler-provided macros.
         defines.extend(self.defines.iter().cloned());
@@ -267,8 +295,16 @@ impl Options {
         };
         emission.unwind_tables = self.unwind.policy();
         emission.x86_code_model = self.x86_code_model;
+        emission.x86_stack_alignment = self.x86_stack_alignment;
         emission.function_sections = self.function_sections;
         emission.data_sections = self.data_sections;
+        emission.stack_frame_warning =
+            self.frame_warning_limit.map(|limit| keel_codegen::StackFrameWarning {
+                limit,
+                report: |function, bytes, limit| {
+                    eprintln!("warning: {function}: stack frame of {bytes} bytes exceeds {limit} bytes [-Wframe-larger-than]");
+                },
+            });
         emission.pressure_schedule = self.pressure_schedule.unwrap_or(matches!(
             self.optimization_level,
             Some(optimization::Level::O2 | optimization::Level::O3)
@@ -440,13 +476,20 @@ impl Options {
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
+    let mut warning_groups = c_warnings::Groups::default();
     let mut optimize_preset = None;
     let mut explicit_allocation = false;
     let mut explicit_selection = false;
     let mut supplied = Vec::new();
+    let mut compile_only = false;
+    let c_compilation = allowed == CC_FLAGS;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let raw = arg.as_str();
+        if c_compilation && warning_groups.parse(raw, &mut opts.c_language) {
+            supplied.push(raw);
+            continue;
+        }
         let flag = if raw.starts_with("--sysroot=") {
             "--sysroot"
         } else if raw.starts_with("-mmacosx-version-min=") {
@@ -455,8 +498,32 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-O"
         } else if raw.starts_with("--code-model=") || raw.starts_with("-mcmodel=") {
             "--code-model"
+        } else if raw.starts_with("-mstack-alignment=") {
+            "-mstack-alignment"
+        } else if raw.starts_with("-mpreferred-stack-boundary=") {
+            "-mpreferred-stack-boundary"
         } else if raw.starts_with("-march=") {
             "-march"
+        } else if raw.starts_with("--target=") {
+            "--target"
+        } else if raw.starts_with("-mtune=") {
+            "--tune"
+        } else if raw.starts_with("-std=") {
+            "-std"
+        } else if raw.starts_with("-fmacro-prefix-map=") {
+            "-fmacro-prefix-map"
+        } else if raw.starts_with("-Wp,-MMD,") {
+            "-Wp,-MMD"
+        } else if raw.starts_with("-Wframe-larger-than=") {
+            "-Wframe-larger-than"
+        } else if raw.starts_with("-Wimplicit-fallthrough=") {
+            "-Wimplicit-fallthrough"
+        } else if raw.starts_with("-falign-functions=")
+            || raw.starts_with("-fmin-function-alignment=")
+        {
+            "-falign-functions"
+        } else if raw.starts_with("-ftrivial-auto-var-init=") {
+            "-ftrivial-auto-var-init"
         } else if raw.starts_with("-fno-builtin-") {
             "-fno-builtin-function"
         } else if raw.starts_with("-I") {
@@ -469,12 +536,129 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             raw
         };
         if flag.starts_with('-') && !allowed.contains(&flag) {
+            if c_compilation && C_DISABLED_WARNINGS.contains(&flag) {
+                continue;
+            }
             return Err(format!("unknown flag `{flag}`\n{USAGE}"));
         }
         if flag.starts_with('-') {
             supplied.push(flag);
         }
         match flag {
+            "-c" => compile_only = true,
+            "-nostdinc" => opts.no_standard_includes = true,
+            "-fsigned-char" => opts.c_language.character_types.plain_char_signed = Some(true),
+            "-funsigned-char" => opts.c_language.character_types.plain_char_signed = Some(false),
+            "-fshort-wchar" => opts.c_language.character_types.short_wchar = true,
+            "-fno-short-wchar" => opts.c_language.character_types.short_wchar = false,
+            "-fno-delete-null-pointer-checks" => opts.c_language.preserve_memory_faults = true,
+            "-ftrivial-auto-var-init" => {
+                opts.c_language.zero_auto_vars = match raw.strip_prefix("-ftrivial-auto-var-init=")
+                {
+                    Some("zero") => true,
+                    Some("uninitialized") => false,
+                    _ => {
+                        return Err(
+                            "`-ftrivial-auto-var-init` needs =zero or =uninitialized".into()
+                        );
+                    }
+                };
+            }
+            "-include" => opts
+                .forced_includes
+                .push(args.next().ok_or("`-include` needs a header")?.into()),
+            "-std" => {
+                opts.gnu11 = match raw.strip_prefix("-std=") {
+                    Some("gnu11") => true,
+                    Some("c11") => false,
+                    _ => return Err("`-std` needs =gnu11 or =c11".into()),
+                };
+            }
+            "-fmacro-prefix-map" => {
+                let (from, to) = raw
+                    .strip_prefix("-fmacro-prefix-map=")
+                    .and_then(|value| value.split_once('='))
+                    .ok_or("`-fmacro-prefix-map` needs =OLD=NEW")?;
+                opts.macro_prefix_maps.push((from.into(), to.into()));
+            }
+            "-Wp,-MMD" => {
+                let path = raw.trim_start_matches("-Wp,-MMD,");
+                if path.is_empty() || path.contains(',') {
+                    return Err("`-Wp,-MMD` needs one dependency path".into());
+                }
+                opts.dependency_file = Some(path.into());
+            }
+            "-save-temps=obj" => opts.save_temps = true,
+            "-Werror=strict-prototypes" => opts.c_language.error_strict_prototypes = true,
+            "-Werror=incompatible-pointer-types" => {
+                opts.c_language.error_incompatible_pointers = true
+            }
+            "-Werror=designated-init" => opts.c_language.error_designated_init = true,
+            "-Werror=date-time" => opts.error_date_time = true,
+            "-Wundef" => opts.warn_undefined = true,
+            "-Wvla" => opts.c_language.warn_vla = true,
+            "-Wmissing-declarations" => opts.c_language.warn_missing_declarations = true,
+            "-Wmissing-prototypes" => opts.c_language.warn_missing_prototypes = true,
+            "-Wimplicit-fallthrough" => {
+                warning_groups.fallthrough =
+                    Some(match raw {
+                        "-Wimplicit-fallthrough" | "-Wimplicit-fallthrough=5" => true,
+                        "-Wimplicit-fallthrough=0" => false,
+                        _ => return Err(
+                            "fallthrough warning levels with comment annotations are unsupported"
+                                .into(),
+                        ),
+                    });
+            }
+            "-Wno-implicit-fallthrough" => warning_groups.fallthrough = Some(false),
+            "-Wframe-larger-than" => {
+                let bytes = raw.strip_prefix("-Wframe-larger-than=").unwrap_or_default();
+                opts.frame_warning_limit = Some(bytes.parse().map_err(|_| {
+                    "`-Wframe-larger-than` requires a nonnegative byte count".to_string()
+                })?);
+            }
+            "-Wno-frame-larger-than" => opts.frame_warning_limit = None,
+            // Undeclared functions and unsupported driver options are always errors.
+            "-Werror=implicit-function-declaration"
+            | "-Werror=unknown-warning-option"
+            | "-Werror=ignored-optimization-argument"
+            | "-Werror=option-ignored"
+            | "-Werror=unused-command-line-argument" => {}
+            "-fno-omit-frame-pointer" => opts.keep_frame_pointer = true,
+            "-fno-optimize-sibling-calls" => opts.no_sibling_calls = true,
+            "-foptimize-sibling-calls" => opts.no_sibling_calls = false,
+            "-fconserve-stack" => opts.conserve_stack = true,
+            "-mno-sse" | "-mno-sse2" => opts.x86_no_sse = true,
+            "-mno-80387" | "-mno-fp-ret-in-387" => opts.x86_no_x87 = true,
+            "-mskip-rax-setup" => opts.x86_skip_rax_setup = true,
+            "-falign-loops=1" => opts.x86_no_loop_alignment = true,
+            "-fPIC" => opts.pic = true,
+            "-mno-avx" => opts.x86_options.push_features("-avx"),
+            "-falign-functions" => {
+                let align = raw
+                    .split_once('=')
+                    .and_then(|(_, value)| value.parse::<u32>().ok())
+                    .filter(|a| a.is_power_of_two() && *a <= keel_ir::MAX_DATA_ALIGN)
+                    .ok_or("function alignment needs a supported power of two in bytes")?;
+                opts.function_alignment = Some(align);
+            }
+            // These requests match the compiler's existing policy.
+            "-fno-common"
+            | "-fno-strict-aliasing"
+            | "-fno-strict-overflow"
+            | "-fstrict-flex-arrays=3"
+            | "-fno-allow-store-data-races"
+            | "-fintegrated-as"
+            | "-m64"
+            | "-mno-red-zone"
+            | "-mno-mmx"
+            | "-mno-3dnow"
+            | "-fno-stack-protector"
+            | "-fno-stack-clash-protection"
+            | "-fno-stack-check"
+            | "-fcf-protection=none"
+            | "-fno-PIE"
+            | "-falign-jumps=1" => {}
             "--reuse-header-lexing" => opts.reuse_header_lexing = true,
             "-fbuiltin" => opts.no_builtin = false,
             "-ffast-math" => {
@@ -518,6 +702,20 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     }
                 };
                 opts.x86_options.set_arch_level(level)?;
+            }
+            "-mstack-alignment" | "-mpreferred-stack-boundary" => {
+                use keel_codegen::x86_64::StackAlignment;
+                let value = raw.split_once('=').map(|(_, value)| value);
+                opts.x86_stack_alignment = Some(match (flag, value) {
+                    ("-mstack-alignment", Some("8"))
+                    | ("-mpreferred-stack-boundary", Some("3")) => StackAlignment::Align8,
+                    ("-mstack-alignment", Some("16"))
+                    | ("-mpreferred-stack-boundary", Some("4")) => StackAlignment::Align16,
+                    ("-mstack-alignment", _) => {
+                        return Err("`-mstack-alignment` needs =8 or =16".into());
+                    }
+                    _ => return Err("`-mpreferred-stack-boundary` needs =3 or =4".into()),
+                });
             }
             "-fno-builtin" => opts.no_builtin = true,
             "-ffreestanding" => {
@@ -743,12 +941,14 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             | "-fasynchronous-unwind-tables"
             | "-fno-asynchronous-unwind-tables" => opts.unwind.set(flag),
             "-ffunction-sections" => opts.function_sections = true,
+            "-fno-function-sections" => opts.function_sections = false,
             "-flto" => opts.lto = true,
             "-fdata-sections" => opts.data_sections = true,
+            "-fno-data-sections" => opts.data_sections = false,
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
             "--code-model" => {
-                if opts.x86_code_model.is_some() {
+                if opts.x86_code_model.is_some() && !raw.starts_with("-mcmodel=") {
                     return Err("`--code-model` may only be supplied once".into());
                 }
                 let name = raw
@@ -799,12 +999,18 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 );
             }
             "--tune" => {
-                let name = args.next().ok_or("`--tune` needs generic or apple-m5")?;
+                let name = raw
+                    .strip_prefix("-mtune=")
+                    .or_else(|| args.next().map(String::as_str))
+                    .ok_or("`--tune` needs generic or apple-m5")?;
                 opts.tuning = keel_codegen::tuning::TuningCpu::from_name(name)
                     .ok_or("unknown tuning CPU; expected generic or apple-m5")?;
             }
             "--target" => {
-                let triple = args.next().ok_or("`--target` needs a target triple")?;
+                let triple = raw
+                    .strip_prefix("--target=")
+                    .or_else(|| args.next().map(String::as_str))
+                    .ok_or("`--target` needs a target triple")?;
                 opts.target = Some(parse_target(triple)?);
             }
             "-p" => {
@@ -822,12 +1028,82 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
     }
+    opts.emit_object |= compile_only && !opts.preprocess_only;
+    if compile_only
+        && opts.emit_object
+        && opts.output.is_none()
+        && let Some(input) = &opts.input
+    {
+        opts.output = std::path::Path::new(input).file_name().map(|name| {
+            std::path::Path::new(name)
+                .with_extension("o")
+                .to_string_lossy()
+                .into_owned()
+        });
+    }
+    if opts.dependency_file.is_some() || opts.save_temps {
+        let (Some(input), Some(output)) = (&opts.input, &opts.output) else {
+            return Err("dependency and temporary files require an input and object output".into());
+        };
+        if !opts.emit_object || opts.emit_wasm || opts.lto || input.ends_with(".i") {
+            return Err(
+                "dependency and temporary files require one raw C source and native object output"
+                    .into(),
+            );
+        }
+        let mut artifacts = vec![std::path::PathBuf::from(input), output.into()];
+        if opts.save_temps {
+            let object = std::path::Path::new(output);
+            artifacts.extend([object.with_extension("i"), object.with_extension("s")]);
+        }
+        if let Some(path) = &opts.dependency_file {
+            artifacts.push(path.into());
+        }
+        let mut resolved = std::collections::HashSet::new();
+        for path in artifacts {
+            if !resolved.insert(report_destination(&path)?) {
+                return Err(format!(
+                    "{} conflicts with another input or output",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if let Some(flag) = supplied.iter().find(|&&flag| {
+        matches!(
+            flag,
+            "-m64"
+                | "-mno-sse"
+                | "-mno-sse2"
+                | "-mno-80387"
+                | "-mno-fp-ret-in-387"
+                | "-mskip-rax-setup"
+                | "-mno-red-zone"
+                | "-mno-mmx"
+                | "-mno-3dnow"
+        )
+    }) && opts.target()? != Target::X86_64LinuxGnu
+    {
+        return Err(format!("`{flag}` requires x86_64-unknown-linux-gnu"));
+    }
+    if opts.x86_skip_rax_setup && !opts.x86_no_sse {
+        return Err("`-mskip-rax-setup` requires SSE-disabled integer variadic calls".into());
+    }
     opts.x86_features = opts.x86_options.resolve()?;
     if opts.x86_options.supplied() && opts.target()? != Target::X86_64LinuxGnu {
         return Err("x86 target features require x86_64-unknown-linux-gnu".into());
     }
     if opts.x86_code_model.is_some() && opts.target()? != Target::X86_64LinuxGnu {
         return Err("x86 code model requires x86_64-unknown-linux-gnu".into());
+    }
+    if opts.pic && opts.target()? == Target::X86_64LinuxGnu {
+        if opts.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel) {
+            return Err("`-fPIC` is incompatible with the kernel code model".into());
+        }
+        opts.x86_code_model = Some(keel_codegen::x86_64::CodeModel::PositionIndependent);
+    }
+    if opts.x86_stack_alignment.is_some() && opts.target()? != Target::X86_64LinuxGnu {
+        return Err("x86 stack alignment requires x86_64-unknown-linux-gnu".into());
     }
     if matches!(
         opts.x86_code_model,
@@ -923,6 +1199,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         reports.push(resolved_report);
     }
+    warning_groups.apply(&mut opts.c_language);
     Ok(opts)
 }
 
@@ -1086,6 +1363,8 @@ const COMPILE_FLAGS: &[&str] = &[
     "-fdata-sections",
     "--target",
     "--code-model",
+    "-mstack-alignment",
+    "-mpreferred-stack-boundary",
     "--emit-object",
     "--emit-wasm",
     "--wasm-opt",
@@ -1115,7 +1394,97 @@ const COMPILE_FLAGS: &[&str] = &[
     "--target-features",
     "--cpu-level",
 ];
+// Keel already leaves these diagnostics disabled.
+const C_DISABLED_WARNINGS: &[&str] = &[
+    "-Wno-address-of-packed-member",
+    "-Wno-alloc-size-larger-than",
+    "-Wno-array-bounds",
+    "-Wno-dangling-pointer",
+    "-Wno-enum-enum-conversion",
+    "-Wno-format-overflow",
+    "-Wno-format-overflow-non-kprintf",
+    "-Wno-format-security",
+    "-Wno-format-truncation",
+    "-Wno-format-truncation-non-kprintf",
+    "-Wno-frame-address",
+    "-Wno-gnu",
+    "-Wno-main",
+    "-Wno-maybe-uninitialized",
+    "-Wno-missing-field-initializers",
+    "-Wno-override-init",
+    "-Wno-packed-not-aligned",
+    "-Wno-pointer-sign",
+    "-Wno-pointer-to-enum-cast",
+    "-Wno-shift-negative-value",
+    "-Wno-stringop-overflow",
+    "-Wno-stringop-truncation",
+    "-Wno-tautological-constant-out-of-range-compare",
+    "-Wno-trigraphs",
+    "-Wno-type-limits",
+    "-Wno-unaligned-access",
+];
 const CC_FLAGS: &[&str] = &[
+    "-c",
+    "-m64",
+    "-std",
+    "-nostdinc",
+    "-fsigned-char",
+    "-funsigned-char",
+    "-fshort-wchar",
+    "-fno-short-wchar",
+    "-fno-delete-null-pointer-checks",
+    "-ftrivial-auto-var-init",
+    "-fno-strict-aliasing",
+    "-fno-strict-overflow",
+    "-fstrict-flex-arrays=3",
+    "-fno-allow-store-data-races",
+    "-fconserve-stack",
+    "-include",
+    "-fmacro-prefix-map",
+    "-Wp,-MMD",
+    "-save-temps=obj",
+    "-Werror=implicit-function-declaration",
+    "-Werror=strict-prototypes",
+    "-Werror=incompatible-pointer-types",
+    "-Werror=designated-init",
+    "-Werror=date-time",
+    "-Wundef",
+    "-Wvla",
+    "-Wmissing-declarations",
+    "-Wmissing-prototypes",
+    "-Wimplicit-fallthrough",
+    "-Wno-implicit-fallthrough",
+    "-Wframe-larger-than",
+    "-Wno-frame-larger-than",
+    "-Werror=unknown-warning-option",
+    "-Werror=ignored-optimization-argument",
+    "-Werror=option-ignored",
+    "-Werror=unused-command-line-argument",
+    "-fno-omit-frame-pointer",
+    "-fno-optimize-sibling-calls",
+    "-foptimize-sibling-calls",
+    "-falign-functions",
+    "-fno-common",
+    "-fintegrated-as",
+    "-fno-function-sections",
+    "-fno-data-sections",
+    "-mno-sse",
+    "-mno-sse2",
+    "-mno-80387",
+    "-mno-fp-ret-in-387",
+    "-mskip-rax-setup",
+    "-mno-avx",
+    "-mno-red-zone",
+    "-mno-mmx",
+    "-mno-3dnow",
+    "-fno-stack-protector",
+    "-fno-stack-clash-protection",
+    "-fno-stack-check",
+    "-fcf-protection=none",
+    "-fPIC",
+    "-fno-PIE",
+    "-falign-jumps=1",
+    "-falign-loops=1",
     "-fmath-errno",
     "-fno-math-errno",
     "-march",
@@ -1167,6 +1536,8 @@ const CC_FLAGS: &[&str] = &[
     "-mmacosx-version-min",
     "--target",
     "--code-model",
+    "-mstack-alignment",
+    "-mpreferred-stack-boundary",
     "--emit-object",
     "--emit-wasm",
     "--wasm-opt",
@@ -1465,6 +1836,17 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
             .output
             .as_ref()
             .ok_or("`--emit-object` requires `-o <output.o>`")?;
+        if opts.save_temps {
+            let path = std::path::Path::new(output).with_extension("s");
+            let mut emission = request.emission;
+            emission.stack_frame_warning = None;
+            stream_output(Some(&path.to_string_lossy()), |sink| {
+                request
+                    .emission(emission)
+                    .text_chunks(&module, sink)
+                    .map_err(|e| e.to_string())
+            })?;
+        }
         // Assemble each function's program as codegen produces it, so the
         // whole module's structured program is never resident at once.
         let encoding_features = if target == Target::X86_64LinuxGnu {
@@ -1522,7 +1904,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
         profiling::scope!("object-write");
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let written = stream_output(opts, |sink| {
+        let written = stream_output(opts.output.as_deref(), |sink| {
             with_codegen_report(opts, target, || {
                 if threads.get() == 1 {
                     return request.text_chunks(&module, sink);
@@ -1549,7 +1931,7 @@ fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
 /// whole, and only if `produce` succeeds. A path that exists but is not a
 /// regular file, such as `/dev/null`, is written in place.
 fn stream_output(
-    opts: &Options,
+    output: Option<&str>,
     produce: impl FnOnce(&mut dyn FnMut(&str)) -> Result<(), String>,
 ) -> Result<(), String> {
     use std::io::Write;
@@ -1570,7 +1952,7 @@ fn stream_output(
         }
         out.flush()
     };
-    let written = match &opts.output {
+    let written = match output {
         None => write(&mut std::io::stdout().lock()),
         Some(path) if std::fs::metadata(path).is_ok_and(|m| !m.is_file()) => {
             std::fs::OpenOptions::new()
@@ -1581,7 +1963,7 @@ fn stream_output(
         Some(path) => keel_util::fs::replace(std::path::Path::new(path), None, |file| write(file)),
     };
     produced?;
-    written.map_err(|e| match &opts.output {
+    written.map_err(|e| match output {
         Some(path) => format!("{path}: {e}"),
         None => format!("stdout: {e}"),
     })
@@ -1649,7 +2031,11 @@ fn preprocess_c_cached(
     let preprocessing = keel_c::PreprocessOptions {
         include_dirs: opts.include_dirs.clone(),
         system_include_dirs: opts.system_include_dirs.clone(),
-        sysroot: opts.preprocessing_sysroot(target)?,
+        sysroot: if opts.no_standard_includes {
+            None
+        } else {
+            opts.preprocessing_sysroot(target)?
+        },
         darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
             (target == Target::Aarch64AppleDarwin)
                 .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
@@ -1660,11 +2046,70 @@ fn preprocess_c_cached(
         x86_baseline: Some(opts.x86_features),
         dump_macros: opts.dump_macros,
     };
-    match cache {
-        Some(cache) => cache.preprocess(text, input, &preprocessing),
-        None => keel_c::preprocess(text, input, &preprocessing),
+    let dialect = keel_c::PreprocessDialect {
+        no_standard_includes: opts.no_standard_includes,
+        forced_includes: opts.forced_includes.clone(),
+        macro_prefix_maps: opts.macro_prefix_maps.clone(),
+        gnu11: opts.gnu11,
+        error_date_time: opts.error_date_time,
+        warn_undefined: opts.warn_undefined,
+        character_types: opts.c_language.character_types,
+    };
+    let (text, artifacts) = keel_c::preprocess_with_artifacts(
+        text,
+        input,
+        &preprocessing,
+        &dialect,
+        cache,
+        opts.dependency_file.is_some(),
+    )
+    .map_err(|e| e.to_string())?;
+    for warning in artifacts.warnings {
+        print_c_warning(warning);
     }
-    .map_err(|e| e.to_string())
+    if let (Some(path), Some(dependencies)) = (&opts.dependency_file, artifacts.dependencies) {
+        let target = opts.output.as_ref().expect("validated object output");
+        let mut rule = String::new();
+        push_make_path(&mut rule, target);
+        rule.push(':');
+        for dependency in dependencies {
+            rule.push_str(" \\\n ");
+            push_make_path(&mut rule, &dependency.to_string_lossy());
+        }
+        rule.push('\n');
+        std::fs::write(path, rule).map_err(|e| format!("{path}: {e}"))?;
+    }
+    Ok(text)
+}
+
+fn print_c_warning(warning: keel_c::Diagnostic) {
+    eprintln!(
+        "{}:{}:{}: warning: {}",
+        warning.file, warning.line, warning.col, warning.message
+    );
+}
+
+fn push_make_path(rule: &mut String, path: &str) {
+    let mut slashes = 0;
+    for ch in path.chars() {
+        match ch {
+            '\\' => slashes += 1,
+            ' ' | '\t' | '#' | ':' => {
+                rule.extend(std::iter::repeat_n('\\', 2 * slashes + 1));
+                slashes = 0;
+                rule.push(ch);
+            }
+            _ => {
+                rule.extend(std::iter::repeat_n('\\', slashes));
+                slashes = 0;
+                if ch == '$' {
+                    rule.push('$');
+                }
+                rule.push(ch);
+            }
+        }
+    }
+    rule.extend(std::iter::repeat_n('\\', 2 * slashes));
 }
 
 /// Preprocesses one C file unless it is a `.i` file, compiles it to IR and
@@ -1675,7 +2120,7 @@ fn c_module(
     input: &str,
     cache: Option<&mut keel_c::PreprocessCache>,
 ) -> Result<Module, String> {
-    let module = {
+    let mut module = {
         let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
         let preprocessed;
         let text = if input.ends_with(".i") {
@@ -1683,6 +2128,12 @@ fn c_module(
         } else {
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             preprocessed = preprocess_c_cached(opts, input, text, cache)?;
+            if opts.save_temps {
+                let path = std::path::Path::new(opts.output.as_ref().expect("validated output"))
+                    .with_extension("i");
+                std::fs::write(&path, &preprocessed)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+            }
             drop(src);
             &preprocessed
         };
@@ -1695,15 +2146,42 @@ fn c_module(
             x86_baseline: Some(opts.x86_features),
         };
         profiling::scope!("c-frontend");
-        keel_c::compile_with_policies(
+        let mut warnings = Vec::new();
+        let result = keel_c::compile_with_diagnostics(
             text,
             input,
             c_opts,
             opts.c_function_binding(),
             opts.library_builtins(),
-        )
-        .map_err(|e| e.to_string())?
+            opts.c_language,
+            &mut warnings,
+        );
+        for warning in warnings {
+            print_c_warning(warning);
+        }
+        result.map_err(|e| e.to_string())?
     };
+    if opts.keep_frame_pointer
+        || opts.no_sibling_calls
+        || opts.conserve_stack
+        || opts.function_alignment.is_some()
+        || opts.x86_no_sse
+        || opts.x86_no_x87
+        || opts.x86_skip_rax_setup
+        || opts.x86_no_loop_alignment
+    {
+        for f in &mut module.functions {
+            f.attrs.frame_pointer |= opts.keep_frame_pointer;
+            f.attrs.no_sibling_calls |= opts.no_sibling_calls;
+            f.attrs.conserve_stack |= opts.conserve_stack;
+            f.attrs.align = f.attrs.align.max(opts.function_alignment);
+            f.attrs.x86_no_sse |= opts.x86_no_sse;
+            f.attrs.x86_no_x87 |= opts.x86_no_x87;
+            f.attrs.x86_skip_rax_setup |= opts.x86_skip_rax_setup;
+            f.attrs.x86_no_loop_alignment |= opts.x86_no_loop_alignment;
+        }
+        module.sync_function_attrs();
+    }
     // The frontend's output is trusted. Checking it is a compiler self-test,
     // so it follows the optimizer's verification policy.
     if opts.optimizer.verification.enabled()
@@ -1797,6 +2275,39 @@ mod tests {
                 "--no-verify-each",
             ],
         )
+    }
+
+    #[test]
+    fn x86_stack_boundary_flags_select_the_call_alignment() {
+        use keel_codegen::x86_64::StackAlignment;
+
+        for allowed in [CC_FLAGS, COMPILE_FLAGS] {
+            let parse = |target: &str, flags: &[&str]| {
+                let args = ["--target", target]
+                    .into_iter()
+                    .chain(flags.iter().copied())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                parse_options(&args, allowed)
+            };
+            let x86 = "x86_64-unknown-linux-gnu";
+            for flag in ["-mstack-alignment=8", "-mpreferred-stack-boundary=3"] {
+                let options = parse(x86, &[flag, "--code-model=kernel", "-Os"]).unwrap();
+                assert_eq!(
+                    options.emission_options().x86_stack_alignment,
+                    Some(StackAlignment::Align8),
+                );
+                assert!(parse("aarch64-apple-darwin", &[flag]).is_err());
+            }
+            let options = parse(
+                x86,
+                &["-mstack-alignment=8", "-mpreferred-stack-boundary=4"],
+            )
+            .unwrap();
+            assert_eq!(options.x86_stack_alignment, Some(StackAlignment::Align16));
+            assert!(parse(x86, &["-mstack-alignment=32"]).is_err());
+            assert!(parse(x86, &["-mpreferred-stack-boundary=2"]).is_err());
+        }
     }
 
     #[test]

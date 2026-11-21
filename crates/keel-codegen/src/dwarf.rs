@@ -9,8 +9,9 @@ use keel_ir::{
     Module,
 };
 
-/// What the debug info needs to know of a compiled function.
+/// Frame layout and debug information for a compiled function.
 pub(crate) struct FrameDebug {
+    pub static_bytes: usize,
     pub frame_register: Option<u8>,
     /// Where each stack slot is, from the frame base register.
     pub slots: Vec<i64>,

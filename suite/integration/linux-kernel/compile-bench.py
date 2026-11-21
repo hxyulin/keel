@@ -94,7 +94,9 @@ def main():
                 else:
                     command = [str(args.keel), 'cc' if row['kind'] == 'c' else 'asm', '--target', 'x86_64-unknown-linux-gnu']
                     if row['kind'] == 'c':
-                        command += [level, '--emit-object', '--cpu-level', 'v1', '--code-model', 'kernel', '--link-intent', 'executable', '-fno-asynchronous-unwind-tables', '-fno-unwind-tables']
+                        command += [level, '--emit-object', '--cpu-level', 'v1', '--code-model', 'kernel',
+                                    '-mstack-alignment=8', '--link-intent', 'executable',
+                                    '-fno-asynchronous-unwind-tables', '-fno-unwind-tables']
                     else:
                         command += ['--x86-syntax', 'att', '--cpu-level', 'v3']
                     features = policy[row['kind'] + '_target_features']

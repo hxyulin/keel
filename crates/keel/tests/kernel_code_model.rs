@@ -5,6 +5,194 @@ use object::{Object, ObjectSection};
 use std::{fs, process::Command};
 
 #[test]
+fn frame_size_warning_reports_layout_once_per_function() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("frame-size-warning");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("frames.c"),
+        r#"
+        extern void use(void *);
+        void large(void) { char buffer[3200]; use(buffer); }
+        void second(void) { char buffer[4096]; use(buffer); }
+        int small(int n) { return n + 1; }
+        void dynamic(int n) { use(__builtin_alloca(n)); }
+    "#,
+    )
+    .unwrap();
+    for target in ["x86_64-linux-gnu", "aarch64-linux-gnu"] {
+        for mode in [
+            &["-Os", "--codegen-threads", "1"][..],
+            &["-Os", "--codegen-threads", "2"],
+            &["--mode", "speed"],
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_keel"))
+                .current_dir(&dir)
+                .args([
+                    "cc",
+                    "--target",
+                    target,
+                    "-Wframe-larger-than=2048",
+                    "-save-temps=obj",
+                    "-c",
+                    "frames.c",
+                    "-o",
+                    "frames.o",
+                ])
+                .args(mode)
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8(result.stderr).unwrap();
+            assert!(result.status.success(), "{target} {mode:?}: {stderr}");
+            assert_eq!(
+                stderr.matches("[-Wframe-larger-than]").count(),
+                2,
+                "{stderr}"
+            );
+            assert!(
+                stderr.find("large:").unwrap() < stderr.find("second:").unwrap(),
+                "{stderr}"
+            );
+        }
+    }
+}
+
+#[test]
+fn kernel_function_flags_survive_ir_round_trip() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kernel-function-flags");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("entry.c"),
+        "__attribute__((noinline)) static long add(long x) { return x + 1; }\n\
+         long entry(long x) { return add(x); }",
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    let ir = run(&[
+        "cc",
+        "--target=x86_64-linux-gnu",
+        "-p",
+        "tail-calls",
+        "-fno-optimize-sibling-calls",
+        "-fno-omit-frame-pointer",
+        "-fconserve-stack",
+        "-fmin-function-alignment=16",
+        "--emit-ir",
+        "entry.c",
+    ]);
+    assert!(ir.contains("frame_pointer no_sibling_calls"), "{ir}");
+    assert!(ir.contains("conserve_stack"), "{ir}");
+    assert!(
+        ir.contains("call @add") && !ir.contains("return_call"),
+        "{ir}"
+    );
+    fs::write(dir.join("entry.keel"), ir).unwrap();
+    let asm = run(&[
+        "compile",
+        "--target=x86_64-linux-gnu",
+        "--mode",
+        "speed",
+        "entry.keel",
+    ]);
+    assert!(asm.contains("\tpush\trbp"), "{asm}");
+    assert!(asm.contains("\t.p2align\t4"), "{asm}");
+}
+
+#[test]
+fn sse_disabled_variadic_calls_and_prologues_use_integer_registers() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kernel-variadic");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("varargs.c"),
+        r#"
+__attribute__((noinline)) int sum(int x, ...) {
+    __builtin_va_list list;
+    __builtin_va_start(list, x);
+    x += __builtin_va_arg(list, int);
+    __builtin_va_end(list);
+    return x;
+}
+int entry(int x) { return sum(x, 9) + 1; }
+"#,
+    )
+    .unwrap();
+    let compile = |flags: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .args(["cc", "--target=x86_64-linux-gnu", "-Os"])
+            .args(flags)
+            .arg("varargs.c")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    let baseline = compile(&[]);
+    assert!(baseline.contains("xmm"), "{baseline}");
+    let integer = compile(&["-mno-sse", "-mno-sse2", "-mskip-rax-setup"]);
+    assert!(!integer.contains("xmm"), "{integer}");
+    assert!(integer.contains("176"), "{integer}");
+    let entry = integer.split_once("\n\"entry\":").unwrap().1;
+    assert!(!entry.contains("\txor\teax, eax"), "{entry}");
+}
+
+#[test]
+fn kernel_auto_init_respects_opt_out_and_preserves_potential_faults() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kernel-auto-init");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("local.c"),
+        r#"
+    extern void use(void *);
+    int f(int *p) {
+        volatile int zero;
+        volatile int untouched __attribute__((__uninitialized__));
+        use((void *)&zero);
+        use((void *)&untouched);
+        return *p;
+    }
+    "#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .args([
+            "cc",
+            "--target=x86_64-linux-gnu",
+            "--emit-ir",
+            "-ftrivial-auto-var-init=zero",
+            "-fno-delete-null-pointer-checks",
+            "local.c",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ir = String::from_utf8(out.stdout).unwrap();
+    assert!(ir.contains("preserve_memory_faults"), "{ir}");
+    assert_eq!(ir.matches("store volatile").count(), 1, "{ir}");
+    assert!(!ir.contains("trap_ub"), "{ir}");
+}
+
+#[test]
 fn kernel_memory_expansion_keeps_small_copies_in_general_registers() {
     let dir = std::env::temp_dir().join(format!("keel-kernel-copy-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

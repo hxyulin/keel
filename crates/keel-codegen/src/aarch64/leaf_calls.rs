@@ -8,11 +8,12 @@ use super::*;
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 pub(super) type Summaries = HashMap<String, (Signature, u64)>;
-pub(super) type Prepared = HashMap<usize, (Output, Vec<(String, Option<DebugScope>)>)>;
+pub(super) type Prepared = HashMap<usize, (Output, FrameDebug)>;
 
 pub(super) fn eligible(func: &Function, symbols: &crate::symbols::Symbols<'_>) -> bool {
     let module = symbols.module;
     func.local
+        && !func.attrs.frame_pointer
         && !func.attrs.weak && !func.weak_odr
         && func.sig.cc == CallConv::Fast
         && !func.sig.variadic
@@ -187,7 +188,10 @@ fn prepare_with_chain_output_limits(
             let used = compiler.alloc.mentioned_gprs() | nested_clobbers;
             let preserved = caller_mask & !used;
             let mut output = Output::new(structured);
-            let marks = compiler.compile(&mut output);
+            // Candidates exclude identity tail calls, so they always use
+            // their planned frame.
+            let static_bytes = compiler.planned_frame_bytes();
+            let scope_marks = compiler.compile(&mut output);
             if is_chain {
                 let remaining = match &output {
                     Output::Text(_) | Output::ElfText(_) => &mut chain_output_bytes,
@@ -207,7 +211,18 @@ fn prepare_with_chain_output_limits(
                 *remaining -= size;
             }
             summaries.insert(original.name.clone(), (original.sig.clone(), preserved));
-            prepared.insert(index, (output, marks));
+            prepared.insert(
+                index,
+                (
+                    output,
+                    FrameDebug {
+                        static_bytes,
+                        frame_register: None,
+                        slots: Vec::new(),
+                        scope_marks,
+                    },
+                ),
+            );
         }
     }
     Ok((summaries, prepared))

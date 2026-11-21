@@ -27,6 +27,34 @@ fn parse(source: &str) -> keel_ir::Module {
     keel_ir::verify_module(&module).unwrap();
     module
 }
+
+#[test]
+fn direct_scalar_frame_respects_eight_byte_calls() {
+    let module = parse(
+        "func @add_one(i64) -> i64 cc(c) {
+        block0(v0: i64):
+            v1 = iconst.i64 1
+            v2 = iadd v0, v1
+            return v2
+        }",
+    );
+    let mut req = request();
+    for (alignment, frame_bytes) in [
+        (keel_codegen::x86_64::StackAlignment::Align16, 40u8),
+        (keel_codegen::x86_64::StackAlignment::Align8, 32u8),
+    ] {
+        req.emission.x86_stack_alignment = Some(alignment);
+        let bytes =
+            keel_asm::assemble_program_for(req.target, &req.program(&module).unwrap()).unwrap();
+        let object = object::File::parse(bytes.as_slice()).unwrap();
+        let text = object.section_by_name(".text").unwrap().data().unwrap();
+        assert!(
+            text.starts_with(&[0x48, 0x81, 0xec, frame_bytes, 0, 0, 0]),
+            "{text:x?}"
+        );
+    }
+}
+
 #[test]
 fn direct_calls_preserve_stream_and_parallel_relocations_and_unwind() {
     let module = parse(SOURCE);

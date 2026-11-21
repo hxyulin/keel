@@ -191,7 +191,7 @@ fn specialize(f: &mut Function, site: CopySite) {
             let one = f.ins(gate).icmp(IntCC::Eq, bytes, sixteen);
             f.ins(gate).brif(one, fast, &[], slow, &[]);
             let flags = MemoryFlags {
-                trap_ub: true,
+                trap_ub: !f.attrs.preserve_memory_faults,
                 ..MemoryFlags::default()
             };
             let emit = InsertPoint::End(fast);
@@ -208,7 +208,7 @@ fn specialize(f: &mut Function, site: CopySite) {
             let tail_src = f.ins(emit).ptradd(src, offset);
             let tail_dst = f.ins(emit).ptradd(dst, offset);
             let flags = MemoryFlags {
-                trap_ub: true,
+                trap_ub: !f.attrs.preserve_memory_faults,
                 ..MemoryFlags::default()
             };
             // Both words are inside the copy. When they overlap, they write

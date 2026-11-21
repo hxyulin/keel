@@ -31,6 +31,9 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
             arg,
             "aligned"
                 | "nonstring"
+                | "uninitialized"
+                | "unused"
+                | "fallthrough"
                 | "packed"
                 | "returns_twice"
                 | "noreturn"

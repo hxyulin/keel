@@ -771,7 +771,10 @@ pub(super) fn emit(
     out: &mut Output,
     linux: bool,
     emission: crate::EmissionOptions,
-) -> bool {
+) -> Option<usize> {
+    if func.attrs.frame_pointer {
+        return None;
+    }
     // Keep the ordinary ABI rejection contract: external Darwin C calls need
     // explicit extension attributes on narrow arguments. Indirect calls can
     // target external code too, including signatures retained after IR edits.
@@ -783,17 +786,15 @@ pub(super) fn emit(
         )
         .is_err()
         {
-            return false;
+            return None;
         }
     }
     for (_, signature) in func.signatures() {
         if super::check_call_signature(|| "indirect call".into(), signature, !linux).is_err() {
-            return false;
+            return None;
         }
     }
-    let Some(code) = encode(func, symbols, linux) else {
-        return false;
-    };
+    let code = encode(func, symbols, linux)?;
     super::function_entry(func, out, linux, emission.function_sections);
     let unwind = emission.unwind_tables == crate::UnwindTables::All;
     if unwind {
@@ -911,5 +912,5 @@ pub(super) fn emit(
         out.directive(Directive::Cfi(Cfi::End));
     }
     crate::backend_profile::count(crate::backend_profile::Counter::DirectFunctions);
-    true
+    Some(code.frame as usize)
 }

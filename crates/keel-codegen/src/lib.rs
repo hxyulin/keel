@@ -22,7 +22,7 @@ mod dispatch_tail;
 mod dwarf;
 mod emission;
 pub mod parallel;
-pub use emission::{BackendMode, CodegenGoal, EmissionOptions, UnwindTables};
+pub use emission::{BackendMode, CodegenGoal, EmissionOptions, StackFrameWarning, UnwindTables};
 mod fold;
 mod integer_division;
 mod kinds;

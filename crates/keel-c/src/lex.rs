@@ -36,8 +36,9 @@ pub enum Tok<'a> {
     },
     /// A character constant, already the value of its `int` (or `wchar_t`).
     Char(i64),
+    ShortWideChar(u16),
     /// A string literal's bytes, without the terminating zero. Wide
-    /// literals (`L"..."`) hold their code points as `u32`s.
+    /// literals (`L"..."`) use the selected wide character encoding.
     Str {
         bytes: &'a [u8],
         wide: bool,
@@ -222,6 +223,7 @@ const SPACE: [bool; 256] = {
 /// Splits all of `src` into tokens. `files` receives the file names line
 /// markers mention; a token's `Loc::file` indexes it. The parser instead
 /// pulls tokens from a [`Lexer`] as it goes.
+#[cfg(test)]
 pub fn tokenize<'a>(
     src: &'a str,
     path: &str,
@@ -258,6 +260,7 @@ pub struct Lexer<'a> {
     pack_limits: Vec<Option<u64>>,
     /// A string literal's bytes, as they are decoded.
     scratch: Vec<u8>,
+    character_types: crate::CharacterTypes,
 }
 
 impl<'a> Lexer<'a> {
@@ -277,7 +280,13 @@ impl<'a> Lexer<'a> {
             pack: Vec::new(),
             pack_limits: vec![None],
             scratch: Vec::new(),
+            character_types: crate::CharacterTypes::default(),
         }
+    }
+
+    pub fn with_character_types(mut self, character_types: crate::CharacterTypes) -> Self {
+        self.character_types = character_types;
+        self
     }
 
     /// The `#pragma pack` limit of a token's `pack`.
@@ -559,6 +568,7 @@ impl<'a> Lexer<'a> {
         let quote = self.peek(0);
         self.pos += 1;
         let string = quote == b'"';
+        let short_wide = wide && self.character_types.short_wchar;
         if string && !wide {
             let rest = &self.src[self.pos..];
             let n = memchr::memchr3(b'"', b'\\', b'\n', rest).unwrap_or(rest.len());
@@ -579,6 +589,7 @@ impl<'a> Lexer<'a> {
         let (mut count, mut first, mut packed) = (0usize, 0u32, 0u32);
         loop {
             let c = self.peek(0);
+            let numeric_escape = c == b'\\' && matches!(self.peek(1), b'x' | b'0'..=b'7');
             let unit = match c {
                 0 | b'\n' => return Err(self.error("unterminated literal")),
                 c if c == quote => {
@@ -622,7 +633,17 @@ impl<'a> Lexer<'a> {
                 }
             };
             if string {
-                if wide {
+                if short_wide {
+                    if let Ok(unit) = u16::try_from(unit) {
+                        bytes.extend_from_slice(&unit.to_le_bytes());
+                    } else if !numeric_escape && let Some(ch) = char::from_u32(unit) {
+                        for unit in ch.encode_utf16(&mut [0; 2]) {
+                            bytes.extend_from_slice(&unit.to_le_bytes());
+                        }
+                    } else {
+                        return Err(self.error("escape exceeds the width of wchar_t"));
+                    }
+                } else if wide {
                     bytes.extend_from_slice(&unit.to_le_bytes());
                 } else {
                     bytes.push(unit as u8);
@@ -643,7 +664,17 @@ impl<'a> Lexer<'a> {
         }
         match count {
             0 => Err(self.error("empty character constant")),
-            1 if !wide => Ok(Tok::Char(i64::from(first as u8 as i8))),
+            1 if !wide => Ok(Tok::Char(
+                if self.character_types.plain_char_signed == Some(false) {
+                    i64::from(first as u8)
+                } else {
+                    i64::from(first as u8 as i8)
+                },
+            )),
+            1 if short_wide => u16::try_from(first)
+                .map(Tok::ShortWideChar)
+                .map_err(|_| self.error("character exceeds the width of wchar_t")),
+            _ if short_wide => Err(self.error("wide character literal has multiple characters")),
             1 => Ok(Tok::Char(i64::from(first))),
             _ => Ok(Tok::Char(i64::from(packed as i32))),
         }

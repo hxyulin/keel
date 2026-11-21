@@ -97,7 +97,7 @@ pub fn run(f: &mut Function, limit: i64, scalar_only: bool) -> bool {
         // memcpy requires valid ranges. Keep that contract after expansion
         // so a later loop transform can combine its exact accesses.
         let flags = MemoryFlags {
-            trap_ub: id == Intrinsic::Memcpy,
+            trap_ub: id == Intrinsic::Memcpy && !f.attrs.preserve_memory_faults,
             ..MemoryFlags::default()
         };
         let Some(size) = expanded_length(f, at, limit) else {

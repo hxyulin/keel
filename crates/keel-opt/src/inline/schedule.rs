@@ -558,6 +558,21 @@ pub(super) fn run_observed_policy_budgeted(
             || *template_costs[callee_index].get_or_insert_with(|| inline_cost(callee)),
             |s| specialized.bodies[s].cost,
         );
+        if caller.attrs.conserve_stack && !requested && stack_cost != 0 {
+            let stack_bytes = |function: &Function| {
+                function
+                    .stack_slots()
+                    .map(|(_, slot)| u64::from(slot.size))
+                    .sum::<u64>()
+            };
+            let original_stack = stack_bytes(frozen[index].as_deref().unwrap_or(caller));
+            // Adapt GCC's 100-byte floor and 400% growth limit to the IR
+            // estimate. Spill space is only known after register allocation.
+            let limit = 100.max(original_stack.max(stack_cost).saturating_mul(5));
+            if stack_bytes(caller).saturating_add(stack_cost) > limit {
+                continue;
+            }
+        }
         let InstData::Call { args, .. } = caller.inst_data(call) else {
             unreachable!("only direct calls reach the budget check")
         };
@@ -664,6 +679,13 @@ pub(super) fn run_observed_policy_budgeted(
         budget.used = module_ledger.growth;
         budget.reserve_used = module_ledger.reserve_growth;
         budget.reserve_sites = module_ledger.reserve_sites;
+    }
+    if frozen.iter().zip(&module.functions).any(|(before, after)| {
+        before.as_ref().is_some_and(|before| {
+            before.attrs.preserve_memory_faults != after.attrs.preserve_memory_faults
+        })
+    }) {
+        module.sync_function_attrs();
     }
     report
 }

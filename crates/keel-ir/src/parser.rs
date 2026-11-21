@@ -893,6 +893,14 @@ impl Parser {
                 "flatten",
                 "no_instrument_function",
                 "no_profile_instrument_function",
+                "frame_pointer",
+                "no_sibling_calls",
+                "preserve_memory_faults",
+                "conserve_stack",
+                "x86_no_sse",
+                "x86_no_x87",
+                "x86_skip_rax_setup",
+                "x86_no_loop_alignment",
                 "naked",
                 "interrupt",
             ] {
@@ -919,6 +927,14 @@ impl Parser {
                         "no_profile_instrument_function" => {
                             &mut attrs.no_profile_instrument_function
                         }
+                        "frame_pointer" => &mut attrs.frame_pointer,
+                        "no_sibling_calls" => &mut attrs.no_sibling_calls,
+                        "preserve_memory_faults" => &mut attrs.preserve_memory_faults,
+                        "conserve_stack" => &mut attrs.conserve_stack,
+                        "x86_no_sse" => &mut attrs.x86_no_sse,
+                        "x86_no_x87" => &mut attrs.x86_no_x87,
+                        "x86_skip_rax_setup" => &mut attrs.x86_skip_rax_setup,
+                        "x86_no_loop_alignment" => &mut attrs.x86_no_loop_alignment,
                         "naked" => &mut attrs.naked,
                         _ => &mut attrs.interrupt,
                     };

@@ -557,7 +557,7 @@ impl FunctionCompiler<'_> {
             // What clang emits for __builtin_debugtrap; a debugger can
             // continue past it.
             Intrinsic::Debugtrap => self.emit(Opcode::Int3, []),
-            // Round up to keep rsp 16-byte aligned; the memory starts
+            // Round up to keep rsp aligned for the frame; the memory starts
             // above the outgoing arguments, which stay at rsp.
             Intrinsic::StackAlloc => {
                 let size = self.use_reg(args[0], S0);
@@ -620,7 +620,11 @@ impl FunctionCompiler<'_> {
                     Opcode::Mov,
                     [
                         asm_arg(sized(memory(p, 4i128), 32)),
-                        asm_arg(48 + 16 * u32::from(floats)),
+                        asm_arg(if self.func.attrs.x86_no_sse {
+                            176
+                        } else {
+                            48 + 16 * u32::from(floats)
+                        }),
                     ],
                 );
                 self.emit(

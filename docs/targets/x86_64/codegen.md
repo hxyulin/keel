@@ -383,6 +383,20 @@ userspace TLS. `medium` and `large` are rejected; a large model would also need
 distant calls, constants and tables. Linkers diagnose relocation overflow
 rather than truncating.
 
+## Stack alignment
+
+The default x86-64 call boundary is 16 bytes. On `x86_64-unknown-linux-gnu`,
+`keel cc` and `keel compile` accept Clang's `-mstack-alignment=8` and GCC's
+`-mpreferred-stack-boundary=3` to select the Linux kernel's 8-byte boundary.
+`-mstack-alignment=16` and `-mpreferred-stack-boundary=4` select the default
+boundary explicitly. The last alignment flag wins.
+
+This setting controls the minimum incoming and outgoing call alignment.
+Outgoing stack arguments and local storage can require stronger alignment.
+Arrange matching call boundaries across translation units and assembly callers.
+The setting is independent of `--code-model` and is applied when emitting
+assembly or an object.
+
 ## Atomics
 
 `lock cmpxchg`, `lock xadd` and `xchg` are full barriers on x86, so only a

@@ -30,6 +30,7 @@ use keel_ir::{
     Intrinsic, Language, MemoryFlags, Module, Ordering, OverflowOp, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
 };
+mod fallthrough;
 
 type R<T> = Result<T, Error>;
 
@@ -81,6 +82,11 @@ pub struct Gen<'p> {
     module: Module,
     debug: bool,
     fast_math: bool,
+    preserve_memory_faults: bool,
+    error_return_type: bool,
+    warn_return_type: bool,
+    warn_implicit_fallthrough: bool,
+    warnings: Vec<Error>,
     library_builtins: crate::LibraryBuiltins,
     library_builtin_symbols: Vec<bool>,
     /// Module source files, by the lexer's file index.
@@ -106,6 +112,14 @@ impl<'p> Gen<'p> {
         self
     }
 
+    pub fn with_language(mut self, language: crate::LanguageOptions) -> Self {
+        self.preserve_memory_faults = language.preserve_memory_faults;
+        self.error_return_type = language.error_return_type;
+        self.warn_return_type = language.warn_return_type;
+        self.warn_implicit_fallthrough = language.warn_implicit_fallthrough;
+        self
+    }
+
     pub fn new(
         p: &'p Parser<'p>,
         funcs: Vec<FuncDef<'p>>,
@@ -119,6 +133,11 @@ impl<'p> Gen<'p> {
             module: Module::default(),
             debug,
             fast_math: false,
+            preserve_memory_faults: false,
+            error_return_type: false,
+            warn_return_type: false,
+            warn_implicit_fallthrough: false,
+            warnings: Vec::new(),
             library_builtins: if p.target == keel_ir::Target::Wasm32UnknownUnknown {
                 crate::LibraryBuiltins::disabled()
             } else {
@@ -179,7 +198,7 @@ impl<'p> Gen<'p> {
             }
     }
 
-    pub fn run(mut self) -> R<Module> {
+    pub fn run(mut self, warnings: &mut Vec<Error>) -> R<Module> {
         self.module.assembly = self.p.assembly.to_vec();
         if self.p.c_layout != CDataLayout::NATIVE_LP64 {
             self.check_private_scalar_profile()?;
@@ -560,6 +579,7 @@ impl<'p> Gen<'p> {
                 .map_err(|e| Error::new(Loc::default(), e))?;
         }
         self.module.sync_function_attrs();
+        warnings.append(&mut self.warnings);
         Ok(self.module)
     }
 
@@ -614,7 +634,7 @@ impl<'p> Gen<'p> {
                 section: None,
                 init: Some(DataInit {
                     constant: true,
-                    align: if s.wide { 4 } else { 1 },
+                    align: u32::from(s.unit),
                     items: vec![DataItem::Bytes(s.bytes.to_vec())],
                 }),
             });
@@ -808,7 +828,7 @@ impl<'p> Gen<'p> {
             match func.inst_data_mut(inst) {
                 InstData::Load { flags, .. } | InstData::Store { flags, .. } => {
                     flags.align = flags.align.max(align);
-                    flags.trap_ub = !flags.volatile;
+                    flags.trap_ub = !flags.volatile && !self.preserve_memory_faults;
                 }
                 _ => unreachable!(),
             }
@@ -839,6 +859,7 @@ impl<'p> Gen<'p> {
         }
         func.attrs = keel_ir::FunctionAttrs {
             weak: global.weak.is_some(),
+            preserve_memory_faults: self.preserve_memory_faults,
             ..global.function_attrs.clone()
         };
         func.attrs.fast_math = keel_ir::FunctionPolicy::resolve(&func.attrs)
@@ -857,6 +878,7 @@ impl<'p> Gen<'p> {
             .map(|p| b.append_block_param(entry, p.ty))
             .collect();
         let dispatch_table = DispatchTable::for_function(&self.p, def);
+        let switch_warnings = self.warn_implicit_fallthrough.then(Default::default);
         let mut fg = FnGen {
             g: self,
             b,
@@ -873,6 +895,7 @@ impl<'p> Gen<'p> {
             dispatch: None,
             dispatch_table,
             cases: Vec::new(),
+            switch_warnings,
             terminated: false,
             scopes: Vec::new(),
             loc: None,
@@ -1027,6 +1050,11 @@ impl<'p> Gen<'p> {
         for stmt in def.body {
             fg.stmt(stmt)?;
         }
+        let fallthrough = (!fg.terminated
+            && (fg.g.error_return_type || fg.g.warn_return_type)
+            && def.ty.ret != Ty::Void
+            && global.name != "main")
+            .then(|| fg.b.current_block());
         if !fg.terminated {
             fg.return_default()?;
         }
@@ -1041,10 +1069,55 @@ impl<'p> Gen<'p> {
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
         let alignments = std::mem::take(&mut fg.alignments);
+        let switch_warnings = fg.switch_warnings.take();
         fg.g.context.ssa = fg.b.finalize_with_context();
+        if let Some(warnings) = switch_warnings {
+            warnings.emit(&func, &mut self.warnings);
+        }
+        if let Some(block) = fallthrough
+            && reaches_block(&func, entry, block)
+        {
+            let diagnostic = Error::new(
+                def.loc,
+                "control reaches end of non-void function [-Wreturn-type]",
+            );
+            if self.error_return_type {
+                return Err(diagnostic);
+            }
+            self.warnings.push(diagnostic);
+        }
         self.finish_access_flags(&mut func, alignments);
         Ok(func)
     }
+}
+
+fn reaches_block(func: &Function, entry: Block, target: Block) -> bool {
+    let mut pending = vec![entry];
+    let mut seen = keel_ir::fxhash::FxHashSet::default();
+    while let Some(block) = pending.pop() {
+        if block == target {
+            return true;
+        }
+        if !seen.insert(block) {
+            continue;
+        }
+        pending.extend(branch_targets(func, block).iter().map(|dest| dest.block));
+    }
+    false
+}
+
+fn branch_targets(func: &Function, block: Block) -> &[keel_ir::BlockCall] {
+    let Some(&last) = func.block_insts(block).last() else {
+        return &[];
+    };
+    let term = func.inst_data(last);
+    if let InstData::Brif { cond, dests } = term
+        && let ValueDef::Result(def, _) = func.value_def(func.resolve(*cond))
+        && let InstData::Iconst { imm, .. } = func.inst_data(def)
+    {
+        return std::slice::from_ref(&dests[usize::from(*imm == 0)]);
+    }
+    term.branch_dests()
 }
 
 #[derive(Clone, Copy)]
@@ -1122,6 +1195,7 @@ struct FnGen<'g, 'p, 'f> {
     dispatch_table: Option<DispatchTable>,
     /// The case blocks of the switches being built.
     cases: Vec<Vec<Block>>,
+    switch_warnings: Option<Box<fallthrough::Diagnostics>>,
     /// The current block ends in a terminator; code that follows goes in a
     /// new, unreachable block.
     terminated: bool,
@@ -1158,6 +1232,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if !self.terminated {
             self.b.ins().jump(block, &[]);
             self.terminated = true;
+        }
+    }
+
+    fn mark_switch_work(&mut self) {
+        if let Some(warnings) = &mut self.switch_warnings {
+            warnings.work(self.b.current_block());
         }
     }
 
@@ -1557,15 +1637,15 @@ mod alignment_tests {
         p.globals[2].align = 16;
         p.strings.push(crate::parse::StrLit {
             bytes: b"a\0",
-            wide: false,
+            unit: 1,
         });
         p.strings.push(crate::parse::StrLit {
             bytes: b"b\0\0\0\0\0\0\0",
-            wide: true,
+            unit: 4,
         });
         p.strings.push(crate::parse::StrLit {
             bytes: b"c\0",
-            wide: false,
+            unit: 1,
         });
         p
     }

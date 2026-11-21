@@ -60,7 +60,10 @@ pub use batch::{BatchCompiler, BatchCompilerError, Input, RawInput};
 pub use library_builtins::{LibraryBuiltin, LibraryBuiltins};
 
 pub use predefined::predefined_macros;
-pub use preprocess::{PreprocessCache, PreprocessOptions, preprocess};
+pub use preprocess::{
+    PreprocessArtifacts, PreprocessCache, PreprocessDialect, PreprocessOptions, preprocess,
+    preprocess_with_artifacts,
+};
 #[cfg(feature = "profile")]
 pub use preprocess::{PreprocessStats, preprocess_with_stats};
 
@@ -139,6 +142,86 @@ pub struct Options {
     pub x86_baseline: Option<keel_asm_ir::x86::Features>,
 }
 
+/// C character representation overrides for one translation unit.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CharacterTypes {
+    /// Signedness of plain `char`. `None` uses the target's default.
+    pub plain_char_signed: Option<bool>,
+    /// Use a 16-bit unsigned `wchar_t` and UTF-16 wide strings.
+    pub short_wchar: bool,
+}
+
+/// C language choices that affect lowering to IR.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LanguageOptions {
+    /// The character types used by this translation unit.
+    pub character_types: CharacterTypes,
+    /// Zero uninitialized automatic objects at their declarations.
+    pub zero_auto_vars: bool,
+    /// Conservatively retain potential faults from C memory accesses.
+    pub preserve_memory_faults: bool,
+    /// Require an explicit type specifier on declarations.
+    pub error_implicit_int: bool,
+    /// Require parameter types in function declarators.
+    pub error_strict_prototypes: bool,
+    /// Diagnose returns that do not match the function's result type.
+    pub error_return_type: bool,
+    /// Reject implicit conversions between incompatible pointer types.
+    pub error_incompatible_pointers: bool,
+    /// Require designated initializers for records marked `designated_init`.
+    pub error_designated_init: bool,
+    /// Warn about runtime-sized array declarators.
+    pub warn_vla: bool,
+    /// Warn about externally visible functions defined without prior declarations.
+    pub warn_missing_declarations: bool,
+    /// Warn about externally visible functions defined without prior prototypes.
+    pub warn_missing_prototypes: bool,
+    /// Warn on casts between incompatible function pointer types.
+    pub warn_cast_function_type: bool,
+    /// Warn on implicit conversions between distinct enumeration types.
+    pub warn_enum_conversion: bool,
+    /// Warn when a switch arm reaches another label without an annotation.
+    pub warn_implicit_fallthrough: bool,
+    /// Warn on the same invalid returns that the error policy rejects.
+    pub warn_return_type: bool,
+    /// Warn when a declaration uses implicit int.
+    pub warn_implicit_int: bool,
+    /// Warn when a comparison uses distinct enumeration types.
+    pub warn_enum_compare: bool,
+    /// Warn when the two arms of a conditional use distinct enumeration types.
+    pub warn_enum_compare_conditional: bool,
+    /// Warn when a comparison mixes integer signedness.
+    pub warn_sign_compare: bool,
+    /// Warn about an empty body on an `if` or `else`.
+    pub warn_empty_body: bool,
+    /// Diagnostics for unused entities and discarded values.
+    pub unused: UnusedWarnings,
+}
+
+/// Individual members of the C unused-warning group.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UnusedWarnings {
+    pub functions: bool,
+    pub variables: bool,
+    pub const_variables: bool,
+    pub set_variables: bool,
+    pub parameters: bool,
+    pub set_parameters: bool,
+    pub labels: bool,
+    pub local_typedefs: bool,
+    pub values: bool,
+}
+
+impl UnusedWarnings {
+    fn track_locals(self) -> bool {
+        self.variables || self.set_variables || self.parameters || self.set_parameters
+    }
+
+    fn track_globals(self) -> bool {
+        self.functions || self.variables || self.const_variables
+    }
+}
+
 /// Compiles preprocessed C source, read from `path`, to a keel module.
 /// Wasm accepts only the bounded freestanding integer/storage profile and
 /// verifies against WASM32. The caller must retain that layout and avoid native
@@ -182,6 +265,47 @@ pub fn compile_with_policies(
     binding: FunctionBinding,
     builtins: LibraryBuiltins,
 ) -> Result<keel_ir::Module, Diagnostic> {
+    compile_with_language(
+        src,
+        path,
+        opts,
+        binding,
+        builtins,
+        LanguageOptions::default(),
+    )
+}
+
+/// Compiles C with explicit language, binding and builtin policies. Use
+/// the same character types during preprocessing.
+pub fn compile_with_language(
+    src: &str,
+    path: &str,
+    opts: Options,
+    binding: FunctionBinding,
+    builtins: LibraryBuiltins,
+    language: LanguageOptions,
+) -> Result<keel_ir::Module, Diagnostic> {
+    compile_with_diagnostics(
+        src,
+        path,
+        opts,
+        binding,
+        builtins,
+        language,
+        &mut Vec::new(),
+    )
+}
+
+/// Compiles C with explicit policies and collects enabled source warnings.
+pub fn compile_with_diagnostics(
+    src: &str,
+    path: &str,
+    opts: Options,
+    binding: FunctionBinding,
+    builtins: LibraryBuiltins,
+    language: LanguageOptions,
+    warnings: &mut Vec<Diagnostic>,
+) -> Result<keel_ir::Module, Diagnostic> {
     if opts.target == keel_ir::Target::Wasm32UnknownUnknown && opts.fast_math {
         return Err(Diagnostic {
             file: path.into(),
@@ -211,18 +335,22 @@ pub fn compile_with_policies(
         col: e.loc.col,
         message: e.message,
     };
-    let mut parser = parse::Parser::new(src, path, opts.target, text);
+    let mut parser = parse::Parser::with_language(src, path, opts.target, text, language);
     parser.set_x86_features(opts.x86_features);
     parser.set_x86_baseline(opts.x86_baseline);
     let parsed = parser.translation_unit();
     let files = parser.take_files();
+    warnings.extend(parser.warnings.drain(..).map(|e| diagnostic(&files, e)));
     parsed.map_err(|e| diagnostic(&files, e))?;
     let funcs = std::mem::take(&mut parser.funcs);
-    let mut module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
+    let mut lowering_warnings = Vec::new();
+    let lowered = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .fast_math(opts.fast_math)
+        .with_language(language)
         .with_library_builtins(builtins)
-        .run()
-        .map_err(|e| diagnostic(&files, e))?;
+        .run(&mut lowering_warnings);
+    warnings.extend(lowering_warnings.into_iter().map(|e| diagnostic(&files, e)));
+    let mut module = lowered.map_err(|e| diagnostic(&files, e))?;
     apply_function_binding(&mut module, opts.target, binding);
     finalize_inline_asm(&mut module, &parser)
         .map_err(|message| diagnostic(&files, Error::new(Loc::default(), message)))?;

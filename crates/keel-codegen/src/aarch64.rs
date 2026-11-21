@@ -389,22 +389,20 @@ pub(crate) fn compile_output<'module>(
     let mut frames = Vec::new();
     if parallel.is_none() {
         for (index, original) in module.functions.iter().enumerate() {
-            if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
+            if let Some((body, frame)) = prepared_leaves.remove(&index) {
                 out.append(body);
-                frames.push(FrameDebug {
-                    frame_register: None,
-                    slots: Vec::new(),
-                    scope_marks,
-                });
+                frames.push(frame);
                 out.flush(&mut sink);
                 continue;
             }
             let _function_profile = crate::backend_profile::function(&original.name);
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &symbols, &mut out, linux, emission)
+                && let Some(static_bytes) =
+                    direct::emit(original, &symbols, &mut out, linux, emission)
             {
                 frames.push(FrameDebug {
+                    static_bytes,
                     frame_register: None,
                     slots: Vec::new(),
                     scope_marks: Vec::new(),
@@ -439,8 +437,14 @@ pub(crate) fn compile_output<'module>(
             } else {
                 (None, Vec::new())
             };
+            let static_bytes = if emission.stack_frame_warning.is_some() {
+                compiler.static_frame_bytes()
+            } else {
+                0
+            };
             let scope_marks = compiler.compile(&mut out);
             frames.push(FrameDebug {
+                static_bytes,
                 slots,
                 scope_marks,
                 frame_register,
@@ -470,11 +474,13 @@ pub(crate) fn compile_output<'module>(
             let _function_profile = crate::backend_profile::function(&original.name);
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &symbols, &mut out, linux, emission)
+                && let Some(static_bytes) =
+                    direct::emit(original, &symbols, &mut out, linux, emission)
             {
                 return Ok(Some((
                     out,
                     FrameDebug {
+                        static_bytes,
                         frame_register: None,
                         slots: Vec::new(),
                         scope_marks: Vec::new(),
@@ -508,10 +514,16 @@ pub(crate) fn compile_output<'module>(
             } else {
                 (None, Vec::new())
             };
+            let static_bytes = if emission.stack_frame_warning.is_some() {
+                compiler.static_frame_bytes()
+            } else {
+                0
+            };
             let scope_marks = compiler.compile(&mut out);
             Ok(Some((
                 out,
                 FrameDebug {
+                    static_bytes,
                     slots,
                     scope_marks,
                     frame_register,
@@ -525,19 +537,9 @@ pub(crate) fn compile_output<'module>(
             |index, result| {
                 let (body, frame) = match result? {
                     Some(result) => result,
-                    None => {
-                        let (body, scope_marks) = prepared_leaves
-                            .remove(&index)
-                            .expect("prepared leaf retained until consumption");
-                        (
-                            body,
-                            FrameDebug {
-                                frame_register: None,
-                                slots: Vec::new(),
-                                scope_marks,
-                            },
-                        )
-                    }
+                    None => prepared_leaves
+                        .remove(&index)
+                        .expect("prepared leaf retained until consumption"),
                 };
                 out.append(body);
                 frames.push(frame);
@@ -545,6 +547,9 @@ pub(crate) fn compile_output<'module>(
                 Ok(())
             },
         )?;
+    }
+    if let Some(warning) = emission.stack_frame_warning {
+        warning.check(module, &frames);
     }
     for f in &module.functions {
         if linux {
@@ -1378,6 +1383,20 @@ impl<'a> FunctionCompiler<'a> {
             scope_marks: Vec::new(),
             copies: Vec::new(),
         })
+    }
+
+    fn static_frame_bytes(&self) -> usize {
+        if !self.debug && crate::lowering::identity_tail_callee(self.func).is_some() {
+            return 0;
+        }
+        self.planned_frame_bytes()
+    }
+
+    fn planned_frame_bytes(&self) -> usize {
+        self.frame_size
+            + 16 * (self.alloc.callee_saved_used.len().div_ceil(2)
+                + self.alloc.float_callee_saved_used.len().div_ceil(2)
+                + usize::from(!self.frameless))
     }
 
     /// Appends the function's assembly to `out`; gives where its lexical

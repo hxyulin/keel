@@ -59,7 +59,8 @@
 //!
 //! The fixed frame is addressed from rbp, so it stays reachable when `rsp`
 //! moves for a dynamic allocation; only the outgoing arguments are at
-//! `rsp`, where calls need them. `rsp` is 16-byte aligned at every call.
+//! `rsp`, where calls need them. The stack is 16-byte aligned at calls by
+//! default. An explicit 8-byte boundary is available for the Linux kernel ABI.
 //!
 //! # Symbols
 //!
@@ -312,6 +313,25 @@ pub enum CodeModel {
     Kernel,
 }
 
+/// Minimum alignment of RSP immediately before an x86-64 call.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StackAlignment {
+    /// Eight-byte call boundary, as used by the x86-64 Linux kernel.
+    Align8,
+    /// Standard System V call boundary.
+    #[default]
+    Align16,
+}
+
+impl StackAlignment {
+    pub(super) const fn bytes(self) -> usize {
+        match self {
+            Self::Align8 => 8,
+            Self::Align16 => 16,
+        }
+    }
+}
+
 fn request<'a>(pools: &'a Pools<'a>, pipeline: &crate::CodegenPipeline<'a>) -> crate::Request<'a> {
     crate::Request::new(crate::Target::X86_64LinuxGnu, *pipeline).pools(pools)
 }
@@ -362,6 +382,7 @@ pub(crate) fn compile_output<'module>(
         allocator: pipeline.allocator,
     };
     let code_model = emission.x86_code_model.unwrap_or_default();
+    let call_alignment = emission.x86_stack_alignment.unwrap_or_default().bytes() as u32;
     if code_model == CodeModel::Kernel && module.data.iter().any(|d| d.thread_local) {
         return Err(CodegenError {
             func: String::new(),
@@ -443,9 +464,10 @@ pub(crate) fn compile_output<'module>(
             )?;
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &symbols, &mut out, emission)
+                && let Some(static_bytes) = direct::emit(original, &symbols, &mut out, emission)
             {
                 frames.push(FrameDebug {
+                    static_bytes,
                     slots: Vec::new(),
                     scope_marks: Vec::new(),
                     frame_register: None,
@@ -464,14 +486,16 @@ pub(crate) fn compile_output<'module>(
                 allocator: pipeline.allocator,
             };
             let boundary = (!debug)
-                .then(|| aggregate_boundary::lower(original))
+                .then(|| aggregate_boundary::lower(original, call_alignment))
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
             let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
-            let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
+            let promoted_inputs = aggregate_inputs::promote(&promoted, debug, call_alignment);
             let promoted_outputs =
-                crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
+                crate::aggregate_outputs::promote(&promoted_inputs, debug, |sig| {
+                    aggregate_outputs::plan(sig, call_alignment)
+                });
             let lowered = vector::lower(&promoted_outputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
@@ -480,8 +504,7 @@ pub(crate) fn compile_output<'module>(
                 pools,
                 &local_pipeline,
                 structured,
-                crate::emission::function_goal(&func.attrs, emission.goal),
-                emission.separate_slots,
+                emission,
             )?;
             compiler.debug = debug;
             compiler.code_model = code_model;
@@ -493,9 +516,15 @@ pub(crate) fn compile_output<'module>(
                 Vec::new()
             };
             let frame_register = compiler.frame_register;
+            let static_bytes = if emission.stack_frame_warning.is_some() {
+                compiler.static_frame_bytes()
+            } else {
+                0
+            };
             let scope_marks = compiler.compile(&mut out)?;
             out.validate_sources(&mut source_validator, &mut validated_items)?;
             frames.push(FrameDebug {
+                static_bytes,
                 slots,
                 scope_marks,
                 frame_register,
@@ -522,11 +551,12 @@ pub(crate) fn compile_output<'module>(
             )?;
             if emission.backend_mode == crate::BackendMode::CompileSpeed
                 && !debug
-                && direct::emit(original, &symbols, &mut out, emission)
+                && let Some(static_bytes) = direct::emit(original, &symbols, &mut out, emission)
             {
                 return Ok((
                     out,
                     FrameDebug {
+                        static_bytes,
                         slots: Vec::new(),
                         scope_marks: Vec::new(),
                         frame_register: None,
@@ -542,14 +572,16 @@ pub(crate) fn compile_output<'module>(
                 allocator: pipeline.allocator,
             };
             let boundary = (!debug)
-                .then(|| aggregate_boundary::lower(original))
+                .then(|| aggregate_boundary::lower(original, call_alignment))
                 .flatten();
             let func = boundary.as_ref().unwrap_or(original);
             let promoted = crate::aggregate_results::promote(func, debug);
             let promoted = crate::aggregate_results::promote_exits(&promoted, debug, emission.goal);
-            let promoted_inputs = aggregate_inputs::promote(&promoted, debug);
+            let promoted_inputs = aggregate_inputs::promote(&promoted, debug, call_alignment);
             let promoted_outputs =
-                crate::aggregate_outputs::promote(&promoted_inputs, debug, aggregate_outputs::plan);
+                crate::aggregate_outputs::promote(&promoted_inputs, debug, |sig| {
+                    aggregate_outputs::plan(sig, call_alignment)
+                });
             let lowered = vector::lower(&promoted_outputs, features);
             let func = crate::schedule::prepare(&lowered, emission.pressure_schedule);
             let mut compiler = FunctionCompiler::new(
@@ -558,8 +590,7 @@ pub(crate) fn compile_output<'module>(
                 pools,
                 &local_pipeline,
                 structured,
-                crate::emission::function_goal(&func.attrs, emission.goal),
-                emission.separate_slots,
+                emission,
             )?;
             compiler.debug = debug;
             compiler.code_model = code_model;
@@ -571,10 +602,16 @@ pub(crate) fn compile_output<'module>(
                 Vec::new()
             };
             let frame_register = compiler.frame_register;
+            let static_bytes = if emission.stack_frame_warning.is_some() {
+                compiler.static_frame_bytes()
+            } else {
+                0
+            };
             let scope_marks = compiler.compile(&mut out)?;
             Ok((
                 out,
                 FrameDebug {
+                    static_bytes,
                     slots,
                     scope_marks,
                     frame_register,
@@ -591,6 +628,9 @@ pub(crate) fn compile_output<'module>(
             }
             Ok(())
         })?;
+    }
+    if let Some(warning) = emission.stack_frame_warning {
+        warning.check(module, &frames);
     }
     for f in &module.functions {
         for (enabled, section) in [
@@ -1036,7 +1076,7 @@ struct FunctionCompiler<'a> {
     folded_values: fold::ValueSet,
     fused_compares: HashSet<Value>,
     /// Bytes at the bottom of the frame for outgoing stack arguments,
-    /// rounded to 16; memory from `stack_alloc` starts just above.
+    /// rounded to the frame alignment; memory from `stack_alloc` starts above.
     outgoing: usize,
     /// Offset from `rsp` of spill slot 0. Slots past the allocator's are
     /// staging for struct arguments in registers; see [`Self::move_args`].
@@ -1172,10 +1212,11 @@ impl<'a> FunctionCompiler<'a> {
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
-        goal: crate::CodegenGoal,
-        separate_slots: bool,
+        emission: crate::EmissionOptions,
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
+        let goal = crate::emission::function_goal(&func.attrs, emission.goal);
+        let call_alignment = emission.x86_stack_alignment.unwrap_or_default().bytes();
         let features = pipeline.selector.x86_features();
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -1187,7 +1228,7 @@ impl<'a> FunctionCompiler<'a> {
         // checks and covers below only scan functions that can match.
         let facts = crate::kinds::FunctionFacts::new(func);
         let present = facts.kinds;
-        let shape = plan::VectorShape::of(func, &facts);
+        let shape = plan::VectorShape::of(func, &facts, call_alignment);
         let saved_pool = pools
             .callee_saved
             .iter()
@@ -1210,7 +1251,7 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             pools
         };
-        plan::check_guaranteed_tails(func, &named, present).map_err(err)?;
+        plan::check_guaranteed_tails(func, &named, present, call_alignment).map_err(err)?;
         let calls = plan::CallArea::plan(func, &facts, &named, shape.frame_align);
         let bounded_speed = goal == crate::CodegenGoal::Speed
             && pipeline.allocator.name() == "bounded"
@@ -1247,7 +1288,7 @@ impl<'a> FunctionCompiler<'a> {
             &facts.slots,
             offset,
             !module.files.is_empty(),
-            separate_slots,
+            emission.separate_slots,
         );
         let saved = plan::saved_registers(
             &alloc,
@@ -1265,7 +1306,8 @@ impl<'a> FunctionCompiler<'a> {
         let frame_size = if register_only_frame {
             0
         } else {
-            plan::frame_size(goal, &shape, simple_leaf, &saved, offset).map_err(err)?
+            plan::frame_size(goal, &shape, simple_leaf, &saved, offset, call_alignment)
+                .map_err(err)?
         };
         let frameless = register_only_frame
             || plan::frameless(
@@ -1366,6 +1408,13 @@ impl<'a> FunctionCompiler<'a> {
         Ok(compiler)
     }
 
+    fn static_frame_bytes(&self) -> usize {
+        if !self.debug && crate::lowering::identity_tail_callee(self.func).is_some() {
+            return 0;
+        }
+        self.frame_size + 8 * (self.saved.len() + usize::from(!self.frameless))
+    }
+
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
     fn compile(
@@ -1458,7 +1507,7 @@ impl<'a> FunctionCompiler<'a> {
             for (i, &block) in order.iter().enumerate() {
                 self.next_block = order.get(i + 1).copied();
                 self.preferred_backedge = loop_layout.backedges.get(&block).copied();
-                if loop_layout.headers.contains(&block) {
+                if !func.attrs.x86_no_loop_alignment && loop_layout.headers.contains(&block) {
                     // A 32-byte fetch boundary costs at most 31 bytes per header.
                     self.out.align(5);
                 }
@@ -1566,17 +1615,19 @@ impl<'a> FunctionCompiler<'a> {
                     [asm_arg(sized((at).clone(), 64)), asm_arg(r64(r))],
                 );
             }
-            let skip = format!(".L{}_saved", func.name);
-            self.emit(Opcode::Test, [asm_arg(r8(0)), asm_arg(r8(0))]);
-            self.emit(Opcode::Jcc(4), [asm_arg(&skip)]);
-            for k in 0..8 {
-                let at = self.frame(area + 48 + 16 * k);
-                self.emit(
-                    Opcode::Movaps,
-                    [asm_arg(sized((at).clone(), 128)), asm_arg(xmm((k) as u8))],
-                );
+            if !func.attrs.x86_no_sse {
+                let skip = format!(".L{}_saved", func.name);
+                self.emit(Opcode::Test, [asm_arg(r8(0)), asm_arg(r8(0))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&skip)]);
+                for k in 0..8 {
+                    let at = self.frame(area + 48 + 16 * k);
+                    self.emit(
+                        Opcode::Movaps,
+                        [asm_arg(sized(at, 128)), asm_arg(xmm(k as u8))],
+                    );
+                }
+                self.out.label(skip);
             }
-            self.out.label(skip);
         }
         if let Some(slot) = self.sret_ptr {
             let at = self.frame(slot);
@@ -2727,7 +2778,7 @@ impl<'a> FunctionCompiler<'a> {
             self.extend_in_place(r, ty, ext);
         }
         // A variadic callee saves this many vector registers.
-        if sig.variadic {
+        if sig.variadic && (!self.func.attrs.x86_skip_rax_setup || placement.floats != 0) {
             self.emit(Opcode::Mov, [asm_arg(r32(0)), asm_arg(placement.floats)]);
         }
         self.arg_places = placement;
@@ -4875,6 +4926,17 @@ impl<'a> FunctionCompiler<'a> {
         // Keep the legality guard in release builds and on the text path too.
         // AVX forms can require AVX2 depending on the borrowed operands.
         if self.feature_error.is_none() {
+            if self.func.attrs.x86_no_sse
+                && (opcode == Opcode::Vzeroupper
+                    || operands.iter().any(|operand| {
+                        matches!(operand, AsmOperand::Register(r) if matches!(
+                            r.class, RegisterClass::Xmm | RegisterClass::Ymm | RegisterClass::Zmm
+                                | RegisterClass::Mmx | RegisterClass::Mask | RegisterClass::Tile
+                        ))
+                    }))
+            {
+                self.feature_error = Some(format!("x86 SIMD register use is disabled: {opcode:?}"));
+            }
             let required = keel_asm_ir::x86::required_features(opcode, &operands);
             // Most instructions require nothing. Comparing with NONE costs
             // far less than `contains`, which packs both sets into bits.
@@ -5299,8 +5361,7 @@ mod feature_guard_tests {
                     &REGISTERS,
                     &pipeline,
                     structured,
-                    crate::CodegenGoal::default(),
-                    false,
+                    crate::EmissionOptions::default(),
                 )
                 .unwrap();
                 let i = Instruction::parse_intel(source).unwrap();

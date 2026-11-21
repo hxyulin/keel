@@ -18,6 +18,7 @@ use crate::{Error, Loc};
 #[derive(Copy, Clone)]
 struct Slot<'a> {
     ty: Ty<'a>,
+    sugar: Sugar<'a>,
     offset: u64,
     bits: Option<BitField>,
 }
@@ -26,6 +27,7 @@ struct Slot<'a> {
 enum SubSlots<'a> {
     Array {
         elem: Ty<'a>,
+        sugar: Sugar<'a>,
         offset: u64,
         size: u64,
         len: u64,
@@ -38,11 +40,13 @@ impl<'a> SubSlots<'a> {
         match self {
             Self::Array {
                 elem,
+                sugar,
                 offset,
                 size,
                 len,
             } => ((index as u64) < *len).then(|| Slot {
                 ty: *elem,
+                sugar: *sugar,
                 offset: offset + index as u64 * size,
                 bits: None,
             }),
@@ -54,10 +58,11 @@ impl<'a> SubSlots<'a> {
 impl<'a> Parser<'a> {
     /// The initializer after `=` for an object of type `ty`. Returns the
     /// items and the type, completed if it was an array of unknown length.
-    pub(crate) fn initializer(&mut self, ty: &Ty<'a>) -> R<(Init<'a>, Ty<'a>)> {
+    pub(crate) fn initializer(&mut self, ty: &Ty<'a>, sugar: Sugar<'a>) -> R<(Init<'a>, Ty<'a>)> {
         let mut items = Vec::new();
         let slot = Slot {
             ty: *ty.unatomic(),
+            sugar,
             offset: 0,
             bits: None,
         };
@@ -179,7 +184,9 @@ impl<'a> Parser<'a> {
         };
         let elem_size = match elem {
             Ty::Int(k) if k.size_with_layout(self.c_layout) == 1 => 1,
-            Ty::Int(k) if k.size_with_layout(self.c_layout) == 4 => 4,
+            Ty::Int(k) if k.size_with_layout(self.c_layout) == self.wide_unit() as u64 => {
+                self.wide_unit()
+            }
             _ => return Ok(None),
         };
         if !matches!(self.peek(), Tok::Str { .. }) {
@@ -190,7 +197,7 @@ impl<'a> Parser<'a> {
             return Err(Error::new(e.loc, "expected a string literal"));
         };
         let mut bytes = self.strings[i].bytes;
-        let unit = if self.strings[i].wide { 4 } else { 1 };
+        let unit = usize::from(self.strings[i].unit);
         if unit != elem_size {
             return Err(Error::new(e.loc, "string literal of the wrong width"));
         }
@@ -252,6 +259,7 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(());
             }
+            self.check_enum_conversion(e, self.enum_identity(slot.sugar));
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
                 offset: slot.offset,
@@ -273,6 +281,7 @@ impl<'a> Parser<'a> {
                 elem, len: Some(n), ..
             }) => SubSlots::Array {
                 elem: *elem.unatomic(),
+                sugar: slot.sugar.array_element(&self.typedefs, self.arena),
                 offset: slot.offset,
                 size: self.size_of(&elem),
                 len: n,
@@ -281,6 +290,7 @@ impl<'a> Parser<'a> {
                 (0..shape.lanes())
                     .map(|i| Slot {
                         ty: *elem,
+                        sugar: Sugar::Plain,
                         offset: slot.offset + u64::from(i) * self.size_of(elem),
                         bits: None,
                     })
@@ -294,6 +304,7 @@ impl<'a> Parser<'a> {
                     .filter(|m| m.name.is_some() || m.bits.is_none())
                     .map(|m| Slot {
                         ty: *m.ty.unatomic(),
+                        sugar: m.sugar,
                         offset: slot.offset + m.offset,
                         bits: m.bits,
                     });
@@ -315,6 +326,7 @@ impl<'a> Parser<'a> {
         first: Option<Expr<'a>>,
         items: &mut Vec<InitItem<'a>>,
     ) -> R<()> {
+        self.check_positional_init(slot, first.map_or_else(|| self.loc(), |e| e.loc))?;
         let mut first = first;
         let subs = self.sub_slots(slot);
         let mut i = 0;
@@ -338,6 +350,18 @@ impl<'a> Parser<'a> {
             Some(e) if matches!(slot.ty, Ty::Array(..)) => Err(array_initializer_error(e.loc)),
             _ => Ok(()),
         }
+    }
+
+    fn check_positional_init(&self, slot: &Slot<'a>, loc: Loc) -> R<()> {
+        if let Ty::Struct(id) = slot.ty
+            && self.structs[id].designated_init
+        {
+            return Err(Error::new(
+                loc,
+                "struct requires field designators [-Wdesignated-init]",
+            ));
+        }
+        Ok(())
     }
 
     /// An undesignated item of a list for `slot`.
@@ -392,6 +416,7 @@ impl<'a> Parser<'a> {
                 self.checked_array_size(&elem, next as u64 + 1, loc)?;
                 Slot {
                     ty: *elem.unatomic(),
+                    sugar: slot.sugar.array_element(&self.typedefs, self.arena),
                     offset: slot
                         .offset
                         .checked_add(next as u64 * self.size_of(&elem))
@@ -399,6 +424,7 @@ impl<'a> Parser<'a> {
                     bits: None,
                 }
             } else {
+                self.check_positional_init(slot, loc)?;
                 match subs.get(next) {
                     Some(s) => s,
                     None => return Err(Error::new(loc, "too many initializers")),
@@ -463,6 +489,7 @@ impl<'a> Parser<'a> {
             self.checked_array_size(&elem, last as u64 + 1, loc)?;
             let sub = Slot {
                 ty: *elem.unatomic(),
+                sugar: slot.sugar.array_element(&self.typedefs, self.arena),
                 offset: slot
                     .offset
                     .checked_add(i as u64 * self.size_of(&elem))
@@ -488,6 +515,7 @@ impl<'a> Parser<'a> {
             if m.name == Some(name) {
                 let sub = Slot {
                     ty: *m.ty.unatomic(),
+                    sugar: m.sugar,
                     offset: slot.offset + m.offset,
                     bits: m.bits,
                 };
@@ -500,6 +528,7 @@ impl<'a> Parser<'a> {
             {
                 let sub = Slot {
                     ty: *found.ty.unatomic(),
+                    sugar: found.sugar,
                     offset: slot.offset + m.offset + off,
                     bits: found.bits,
                 };

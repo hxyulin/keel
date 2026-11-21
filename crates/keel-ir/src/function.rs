@@ -312,6 +312,22 @@ pub struct FunctionAttrs {
     pub no_instrument_function: bool,
     /// Suppress profile instrumentation; no profile instrumentation is currently emitted.
     pub no_profile_instrument_function: bool,
+    /// Retain a frame pointer in the native prologue.
+    pub frame_pointer: bool,
+    /// Suppress optional conversion of ordinary calls to tail calls.
+    pub no_sibling_calls: bool,
+    /// Preserve faulting behavior of accesses when expanding memory operations.
+    pub preserve_memory_faults: bool,
+    /// Apply a tighter stack-growth budget to optional inlining.
+    pub conserve_stack: bool,
+    /// Keep compiler-generated x86 code off SIMD registers.
+    pub x86_no_sse: bool,
+    /// Disallow x87 floating-point values in x86 code generation.
+    pub x86_no_x87: bool,
+    /// Skip the SysV variadic vector-register count for integer-only calls.
+    pub x86_skip_rax_setup: bool,
+    /// Use byte alignment for x86 loop headers.
+    pub x86_no_loop_alignment: bool,
     /// Requires a producer-owned prologue/epilogue; executable consumers reject it.
     pub naked: bool,
     /// Requires interrupt register/frame preservation and return; consumers reject it.
@@ -344,6 +360,14 @@ impl FunctionAttrs {
         self.flatten |= other.flatten;
         self.no_instrument_function |= other.no_instrument_function;
         self.no_profile_instrument_function |= other.no_profile_instrument_function;
+        self.frame_pointer |= other.frame_pointer;
+        self.no_sibling_calls |= other.no_sibling_calls;
+        self.preserve_memory_faults |= other.preserve_memory_faults;
+        self.conserve_stack |= other.conserve_stack;
+        self.x86_no_sse |= other.x86_no_sse;
+        self.x86_no_x87 |= other.x86_no_x87;
+        self.x86_skip_rax_setup |= other.x86_skip_rax_setup;
+        self.x86_no_loop_alignment |= other.x86_no_loop_alignment;
         self.naked |= other.naked;
         self.interrupt |= other.interrupt;
     }
@@ -406,6 +430,14 @@ impl fmt::Display for FunctionAttrs {
                 "no_profile_instrument_function",
             ),
             (self.naked, "naked"),
+            (self.frame_pointer, "frame_pointer"),
+            (self.no_sibling_calls, "no_sibling_calls"),
+            (self.preserve_memory_faults, "preserve_memory_faults"),
+            (self.conserve_stack, "conserve_stack"),
+            (self.x86_no_sse, "x86_no_sse"),
+            (self.x86_no_x87, "x86_no_x87"),
+            (self.x86_skip_rax_setup, "x86_skip_rax_setup"),
+            (self.x86_no_loop_alignment, "x86_no_loop_alignment"),
             (self.interrupt, "interrupt"),
         ] {
             if set {

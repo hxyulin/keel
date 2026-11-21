@@ -60,6 +60,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn expr(&mut self) -> R<Expr<'a>> {
         let mut e = self.assign()?;
         while self.is(",") {
+            self.discarded_value(&e);
             let loc = self.loc();
             self.advance();
             let r = self.assign()?;
@@ -90,6 +91,9 @@ impl<'a> Parser<'a> {
 
     fn assignment(&mut self, op: &str, lhs: Expr<'a>, rhs: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         self.check_modifiable_lvalue(&lhs)?;
+        if op == "=" {
+            self.record_store_without_read(&lhs);
+        }
         if let Ty::Atomic(&ty) = lhs.ty {
             if ty.is_float() && op != "=" {
                 let bin = match op {
@@ -180,6 +184,9 @@ impl<'a> Parser<'a> {
                     format!("`{op}` on an `_Atomic` pointer is not supported"),
                 ));
             }
+            if rmw.is_none() {
+                self.check_enum_conversion(rhs, self.enum_identity(lhs.sugar));
+            }
             let rhs = self.rvalue(rhs);
             let rhs = self.convert_for_assign(rhs, &ty)?;
             let builtin = match rmw {
@@ -197,6 +204,7 @@ impl<'a> Parser<'a> {
         let ty = lhs.ty;
         let result_sugar = *lhs.sugar.unqualified(&self.typedefs);
         if op == "=" {
+            self.check_enum_conversion(rhs, self.enum_identity(result_sugar));
             let rhs = self.convert_for_assign(rhs, &ty)?;
             let sugar = *lhs.sugar.unqualified(&self.typedefs);
             return Ok(
@@ -372,6 +380,18 @@ impl<'a> Parser<'a> {
         loc: Loc,
     ) -> R<Expr<'a>> {
         let (a, b) = (self.rvalue(a), self.rvalue(b));
+        if self.language.warn_enum_compare_conditional {
+            self.warn_enum_comparison(a, b, loc, "enum-compare-conditional");
+        }
+        let enum_origin = if self.language.warn_enum_conversion
+            || self.language.warn_enum_compare
+            || self.language.warn_enum_compare_conditional
+        {
+            self.expression_enum_identity(a)
+                .filter(|&id| self.expression_enum_identity(b) == Some(id))
+        } else {
+            None
+        };
         let ty = if a.ty.is_arith() && b.ty.is_arith() {
             usual_with_layout(&a.ty, &b.ty, self.c_layout)
         } else if a.ty.is_ptr() && is_null(&b) {
@@ -401,7 +421,7 @@ impl<'a> Parser<'a> {
                 self.arena,
             )
         } else {
-            Sugar::Plain
+            enum_origin.map_or(Sugar::Plain, Sugar::Enumerator)
         };
         Ok(mk(
             ExprKind::Cond(self.node(cond), self.node(a), self.node(b)),
@@ -480,6 +500,12 @@ impl<'a> Parser<'a> {
             }
             "==" | "!=" | "<" | ">" | "<=" | ">=" => {
                 let op = bin_op(p);
+                if self.language.warn_enum_compare {
+                    self.warn_enum_comparison(l, r, loc, "enum-compare");
+                }
+                if self.language.warn_sign_compare {
+                    self.warn_signedness_comparison(l, r, loc);
+                }
                 let (l, r) = if l.ty.is_arith() && r.ty.is_arith() {
                     let ty = usual_with_layout(&l.ty, &r.ty, self.c_layout);
                     (self.cast(l, ty), self.cast(r, ty))
@@ -787,6 +813,18 @@ impl<'a> Parser<'a> {
             let sugar = *sugar.unqualified(&self.typedefs);
             let e = self.cast_expr()?;
             let e = self.rvalue(e);
+            if self.language.warn_cast_function_type
+                && let (Some(source), Some(destination)) = (
+                    e.ty.pointee().and_then(Ty::func),
+                    ty.pointee().and_then(Ty::func),
+                )
+                && !compatible_function_cast(source, destination, self.c_layout)
+            {
+                self.warnings.push(Error::new(
+                    loc,
+                    "cast between incompatible function pointer types [-Wcast-function-type]",
+                ));
+            }
             if let Ty::Struct(id) = ty
                 && self.structs[id].is_union
                 && e.ty != ty
@@ -992,6 +1030,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let name = self.ident()?;
                 let name = self.resolve_label(name);
+                self.reference_label(name);
                 let Some(fs) = self.fs.as_mut() else {
                     return Err(Error::new(loc, "`&&label` outside a function"));
                 };
@@ -1281,6 +1320,7 @@ impl<'a> Parser<'a> {
         };
         for (i, arg) in args.iter_mut().enumerate() {
             *arg = if let Some(param) = fty.params.get(i).filter(|_| fty.has_prototype()) {
+                self.check_enum_conversion(*arg, fty.param_enums.get(i).copied().flatten());
                 self.convert_argument(*arg, param)?
             } else if fty.variadic || !fty.has_prototype() {
                 self.default_promote(*arg)
@@ -1358,9 +1398,12 @@ impl<'a> Parser<'a> {
             )),
             Tok::BadNumber(text) => Err(Error::new(loc, format!("invalid number `{text}`"))),
             Tok::Char(v) => Ok(mk(ExprKind::Int(v), INT, loc)),
+            Tok::ShortWideChar(v) => Ok(mk(ExprKind::Int(i64::from(v)), self.wide_char(), loc)),
             Tok::Str { bytes, wide } => {
                 let mut bytes = bytes.to_vec();
                 let mut wide = wide;
+                let unit = self.wide_unit();
+                let widen = |&b: &u8| u32::from(b).to_le_bytes().into_iter().take(unit);
                 while let Tok::Str {
                     bytes: more,
                     wide: w,
@@ -1368,14 +1411,11 @@ impl<'a> Parser<'a> {
                 {
                     if w && !wide {
                         // Widen what came before.
-                        bytes = bytes
-                            .iter()
-                            .flat_map(|&b| u32::from(b).to_le_bytes())
-                            .collect();
+                        bytes = bytes.iter().flat_map(widen).collect();
                         wide = true;
                     }
                     if wide && !w {
-                        bytes.extend(more.iter().flat_map(|&b| u32::from(b).to_le_bytes()));
+                        bytes.extend(more.iter().flat_map(widen));
                     } else {
                         bytes.extend(more);
                     }
@@ -1390,7 +1430,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "statement expression outside a function"));
                 }
                 let scope = self.push_block();
-                let mut stmts = self.block_items()?;
+                let mut stmts = self.block_items(true)?;
                 self.pop_block();
                 self.expect(")")?;
                 let value = stmts
@@ -1419,6 +1459,7 @@ impl<'a> Parser<'a> {
                         let e = self.rvalue(*e);
                         Some(self.node(e))
                     });
+                self.discarded_statement_items(stmts);
                 let ty = value.as_ref().map_or(Ty::Void, |v| v.ty);
                 let sugar = value
                     .as_ref()
@@ -1508,20 +1549,14 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn string_expr(&mut self, mut bytes: Vec<u8>, wide: bool, loc: Loc) -> Expr<'a> {
-        let unit = if wide { 4 } else { 1 };
+        let unit = if wide { self.wide_unit() } else { 1 };
         bytes.extend(std::iter::repeat_n(0, unit));
         let len = (bytes.len() / unit) as u64;
         let i = self.add_string(bytes, wide);
         let elem = if wide {
-            if self.c_layout == CDataLayout::NATIVE_LP64 && self.target == Target::Aarch64LinuxGnu {
-                UINT
-            } else {
-                INT
-            }
-        } else if self.target == Target::Aarch64LinuxGnu {
-            Ty::Int(IntKind::UPlainChar)
+            self.wide_char()
         } else {
-            CHAR
+            self.plain_char()
         };
         mk(ExprKind::Str(i), self.array_type(elem, Some(len)), loc)
     }
@@ -1562,7 +1597,7 @@ impl<'a> Parser<'a> {
                 "variably modified compound literals are not supported",
             ));
         }
-        let (init, ty) = self.initializer(&ty)?;
+        let (init, ty) = self.initializer(&ty, sugar)?;
         Ok(self.initialized_compound_literal(ty, sugar, loc, init))
     }
 
@@ -1745,6 +1780,77 @@ impl<'a> Parser<'a> {
         self.convert_for_assign(expr, ty)
     }
 
+    pub(crate) fn enum_identity(&self, sugar: Sugar<'a>) -> Option<usize> {
+        match sugar.unqualified(&self.typedefs) {
+            Sugar::Enum(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn check_enum_conversion(&mut self, expr: Expr<'a>, destination: Option<usize>) {
+        if self.language.warn_enum_conversion
+            && let Some(destination) = destination
+            && let Some(source) = self.expression_enum_identity(expr)
+            && source != destination
+        {
+            let name = |id: usize| self.enums[id].tag.unwrap_or("<anonymous>");
+            self.warnings.push(Error::new(
+                expr.loc,
+                format!(
+                    "implicit conversion from enum `{}` to enum `{}` [-Wenum-conversion]",
+                    name(source),
+                    name(destination)
+                ),
+            ));
+        }
+    }
+
+    fn expression_enum_identity(&self, expr: Expr<'a>) -> Option<usize> {
+        match expr.sugar.unqualified(&self.typedefs) {
+            Sugar::Enum(id) | Sugar::Enumerator(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    fn warn_enum_comparison(&mut self, lhs: Expr<'a>, rhs: Expr<'a>, loc: Loc, warning: &str) {
+        if let (Some(left), Some(right)) = (
+            self.expression_enum_identity(lhs),
+            self.expression_enum_identity(rhs),
+        ) && left != right
+        {
+            let name = |id: usize| self.enums[id].tag.unwrap_or("<anonymous>");
+            self.warnings.push(Error::new(
+                loc,
+                format!(
+                    "comparison of enum `{}` and enum `{}` [-W{warning}]",
+                    name(left),
+                    name(right)
+                ),
+            ));
+        }
+    }
+
+    fn warn_signedness_comparison(&mut self, lhs: Expr<'a>, rhs: Expr<'a>, loc: Loc) {
+        let (Ty::Int(left), Ty::Int(right)) = (promoted(&lhs.ty), promoted(&rhs.ty)) else {
+            return;
+        };
+        if left.signed() == right.signed()
+            || usual_with_layout(&lhs.ty, &rhs.ty, self.c_layout).is_signed()
+        {
+            return;
+        }
+        let signed = if left.signed() { lhs } else { rhs };
+        // A known nonnegative signed operand compares as intended.
+        if !matches!(eval_constant_with_layout(&signed, false, self.c_layout),
+            Some(Const::Int(value)) if !value.is_negative())
+        {
+            self.warnings.push(Error::new(
+                loc,
+                "comparison of integers of different signedness [-Wsign-compare]",
+            ));
+        }
+    }
+
     /// Conversion as if by assignment, to parameters and returns too.
     pub(crate) fn convert_for_assign(&mut self, e: Expr<'a>, ty: &Ty<'a>) -> R<Expr<'a>> {
         let e = self.rvalue(e);
@@ -1761,6 +1867,21 @@ impl<'a> Parser<'a> {
         }
         if !ty.is_scalar() || !e.ty.is_scalar() {
             return Err(Error::new(e.loc, "incompatible types in assignment"));
+        }
+        if self.language.error_incompatible_pointers
+            && let (Some(source), Some(destination)) = (e.ty.pointee(), ty.pointee())
+            && *source != Ty::Void
+            && *destination != Ty::Void
+            && !source.compatible(destination)
+            // Differences in the signedness of an integer pointee have their
+            // own GCC/Clang diagnostic. Plain char is also a character type.
+            && !matches!((source, destination), (Ty::Int(a), Ty::Int(b))
+                if a.to_unsigned() == b.to_unsigned())
+        {
+            return Err(Error::new(
+                e.loc,
+                "incompatible pointer types [-Wincompatible-pointer-types]",
+            ));
         }
         if let (Some(source), Some(destination)) = (
             e.ty.pointee().and_then(Ty::func),
@@ -1779,6 +1900,31 @@ impl<'a> Parser<'a> {
         }
         Ok(self.cast(e, *ty))
     }
+}
+
+fn compatible_function_cast(a: &FuncTy, b: &FuncTy, layout: CDataLayout) -> bool {
+    if a.microsoft_x64 != b.microsoft_x64 {
+        return false;
+    }
+    // GCC allows a void/void function pointer to serve as a generic
+    // carrier and ignores ABI-neutral pointer and integer differences.
+    let carrier = |ty: &FuncTy| {
+        ty.has_prototype() && ty.ret == Ty::Void && ty.params.is_empty() && !ty.variadic
+    };
+    if carrier(a) || carrier(b) {
+        return true;
+    }
+    let compatible = |a: &Ty, b: &Ty| {
+        a.compatible(b)
+            || (a.is_ptr() && b.is_ptr())
+            || matches!((a, b), (Ty::Int(x), Ty::Int(y))
+                if x.rank() != 0 && y.rank() != 0 && x.size_with_layout(layout) == y.size_with_layout(layout))
+    };
+    compatible(&a.ret, &b.ret)
+        && (!a.has_prototype()
+            || !b.has_prototype()
+            || ((a.variadic || b.variadic || a.params.len() == b.params.len())
+                && a.params.iter().zip(b.params).all(|(a, b)| compatible(a, b))))
 }
 
 /// An integer constant converted to integer type `ty`, if it fits.

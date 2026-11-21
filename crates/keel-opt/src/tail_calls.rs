@@ -135,7 +135,7 @@ fn run(module: &mut Module) -> bool {
     }
     let mut changed = false;
     for (index, f) in module.functions.iter_mut().enumerate() {
-        if !safe[index] {
+        if !safe[index] || f.attrs.no_sibling_calls {
             continue;
         }
         let mut uses = FxHashMap::default();

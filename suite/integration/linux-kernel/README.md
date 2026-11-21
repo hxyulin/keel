@@ -112,6 +112,27 @@ Keel's unsupported Kbuild flags are not forwarded or silently accepted. The C
 probe uses its ordinary userspace code-generation mode. Accepted objects are
 not yet checked by objtool or linked into the reference image.
 
+## Replay raw C commands
+
+Use the capture's 64-bit C file list and a GCC or Clang reference build of
+the same kernel configuration. A Clang build only needs its saved
+`.o.cmd` files and generated headers. The replay runs in that build
+directory so relative include and generated-file paths retain their meaning.
+
+```sh
+python3 suite/integration/linux-kernel/audit.py replay-c \
+  --build "$kernel_audit_root/reference-out/build" \
+  --manifest "$kernel_audit_root/reference-out/inputs.json" \
+  --keel "$PWD/target/debug/keel" --out "$kernel_audit_root/raw-keel" --jobs 8
+```
+
+The replay replaces the compiler and redirects the object, dependency file
+and saved intermediates into the output directory. It supplies Keel's target
+and instruction policy and preserves the saved compiler flags. Kbuild's
+post-compiler commands remain external. The report records the exact
+arguments, diagnostics and object hashes. Missing artifacts, an unsupported
+option or a failed compilation make the replay fail.
+
 The `compare` command assembles each accepted assembly input with GNU as and
 uses the existing `compiler_asm_compat/objinspect.py` normalizer. GNU relocation
 relaxation is disabled to match the current assembler contract. It retains

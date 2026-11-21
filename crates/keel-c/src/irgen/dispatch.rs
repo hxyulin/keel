@@ -184,7 +184,8 @@ pub(super) fn visit_stmt_exprs(
             visit_stmt_exprs(body, f)?;
         }
         Stmt::Declare(_)
-        | Stmt::Case(_)
+        | Stmt::Case(..)
+        | Stmt::Fallthrough
         | Stmt::Break
         | Stmt::Continue
         | Stmt::Return(None, _)

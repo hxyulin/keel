@@ -26,9 +26,24 @@ pub fn predefined_macros(
     darwin_deployment: Option<&str>,
     x86_baseline: Option<keel_asm_ir::x86::Features>,
 ) -> Result<String, String> {
+    predefined_macros_with_character_types(
+        target,
+        darwin_deployment,
+        x86_baseline,
+        crate::CharacterTypes::default(),
+    )
+}
+
+pub(crate) fn predefined_macros_with_character_types(
+    target: Target,
+    darwin_deployment: Option<&str>,
+    x86_baseline: Option<keel_asm_ir::x86::Features>,
+    character_types: crate::CharacterTypes,
+) -> Result<String, String> {
     let wasm = target == Target::Wasm32UnknownUnknown;
     let apple = target == Target::Aarch64AppleDarwin;
     let arm_linux = target == Target::Aarch64LinuxGnu;
+    let short_wchar = character_types.short_wchar;
     if !apple && darwin_deployment.is_some() {
         return Err("macOS deployment target requires aarch64-apple-darwin".into());
     }
@@ -86,12 +101,20 @@ pub fn predefined_macros(
         ("__LITTLE_ENDIAN__", "1"),
         (
             "__WCHAR_TYPE__",
-            if arm_linux { "unsigned int" } else { "int" },
+            if short_wchar {
+                "unsigned short"
+            } else if arm_linux {
+                "unsigned int"
+            } else {
+                "int"
+            },
         ),
-        ("__WCHAR_WIDTH__", "32"),
+        ("__WCHAR_WIDTH__", if short_wchar { "16" } else { "32" }),
         (
             "__WCHAR_MAX__",
-            if arm_linux {
+            if short_wchar {
+                "65535"
+            } else if arm_linux {
                 "4294967295U"
             } else {
                 "2147483647"
@@ -111,7 +134,14 @@ pub fn predefined_macros(
         ("__FLT_EVAL_METHOD__", "0"),
         ("__DECIMAL_DIG__", "__LDBL_DECIMAL_DIG__"),
         ("__clang_literal_encoding__", "\"UTF-8\""),
-        ("__clang_wide_literal_encoding__", "\"UTF-32\""),
+        (
+            "__clang_wide_literal_encoding__",
+            if short_wchar {
+                "\"UTF-16\""
+            } else {
+                "\"UTF-32\""
+            },
+        ),
     ] {
         def(name, value);
     }
@@ -142,7 +172,7 @@ pub fn predefined_macros(
         ("POINTER", if wasm { 4 } else { 8 }),
         ("SIZE_T", if wasm { 4 } else { 8 }),
         ("PTRDIFF_T", if wasm { 4 } else { 8 }),
-        ("WCHAR_T", 4),
+        ("WCHAR_T", if short_wchar { 2 } else { 4 }),
         ("WINT_T", 4),
     ] {
         def(&format!("__SIZEOF_{name}__"), &size.to_string());
@@ -464,8 +494,6 @@ pub fn predefined_macros(
             "__ARM_64BIT_STATE",
             "__ARM_PCS_AAPCS64",
             "__ARM_ARCH_ISA_A64",
-            "__CHAR_UNSIGNED__",
-            "__WCHAR_UNSIGNED__",
         ] {
             def(name, if name == "__ARM_NEON_FP" { "0xE" } else { "1" });
         }
@@ -475,6 +503,15 @@ pub fn predefined_macros(
             def(name, "1");
         }
         def("__GCC_ASM_FLAG_OUTPUTS__", "1");
+    }
+    if !character_types.plain_char_signed.unwrap_or(!arm_linux) {
+        def("__CHAR_UNSIGNED__", "1");
+    }
+    if short_wchar || arm_linux {
+        def("__WCHAR_UNSIGNED__", "1");
+    }
+    if short_wchar {
+        def("__WCHAR_MIN__", "0");
     }
     Ok(out)
 }

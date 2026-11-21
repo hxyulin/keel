@@ -56,6 +56,19 @@ supported, as are `#line`, `#error`, pragma forwarding, `_Pragma`, `__FILE__`,
 and each expansion has a token and work limit. `-D` and `-U` apply in
 command-line order after the predefined macros.
 
+`-std=gnu11` omits `__STRICT_ANSI__` and allows conditionals within
+function-like macro arguments. `-include FILE` loads forced headers in
+command-line order after `-D` and `-U`. `-nostdinc` keeps explicit search
+directories and skips embedded headers and host SDK discovery.
+`-fmacro-prefix-map=FROM=TO` rewrites file-name macro expansions. When
+multiple maps match, the last one wins.
+
+For a single raw C input with object output, `-Wp,-MMD,FILE` writes a Make
+dependency rule for the object, source and non-system headers.
+`-save-temps=obj` leaves the preprocessed C and assembly beside the object.
+`-Wundef` warns when an undefined identifier is interpreted as zero in a
+preprocessor condition.
+
 The preprocessor scans the main file in chunks of about 4,096 tokens that end
 at a line break, and processes each chunk before it scans the next. The main
 file's tokens are therefore never all in memory. A lexical error anywhere in
@@ -142,6 +155,33 @@ Libc headers, libraries, startup objects and runtime helpers come from the
 target SDK. Keel does not ship a libc.
 
 ## Lowering
+
+`-funsigned-char` and `-fsigned-char` set the signedness of plain `char`.
+`-fshort-wchar` selects unsigned 16-bit wide characters and UTF-16 wide
+strings. These choices apply to predefined macros and literal types.
+`-ftrivial-auto-var-init=zero` initializes uninitialized automatic objects,
+except declarations marked `__attribute__((uninitialized))`.
+`-fno-delete-null-pointer-checks` keeps potentially faulting accesses
+observable in the IR optimizer.
+
+The driver supports `-Wvla`, `-Wmissing-declarations`,
+`-Wmissing-prototypes` and GCC-style `-Wcast-function-type`, plus the
+pinned Linux build's `-Werror=…`
+checks for implicit declarations and types, prototypes, return types,
+incompatible pointer types, designated initializers and date macros.
+`-Wenum-conversion` uses C enum identities at implicit conversion sites.
+`-Wimplicit-fallthrough` and `-Wimplicit-fallthrough=5` check reachable
+switch edges and recognize GNU fallthrough attributes.
+`-Wframe-larger-than=BYTES` reports the native static frame including spills
+and register saves. Runtime-sized allocations are excluded.
+`-Wall` enables unused-object, label, typedef and value checks, along with
+implicit-int, return-type and enum-comparison diagnostics.
+`-Wextra` enables enum conversions, function-pointer casts, mixed-signedness
+comparisons, empty bodies and attribute-based fallthrough diagnostics.
+`-Wunused` enables the unused diagnostics independently. `-Wextra` in
+combination with `-Wall` or `-Wunused` also checks unused parameters.
+Specific diagnostic switches take precedence over groups in either order.
+Group membership is limited to Keel's implemented diagnostics.
 
 - **Parsing.** C cannot be parsed without knowing which names are types, so
   the parser keeps scopes, type-checks as it goes and builds a typed tree in
