@@ -1186,10 +1186,12 @@ impl FunctionCompiler<'_> {
         );
     }
     pub(super) fn vector_spill(&mut self, store: bool, register: u8, slot: u32, bytes: u32) {
-        let offset = self.spill_base + 8 * slot as usize;
+        let offset = self.spill_offset(slot);
         // Unaligned Q spills use unscaled addressing when possible; large
         // offsets need an address in x17. Scalar slots retain their old layout.
-        let at = if bytes == 16 && !offset.is_multiple_of(16) && offset > 255 {
+        let at = if offset > MAX_SLOT_OFFSET {
+            self.spill_address(slot)
+        } else if bytes == 16 && !offset.is_multiple_of(16) && offset > 255 {
             self.address(Loc::Reg(S1), self.base, offset);
             Address::base(Reg::x(S1))
         } else {

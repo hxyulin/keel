@@ -3,6 +3,8 @@
 mod leaf;
 #[path = "stack_frame/lifetime.rs"]
 mod lifetime;
+#[path = "common/native_oracle.rs"]
+mod native_oracle;
 #[path = "stack_frame/returns.rs"]
 mod returns;
 
@@ -242,6 +244,94 @@ fn large_aarch64_arguments_assemble_and_match_native_c() {
         }
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn aarch64_far_spills_survive_calls_and_dynamic_stack() {
+    use std::fmt::Write as _;
+
+    // More than 4095 distinct values remain live across a call. The final
+    // vector needs both halves preserved, and the dynamic slot moves sp.
+    const COUNT: usize = 4112;
+    let mut source = String::from(
+        "decl @clobber()\nfunc @far(ptr, ptr) -> i64 {\nblock0(v0:ptr,v1:ptr):\n \
+         v2 = iconst.i64 32\n v3 = intrinsic stack_alloc(v2)\n v4 = iconst.i64 8\n",
+    );
+    let mut values = Vec::with_capacity(COUNT);
+    let mut pointer = 0;
+    let mut next = 5;
+    for _ in 0..COUNT {
+        writeln!(source, " v{next} = load.i64 v{pointer}").unwrap();
+        values.push(next);
+        writeln!(source, " v{} = ptradd v{pointer}, v4", next + 1).unwrap();
+        pointer = next + 1;
+        next += 2;
+    }
+    let vector = next;
+    let mut sum = next + 1;
+    let first = values[0];
+    writeln!(
+        source,
+        " v{vector} = load.i64x2 v{pointer}\n store v{first}, v3\n call @clobber()\n \
+         store v{vector}, v1\n v{sum} = load.i64 v3"
+    )
+    .unwrap();
+    for value in values {
+        writeln!(source, " v{} = iadd v{sum}, v{value}", sum + 1).unwrap();
+        sum += 1;
+    }
+    writeln!(source, " return v{sum}\n}}").unwrap();
+
+    let module = keel_ir::parse(&source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let driver = format!(
+        r#"#include <stdint.h>
+         extern uint64_t far(const uint64_t *, uint64_t *);
+         void clobber(void) {{
+             __asm__ volatile("mov x0, #0\n\tmovi v0.16b, #0" ::: "x0", "v0");
+         }}
+         int main(void) {{
+             _Alignas(16) uint64_t input[{COUNT} + 2];
+             uint64_t output[2] = {{0, 0}};
+             uint64_t expected = 17;
+             for (unsigned i = 0; i < {COUNT}; ++i) {{
+                 input[i] = i + 17;
+                 expected += input[i];
+             }}
+             input[{COUNT}] = 12345;
+             input[{COUNT} + 1] = 67890;
+             register uint64_t saved __asm__("x28") = UINT64_C(0x46af186f079eb229);
+             __asm__ volatile("" : "+r"(saved));
+             uint64_t sum = far(input, output);
+             __asm__ volatile("" : "+r"(saved));
+             return !(sum == expected && output[0] == 12345 && output[1] == 67890 &&
+                      saved == UINT64_C(0x46af186f079eb229));
+         }}"#
+    );
+    let oracle = native_oracle::PreparedOracle::new("arm-far-spills", &driver, &["-O2"]);
+    for target in [Target::Aarch64AppleDarwin, Target::Aarch64LinuxGnu] {
+        let pipeline = CodegenPipeline {
+            selector: &SelectionTier::Baseline,
+            allocator: &AllocationTier::Full,
+        };
+        let request = keel_codegen::Request::new(target, pipeline);
+        let asm = request.text(&module).unwrap();
+        for instruction in ["str\tx", "ldr\tx", "str\tq", "ldr\tq"] {
+            assert!(
+                asm.lines()
+                    .any(|line| line.trim_start().starts_with(instruction)
+                        && line.ends_with("[x28]")),
+                "{target:?} did not emit far {instruction}"
+            );
+        }
+        let text_object = keel_asm::assemble_source_for(target, &asm).unwrap();
+        let object =
+            keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+        assert!(text_object == object, "{target:?} object paths differ");
+        if target == Target::Aarch64AppleDarwin {
+            oracle.run(&object, "far spill frame");
+        }
+    }
 }
 
 #[test]

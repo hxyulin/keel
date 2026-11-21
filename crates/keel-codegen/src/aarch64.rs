@@ -229,6 +229,9 @@ const S0: u8 = 16;
 const S1: u8 = 17;
 const S2: u8 = 8;
 
+/// Address scratch reserved only in functions with far spill slots.
+const FAR_SPILL: u8 = 28;
+
 /// The base pointer of functions that move `sp`; see "Frame".
 const BASE: u8 = 19;
 
@@ -1190,14 +1193,34 @@ impl<'a> FunctionCompiler<'a> {
         let bank = extended_bank.then(|| pipeline.allocator.call_site_base().unwrap());
         let mut alloc =
             plan::allocate(func, &pools, &covers.selection, pipeline, bank).map_err(err)?;
+        let mut spills = plan::SpillArea::plan(func, &alloc, calls.spill_base);
         let plan::InlineAsmPlans {
-            asm_saved,
+            mut asm_saved,
             asm_float_saved,
             has_inline_asm,
             asm_plans,
         } = asm;
+        if spills.end > MAX_SLOT_OFFSET {
+            // Far spill accesses can run while the ordinary scratch registers
+            // are holding operands or parallel-copy values.
+            if pools.callee_saved.contains(&FAR_SPILL) {
+                let callee_saved: Vec<_> = pools
+                    .callee_saved
+                    .iter()
+                    .copied()
+                    .filter(|&reg| reg != FAR_SPILL)
+                    .collect();
+                let pools = Pools {
+                    callee_saved: &callee_saved,
+                    ..pools
+                };
+                alloc =
+                    plan::allocate(func, &pools, &covers.selection, pipeline, bank).map_err(err)?;
+                spills = plan::SpillArea::plan(func, &alloc, calls.spill_base);
+            }
+            asm_saved.push(FAR_SPILL);
+        }
         plan::add_saved_registers(&mut alloc, asm_saved, asm_float_saved, moves_sp);
-        let spills = plan::SpillArea::plan(func, &alloc, calls.spill_base).map_err(err)?;
         // Slot offsets are aligned, so an `sp` aligned to the largest slot
         // alignment gives aligned addresses. `sp` is 16-byte aligned; the
         // prologue rounds it down further for slots aligned above that.
@@ -2297,10 +2320,8 @@ impl<'a> FunctionCompiler<'a> {
                 return;
             }
             let class = if ty.is_float() { 'd' } else { 'x' };
-            self.mach(
-                "str",
-                [(Reg::scalar(class, r)).into(), (self.slot(s)).into()],
-            );
+            let address = self.spill_address(s);
+            self.mach("str", [Reg::scalar(class, r).into(), address.into()]);
         }
     }
 
@@ -3254,7 +3275,8 @@ impl<'a> FunctionCompiler<'a> {
             );
         }
         if let Loc::Stack(s) = dst {
-            self.mach("str", [(Reg::x(r)).into(), (self.slot(s)).into()]);
+            let address = self.spill_address(s);
+            self.mach("str", [Reg::x(r).into(), address.into()]);
         }
     }
 
@@ -4858,10 +4880,23 @@ impl<'a> FunctionCompiler<'a> {
         self.func.value_type(self.func.resolve(value))
     }
 
-    /// The address of spill slot `index`: above the outgoing arguments at
-    /// the bottom of the frame, close enough to `sp` for a scaled immediate.
+    /// The frame-relative location of spill slot `index`.
     fn slot(&self, index: u32) -> Address {
-        Address::offset(self.base, self.spill_base + 8 * index as usize)
+        Address::offset(self.base, self.spill_offset(index))
+    }
+
+    fn spill_offset(&self, index: u32) -> usize {
+        self.spill_base + 8 * index as usize
+    }
+
+    fn spill_address(&mut self, index: u32) -> Address {
+        let offset = self.spill_offset(index);
+        if offset > MAX_SLOT_OFFSET {
+            self.address(Loc::Reg(FAR_SPILL), self.base, offset);
+            Address::base(Reg::x(FAR_SPILL))
+        } else {
+            self.slot(index)
+        }
     }
 
     fn write_loc_name<W: Write + ?Sized>(&self, out: &mut W, loc: Loc) {
@@ -4955,13 +4990,22 @@ impl<'a> FunctionCompiler<'a> {
             self.vector_spill(store, register, slot, bytes);
             return;
         }
+        let offset = self.spill_offset(slot);
+        if offset > MAX_SLOT_OFFSET {
+            let address = self.spill_address(slot);
+            let reg = Reg::scalar(if float { 'd' } else { 'x' }, register);
+            self.mach(
+                if store { "str" } else { "ldr" },
+                [reg.into(), address.into()],
+            );
+            return;
+        }
         let opcode = match (store, float) {
             (false, false) => Opcode::LDR_64_ldst_pos,
             (false, true) => Opcode::LDR_D_ldst_pos,
             (true, false) => Opcode::STR_64_ldst_pos,
             (true, true) => Opcode::STR_D_ldst_pos,
         };
-        let offset = self.spill_base + 8 * slot as usize;
         let base = self.base;
         self.native(
             opcode,

@@ -744,7 +744,7 @@ pub(super) struct SpillArea {
 }
 
 impl SpillArea {
-    pub fn plan(func: &Function, alloc: &Allocation, spill_base: usize) -> Result<Self, String> {
+    pub fn plan(func: &Function, alloc: &Allocation, spill_base: usize) -> Self {
         let mut vector_spills = HashMap::default();
         let has_vectors = (0..func.num_values()).any(|i| {
             func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
@@ -765,16 +765,11 @@ impl SpillArea {
         }
         let offset =
             spill_base + 8 * (alloc.spill_slots as usize + if has_vectors { 2 } else { 0 });
-        if offset > MAX_SLOT_OFFSET {
-            return Err(format!(
-                "{offset} bytes of spill slots is too many for this allocator"
-            ));
-        }
-        Ok(Self {
+        Self {
             vector_spills,
             copy_temp,
             end: offset,
-        })
+        }
     }
 }
 
