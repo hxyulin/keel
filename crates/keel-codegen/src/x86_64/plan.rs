@@ -629,6 +629,226 @@ pub(super) fn prefer_abi_gprs(
     }
 }
 
+#[derive(Default)]
+pub(super) struct KernelImmediates {
+    pub stores: HashMap<Inst, keel_ir::Symbol>,
+    pub memory_args: HashMap<Inst, [Option<Value>; 3]>,
+}
+
+impl KernelImmediates {
+    pub fn select(
+        func: &Function,
+        symbols: &crate::symbols::Symbols<'_>,
+        facts: &crate::kinds::FunctionFacts<'_>,
+        shape: &VectorShape,
+        selection: &mut crate::select::Selection,
+    ) -> Self {
+        let mut immediates = Self::default();
+        if !facts.kinds.symbol_addr && (!facts.kinds.intrinsic || shape.wide_vectors) {
+            return immediates;
+        }
+        let static_symbol = |symbol| {
+            !symbols
+                .data_object(func.symbol_name(symbol))
+                .is_some_and(|data| data.thread_local)
+        };
+        for (block, inst) in func.layout_insts() {
+            if selection.covered(inst) || selection.has_constraint(inst) {
+                continue;
+            }
+            let source = |value: Value, selection: &crate::select::Selection| {
+                let ValueDef::Result(source, _) = func.value_def(value) else {
+                    return None;
+                };
+                (facts.machine_uses[value.index()] == 1
+                    && func.inst_block(source) == block
+                    && selection.is_free(source))
+                .then_some(source)
+            };
+            match func.inst_data(inst) {
+                &InstData::Store { value, .. } if facts.kinds.symbol_addr => {
+                    let value = func.resolve(value);
+                    let Some(source) = source(value, selection) else {
+                        continue;
+                    };
+                    let InstData::SymbolAddr { symbol } = *func.inst_data(source) else {
+                        continue;
+                    };
+                    if !static_symbol(symbol) {
+                        continue;
+                    }
+                    let mut operands = selection.operands(func, inst);
+                    let Some(index) = operands.iter().position(|&v| v == value) else {
+                        continue;
+                    };
+                    operands.remove(index);
+                    selection.set_operands(inst, operands);
+                    selection.cover(source);
+                    immediates.stores.insert(inst, symbol);
+                }
+                InstData::Intrinsic {
+                    id:
+                        Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp,
+                    args,
+                } if !shape.wide_vectors && args.len() == 3 => {
+                    let mut operands = selection.operands(func, inst);
+                    let mut values = [None; 3];
+                    for (entry, &arg) in values.iter_mut().zip(args) {
+                        let value = func.resolve(arg);
+                        let Some(source) = source(value, selection) else {
+                            continue;
+                        };
+                        match *func.inst_data(source) {
+                            InstData::Iconst { .. } => {}
+                            InstData::SymbolAddr { symbol } if static_symbol(symbol) => {}
+                            _ => continue,
+                        }
+                        let Some(index) = operands.iter().position(|&v| v == value) else {
+                            continue;
+                        };
+                        operands.remove(index);
+                        selection.cover(source);
+                        *entry = Some(value);
+                    }
+                    if values.iter().any(Option::is_some) {
+                        selection.set_operands(inst, operands);
+                        immediates.memory_args.insert(inst, values);
+                    }
+                }
+                _ => {}
+            }
+        }
+        immediates
+    }
+}
+
+pub(super) struct ForwardedReturn {
+    pub call: Inst,
+    pub ret: Inst,
+    pub value: Value,
+}
+
+/// Leave a single-use call result in rax across an immediately adjacent return.
+pub(super) fn forwarded_returns(
+    func: &Function,
+    facts: &crate::kinds::FunctionFacts<'_>,
+    selection: &mut crate::select::Selection,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Vec<ForwardedReturn> {
+    let mut sites = Vec::new();
+    let [ret] = func.sig.returns.as_slice() else {
+        return sites;
+    };
+    let scalar_result = |sig: &keel_ir::Signature| {
+        sig.cc == CallConv::C
+            && !sig.returns_twice
+            && !sig
+                .params
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Sret(_)))
+    };
+    if !facts.kinds.call
+        || !scalar_result(&func.sig)
+        || !matches!(ret.ty, Type::I32 | Type::I64 | Type::Ptr)
+        || ret.ext != ArgExt::None
+        || ret.purpose != Purpose::Normal
+        || (pipeline.allocator.name() != "compact"
+            && pipeline.allocator.call_site_base() != Some(regalloc::AllocationTier::Compact))
+    {
+        return sites;
+    }
+    for block in func.blocks() {
+        let Some((_, &[call, ret])) = func.block_insts(block).split_last_chunk::<2>() else {
+            continue;
+        };
+        let InstData::Call { func: callee, .. } = *func.inst_data(call) else {
+            continue;
+        };
+        let InstData::Return { args } = func.inst_data(ret) else {
+            continue;
+        };
+        let ([value], [returned]) = (func.inst_results(call), args.as_slice()) else {
+            continue;
+        };
+        let value = *value;
+        let sig = &func.callee(callee).sig;
+        if func.resolve(*returned) == value
+            && func.resolve(value) == value
+            && facts.machine_uses[value.index()] == 1
+            && scalar_result(sig)
+            && sig.returns == func.sig.returns
+            && selection.is_free(call)
+            && selection.is_free(ret)
+            && !selection.has_operand_override(ret)
+            && selection.omitted_defs.insert(value)
+        {
+            selection.set_operands(ret, Vec::new());
+            sites.push(ForwardedReturn { call, ret, value });
+        }
+    }
+    sites
+}
+
+pub(super) fn returns_preserve_rax(alloc: &Allocation, sites: &[ForwardedReturn]) -> bool {
+    sites.iter().all(|site| {
+        alloc
+            .edits
+            .instruction_index(site.call)
+            .is_none_or(|i| alloc.edits.instruction(i).after.is_empty())
+            && alloc
+                .edits
+                .instruction_index(site.ret)
+                .is_none_or(|i| alloc.edits.instruction(i).before.is_empty())
+    })
+}
+
+/// Every ordinary frame reference sees the same rsp after the prologue.
+/// Inline asm operands still use rbp because the template may push registers.
+pub(super) fn has_fixed_kernel_frame(func: &Function, present: crate::kinds::InstKinds) -> bool {
+    func.attrs.x86_no_sse
+        && !func.sig.returns_twice
+        && func.personality.is_none()
+        && !present.return_call
+        && !present.landing_pad
+        && !present.stack_alloc
+        && (!present.call && !present.intrinsic
+            || func
+                .layout_insts()
+                .all(|(_, inst)| match func.inst_data(inst) {
+                    InstData::Intrinsic { id, .. } => matches!(
+                        id,
+                        Intrinsic::Memcpy
+                            | Intrinsic::Memmove
+                            | Intrinsic::Memset
+                            | Intrinsic::Memcmp
+                            | Intrinsic::LifetimeStart
+                            | Intrinsic::LifetimeEnd
+                    ),
+                    InstData::Invoke { .. } | InstData::X86RflagsRegion { .. } => false,
+                    _ => true,
+                }))
+}
+
+/// Index the relative offsets by destination label, including distinct copy
+/// stubs for edges that reach the same block with different arguments.
+pub(super) fn compact_switch_table(
+    labels: impl Iterator<Item = String>,
+) -> Option<(Vec<String>, Vec<u8>)> {
+    let mut targets = Vec::new();
+    let mut indices = Vec::new();
+    let mut seen = HashMap::default();
+    for label in labels {
+        let index = *seen.entry(label.clone()).or_insert_with(|| {
+            let index = targets.len();
+            targets.push(label);
+            index
+        });
+        indices.push(u8::try_from(index).ok()?);
+    }
+    // Compared with four bytes per case, leave room for the indexed byte load.
+    (targets.len() * 4 + 8 < indices.len() * 3).then_some((targets, indices))
+}
+
 /// Runs the allocator, places the extended-precision stack homes and
 /// validates the result. Gives the allocation and those homes' slots.
 pub(super) fn allocate(

@@ -33,9 +33,12 @@ impl FunctionCompiler<'_> {
             }
             InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
-                let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some((_, k)) => asm_arg(k),
-                    None => asm_arg(reg(self.use_reg(value, S0), ty)),
+                let v = if let Some(symbol) = self.kernel_immediates.stores.get(&inst) {
+                    asm_arg(symbol_address(func.symbol_name(*symbol), Modifier::None))
+                } else if let Some((_, k)) = folded_imm(func, func.inst_data(inst)) {
+                    asm_arg(k)
+                } else {
+                    asm_arg(reg(self.use_reg(value, S0), ty))
                 };
                 let a = self.mem(addr, S1, ty);
                 self.emit(Opcode::Mov, [asm_arg(a), asm_arg(v)]);

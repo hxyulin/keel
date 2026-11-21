@@ -234,6 +234,129 @@ fn kernel_memory_expansion_keeps_small_copies_in_general_registers() {
 }
 
 #[test]
+fn kernel_size_codegen_shortens_static_frames_and_call_sequences() {
+    use std::fmt::Write as _;
+
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("kernel-size");
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("size.c");
+    let mut source = String::from(
+        r#"
+        extern char cache[192];
+        extern char *pointer;
+        extern long callee(long);
+        extern void clobber(void);
+
+        void store_address(void) { pointer = cache; }
+        void copy_in(const void *src) { __builtin_memmove(cache, src, 96); }
+        long pass_result(long x) { return callee(x); }
+        long keep_result(long x) {
+            long result = callee(x);
+            clobber();
+            return result;
+        }
+        int fixed_frame(int x) {
+            volatile int words[96];
+            int from_asm;
+            words[0] = x;
+            words[31] = x + 3;
+            words[95] = x + 7;
+            __asm__ volatile ("pushq %%r10\n\tmovl %1, %0\n\tpopq %%r10"
+                              : "=r"(from_asm) : "m"(words[0]) : "memory");
+            return from_asm + words[31] + words[95];
+        }
+        extern int route_0(int), route_1(int), route_2(int), route_3(int);
+        __attribute__((cold)) int dispatch(unsigned key, int input) {
+            switch (key) {
+    "#,
+    );
+    for target in 0..4 {
+        for key in (41..=104).filter(|key| key % 7 != 0 && key % 4 == target) {
+            writeln!(source, "case {key}:").unwrap();
+        }
+        writeln!(source, "return route_{target}(input);").unwrap();
+    }
+    source.push_str("default: return input + 9; } }");
+    fs::write(&input, source).unwrap();
+
+    let compile = |extra: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_keel"))
+            .args([
+                "cc",
+                "--target",
+                "x86_64-linux-gnu",
+                "--code-model",
+                "kernel",
+                "--link-intent",
+                "executable",
+                "-mno-sse",
+                "-mstack-alignment=8",
+                "-Os",
+                "-fno-omit-frame-pointer",
+                "-fno-optimize-sibling-calls",
+            ])
+            .args(extra)
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let asm = String::from_utf8(compile(&[])).unwrap();
+    let body = |name: &str| {
+        asm.split_once(&format!("\"{name}\":"))
+            .unwrap()
+            .1
+            .split_once(&format!(".size \"{name}\""))
+            .unwrap()
+            .0
+    };
+    assert!(
+        body("fixed_frame").contains("[rsp +"),
+        "{}",
+        body("fixed_frame")
+    );
+    assert!(
+        body("fixed_frame").contains("[rbp +"),
+        "{}",
+        body("fixed_frame")
+    );
+    assert!(body("store_address").contains("], offset \"cache\""));
+    let copy = body("copy_in");
+    let move_source = copy.find("mov\trsi, rdi").unwrap();
+    let move_symbol = copy.find("mov\trdi, offset \"cache\"").unwrap();
+    assert!(move_source < move_symbol, "{copy}");
+    assert!(copy.contains("mov\tedx, 96"), "{copy}");
+    let after_call = body("pass_result").split_once("@PLT").unwrap().1;
+    assert!(!after_call.contains("rax"), "{after_call}");
+    let after_clobber = body("keep_result").rsplit_once("@PLT").unwrap().1;
+    assert!(after_clobber.contains("mov\trax,"), "{after_clobber}");
+    assert!(body("dispatch").contains("movzx\teax, byte ptr"));
+
+    let file_path = dir.join("size.o");
+    compile(&["--emit-object", "-o", file_path.to_str().unwrap()]);
+    let object = fs::read(file_path).unwrap();
+    let from_asm = keel_asm::x86::assemble_object(&asm).unwrap();
+    let structured = object::File::parse(&*object).unwrap();
+    let textual = object::File::parse(&*from_asm).unwrap();
+    let text = structured.section_by_name(".text").unwrap();
+    assert_eq!(
+        text.data().unwrap(),
+        textual.section_by_name(".text").unwrap().data().unwrap()
+    );
+    assert!(text.relocations().any(|(_, relocation)| {
+        relocation.flags()
+            == (object::RelocationFlags::Elf {
+                r_type: object::elf::R_X86_64_32S,
+            })
+    }));
+}
+
+#[test]
 fn c_and_ir_cli_choose_kernel_addresses_and_reject_incompatible_targets() {
     let dir = std::env::temp_dir().join(format!("keel-kernel-model-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

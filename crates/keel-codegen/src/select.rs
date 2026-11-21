@@ -801,6 +801,10 @@ impl Selection {
         self.allocation_folds.remove(&inst);
     }
 
+    pub(crate) fn clear_operand_override(&mut self, inst: Inst) {
+        self.allocation_operands.remove(&inst);
+    }
+
     pub(crate) fn remaining_folds(&self, func: &Function, inst: Inst, folds: &mut Vec<Value>) {
         for value in folds.iter_mut() {
             *value = func.resolve(*value);

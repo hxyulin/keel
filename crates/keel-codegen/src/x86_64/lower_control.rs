@@ -163,7 +163,9 @@ impl FunctionCompiler<'_> {
                         .map(|(&v, dst)| (dst, self.loc(v)))
                         .collect();
                     self.parallel_copy(&moves);
-                } else if let Some(&value) = args.first() {
+                } else if let Some(&value) = args.first()
+                    && !self.forwarded_returns.contains(&inst)
+                {
                     let ty = self.ty(value);
                     if ty == Type::F80 {
                         self.f80_push(value);

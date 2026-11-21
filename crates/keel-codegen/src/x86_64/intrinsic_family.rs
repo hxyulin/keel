@@ -512,6 +512,38 @@ impl FunctionCompiler<'_> {
     }
 
     /// Lowers an intrinsic: an x86 one by its family, the others here.
+    fn move_memory_args(&mut self, args: &[Value], immediates: [Option<Value>; 3]) {
+        let registers = [RDI, sysv::RSI, RDX];
+        let moves: Vec<_> = registers
+            .into_iter()
+            .zip(args.iter().zip(immediates))
+            .filter(|(_, (_, immediate))| immediate.is_none())
+            .map(|(register, (&arg, _))| (Loc::Reg(register), self.loc(arg)))
+            .collect();
+        // Move live sources before an immediate can overwrite one of them.
+        self.parallel_copy(&moves);
+        for (register, value) in registers.into_iter().zip(immediates) {
+            let Some(value) = value else { continue };
+            let ValueDef::Result(source, _) = self.func.value_def(value) else {
+                unreachable!("planned immediate")
+            };
+            match *self.func.inst_data(source) {
+                InstData::Iconst { ty, imm } => self.materialize(register, imm, ty),
+                InstData::SymbolAddr { symbol } => self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(r64(register)),
+                        asm_arg(symbol_address(
+                            self.func.symbol_name(symbol),
+                            Modifier::None,
+                        )),
+                    ],
+                ),
+                _ => unreachable!("planned immediate"),
+            }
+        }
+    }
+
     pub(super) fn intrinsic(
         &mut self,
         inst: Inst,
@@ -532,20 +564,24 @@ impl FunctionCompiler<'_> {
             // order. memset's `int c` only uses its low byte, so the
             // unspecified upper bits of the i8 are harmless.
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
-                let sig = keel_ir::Signature {
-                    params: id.info().params.iter().map(|&t| AbiParam::new(t)).collect(),
-                    returns: id
-                        .info()
-                        .returns
-                        .iter()
-                        .map(|&t| AbiParam::new(t))
-                        .collect(),
-                    cc: CallConv::C,
-                    x86_vector_abi: None,
-                    variadic: false,
-                    returns_twice: false,
-                };
-                self.move_args(&args.to_vec().into(), &sig, None, false);
+                if let Some(immediates) = self.kernel_immediates.memory_args.get(&inst).copied() {
+                    self.move_memory_args(args, immediates);
+                } else {
+                    let sig = keel_ir::Signature {
+                        params: id.info().params.iter().map(|&t| AbiParam::new(t)).collect(),
+                        returns: id
+                            .info()
+                            .returns
+                            .iter()
+                            .map(|&t| AbiParam::new(t))
+                            .collect(),
+                        cc: CallConv::C,
+                        x86_vector_abi: None,
+                        variadic: false,
+                        returns_twice: false,
+                    };
+                    self.move_args(&args.to_vec().into(), &sig, None, false);
+                }
                 self.emit(
                     Opcode::Call,
                     [asm_arg(symbol_address(&id.to_string(), Modifier::Plt))],

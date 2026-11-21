@@ -1052,6 +1052,9 @@ enum AggregateResult<'a> {
 
 struct FunctionCompiler<'a> {
     goal: crate::CodegenGoal,
+    short_frame: bool,
+    kernel_immediates: plan::KernelImmediates,
+    forwarded_returns: HashSet<Inst>,
     /// One return site owns the epilogue when sharing beats even near jumps.
     shared_return: Option<Inst>,
     code_model: CodeModel,
@@ -1262,9 +1265,34 @@ impl<'a> FunctionCompiler<'a> {
         {
             plan::prefer_abi_gprs(func, &named, &mut covers.selection);
         }
+        let kernel_size = goal == crate::CodegenGoal::Size
+            && emission.x86_code_model == Some(CodeModel::Kernel)
+            && !func.attrs.optnone;
+        let kernel_immediates = if kernel_size && module.files.is_empty() {
+            plan::KernelImmediates::select(func, symbols, &facts, &shape, &mut covers.selection)
+        } else {
+            plan::KernelImmediates::default()
+        };
+        let mut forwarded = if kernel_size && !shape.wide_vectors && module.files.is_empty() {
+            plan::forwarded_returns(func, &facts, &mut covers.selection, pipeline)
+        } else {
+            Vec::new()
+        };
         crate::backend_profile::count_covers(&covers.selection);
-        let (alloc, f80_homes) =
-            plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?;
+        let allocation = plan::allocate(func, pools, &covers.selection, pipeline);
+        let (alloc, f80_homes) = match allocation {
+            Ok(allocation) if plan::returns_preserve_rax(&allocation.0, &forwarded) => allocation,
+            other if forwarded.is_empty() => other.map_err(err)?,
+            _ => {
+                // A transfer between a call and its return may use rax. Restore
+                // the ordinary live range so the allocator can preserve the value.
+                for site in forwarded.drain(..) {
+                    covers.selection.omitted_defs.remove(&site.value);
+                    covers.selection.clear_operand_override(site.ret);
+                }
+                plan::allocate(func, pools, &covers.selection, pipeline).map_err(err)?
+            }
+        };
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
         let system = plan::SystemSlots::plan(func, present, features, spills.end);
         let compact_inputs = goal == crate::CodegenGoal::Size
@@ -1383,6 +1411,12 @@ impl<'a> FunctionCompiler<'a> {
             named,
             frame_size,
             frameless,
+            short_frame: kernel_size
+                && !frameless
+                && shape.frame_register.is_none()
+                && plan::has_fixed_kernel_frame(func, present),
+            kernel_immediates,
+            forwarded_returns: forwarded.into_iter().map(|site| site.ret).collect(),
             register_only_frame,
             saved,
             next_block: None,
@@ -4280,6 +4314,18 @@ impl<'a> FunctionCompiler<'a> {
                 asm_arg(value as i64)
             }
         };
+        let compact_table = (self.goal == crate::CodegenGoal::Size
+            && self.code_model == CodeModel::Kernel
+            && self.func.attrs.cold
+            && !replica
+            && plan.jump_table()
+            && span >= 31)
+            .then(|| {
+                plan::compact_switch_table(
+                    plan.table().map(|i| self.switch_target(inst, i, &dests[i])),
+                )
+            })
+            .flatten();
         let table = if plan.jump_table() {
             // idx = x - min, unsigned; anything above the span is default.
             // A 32-bit index is zero-extended by writing it.
@@ -4312,6 +4358,10 @@ impl<'a> FunctionCompiler<'a> {
                     asm_arg(symbol_memory(rip(), &table, Modifier::None)),
                 ],
             );
+            if let Some((targets, _)) = &compact_table {
+                let index = offset_memory(&indexed(r64(1), r64(0), 1), (targets.len() * 4) as i128);
+                self.emit(Opcode::Movzx, [asm_arg(r32(0)), asm_arg(sized(index, 8))]);
+            }
             self.emit(
                 Opcode::Movsxd,
                 [
@@ -4337,9 +4387,17 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(table) = table {
             self.out.align(2);
             self.out.label(table.clone());
-            for i in plan.table() {
-                self.out
-                    .integer(4, Expression::difference(targets[i].clone(), table.clone()));
+            if let Some((unique, indices)) = compact_table {
+                for target in unique {
+                    self.out
+                        .integer(4, Expression::difference(target, table.clone()));
+                }
+                self.out.bytes(&indices);
+            } else {
+                for i in plan.table() {
+                    self.out
+                        .integer(4, Expression::difference(targets[i].clone(), table.clone()));
+                }
             }
         } else {
             for (i, &value) in plan.values.iter().enumerate() {
@@ -4890,6 +4948,15 @@ impl<'a> FunctionCompiler<'a> {
             return memory(r64(r), offset as i128);
         }
         let top = self.frame_size + 8 * self.saved.len();
+        if self.short_frame
+            && offset <= 127
+            && top - offset > 128
+            && self
+                .current_inst
+                .is_some_and(|i| !matches!(self.func.inst_data(i), InstData::InlineAsm { .. }))
+        {
+            return memory(r64(4), offset as i128);
+        }
         memory(r64(5), -((top - offset) as i128))
     }
 
