@@ -71,6 +71,8 @@ pub struct OptimizationContext {
     pub capabilities: keel_ir::VectorCapabilities,
     /// Pointer storage model. `None` turns off rewrites that depend on it.
     pub layout: Option<DataLayout>,
+    /// Expand constant-size memory intrinsics with scalar chunks only.
+    pub scalar_memory_expansion: bool,
     /// Every instruction is canonical on entry. The pass manager sets this to
     /// [`Pass::requires_canonical_form`] for each run, whatever the caller passed.
     pub canonical: bool,
@@ -87,6 +89,7 @@ impl OptimizationContext {
             target,
             capabilities,
             layout,
+            scalar_memory_expansion: false,
             canonical: false,
         }
     }
@@ -99,6 +102,7 @@ impl From<VectorTarget> for OptimizationContext {
 
 mod bounded_stack_dse;
 mod branch_facts;
+mod constant_returns;
 mod fold_zero_byte_suffix;
 mod memory_alias;
 mod memory_forward;
@@ -297,7 +301,7 @@ pub(crate) static FAST_LOCAL: &dyn Pass = &fast::Local;
 pub(crate) static SMALL_MEMORY: &dyn Pass = &BuiltinPass::new(
     "small-memory",
     "expand ordinary constant memory intrinsics of at most 32 bytes",
-    |f, _| small_memory::run(f, small_memory::MAX_BYTES),
+    |f, context| small_memory::run(f, small_memory::MAX_BYTES, context.scalar_memory_expansion),
 );
 pub(crate) static SHORT_RECORD_COPIES: &dyn Pass = &BuiltinPass::new(
     "short-record-copies",
@@ -312,7 +316,13 @@ pub(crate) static SHORT_MEMCMP: &dyn Pass = &BuiltinPass::new(
 pub(crate) static MEMORY_EXPAND: &dyn Pass = &BuiltinPass::new(
     "memory-expand",
     "expand ordinary constant memory intrinsics of at most 128 bytes, for tiers without inlining",
-    |f, _| small_memory::run(f, small_memory::LATE_MAX_BYTES),
+    |f, context| {
+        small_memory::run(
+            f,
+            small_memory::LATE_MAX_BYTES,
+            context.scalar_memory_expansion,
+        )
+    },
 );
 pub(crate) static STACK_NOTRAP: &dyn Pass = &BuiltinPass::new(
     "stack-notrap",
@@ -483,6 +493,7 @@ pub(crate) static SPECIALIZE_ZERO_FLAGS: &dyn Pass = &specialize_zero_flags::Spe
 pub(crate) static SPECIALIZE_SINGLE_COUNT_EXIT: &dyn Pass =
     &specialize_single_count_exit::SpecializeSingleCountExit;
 pub(crate) static CONSTANT_ARGS: &dyn Pass = &constant_args::ConstantArgs;
+pub(crate) static CONSTANT_RETURNS: &dyn Pass = &constant_returns::ConstantReturns;
 pub(crate) static BRANCH_FACTS: &dyn Pass = &BuiltinPass::new(
     "branch-facts",
     "fold integer comparisons known from dominating edges",
@@ -570,6 +581,7 @@ pub static PASSES: &[&dyn Pass] = &[
     FOLD_ZERO_BYTE_SUFFIX,
     RANGE_FACTS,
     CONSTANT_ARGS,
+    CONSTANT_RETURNS,
     SPECIALIZE_ZERO_FLAGS,
     SPECIALIZE_SINGLE_COUNT_EXIT,
     EMPTY_CALLS,
@@ -847,6 +859,7 @@ const SIZE_PARTS: &[&[&str]] = &[
     // Motion exposes equivalent computations for GVN. Restore local constant
     // and address copies afterward to avoid long-lived values and their spills.
     &["gcm-size", "gvn", "gcm-size", "dce"],
+    &["constant-returns"],
     &RELEASE_EPILOGUE,
     &["terminal-merge"],
 ];

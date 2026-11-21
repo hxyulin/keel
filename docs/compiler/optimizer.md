@@ -169,7 +169,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `specialize-zero-flags` | Share one constant-zero copy of a recursive x86-64 dispatcher |
 | `specialize-single-count-exit` | Give a guarded single-element exit a short continuation on AArch64 |
 | `thread-entry-status` | Route a constant entry status directly to its destination in large local x86-64 functions |
-| `constant-args`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, empty calls and unreachable functions |
+| `constant-args`, `constant-returns`, `empty-calls`, `unused-functions`, `compact-unused-functions` | [Module cleanup](#module-cleanup) of constant arguments, constant results, empty calls and unreachable functions |
 | `inline-guards` | Inline bounded scalar no-op guards while retaining the original slow call |
 | `private-aggregate-cleanup` | Pass private two-word by-value aggregates as word pairs |
 | `internal-fast-calls` | Final private transport for contained direct calls; see [internal fast calls](#internal-fast-calls) |
@@ -881,7 +881,11 @@ only when every direct call passes the same literal and the function cannot
 escape through data, addresses, assembly, retention or lifecycle roots. Weak,
 public, variadic, returns-twice and explicit aggregate-transport functions are
 excluded. The signature and call arguments stay; the body is not inlined or
-cloned. `empty-calls` removes calls proven to have no effect, and
+cloned. In Size, `constant-returns` substitutes the integer result of a direct
+call to a local definition when every return yields the same literal. The call
+still executes, preserving effects and faults. The final CFG cleanup can then
+remove branches on the result without inlining the helper.
+`empty-calls` removes calls proven to have no effect, and
 `unused-functions` removes functions that optimization made unreachable. Both
 treat constructors, destructors, address references, relocations and assembly
 references as roots. Balanced, Size and Full run them late. Full also runs

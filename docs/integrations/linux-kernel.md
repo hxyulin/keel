@@ -8,16 +8,21 @@ inputs, builds the images and runs the checks.
 
 ## Compiling kernel inputs
 
-Kernel objects use the [`kernel` code model](../targets/x86_64/codegen.md#code-models),
-which materializes symbol addresses as sign-extended 32-bit absolute values,
-and the pinned instruction policy:
+Kernel objects use the [`kernel` code model](../targets/x86_64/codegen.md#code-models)
+and the pinned instruction policy. The model materializes symbol addresses as
+sign-extended 32-bit absolute values. Expansion of fixed-size memory intrinsics
+uses scalar chunks so early kernel copies can run before the FPU is enabled.
 
 ```sh
-keel cc -O --target x86_64-unknown-linux-gnu \
+keel cc -Os --target x86_64-unknown-linux-gnu \
   --link-intent executable --code-model kernel --cpu-level v1 \
   --target-features +popcnt,+rdrand,+rdtscp,+xsave,+clflush,+fsgsbase,+prefetchw,+invpcid,+rdseed,+cx16,+waitpkg \
-  --emit-object input.i -o input.o
+  -fno-asynchronous-unwind-tables -fno-unwind-tables --emit-object input.i -o input.o
 ```
+
+Both `-Os` and `-O` support this configuration. Size propagates the constant
+result of the DAX predicate without inlining its loads, so callers can drop the
+branch to the unavailable DAX implementation.
 
 The code model is not stored in IR; apply the flag again when compiling an IR
 file. It does not change the CPU policy or establish a no-SIMD, interrupt-safe

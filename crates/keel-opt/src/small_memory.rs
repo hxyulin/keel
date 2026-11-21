@@ -74,7 +74,7 @@ fn stack_address(f: &Function, mut value: Value) -> bool {
 
 /// Expands memcpy, memmove and memset of at most `limit` bytes, and memcmp
 /// equality tests of at most [`MAX_BYTES`].
-pub fn run(f: &mut Function, limit: i64) -> bool {
+pub fn run(f: &mut Function, limit: i64, scalar_only: bool) -> bool {
     // Expansion only replaces the intrinsic it visits.
     let work: Vec<_> = f
         .layout_insts()
@@ -114,13 +114,14 @@ pub fn run(f: &mut Function, limit: i64) -> bool {
         // stack-forward and stack-promote see through scalar stores only, so
         // memset stays scalar, and memmove too while its snapshot fits in
         // four registers.
-        let vectors = match id {
-            Intrinsic::Memcpy => {
-                size > MAX_BYTES || !(stack_address(f, args[0]) || stack_address(f, args[1]))
-            }
-            Intrinsic::Memmove => size > MAX_BYTES,
-            _ => false,
-        };
+        let vectors = !scalar_only
+            && match id {
+                Intrinsic::Memcpy => {
+                    size > MAX_BYTES || !(stack_address(f, args[0]) || stack_address(f, args[1]))
+                }
+                Intrinsic::Memmove => size > MAX_BYTES,
+                _ => false,
+            };
         while vectors && offset + 16 <= size {
             let addr = address(f, at, args[1], offset);
             let value = emit(
@@ -461,7 +462,7 @@ mod memcmp_tests {
         let m = candidate("v3 = iconst.i64 16", "v6 = icmp.eq v4, v5\nreturn v6");
         let mut m = keel_ir::parse(&m.to_string().replace("proven_builtin", "memcmp")).unwrap();
         let before = m.to_string();
-        assert!(!run(&mut m.functions[0], LATE_MAX_BYTES));
+        assert!(!run(&mut m.functions[0], LATE_MAX_BYTES, false));
         assert_eq!(m.to_string(), before);
     }
 }

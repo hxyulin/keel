@@ -5,6 +5,47 @@ use object::{Object, ObjectSection};
 use std::{fs, process::Command};
 
 #[test]
+fn kernel_memory_expansion_keeps_small_copies_in_general_registers() {
+    let dir = std::env::temp_dir().join(format!("keel-kernel-copy-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("copy.c");
+    fs::write(
+        &input,
+        "void copy(void *dst, const void *src) { __builtin_memcpy(dst, src, 16); }",
+    )
+    .unwrap();
+    for level in ["-O1", "-Os"] {
+        for model in ["kernel", "pic"] {
+            let result = Command::new(env!("CARGO_BIN_EXE_keel"))
+                .args([
+                    "cc",
+                    "--target",
+                    "x86_64-unknown-linux-gnu",
+                    "--code-model",
+                    model,
+                    level,
+                ])
+                .arg(&input)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{level} {model}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let asm = String::from_utf8(result.stdout).unwrap();
+            assert!(!asm.contains("memcpy"), "{level} {model}: {asm}");
+            assert_eq!(
+                asm.contains("xmm"),
+                model == "pic",
+                "{level} {model}: {asm}"
+            );
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn c_and_ir_cli_choose_kernel_addresses_and_reject_incompatible_targets() {
     let dir = std::env::temp_dir().join(format!("keel-kernel-model-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

@@ -354,7 +354,11 @@ impl Options {
         let capabilities =
             keel_codegen::x86_features::vector_capabilities(self.target()?, &selector)
                 .map_err(str::to_string)?;
-        Ok(keel_opt::OptimizationContext::new(target, capabilities))
+        let mut context = keel_opt::OptimizationContext::new(target, capabilities);
+        // Short copies can run before the kernel enables the FPU.
+        context.scalar_memory_expansion =
+            self.x86_code_model == Some(keel_codegen::x86_64::CodeModel::Kernel);
+        Ok(context)
     }
 
     fn run_optimization(

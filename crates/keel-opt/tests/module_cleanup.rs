@@ -2,6 +2,8 @@
 mod constant_args;
 #[path = "module_cleanup/constant_data.rs"]
 mod constant_data;
+#[path = "module_cleanup/constant_returns.rs"]
+mod constant_returns;
 #[path = "module_cleanup/devirtualize.rs"]
 mod devirtualize;
 #[path = "module_cleanup/outline_cold.rs"]
