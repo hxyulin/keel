@@ -271,9 +271,10 @@ keep their existing staging boundary.
 With Bounded allocation in speed mode, an i32 or i64 comparison used only by
 its branch can also cross one stack-address definition in code without debug
 locations. The backend keeps the operands live until it emits the branch.
-In size mode, a register-only i64 comparison can feed a branch across
-up to four stack lifetime markers without crossing a source line. Selected
-memory comparisons still read within the original lifetime.
+In size mode, a register-only i64 comparison can feed a branch across up to
+four stack lifetime markers without crossing a source line. The same applies
+to i32 comparisons when the function requires a frame pointer. Selected memory
+comparisons still read within the original lifetime.
 
 ## Memory operand folding
 

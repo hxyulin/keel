@@ -492,7 +492,10 @@ pub(super) fn run_observed_policy_budgeted(
                 let removable = callee.local
                     && calls.get(&callee.name) == Some(&1)
                     && !roots.contains(&callee.name);
-                !super::cost::size_site_fits(callee, target, removable, constant)
+                !(super::cost::size_site_fits(callee, target, removable, constant)
+                    || (target == crate::VectorTarget::X86Sse2
+                        && caller.attrs.frame_pointer
+                        && super::cost::framed_call_forwarder(callee)))
                     || code_insts(callee).take(129).count() > 128
             } {
                 Some(("size profitability", "size_profitability"))

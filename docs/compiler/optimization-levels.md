@@ -179,6 +179,9 @@ Bound x86-64 read-only leaves that require a frame can use up to 224 estimated
 bytes and can inline without a hint. These leaves have at most 48 IR
 instructions, an acyclic CFG and no surviving stack slots. The per-caller
 and module growth limits still apply.
+Framed x86-64 callers can also inline short direct-call wrappers that require
+their own frame and disable sibling calls. The wrapper forwards scalar
+arguments and results, or copies one aggregate result word from a local slot.
 Removable single-use private bodies bypass this filter because their out-of-line code
 disappears. Empty x86 compiler barriers have zero emission cost. The estimate
 also accounts for recognized x86 memory bit tests and single-instruction

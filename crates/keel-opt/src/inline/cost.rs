@@ -1,7 +1,10 @@
 //! Size limits, callee profitability and the cost of inlining one callee.
 use super::clone::{byval_copy_chunks, inline_stack_slots};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, Intrinsic, Purpose, Type, ValueDef};
+use keel_ir::{
+    AbiParam, BinaryOp, CallConv, EntityRef, Function, Inst, InstData, Intrinsic, Purpose, Type,
+    ValueDef,
+};
 
 /// The instructions an intrinsic in a priority or cheap-helper callee adds
 /// beyond its own, or `None` when it can become a call. Codegen calls libc
@@ -973,6 +976,131 @@ pub(super) fn size_site_fits(
         crate::VectorTarget::Portable => return true,
     };
     target_bytes(f, target).is_some_and(|bytes| bytes <= limit)
+}
+
+/// A register-only wrapper that must create its own frame and make a normal
+/// call. Its caller can set up the nested call directly without a second frame.
+pub(super) fn framed_call_forwarder(f: &Function) -> bool {
+    if !f.attrs.frame_pointer
+        || !f.attrs.no_sibling_calls
+        || f.attrs.cold
+        || f.blocks().take(2).count() != 1
+    {
+        return false;
+    }
+    let register_signature = |sig: &keel_ir::Signature| {
+        sig.cc == CallConv::C
+            && !sig.variadic
+            && !sig.returns_twice
+            && sig.params.len() <= 6
+            && sig.returns.len() <= 1
+            && sig.params.iter().chain(&sig.returns).all(scalar_argument)
+    };
+    if !register_signature(&f.sig) {
+        return framed_word_result_forwarder(f);
+    }
+    let mut forwarded_call = None;
+    for inst in code_insts(f).take(9) {
+        match f.inst_data(inst) {
+            InstData::Iconst { .. } | InstData::SymbolAddr { .. } => {}
+            InstData::Call { func, .. }
+                if forwarded_call.is_none() && register_signature(&f.callee(*func).sig) =>
+            {
+                forwarded_call = Some(inst);
+            }
+            InstData::Return { args } => {
+                return forwarded_call.is_some_and(|call| {
+                    args.iter()
+                        .map(|&v| f.resolve(v))
+                        .eq(f.inst_results(call).iter().copied())
+                }) && target_bytes(f, crate::VectorTarget::X86Sse2)
+                    .is_some_and(|bytes| bytes <= 32);
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn scalar_argument(param: &AbiParam) -> bool {
+    param.purpose == Purpose::Normal
+        && matches!(
+            param.ty,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+        )
+}
+
+/// A one-word aggregate return can use a local result slot for the nested
+/// call. This form only reloads that word and passes it to its own caller.
+fn framed_word_result_forwarder(f: &Function) -> bool {
+    let has_word_result = |sig: &keel_ir::Signature| {
+        let [first, args @ ..] = sig.params.as_slice() else {
+            return false;
+        };
+        sig.cc == CallConv::C
+            && !sig.variadic
+            && !sig.returns_twice
+            && sig.returns.is_empty()
+            && matches!(&first.purpose, Purpose::Sret(layout) if layout.size() == 8)
+            && args.len() <= 5
+            && args.iter().all(scalar_argument)
+    };
+    if !has_word_result(&f.sig) {
+        return false;
+    }
+    let code = code_insts(f).take(10).collect::<Vec<_>>();
+    let Some((prefix, &[call, load, store, ret])) = code.split_last_chunk::<4>() else {
+        return false;
+    };
+    let Some((&address, setup)) = prefix.split_first() else {
+        return false;
+    };
+    let InstData::StackAddr { slot } = *f.inst_data(address) else {
+        return false;
+    };
+    if f.stack_slot(slot).size != 8
+        || setup.iter().any(|&i| {
+            !matches!(
+                f.inst_data(i),
+                InstData::Iconst { .. } | InstData::SymbolAddr { .. }
+            )
+        })
+    {
+        return false;
+    }
+    let (
+        InstData::Call { func, args },
+        InstData::Load {
+            ty: Type::I64,
+            addr,
+            flags,
+        },
+        InstData::Store {
+            addr: output,
+            value,
+            flags: written,
+        },
+        InstData::Return { .. },
+    ) = (
+        f.inst_data(call),
+        f.inst_data(load),
+        f.inst_data(store),
+        f.inst_data(ret),
+    )
+    else {
+        return false;
+    };
+    let temp = f.first_result(address);
+    let nested = &f.callee(*func).sig;
+    has_word_result(nested)
+        && nested.params[0].purpose == f.sig.params[0].purpose
+        && args.first().is_some_and(|&a| f.resolve(a) == temp)
+        && f.resolve(*addr) == temp
+        && !flags.volatile
+        && !written.volatile
+        && f.resolve(*value) == f.first_result(load)
+        && f.resolve(*output) == f.block_params(f.entry_block().unwrap())[0]
+        && target_bytes(f, crate::VectorTarget::X86Sse2).is_some_and(|bytes| bytes <= 48)
 }
 
 fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {

@@ -81,7 +81,10 @@ block1(v4: i64, v5: i64):
     let narrow = source
         .replace("@lifetime_cmp(", "@lifetime_narrow_cmp(")
         .replace("i64", "i32");
-    let module = keel_ir::parse(&format!("{source}\n{memory}\n{narrow}")).unwrap();
+    let framed = narrow
+        .replace("@lifetime_narrow_cmp(", "@lifetime_framed_cmp(")
+        .replace("cc(c) {", "cc(c) frame_pointer {");
+    let module = keel_ir::parse(&format!("{source}\n{memory}\n{narrow}\n{framed}")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let target = Target::X86_64LinuxGnu;
     let request = keel_codegen::Request::new(
@@ -114,6 +117,10 @@ block1(v4: i64, v5: i64):
         function(&text, "lifetime_narrow_cmp").contains("\tset"),
         "{text}"
     );
+    assert!(
+        !function(&text, "lifetime_framed_cmp").contains("\tset"),
+        "{text}"
+    );
     let object =
         keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
     assert_eq!(
@@ -128,6 +135,7 @@ block1(v4: i64, v5: i64):
 #include <stdint.h>
 uint64_t lifetime_cmp(uint64_t, uint64_t);
 uint64_t lifetime_mem_cmp(uint64_t, uint64_t);
+uint32_t lifetime_framed_cmp(uint32_t, uint32_t);
 int main(void) {
     const uint64_t values[] = {0, 1, 19, UINT64_C(1) << 63, UINT64_MAX};
     for (unsigned i = 0; i < sizeof(values) / sizeof(*values); ++i)
@@ -135,6 +143,8 @@ int main(void) {
             uint64_t a = values[i], b = values[j];
             uint64_t want = a < b ? a - b : b - a;
             if (lifetime_cmp(a, b) != want || lifetime_mem_cmp(a, b) != want) return 1;
+            uint32_t x = a, y = b;
+            if (lifetime_framed_cmp(x, y) != (x < y ? x - y : y - x)) return 2;
         }
     return 0;
 }

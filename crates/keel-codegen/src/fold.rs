@@ -296,7 +296,9 @@ pub(crate) fn fused_compare_pairs(
                 InstData::Icmp { args, .. } => match func.value_type(func.resolve(args[0])) {
                     Type::I128 => continue,
                     Type::I64 => true,
-                    Type::I32 => span != CompareSpan::LifetimeMarkers,
+                    // A required frame takes a GPR away from the fused
+                    // operands. Avoid materializing the condition there.
+                    Type::I32 => span != CompareSpan::LifetimeMarkers || func.attrs.frame_pointer,
                     _ => false,
                 },
                 InstData::Fcmp { .. } => false,

@@ -84,6 +84,109 @@ fn a_single_use_needs_no_byte_allowance_only_when_its_body_can_disappear() {
 }
 
 #[test]
+fn size_inlines_small_framed_call_forwarders() {
+    use keel_ir::InstData;
+
+    let source = r#"
+data @state = align 8 { zero 8 }
+decl @update(ptr, i32, i32) -> i32 cc(c)
+func @forward(i32) -> i32 cc(c) frame_pointer no_sibling_calls no_semantic_interposition {
+block0(v0: i32):
+    v1 = symbol_addr @state
+    v2 = iconst.i32 0
+    v3 = call @update(v1, v0, v2)
+    return v3
+}
+func @caller(i32) -> i32 cc(c) frame_pointer {
+block0(v0: i32):
+    v1 = call @forward(v0)
+    return v1
+}
+"#;
+    let cases = [
+        (source.to_owned(), VectorTarget::X86Sse2, "update"),
+        (source.to_owned(), VectorTarget::Aarch64Neon, "forward"),
+        (
+            source.replace("no_semantic_interposition", ""),
+            VectorTarget::X86Sse2,
+            "forward",
+        ),
+        (
+            source.replace("no_sibling_calls", ""),
+            VectorTarget::X86Sse2,
+            "forward",
+        ),
+        (
+            source.replace("    return v3", "    store v2, v1\n    return v3"),
+            VectorTarget::X86Sse2,
+            "forward",
+        ),
+    ];
+    for (source, target, expected) in cases {
+        let module = optimize(&source, target);
+        let caller = module
+            .functions
+            .iter()
+            .find(|f| f.name == "caller")
+            .unwrap();
+        let callees: Vec<_> = caller
+            .layout_insts()
+            .filter_map(|(_, i)| match caller.inst_data(i) {
+                InstData::Call { func, .. } => Some(caller.callee(*func).name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(callees, [expected], "{target:?}: {source}");
+    }
+}
+
+#[test]
+fn size_inlines_framed_word_result_forwarders() {
+    let source = r#"
+decl @read_word(ptr sret [1 x i64], i32, i32) cc(c)
+func @forward(ptr sret [1 x i64], i32) cc(c) frame_pointer no_sibling_calls no_semantic_interposition {
+    ss0 = stack_slot 8, align 8
+block0(v0: ptr, v1: i32):
+    v2 = stack_addr ss0
+    intrinsic lifetime_start(v2)
+    v3 = iconst.i32 16
+    call @read_word(v2, v1, v3)
+    v4 = load.i64 align 8 notrap v2
+    store v4, v0
+    return
+}
+func @caller(ptr sret [1 x i64], i32) cc(c) frame_pointer {
+block0(v0: ptr, v1: i32):
+    call @forward(v0, v1)
+    return
+}
+"#;
+    for (text, target, expected) in [
+        (source.to_owned(), VectorTarget::X86Sse2, "read_word"),
+        (source.to_owned(), VectorTarget::Aarch64Neon, "forward"),
+        (
+            source.replace("load.i64 align", "load.i64 volatile align"),
+            VectorTarget::X86Sse2,
+            "forward",
+        ),
+    ] {
+        let module = optimize(&text, target);
+        let caller = module
+            .functions
+            .iter()
+            .find(|f| f.name == "caller")
+            .unwrap();
+        let callee = caller
+            .layout_insts()
+            .find_map(|(_, i)| match caller.inst_data(i) {
+                keel_ir::InstData::Call { func, .. } => Some(caller.callee(*func).name.as_str()),
+                _ => None,
+            });
+        assert_eq!(callee, Some(expected), "{text}");
+    }
+}
+
+#[test]
 fn late_size_inlining_only_revisits_non_cold_framed_x86_callers() {
     for (target, attributes, expected) in [
         (VectorTarget::X86Sse2, "frame_pointer ", 0),
