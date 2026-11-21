@@ -4403,7 +4403,9 @@ impl<'a> FunctionCompiler<'a> {
     /// Emits the compare of `icmp`/`fcmp` `inst`, returning the condition
     /// code that holds when its condition does.
     fn compare(&mut self, inst: Inst) -> &'static str {
-        if let Some(&(source, mask)) = self.selection.mask_tests.get(&inst) {
+        if let Some(&(crate::select::MaskTestSource::Register(source), mask)) =
+            self.selection.mask_tests.get(&inst)
+        {
             let InstData::Icmp {
                 cond: cond @ (IntCC::Eq | IntCC::Ne),
                 ..

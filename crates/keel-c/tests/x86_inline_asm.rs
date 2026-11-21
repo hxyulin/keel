@@ -427,6 +427,90 @@ fn deferred_immediates_reject_runtime_symbols_for_n_and_failed_required_calls() 
 }
 
 #[test]
+fn size_symbolic_asm_load_uses_the_relocation_without_staging() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request};
+    use keel_test_support::native_program;
+    use object::{Object, ObjectSection};
+
+    let source = r#"
+extern unsigned long payload;
+extern unsigned int narrow;
+unsigned long peek_symbol(void) {
+    unsigned long result;
+    asm volatile("movq %a1, %0" : "=r"(result) : "i"(&payload));
+    return result;
+}
+unsigned int peek_narrow(void) {
+    unsigned int result;
+    asm volatile("movl %a1, %0" : "=r"(result) : "i"(&narrow));
+    return result;
+}
+unsigned long peek_barrier(void) {
+    unsigned long result;
+    asm volatile("movq %a1, %0" : "=r"(result) : "i"(&payload) : "memory");
+    return result;
+}
+"#;
+    let module = compile(source, false).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let text = request.text(&module).unwrap();
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    for name in ["peek_symbol", "peek_narrow"] {
+        let body = text.split_once(&format!("\"{name}\":")).unwrap().1;
+        let body = body.split_once(".size").unwrap().0;
+        assert!(!body.contains("[rbp") && !body.contains("[rsp"), "{body}");
+    }
+    let file = object::File::parse(object.as_slice()).unwrap();
+    let direct = file
+        .section_by_name(".text")
+        .unwrap()
+        .relocations()
+        .filter(|(_, r)| {
+            r.flags()
+                == (object::RelocationFlags::Elf {
+                    r_type: object::elf::R_X86_64_PC32,
+                })
+        })
+        .count();
+    assert_eq!(direct, 3, "{text}");
+    native_program!("symbolic-asm-load")
+        .file("load.o", object)
+        .file(
+            "oracle.c",
+            r#"
+unsigned long payload = 0xfe12ab34cafef00dUL;
+unsigned int narrow = 0x87654321U;
+unsigned long peek_symbol(void), peek_barrier(void);
+unsigned int peek_narrow(void);
+int main(void) {
+    if (peek_symbol() != payload || peek_barrier() != payload || peek_narrow() != narrow)
+        return 1;
+    payload = 0xfedcba9876543210UL;
+    narrow = 0xfedcba98U;
+    return peek_symbol() != payload || peek_barrier() != payload || peek_narrow() != narrow;
+}
+"#,
+        )
+        .link(["oracle.c", "load.o"])
+        .check();
+}
+
+#[test]
 fn finalized_symbol_choices_and_flags_match_clang_and_gnu() {
     use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget};
     use std::{fs, process::Command};

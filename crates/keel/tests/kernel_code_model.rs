@@ -244,10 +244,12 @@ fn size_codegen_obeys_frame_abi_and_symbol_ranges() {
         r#"
         extern char cache[192];
         extern char *pointer;
+        extern volatile int stamp;
         extern long callee(long);
         extern void clobber(void);
 
         void store_address(void) { pointer = cache; }
+        int read_stamp(void) { return stamp; }
         void copy_in(const void *src) { __builtin_memmove(cache, src, 96); }
         long pass_result(long x) { return callee(x); }
         long keep_result(long x) {
@@ -336,6 +338,12 @@ fn size_codegen_obeys_frame_abi_and_symbol_ranges() {
             store.contains("], offset \"cache\""),
             model == "kernel",
             "{store}"
+        );
+        let load = body("read_stamp");
+        assert_eq!(
+            load.contains("dword ptr [\"stamp\"]"),
+            model == "kernel",
+            "{load}"
         );
         let copy = body("copy_in");
         let move_source = copy.find("mov\trsi, rdi").unwrap();

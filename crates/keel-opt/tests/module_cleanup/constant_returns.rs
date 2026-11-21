@@ -31,6 +31,69 @@ fn size_folds_a_bound_result_and_keeps_the_call_and_its_effects() {
 }
 
 #[test]
+fn size_removes_a_trivial_constant_call_and_keeps_argument_evaluation() {
+    let mut module = parse(
+        "\
+decl @effect() -> ptr
+func @constant(ptr) -> i32 noinline local {
+block0(v0: ptr):
+ v1 = iconst.i32 19
+ return v1
+}
+func @entry() -> i32 {
+block0:
+ v0 = call @effect()
+ v1 = call @constant(v0)
+ return v1
+}",
+    )
+    .unwrap();
+    keel_opt::optimize_with_tier(&mut module, keel_opt::OptimizationTier::Size).unwrap();
+    verify_module(&module).unwrap();
+    let [entry] = module.functions.as_slice() else {
+        panic!("unreachable constant helper was retained");
+    };
+    let text = entry.to_string();
+    assert!(!text.contains("call @constant"), "{text}");
+    assert!(text.contains("call @effect"), "{text}");
+    assert!(text.contains("iconst.i32 19"), "{text}");
+}
+
+#[test]
+fn size_forwards_a_trivial_parameter_return_and_keeps_observed_calls() {
+    let mut module = parse(
+        "\
+decl @effect() -> ptr
+func @identity(i32, ptr) -> ptr noinline local {
+block0(v0: i32, v1: ptr):
+ return v1
+}
+func @observe(ptr) -> ptr noinline local {
+block0(v0: ptr):
+ v1 = load.i32 volatile v0
+ return v0
+}
+func @entry() -> ptr {
+block0:
+ v0 = call @effect()
+ v1 = iconst.i32 0
+ v2 = call @identity(v1, v0)
+ v3 = call @identity(v1, v2)
+ v4 = call @observe(v3)
+ return v4
+}",
+    )
+    .unwrap();
+    keel_opt::optimize_with_tier(&mut module, keel_opt::OptimizationTier::Size).unwrap();
+    verify_module(&module).unwrap();
+    let entry = module.functions.iter().find(|f| f.name == "entry").unwrap();
+    let text = entry.to_string();
+    assert!(!text.contains("call @identity"), "{text}");
+    assert!(text.contains("call @effect"), "{text}");
+    assert!(text.contains("call @observe"), "{text}");
+}
+
+#[test]
 fn unknown_and_interposable_results_keep_the_branch() {
     for source in [
         SOURCE.replace("noinline local", "noinline weak"),

@@ -492,14 +492,8 @@ pub(super) fn run_observed_policy_budgeted(
                 let removable = callee.local
                     && calls.get(&callee.name) == Some(&1)
                     && !roots.contains(&callee.name);
-                let byte_reject = !super::cost::size_bytes_fit(callee, target, removable);
-                byte_reject
+                !super::cost::size_site_fits(callee, target, removable, constant)
                     || code_insts(callee).take(129).count() > 128
-                    || !(callee.attrs.inlinehint
-                        || constant
-                        || (callee.local
-                            && calls.get(&callee.name) == Some(&1)
-                            && !roots.contains(&callee.name)))
             } {
                 Some(("size profitability", "size_profitability"))
             } else if (!caller.attrs.flatten && flatten) || specialization_only.contains(&t) {

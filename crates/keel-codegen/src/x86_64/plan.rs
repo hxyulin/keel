@@ -496,6 +496,76 @@ pub(super) fn mask_test_type(ty: Type, mask: i64, goal: crate::CodegenGoal) -> O
     }
 }
 
+fn fuse_asm_bit_test_branches(
+    func: &Function,
+    uses: &[u8],
+    selection: &mut crate::select::Selection,
+) {
+    if func.debug_loc.is_some()
+        || !func.debug_vars.is_empty()
+        || func.layout_insts().any(|(_, i)| func.inst_loc(i).is_some())
+    {
+        return;
+    }
+    for block in func.blocks() {
+        let insts = func.block_insts(block);
+        let Some((&branch, before)) = insts.split_last() else {
+            continue;
+        };
+        let InstData::Brif { cond, .. } = *func.inst_data(branch) else {
+            continue;
+        };
+        let cond = func.resolve(cond);
+        if !selection.is_free(branch)
+            || selection.has_operand_override(branch)
+            || uses[cond.index()] != 1
+        {
+            continue;
+        }
+        let Some((&last, earlier)) = before.split_last() else {
+            continue;
+        };
+        let (test, compare, flag, invert) = match *func.inst_data(last) {
+            InstData::Icmp {
+                cond: cc @ (IntCC::Eq | IntCC::Ne),
+                args: [flag, zero],
+            } if func.first_result(last) == cond
+                && crate::fold::iconst(func, zero) == Some(0)
+                && selection.is_free(last) =>
+            {
+                let Some(&test) = earlier.last() else {
+                    continue;
+                };
+                (test, Some(last), func.resolve(flag), cc == IntCC::Eq)
+            }
+            InstData::InlineAsm { .. } => (last, None, cond, false),
+            _ => continue,
+        };
+        let InstData::InlineAsm { asm, .. } = func.inst_data(test) else {
+            continue;
+        };
+        let Some(cc) = asm.x86_memory_bit_test() else {
+            continue;
+        };
+        if func.first_result(test) != flag || uses[flag.index()] != 1 || !selection.is_free(test) {
+            continue;
+        }
+        let mut args = selection.operands(func, branch);
+        args.remove(0);
+        // Adjacent lowering leaves CF live. The allocator's edge copies and
+        // rematerializations preserve flags.
+        selection.claim(Cover::CompareBranch, branch);
+        selection.set_operands(branch, args);
+        selection.omitted_defs.insert(flag);
+        selection
+            .asm_bit_test_branches
+            .insert(branch, cc ^ u8::from(invert));
+        if let Some(compare) = compare {
+            selection.cover(compare);
+        }
+    }
+}
+
 /// The selection and the x86 covers layered on it, each keyed by the
 /// instruction it replaces.
 pub(super) struct Covers {
@@ -514,6 +584,7 @@ impl Covers {
         facts: &crate::kinds::FunctionFacts<'_>,
         across_stack_addr: bool,
         goal: crate::CodegenGoal,
+        compact_asm_inputs: bool,
     ) -> Self {
         let (present, uses) = (facts.kinds, &facts.machine_uses);
         let mut selection = pipeline.selector.select_with_uses(
@@ -546,10 +617,14 @@ impl Covers {
         ]
         .map(on);
         let signed_byte = on(Cover::X86SignedByteLoad);
-        if present.compare && mask_tests {
-            selection.fold_mask_tests(func, uses, Cover::X86MaskTest, |ty, mask| {
+        let branch_masks = goal == crate::CodegenGoal::Size && present.brif;
+        if mask_tests && (present.compare || branch_masks) {
+            selection.fold_mask_tests(func, uses, Cover::X86MaskTest, branch_masks, |ty, mask| {
                 mask_test_type(ty, mask, goal).is_some()
             });
+        }
+        if present.inline_asm && present.brif && compare_branch && compact_asm_inputs {
+            fuse_asm_bit_test_branches(func, uses, &mut selection);
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
@@ -657,6 +732,7 @@ pub(super) fn prefer_abi_gprs(
 #[derive(Default)]
 pub(super) struct SizeImmediates {
     pub stores: HashMap<Inst, keel_ir::Symbol>,
+    pub loads: HashMap<Inst, keel_ir::Symbol>,
     pub memory_args: HashMap<Inst, [Option<Value>; 3]>,
 }
 
@@ -670,9 +746,10 @@ impl SizeImmediates {
         selection: &mut crate::select::Selection,
     ) -> Self {
         let mut immediates = Self::default();
-        // A pointer store can encode only a sign-extended 32-bit symbol.
-        let symbol_stores = facts.kinds.symbol_addr && code_model == CodeModel::Kernel;
-        if !symbol_stores && (!facts.kinds.intrinsic || shape.wide_vectors) {
+        // Loads and pointer stores can encode only a sign-extended 32-bit symbol.
+        let kernel_symbols = facts.kinds.symbol_addr && code_model == CodeModel::Kernel;
+        let asm_loads = facts.kinds.inline_asm && facts.kinds.symbol_addr;
+        if !kernel_symbols && !asm_loads && (!facts.kinds.intrinsic || shape.wide_vectors) {
             return immediates;
         }
         let static_symbol = |symbol| {
@@ -694,7 +771,38 @@ impl SizeImmediates {
                 .then_some(source)
             };
             match func.inst_data(inst) {
-                &InstData::Store { value, .. } if symbol_stores => {
+                InstData::InlineAsm { asm, args } if asm_loads => {
+                    let Some(value) = inline_asm::symbolic_load(func, asm, args) else {
+                        continue;
+                    };
+                    let Some(source) = source(func.resolve(value), selection) else {
+                        continue;
+                    };
+                    let InstData::SymbolAddr { symbol } = *func.inst_data(source) else {
+                        continue;
+                    };
+                    if static_symbol(symbol) {
+                        selection.set_operands(inst, Vec::new());
+                        selection.cover(source);
+                    }
+                }
+                &InstData::Load { addr, ty, .. }
+                    if kernel_symbols && ty != Type::I128 && selection.is_free(inst) =>
+                {
+                    let addr = func.resolve(addr);
+                    let Some(source) = source(addr, selection) else {
+                        continue;
+                    };
+                    let InstData::SymbolAddr { symbol } = *func.inst_data(source) else {
+                        continue;
+                    };
+                    if static_symbol(symbol) {
+                        selection.set_operands(inst, Vec::new());
+                        selection.cover(source);
+                        immediates.loads.insert(inst, symbol);
+                    }
+                }
+                &InstData::Store { value, .. } if kernel_symbols => {
                     let value = func.resolve(value);
                     let Some(source) = source(value, selection) else {
                         continue;
@@ -1090,7 +1198,7 @@ pub(super) fn plan_inline_asm(
     shape: &VectorShape,
     features: keel_asm_ir::x86::Features,
     compact_inputs: bool,
-    goto_context: Option<&inline_asm::GotoContext<'_>>,
+    direct: Option<&inline_asm::DirectContext<'_>>,
 ) -> Result<HashMap<Inst, inline_asm::Plan>, String> {
     let mut function_index = None;
     let mut inline_asm_plans = HashMap::default();
@@ -1119,7 +1227,8 @@ pub(super) fn plan_inline_asm(
                     unique: (function_index << 32) | inst.index() as u64,
                     avx512f: features.avx512f,
                     compact_inputs,
-                    direct_goto: goto_context.zip(insts.get(index + 1).copied()),
+                    direct,
+                    next: insts.get(index + 1).copied(),
                 },
             )?;
             inline_asm_plans.insert(inst, plan);

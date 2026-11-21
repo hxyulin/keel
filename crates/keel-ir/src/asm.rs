@@ -107,6 +107,43 @@ pub enum AsmClobber {
 }
 
 impl InlineAsm {
+    /// Recognizes an x86-64 memory BT carrying its result in CF or its inverse.
+    /// The template can read memory, fault and act as a compiler barrier.
+    pub fn x86_memory_bit_test(&self) -> Option<u8> {
+        let [(AsmOperand::Flag(cc @ (2 | 3)), _)] = self.outputs.as_slice() else {
+            return None;
+        };
+        if !matches!(
+            self.inputs.as_slice(),
+            [
+                AsmOperand::Mem,
+                AsmOperand::Reg
+                    | AsmOperand::Imm
+                    | AsmOperand::RegImm
+                    | AsmOperand::RegSignedImm32
+                    | AsmOperand::RegShiftImm5,
+            ]
+        ) || self
+            .clobbers
+            .iter()
+            .any(|c| matches!(c, AsmClobber::Reg(_)))
+        {
+            return None;
+        }
+        let template = self.template.trim();
+        let code = if let Some((code, comment)) = template.split_once("/*") {
+            if comment.strip_suffix("*/")?.contains("*/") {
+                return None;
+            }
+            code.trim()
+        } else {
+            template
+        };
+        let (opcode, operands) = code.split_once(|c: char| c.is_ascii_whitespace())?;
+        let (bit, memory) = operands.split_once(',')?;
+        (opcode == "btq" && bit.trim() == "%2" && memory.trim() == "%1").then_some(*cc)
+    }
+
     /// Builds inline assembly from a constraint string; `output_types` are
     /// the result types, one per output.
     pub fn new(template: &str, constraints: &str, output_types: &[Type]) -> Result<Self, String> {

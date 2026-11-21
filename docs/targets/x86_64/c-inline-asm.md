@@ -261,6 +261,11 @@ output. The input registers are reserved by the backend and `SETcc` writes
 the result directly to a register. The memory operand and declared clobbers
 keep their ordinary effects.
 
+For a single `movl` or `movq` from a symbolic `%a` operand to an
+unconstrained register result, Size emission uses the allocated destination
+without staging. A spilled result uses a reserved scratch register. The
+template retains its RIP-relative relocation.
+
 Substituted text remains an explicit fragment in the enclosing object program.
 The shared assembler processes directives, macro state, labels, relocations and
 CPU-feature legality when it consumes that program. Emitting assembly text alone

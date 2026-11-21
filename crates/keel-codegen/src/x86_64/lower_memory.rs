@@ -8,7 +8,7 @@ impl FunctionCompiler<'_> {
         match *func.inst_data(inst) {
             InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
                 let d = self.def_freg(result);
-                let a = self.mem(addr, S0, ty);
+                let a = self.load_memory(inst, addr, ty);
                 self.emit(movs(ty), [asm_arg(simd(d, ty)), asm_arg(a)]);
                 self.def_done(result, d);
             }
@@ -16,7 +16,7 @@ impl FunctionCompiler<'_> {
             // part of a register (and depending on its old value).
             InstData::Load { ty, addr, .. } => {
                 let d = self.def_reg(result);
-                let a = self.mem(addr, S0, ty);
+                let a = self.load_memory(inst, addr, ty);
                 match ty {
                     Type::I8 | Type::I16 => self.emit(Opcode::Movzx, [asm_arg(r32(d)), asm_arg(a)]),
                     _ => self.emit(Opcode::Mov, [asm_arg(reg(d, ty)), asm_arg(a)]),
@@ -124,5 +124,16 @@ impl FunctionCompiler<'_> {
             }
             _ => unreachable!("not a memory access"),
         }
+    }
+
+    fn load_memory(&mut self, inst: Inst, addr: Value, ty: Type) -> Memory {
+        if let Some(&symbol) = self.size_immediates.loads.get(&inst) {
+            let mut memory = symbol_memory(rip(), self.func.symbol_name(symbol), Modifier::None);
+            // The kernel model already requires an absolute signed 32-bit
+            // relocation for this symbol. Use the same relocation in the load.
+            memory.base = None;
+            return sized(memory, ptr(ty));
+        }
+        self.mem(addr, S0, ty)
     }
 }

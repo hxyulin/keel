@@ -120,6 +120,17 @@ entry(v0: ptr, v1: i64):
  v4 = iadd v1, v3
  return v4
 }
+func @bit_test_branch(ptr, i64) -> i64 {
+entry(v0: ptr, v1: i64):
+ v2 = iconst.i64 1
+ v3 = iadd v1, v2
+ v5 = iconst.i8 0
+ v4 = asm "btq %2,%1", "=@ccb,m,rI,~{memory}"(v0, v1) -> i8
+ v6 = icmp.eq v4, v5
+ brif v6, done(v1), done(v3)
+done(v7: i64):
+ return v7
+}
 "#;
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
@@ -151,6 +162,16 @@ entry(v0: ptr, v1: i64):
                 .any(|line| line.contains("setb") && !line.contains("ptr")),
             "{text}"
         );
+        let (_, branch) = text.split_once("\"bit_test_branch\":").unwrap();
+        let (branch, _) = branch.split_once(".size").unwrap();
+        assert!(
+            branch.contains("\tjae\t") || branch.contains("\tjb\t"),
+            "{branch}"
+        );
+        assert!(
+            !branch.contains("\tset") && !branch.contains("\ttest"),
+            "{branch}"
+        );
         let bytes =
             keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
         assert_eq!(bytes, keel_asm::assemble_source_for(target, &text).unwrap());
@@ -160,8 +181,11 @@ entry(v0: ptr, v1: i64):
                 "driver.c",
                 "\
 extern long bit_test(unsigned long *, long);
+extern long bit_test_branch(unsigned long *, long);
 int main(void) {
     unsigned long words[] = {1UL << 63, 1};
+    for (long bit = -64; bit < 64; ++bit)
+        if (bit_test_branch(words + 1, bit) != bit_test(words + 1, bit)) return 1;
     return !(bit_test(words, 0) == 0 && bit_test(words, 63) == 64 &&
              bit_test(words, 64) == 65 && bit_test(words, 65) == 65 &&
              bit_test(words + 1, -1) == 0);

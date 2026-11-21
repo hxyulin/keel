@@ -1260,7 +1260,14 @@ impl<'a> FunctionCompiler<'a> {
         let bounded_speed = goal == crate::CodegenGoal::Speed
             && pipeline.allocator.name() == "bounded"
             && module.files.is_empty();
-        let mut covers = plan::Covers::select(func, pipeline, &facts, bounded_speed, goal);
+        let compact_inputs = goal == crate::CodegenGoal::Size
+            && pools
+                .caller_saved
+                .iter()
+                .chain(pools.callee_saved)
+                .all(|&r| r != S0 && r != S1);
+        let mut covers =
+            plan::Covers::select(func, pipeline, &facts, bounded_speed, goal, compact_inputs);
         if pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
             && !func.attrs.optnone
         {
@@ -1301,19 +1308,13 @@ impl<'a> FunctionCompiler<'a> {
         };
         let spills = plan::SpillArea::plan(func, &alloc, f80_homes, &shape, &calls);
         let system = plan::SystemSlots::plan(func, present, features, spills.end);
-        let compact_inputs = goal == crate::CodegenGoal::Size
-            && pools
-                .caller_saved
-                .iter()
-                .chain(pools.callee_saved)
-                .all(|&r| r != S0 && r != S1);
         let scratch_mask = (1 << S0) | (1 << S1) | (1 << S2);
-        let goto_context = (size_optimized
+        let asm_context = (size_optimized
             && present.inline_asm
             && module.files.is_empty()
             && bare_label(&func.name)
             && alloc.mentioned_gprs() & scratch_mask == 0)
-            .then_some(inline_asm::GotoContext {
+            .then_some(inline_asm::DirectContext {
                 allocation: &alloc,
                 facts: &facts,
                 selection: &covers.selection,
@@ -1325,7 +1326,7 @@ impl<'a> FunctionCompiler<'a> {
             &shape,
             features,
             compact_inputs,
-            goto_context.as_ref(),
+            asm_context.as_ref(),
         )
         .map_err(err)?;
         let asm_bytes = inline_asm_plans
@@ -4452,6 +4453,25 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    fn emit_mask_test(&mut self, inst: Inst) -> bool {
+        let Some(&(source, mask)) = self.selection.mask_tests.get(&inst) else {
+            return false;
+        };
+        match source {
+            crate::select::MaskTestSource::Register(value) => {
+                let ty = plan::mask_test_type(self.ty(value), mask, self.goal)
+                    .expect("selected mask test has an encodable immediate");
+                let a = self.use_reg(value, S0);
+                self.emit(Opcode::Test, [asm_arg(reg(a, ty)), asm_arg(mask as i32)]);
+            }
+            crate::select::MaskTestSource::Memory { addr, ty } => {
+                let at = self.mem(addr, S0, ty);
+                self.emit(Opcode::Test, [asm_arg(&at), asm_arg(mask as i32)]);
+            }
+        }
+        true
+    }
+
     /// Emits the compare of `icmp`/`fcmp` `inst`, returning the condition
     /// code that holds when its condition does.
     ///
@@ -4460,7 +4480,7 @@ impl<'a> FunctionCompiler<'a> {
     /// clear), false for NaN, and `a < b` is `b > a`. Equality needs two
     /// flags (ZF set, PF clear), combined into al and tested.
     fn compare(&mut self, inst: Inst) -> &'static str {
-        if let Some(&(source, mask)) = self.selection.mask_tests.get(&inst) {
+        if self.emit_mask_test(inst) {
             let InstData::Icmp {
                 cond: cond @ (IntCC::Eq | IntCC::Ne),
                 ..
@@ -4468,10 +4488,6 @@ impl<'a> FunctionCompiler<'a> {
             else {
                 unreachable!("ZF-only mask test")
             };
-            let a = self.use_reg(source, S0);
-            let ty = plan::mask_test_type(self.ty(source), mask, self.goal)
-                .expect("selected mask test has an encodable immediate");
-            self.emit(Opcode::Test, [asm_arg(reg(a, ty)), asm_arg(mask as i32)]);
             return cond_code(cond);
         }
         if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {

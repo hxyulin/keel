@@ -65,15 +65,21 @@ impl FunctionCompiler<'_> {
                 let [then_dest, else_dest] = &**dests;
                 // To the else-branch when the condition is zero, or when a
                 // fused compare's condition does not hold.
-                let not = match func.value_def(func.resolve(cond)) {
+                let not = match (
+                    self.selection.asm_bit_test_branches.get(&inst).copied(),
+                    func.value_def(func.resolve(cond)),
+                ) {
+                    (Some(2), _) => "ae",
+                    (Some(3), _) => "b",
+                    _ if self.emit_mask_test(inst) => "e",
                     // A fused compare-and-swap left ZF set when it stored.
-                    ValueDef::Result(cas, _)
+                    (_, ValueDef::Result(cas, _))
                         if self.fused_compares.contains(&func.resolve(cond))
                             && matches!(func.inst_data(cas), InstData::AtomicCas { .. }) =>
                     {
                         "ne"
                     }
-                    ValueDef::Result(compare, _)
+                    (_, ValueDef::Result(compare, _))
                         if self.fused_compares.contains(&func.resolve(cond)) =>
                     {
                         invert_cond(self.compare(compare))

@@ -146,6 +146,12 @@ impl OperandTable {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum MaskTestSource {
+    Register(Value),
+    Memory { addr: Value, ty: Type },
+}
+
 #[derive(Default, Debug)]
 pub struct Selection {
     pub(crate) switch_bounds: HashMap<Inst, (u64, u64)>,
@@ -165,7 +171,9 @@ pub struct Selection {
     /// X86 exact-width adjacent ordinary load encoded as an integer CMP RHS.
     pub(crate) compare_memory: HashMap<Inst, Value>,
     /// Literal-mask zero tests, consumed only for equality flags.
-    pub(crate) mask_tests: HashMap<Inst, (Value, i64)>,
+    pub(crate) mask_tests: HashMap<Inst, (MaskTestSource, i64)>,
+    /// Size-only branches that consume an inline memory BT's carry flag.
+    pub(crate) asm_bit_test_branches: HashMap<Inst, u8>,
     /// X86 adjacent load encoded as an integer binary RHS.
     pub(crate) binary_memory: HashMap<Inst, Value>,
     /// X86 adjacent quotient/multiply/subtract using the native remainder.
@@ -248,6 +256,7 @@ impl Selection {
         func: &Function,
         uses: &[u8],
         cover: Cover,
+        branch_masks: bool,
         valid: impl Fn(Type, i64) -> bool,
     ) {
         // Debug locations retain their existing materialized-value contract.
@@ -259,17 +268,25 @@ impl Selection {
         }
         for block in func.blocks() {
             let insts = func.block_insts(block);
-            for (end, &compare) in insts.iter().enumerate() {
-                let InstData::Icmp {
-                    cond: IntCC::Eq | IntCC::Ne,
-                    args,
-                } = *func.inst_data(compare)
-                else {
-                    continue;
+            for (end, &root) in insts.iter().enumerate() {
+                let (masked, zero) = match *func.inst_data(root) {
+                    InstData::Icmp {
+                        cond: IntCC::Eq | IntCC::Ne,
+                        args: [masked, zero],
+                    } if crate::fold::iconst(func, zero) == Some(0)
+                        && func.resolve(func.first_result(root)) == func.first_result(root) =>
+                    {
+                        (masked, Some(func.resolve(zero)))
+                    }
+                    InstData::Brif { cond, .. }
+                        if branch_masks && !self.has_operand_override(root) =>
+                    {
+                        (cond, None)
+                    }
+                    _ => continue,
                 };
-                let masked = func.resolve(args[0]);
+                let masked = func.resolve(masked);
                 if !matches!(func.value_type(masked), Type::I32 | Type::I64)
-                    || crate::fold::iconst(func, args[1]) != Some(0)
                     || uses[masked.index()] != 1
                 {
                     continue;
@@ -285,9 +302,8 @@ impl Selection {
                     continue;
                 };
                 if func.inst_block(and) != block
-                    || func.resolve(func.first_result(compare)) != func.first_result(compare)
                     || func.first_result(and) != masked
-                    || [and, compare]
+                    || [and, root]
                         .into_iter()
                         .any(|i| func.is_removed(i) || !self.is_free(i))
                 {
@@ -315,13 +331,39 @@ impl Selection {
                     if !valid(func.value_type(masked), mask) {
                         continue;
                     }
-                    self.claim(cover, compare);
-                    self.mask_tests.insert(compare, (source, mask));
-                    self.set_operands(compare, vec![source]);
-                    // The zero RHS is encoded by this recipe. Prevent later
-                    // folding/fusion from removing an equal-valued source leaf.
-                    self.allocation_folds
-                        .insert(compare, vec![func.resolve(args[1])]);
+                    self.claim(cover, root);
+                    let mut operand = MaskTestSource::Register(source);
+                    if let Some(zero) = zero {
+                        self.set_operands(root, vec![source]);
+                        // The zero RHS is encoded by this recipe. Preserve
+                        // the source leaf if it is the same value.
+                        self.allocation_folds.insert(root, vec![zero]);
+                    } else {
+                        // Brif lists its condition before the successor arguments.
+                        let mut operands = self.operands(func, root);
+                        if let ValueDef::Result(load, 0) = func.value_def(source)
+                            && uses[source.index()] == 1
+                            && self.is_free(load)
+                            && !func.is_removed(load)
+                            && let InstData::Load { addr, flags, ty } = *func.inst_data(load)
+                            && !flags.volatile
+                            && (ty == Type::I32 || i32::try_from(mask).is_ok())
+                            && insts[..start].iter().rev().find(|&&i| {
+                                !matches!(func.inst_data(i), InstData::Iconst { .. })
+                                    || self.has_constraint(i)
+                            }) == Some(&load)
+                        {
+                            // Move the exact access past only constants and
+                            // the eliminated AND. Keep selected address leaves.
+                            operands.splice(..1, self.operands(func, load));
+                            self.cover(load);
+                            operand = MaskTestSource::Memory { addr, ty };
+                        } else {
+                            operands[0] = source;
+                        }
+                        self.set_operands(root, operands);
+                    }
+                    self.mask_tests.insert(root, (operand, mask));
                     self.cover(and);
                     break;
                 }

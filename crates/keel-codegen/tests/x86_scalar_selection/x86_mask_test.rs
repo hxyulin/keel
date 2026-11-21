@@ -122,6 +122,140 @@ int main(void) {
         .link(["oracle.c", "masks.o"])
         .check();
 }
+
+#[test]
+fn size_tests_a_branch_mask_and_preserves_edge_arguments() {
+    use keel_test_support::native_program;
+
+    let source = "\
+func @mask_branch(i64, i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: i64):
+    v3 = iconst.i64 512
+    v4 = and v0, v3
+    brif v4, block1(v1, v0), block1(v2, v0)
+block1(v5: i64, v6: i64):
+    v7 = isub v5, v6
+    return v7
+}";
+    let module = keel_ir::parse(source).unwrap();
+    let shared = keel_ir::parse(&source.replace("block1(v1, v0)", "block1(v1, v4)")).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_ir::verify_module(&shared).unwrap();
+    let target = keel_codegen::Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    );
+    assert!(request.text(&module).unwrap().contains("\tand\t"));
+    let request = request.emission(options);
+    assert!(request.text(&shared).unwrap().contains("\tand\t"));
+    for (pools, label) in [
+        (&keel_codegen::x86_64::REGISTERS, "branch-mask-register"),
+        (&EMPTY, "branch-mask-spilled"),
+    ] {
+        let request = request.pools(pools);
+        let text = request.text(&module).unwrap();
+        assert!(!text.contains("\tand\t"), "{text}");
+        let test = tests(&text);
+        assert_eq!(test.len(), 1, "{text}");
+        let (reg, imm) = test[0]
+            .trim_start()
+            .strip_prefix("test\t")
+            .unwrap()
+            .split_once(", ")
+            .unwrap();
+        assert_eq!(Register::parse(reg).unwrap().width, 16, "{text}");
+        assert_eq!(imm, "512", "{text}");
+        let object =
+            keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+        assert_eq!(
+            object,
+            keel_asm::assemble_source_for(target, &text).unwrap()
+        );
+        native_program!(label)
+            .file("mask.o", object)
+            .file(
+                "oracle.c",
+                r#"
+#include <stdint.h>
+uint64_t mask_branch(uint64_t, uint64_t, uint64_t);
+int main(void) {
+    for (unsigned bit = 0; bit < 64; ++bit) {
+        uint64_t x = UINT64_C(1) << bit;
+        if (mask_branch(x, 35, 71) != (bit == 9 ? 35 : 71) - x) return 1;
+    }
+    return 0;
+}
+"#,
+            )
+            .link(["oracle.c", "mask.o"])
+            .check();
+    }
+}
+
+#[test]
+fn size_branch_tests_memory_at_the_original_access_width() {
+    let source = "\
+func @mask_load(ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 3
+    v3 = shl v1, v2
+    v4 = ptradd v0, v3
+    v5 = load.i64 v4
+    v6 = iconst.i64 512
+    v7 = and v5, v6
+    brif v7, block1, block2
+block1:
+    return v1
+block2:
+    v8 = iconst.i64 7
+    return v8
+}";
+    let target = keel_codegen::Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let module = keel_ir::parse(source).unwrap();
+    let text = request.text(&module).unwrap();
+    let test = text
+        .lines()
+        .find(|line| line.starts_with("\ttest\t"))
+        .unwrap();
+    assert!(
+        test.contains("qword ptr") && test.contains(" * 8"),
+        "{text}"
+    );
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    for body in [
+        source.replace("load.i64 v4", "load.i64 volatile v4"),
+        source.replace("iconst.i64 512", "iconst.i64 2147483648"),
+        source.replace("v6 = iconst", "store v1, v0\n    v6 = iconst"),
+    ] {
+        let module = keel_ir::parse(&body).unwrap();
+        let text = request.text(&module).unwrap();
+        assert_eq!(tests(&text).len(), 1, "{text}");
+        assert!(text.contains("qword ptr"), "{text}");
+        assert!(!text.contains("\ttest\tqword ptr"), "{text}");
+    }
+}
+
 fn compile(
     src: &str,
     s: &dyn InstructionSelector,

@@ -311,10 +311,14 @@ a named [cover](../../compiler/design.md) that `--isel all,-<name>` turns off:
   accesses) and indexed vector addresses are excluded.
 - **Mask tests.** An i32 `and` with a literal mask whose only use is an Eq or
   Ne compare against zero in the same block becomes `test r32, imm32`, feeding
-  SETcc, Jcc or CMOV. Only constants may sit between them.
-  `Selection::fold_x86_mask_tests` runs after the selector and before
-  compare/branch/select fusion. Shared AND results, other predicates, nonzero
-  comparisons, register masks and other widths keep the AND.
+  SETcc, Jcc or CMOV. Size also accepts i64 masks and branches on the AND result
+  directly. It uses the narrowest TEST that preserves the zero result.
+  A single-use ordinary load may feed a branch's TEST memory operand when it
+  is adjacent apart from constants and the immediate fits the load's width.
+  The memory operand reads the full original width.
+  Only constants may sit between AND and its sole user. Selection runs before
+  compare/branch/select fusion. Shared AND results and masks that need a
+  register keep the AND.
 - **Signed byte loads.** An ordinary `load.i8` followed by `sext.i32`, with one
   use of the byte and identical source locations, becomes
   `movsx r32, byte ptr [address]`. The address is read before the destination
@@ -333,13 +337,16 @@ roots each one claimed. x86 runs the shared covers `offset-address`,
 `indexed-address`, `zero-test`, `compare-branch` and `packed-abs`, and these.
 On x86, `compare-branch` also turns a compare-and-swap flag used only by the
 next `brif` into a `jne` on the ZF that `lock cmpxchg` leaves.
+In Size, a supported inline memory `btq` followed by a sole-use branch can
+branch on CF directly. One intervening Eq or Ne comparison against zero is
+also supported when it is used only by that branch.
 
 | Cover | Stage | Pattern |
 |---|---|---|
 | `x86-division-remainder` | selection | `x - (x / y) * y` reads the division's remainder |
 | `x86-lea-mul3` | selection | `x * 3 + c` as one LEA (see below) |
 | `x86-binary-memory`, `x86-compare-memory` | selection | Adjacent load as the memory RHS (see [memory operand folding](#memory-operand-folding)) |
-| `x86-mask-test` | backend | i32 `and` with a literal mask tested against zero, as TEST |
+| `x86-mask-test` | backend | single-use literal `and` in a zero comparison or, in Size, a branch |
 | `x86-select-compare` | backend | Single-use scalar compare re-emitted at its select (see [scalar compare and select](#scalar-compare-and-select)) |
 | `x86-packed-positive`, `x86-packed-sign` | backend | i64x2 positive filters, clamps and sign selects |
 | `x86-packed-low-load`, `x86-packed-wide-load`, `x86-signed-byte-load` | backend | Widening loads |
@@ -382,6 +389,9 @@ change C layout, the ABI, CPU features, optimization or unwind emission.
 userspace TLS. `medium` and `large` are rejected; a large model would also need
 distant calls, constants and tables. Linkers diagnose relocation overflow
 rather than truncating.
+
+Under the Size goal, a load that is the only use of a kernel symbol's address
+can encode the symbol in its memory operand with the same signed relocation.
 
 ## Stack alignment
 

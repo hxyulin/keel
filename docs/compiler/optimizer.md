@@ -885,9 +885,13 @@ escape through data, addresses, assembly, retention or lifecycle roots. Weak,
 public, variadic, returns-twice and explicit aggregate-transport functions are
 excluded. The signature and call arguments stay; the body is not inlined or
 cloned. In Size, `constant-returns` substitutes the integer result of a direct
-call to a local definition when every return yields the same literal. The call
-still executes, preserving effects and faults. The final CFG cleanup can then
-remove branches on the result without inlining the helper.
+call to a local definition when every return yields the same literal. A body
+consisting only of the constant and return can be removed from the call site.
+The same pass replaces a local helper whose entire body returns one of its
+parameters with the corresponding argument.
+Argument evaluation and calls with other effects or possible faults remain.
+The final CFG cleanup can then remove branches on the result without inlining
+the helper.
 `empty-calls` removes calls proven to have no effect, and
 `unused-functions` removes functions that optimization made unreachable. Both
 treat constructors, destructors, address references, relocations and assembly

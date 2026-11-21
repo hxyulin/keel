@@ -171,8 +171,15 @@ integer immediates in their consuming instructions when every use can encode
 them. Duplicated bodies have a 16-byte allowance on AArch64 and a 32-byte
 allowance on x86-64. Private x86-64 helpers with an inline hint and a required
 frame pointer get 96 bytes to account for the out-of-line call and frame.
+Bound x86-64 read-only leaves that require a frame can use up to 160 estimated
+bytes and can inline without a hint. These leaves have at most 32 IR
+instructions and an acyclic CFG. The per-caller and module growth limits
+still apply.
 Removable single-use private bodies bypass this filter because their out-of-line code
-disappears. Inline assembly and intrinsics have no estimate and remain calls.
+disappears. Empty x86 compiler barriers have zero emission cost. The estimate
+also accounts for recognized x86 memory bit tests and their flag outputs.
+Both preserve their memory effects when inlined. Unrecognized assembly and
+intrinsics have no estimate and remain calls.
 Portable targets keep the existing IR policy. Required inlining and flatten
 retain their contracts. This admission filter can reduce text while adding
 calls and runtime cost. It does not predict final object size after selection

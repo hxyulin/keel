@@ -936,12 +936,29 @@ mod budget_tests {
 
 /// Bounded emission estimate, not an object-size promise. Single-use private
 /// bodies can disappear; duplicated bodies get only a small call-site allowance.
-pub(super) fn size_bytes_fit(f: &Function, target: crate::VectorTarget, removable: bool) -> bool {
+pub(super) fn size_site_fits(
+    f: &Function,
+    target: crate::VectorTarget,
+    removable: bool,
+    constant_arg: bool,
+) -> bool {
     if removable {
         return true;
     }
+    let framed_leaf = target == crate::VectorTarget::X86Sse2
+        && f.attrs.frame_pointer
+        && !f.attrs.cold
+        && (f.local || f.attrs.noninterposable || f.attrs.no_semantic_interposition)
+        && f.layout_insts().take(33).count() <= 32
+        && readonly_leaf(f);
+    if !(f.attrs.inlinehint || constant_arg || framed_leaf) {
+        return false;
+    }
     let limit = match target {
         crate::VectorTarget::Aarch64Neon => 16,
+        // Private read-only leaves can eliminate the call, frame and ABI
+        // argument moves. Their bounded CFG and ordinary budgets still apply.
+        crate::VectorTarget::X86Sse2 if framed_leaf => 160,
         // These hinted private helpers always pay for an out-of-line frame.
         // Keep the wider allowance confined to builds that require that frame.
         crate::VectorTarget::X86Sse2 if f.local && f.attrs.inlinehint && f.attrs.frame_pointer => {
@@ -1000,6 +1017,23 @@ fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
             });
         }
         bytes += match data {
+            InstData::InlineAsm { asm, args }
+                if !arm
+                    && asm.template.trim().is_empty()
+                    && asm.outputs.is_empty()
+                    && args.is_empty()
+                    && asm
+                        .clobbers
+                        .iter()
+                        .all(|clobber| matches!(clobber, keel_ir::AsmClobber::Memory)) =>
+            {
+                // An empty compiler barrier stays in the clone and emits no bytes.
+                0
+            }
+            InstData::InlineAsm { asm, .. } if !arm && asm.x86_memory_bit_test().is_some() => {
+                // Budget for the test, scratch input moves and a materialized flag.
+                24
+            }
             InstData::InlineAsm { .. } | InstData::Intrinsic { .. } => return None,
             InstData::Iconst { imm, ty } if arm => {
                 let bits = if *ty == keel_ir::Type::I64 { 64 } else { 32 };
@@ -1043,6 +1077,31 @@ fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
 mod byte_tests {
     use super::*;
     #[test]
+    fn x86_costs_the_known_bit_test_and_keeps_unknown_assembly_unpriced() {
+        let source = r#"func @flag(ptr, i64) -> i8 inlinehint frame_pointer local {
+block0(v0: ptr, v1: i64):
+    v2 = asm "btq %2,%1", "=@ccb,m,rI,~{memory}"(v0, v1) -> i8
+    return v2
+}"#;
+        for (body, expected) in [
+            (source.to_owned(), true),
+            (source.replace("btq %2,%1", "btsq %2,%1"), false),
+            (source.replace("~{memory}", "~{rax}"), false),
+        ] {
+            let module = keel_ir::parse(&body).unwrap();
+            assert_eq!(
+                size_site_fits(
+                    &module.functions[0],
+                    crate::VectorTarget::X86Sse2,
+                    false,
+                    false
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn wide_constants_have_target_specific_costs() {
         let module = keel_ir::parse(
             "func @f() -> i64 {\nblock0:\n v0=iconst.i64 1311768467463790320\n return v0\n }",
@@ -1067,19 +1126,33 @@ block0(v0: ptr):
 }";
         let target = crate::VectorTarget::X86Sse2;
         let module = keel_ir::parse(source).unwrap();
-        assert!(size_bytes_fit(&module.functions[0], target, false));
+        assert!(size_site_fits(&module.functions[0], target, false, true));
         let register_use = source.replace("v3 = and v1, v2", "v3 = and v2, v1");
         let module = keel_ir::parse(&register_use).unwrap();
-        assert!(!size_bytes_fit(&module.functions[0], target, false));
+        assert!(!size_site_fits(&module.functions[0], target, false, true));
     }
     #[test]
     fn removable_body_does_not_need_a_byte_allowance() {
         let module = keel_ir::parse("func @f() {\nblock0:\n return\n}").unwrap();
-        assert!(size_bytes_fit(
+        assert!(size_site_fits(
             &module.functions[0],
             crate::VectorTarget::Aarch64Neon,
-            true
+            true,
+            false,
         ));
+    }
+    #[test]
+    fn x86_empty_compiler_barrier_emits_no_bytes() {
+        let source = "func @f() {
+block0:
+    asm \"\", \"~{memory}\"()
+    return
+}";
+        let target = crate::VectorTarget::X86Sse2;
+        let module = keel_ir::parse(source).unwrap();
+        assert_eq!(target_bytes(&module.functions[0], target), Some(1));
+        let opaque = keel_ir::parse(&source.replace("asm \"\"", "asm \"nop\"")).unwrap();
+        assert_eq!(target_bytes(&opaque.functions[0], target), None);
     }
     #[test]
     fn x86_framed_local_inline_hints_get_more_room() {
@@ -1095,12 +1168,40 @@ block0(v0: i64, v1: i64):
 }";
         let target = crate::VectorTarget::X86Sse2;
         let module = keel_ir::parse(source).unwrap();
-        assert!(size_bytes_fit(&module.functions[0], target, false));
+        assert!(size_site_fits(&module.functions[0], target, false, false));
         for attribute in [" inlinehint", " frame_pointer", " local"] {
             let module = keel_ir::parse(&source.replace(attribute, "")).unwrap();
-            assert!(!size_bytes_fit(&module.functions[0], target, false));
+            assert!(!size_site_fits(&module.functions[0], target, false, true));
         }
     }
+
+    #[test]
+    fn x86_size_admits_bound_framed_readonly_leaves_without_a_hint() {
+        let source = "func @f(ptr, i64) -> i64 cc(c) frame_pointer local {
+block0(v0: ptr, v1: i64):
+    v2 = ptradd v0, v1
+    v3 = load.i64 v2
+    return v3
+}";
+        let target = crate::VectorTarget::X86Sse2;
+        let module = keel_ir::parse(source).unwrap();
+        assert!(size_site_fits(&module.functions[0], target, false, false));
+        for source in [
+            source.replace(" frame_pointer", ""),
+            source.replace(" local", ""),
+            source.replace("    return v3", "    store v3, v2\n    return v3"),
+        ] {
+            let module = keel_ir::parse(&source).unwrap();
+            assert!(!size_site_fits(&module.functions[0], target, false, false));
+        }
+        assert!(!size_site_fits(
+            &module.functions[0],
+            crate::VectorTarget::Aarch64Neon,
+            false,
+            false,
+        ));
+    }
+
     #[test]
     fn negative_constant_uses_movn_allowance() {
         let module =
