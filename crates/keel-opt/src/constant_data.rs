@@ -23,7 +23,7 @@ impl Pass for ConstantData {
         let Some(layout) = context.layout else {
             return Some(false);
         };
-        if !module.assembly.is_empty()
+        if !module.assembly.iter().all(|text| data_and_linkage(text))
             || module.functions.iter().any(|f| {
                 f.layout_insts()
                     .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
@@ -43,6 +43,7 @@ impl Pass for ConstantData {
                     || d.section.is_some()
                     || !init.constant
                     || init.has_relocations()
+                    || module.assembly.iter().any(|text| text.contains(&d.name))
                 {
                     return None;
                 }
@@ -149,6 +150,71 @@ impl Pass for ConstantData {
         }
         Some(changed)
     }
+}
+
+/// Recognize ELF export records and symbol linkage. Keep the module-wide
+/// barrier for code, macros and unknown sections or directives.
+fn data_and_linkage(text: &str) -> bool {
+    let mut in_data = false;
+    for statement in text
+        .split([';', '\n'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Some(label) = statement.strip_suffix(':') {
+            if !in_data || !asm_symbol(label) {
+                return false;
+            }
+            continue;
+        }
+        let (directive, args) = statement
+            .split_once(char::is_whitespace)
+            .map_or((statement, ""), |(directive, args)| {
+                (directive, args.trim())
+            });
+        match (in_data, directive) {
+            (false, ".section")
+                if args.split_once(',').is_some_and(|(name, flags)| {
+                    name.trim() == "\".export_symbol\"" && flags.trim() == "\"a\""
+                }) =>
+            {
+                in_data = true;
+            }
+            (true, ".previous") if args.is_empty() => in_data = false,
+            (true, ".asciz")
+                if args
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .is_some_and(|s| {
+                        s.bytes().all(|c| {
+                            c.is_ascii_graphic() && !matches!(c, b'"' | b'\\') || c == b' '
+                        })
+                    }) => {}
+            (true, ".balign") if !args.is_empty() && args.bytes().all(|c| c.is_ascii_digit()) => {}
+            (true, ".quad") | (false, ".weak" | ".globl") if asm_symbol(args) => {}
+            (false, ".type")
+                if args.split_once(',').is_some_and(|(name, ty)| {
+                    asm_symbol(name.trim()) && ty.trim() == "@function"
+                }) => {}
+            (false, ".set")
+                if args.split_once(',').is_some_and(|(name, target)| {
+                    asm_symbol(name.trim()) && asm_symbol(target.trim())
+                }) => {}
+            _ => return false,
+        }
+    }
+    !in_data
+}
+
+fn asm_symbol(text: &str) -> bool {
+    text != "."
+        && text
+            .bytes()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'_' | b'.'))
+        && text
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.'))
 }
 
 fn address(f: &Function, mut value: Value) -> Option<(&str, i64)> {

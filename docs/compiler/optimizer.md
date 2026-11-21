@@ -159,6 +159,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `loop-strength-reduce` | Replace wrapping i32/i64 induction products with recurrences in two-block loops |
 | `loop-unroll` | Two-way unrolling of wrapping integer reductions |
 | `loop-unroll-exact` | Fully unroll tiny literal-trip loops in scalar operation order |
+| `stack-index-unroll` | Expose fixed stack offsets in short readback loops whose arrays can be eliminated |
 | `loop-rotate` | Guarded rotation that copies header tests to the latch and keeps the entry guard |
 | `loop-unroll-words` | Check the range once per four scalar word comparisons and exit at the first mismatch |
 | `adjacent-abs` | Convert private scalar absolute-value triangles before vectorization |
@@ -358,11 +359,13 @@ and meet the load's alignment contract.
 
 Objects are at most 4096 bytes. Mutable, nonlocal, weak, TLS, explicitly placed
 and relocation-bearing objects remain memory accesses. Volatile and atomic
-loads remain unchanged. Module or inline assembly prevents the pass, as do
-opaque machine-state observers in the affected function. The pass needs an
-explicit data layout and honors function optimization policies. Balanced and
-Size run it before their scalar and inlining rounds, so ordinary cleanup can
-use the exposed literals.
+loads remain unchanged. Inline assembly and opaque module assembly prevent
+the pass. Module assembly for ELF export records and symbol linkage
+allows folding objects whose names do not appear in those fragments. Opaque
+machine-state observers prevent folding within the affected function. The pass
+needs an explicit data layout and honors function optimization policies.
+Balanced and Size run it before their scalar and inlining rounds, so ordinary
+cleanup can use the exposed literals.
 Wide literals can cost more instructions than a memory read when later
 optimization does not simplify their uses. Selection still determines the
 materialization sequence.
@@ -955,6 +958,15 @@ trap or source location can observe the earlier store. Input reads that may
 alias the field keep the writes separate. Calls, volatile accesses, floating
 operations, unsupported control flow and debugger locations reject the
 candidate. Empty lexical scopes alone do not prevent unrolling. The final induction update must not wrap in its comparison domain.
+
+### stack-index-unroll
+
+In x86-64 Size, a counted loop with two to eight literal iterations can
+expose fixed offsets for a local array. The loop must read at least twice
+through computed offsets from the same fixed stack slot. Exact unrolling
+preserves access order. A bounded trial folds the offsets and forwards the
+stack values. It replaces the original only when the slot has no remaining
+address uses and the function has fewer instructions.
 
 ### if-convert
 

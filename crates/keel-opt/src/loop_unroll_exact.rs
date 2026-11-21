@@ -6,13 +6,16 @@ use crate::ir_match::{def, int_bits, int_const};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
-    Type, UnaryOp, Value,
+    StackSlot, Type, UnaryOp, Value,
 };
 
 const MAX_TRIPS: usize = 8;
 const MAX_BODY: usize = 24;
 const MAX_CLONED: usize = 128;
 const FUNCTION_BUDGET: usize = 768;
+const INDEXED_STACK_MAX_CLONED: usize = 192;
+const INDEXED_STACK_MAX_BLOCKS: usize = 64;
+const INDEXED_STACK_MAX_INSTS: usize = 32_768;
 
 pub(crate) struct LoopUnrollExact;
 impl crate::Pass for LoopUnrollExact {
@@ -33,6 +36,87 @@ impl crate::Pass for LoopUnrollExact {
     }
 }
 
+pub(crate) struct StackIndexUnroll;
+impl crate::Pass for StackIndexUnroll {
+    fn name(&self) -> &'static str {
+        "stack-index-unroll"
+    }
+    fn description(&self) -> &'static str {
+        "unroll a literal-trip readback loop when stack forwarding can remove its array"
+    }
+    fn family(&self) -> crate::PassFamily {
+        crate::PassFamily::Unroll
+    }
+    fn run(&self, f: &mut Function, context: &crate::OptimizationContext) -> bool {
+        // With SSE disabled the x86 function context keeps its native layout
+        // but uses the portable vector policy.
+        if context.layout.is_none()
+            || context.target == crate::VectorTarget::Aarch64Neon
+            || f.num_stack_slots() == 0
+            || f.num_insts() > INDEXED_STACK_MAX_INSTS
+            || f.blocks().take(INDEXED_STACK_MAX_BLOCKS + 1).count() > INDEXED_STACK_MAX_BLOCKS
+            || has_debug(f)
+        {
+            return false;
+        }
+        let Some((candidate, slot)) = f.blocks().find_map(|header| {
+            let candidate = analyze(f, header, UnrollScope::StackReadback)?;
+            let slot = indexed_reads(f, candidate.body?)?;
+            (candidate.trips >= 2).then_some((candidate, slot))
+        }) else {
+            return false;
+        };
+
+        // An address may also escape outside the loop, or its reads may lack
+        // dominating writes. Keep the original unless forwarding proves the
+        // slot can disappear and the complete rewrite is smaller.
+        let mut trial = f.clone();
+        transform(&mut trial, candidate);
+        crate::const_fold::run(&mut trial);
+        crate::simplify_cfg::run(&mut trial);
+        crate::stack_notrap::run(&mut trial);
+        if !crate::STACK_FORWARD.run(&mut trial, context) {
+            return false;
+        }
+        crate::dce::run(&mut trial);
+        if trial
+            .layout_insts()
+            .any(|(_, i)| matches!(*trial.inst_data(i), D::StackAddr { slot: s } if s == slot))
+            || trial.layout_insts().count() >= f.layout_insts().count()
+        {
+            return false;
+        }
+        *f = trial;
+        true
+    }
+    fn deterministic(&self) -> bool {
+        true
+    }
+}
+
+fn indexed_reads(f: &Function, body: Block) -> Option<StackSlot> {
+    let mut seen = FxHashSet::default();
+    f.block_insts(body).iter().find_map(|&i| {
+        let D::Load { addr, .. } = *f.inst_data(i) else {
+            return None;
+        };
+        let D::Binary {
+            op: B::Ptradd,
+            args,
+        } = *f.inst_data(def(f, addr)?)
+        else {
+            return None;
+        };
+        if int_const(f, args[1]).is_some() {
+            return None;
+        }
+        let D::StackAddr { slot } = *f.inst_data(def(f, args[0])?) else {
+            return None;
+        };
+        (!seen.insert(slot)).then_some(slot)
+    })
+}
+
 struct Candidate {
     header: Block,
     body: Option<Block>,
@@ -42,6 +126,12 @@ struct Candidate {
     exit: BlockCall,
     trips: usize,
     cost: usize,
+}
+
+#[derive(Clone, Copy)]
+enum UnrollScope {
+    General,
+    StackReadback,
 }
 
 fn value(f: &Function, v: Value, signed: bool) -> Option<i128> {
@@ -69,7 +159,7 @@ fn trips(f: &Function, start: Value, bound: Value, signed: bool, rotated: bool) 
     }
     Some(n as usize)
 }
-fn analyze(f: &Function, header: Block) -> Option<Candidate> {
+fn analyze(f: &Function, header: Block, scope: UnrollScope) -> Option<Candidate> {
     if f.block_params(header).is_empty() || f.block_params(header).len() > 4 {
         return None;
     }
@@ -174,6 +264,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             let allowed = match f.inst_data(i) {
                 D::Iconst { ty, .. } => ty.is_int(),
                 D::SymbolAddr { .. } => true,
+                D::StackAddr { .. } => matches!(scope, UnrollScope::StackReadback),
                 D::Binary {
                     op:
                         B::Iadd
@@ -236,7 +327,11 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         } else {
             0
         };
-    if c.cost > MAX_CLONED {
+    let cloned_limit = match scope {
+        UnrollScope::General => MAX_CLONED,
+        UnrollScope::StackReadback => INDEXED_STACK_MAX_CLONED,
+    };
+    if c.cost > cloned_limit {
         return None;
     }
     // Only header parameters may be used outside the loop. Exit-edge arguments
@@ -265,7 +360,7 @@ fn clone_block(
     let insts = f.block_insts(b).to_vec();
     for &i in &insts[..insts.len() - 1] {
         let original = f.inst_results(i).first().copied();
-        // Literals and symbol addresses have no iteration-dependent operands.
+        // Literals and fixed addresses have no iteration-dependent operands.
         // Keep the first clone: later scalar steps reuse it without requiring
         // another GVN/GCM pass after the unrolled region is constructed.
         if let Some(original) = original
@@ -275,7 +370,10 @@ fn clone_block(
             continue;
         }
         let mut data = f.inst_data(i).clone();
-        let invariant = matches!(data, D::Iconst { .. } | D::SymbolAddr { .. });
+        let invariant = matches!(
+            data,
+            D::Iconst { .. } | D::SymbolAddr { .. } | D::StackAddr { .. }
+        );
         data.for_each_operand_mut(|v| {
             let old = f.resolve(*v);
             *v = map.get(&old).copied().unwrap_or(old);
@@ -334,8 +432,12 @@ fn transform(f: &mut Function, c: Candidate) {
     }
     f.remove_block(c.header);
 }
+fn has_debug(f: &Function) -> bool {
+    f.debug_return.is_some() || f.debug_loc.is_some() || !f.debug_vars.is_empty()
+}
+
 fn run(f: &mut Function) -> bool {
-    if f.debug_return.is_some() || f.debug_loc.is_some() || !f.debug_vars.is_empty() {
+    if has_debug(f) {
         return false;
     }
     let headers = f.blocks().collect::<Vec<_>>();
@@ -345,7 +447,7 @@ fn run(f: &mut Function) -> bool {
         if !f.is_block_inserted(header) {
             continue;
         }
-        if let Some(c) = analyze(f, header)
+        if let Some(c) = analyze(f, header, UnrollScope::General)
             && c.cost <= budget
         {
             budget -= c.cost;

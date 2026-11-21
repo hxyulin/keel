@@ -2,6 +2,83 @@ use keel_ir::{InstData as D, Type};
 use keel_ir_interp::Interpreter;
 use std::fmt::Write as _;
 
+#[test]
+fn size_unrolls_indexed_reads_only_when_the_fixed_slot_disappears() {
+    use keel_ir_interp::{Outcome, Val};
+
+    let source = r#"
+func @sum(i32, i32) -> i32 x86_no_sse {
+    ss0 = stack_slot 16, align 4
+block0(v0: i32, v1: i32):
+    v2 = stack_addr ss0
+    v3 = iconst.i64 4
+    v4 = ptradd v2, v3
+    v5 = iconst.i64 8
+    v6 = ptradd v2, v5
+    v7 = iconst.i64 12
+    v8 = ptradd v2, v7
+    store v0, v2
+    store v1, v4
+    store v0, v6
+    store v1, v8
+    v9 = iconst.i64 0
+    v10 = iconst.i32 0
+    jump block1(v9, v10)
+block1(v11: i64, v12: i32):
+    v13 = iconst.i64 2
+    v14 = icmp.ult v11, v13
+    brif v14, block2, block3
+block2:
+    v15 = imul v11, v3
+    v16 = ptradd v2, v15
+    v17 = iadd v15, v5
+    v18 = ptradd v2, v17
+    v19 = load.i32 v16
+    v20 = load.i32 v18
+    v21 = iadd v19, v20
+    v22 = iadd v12, v21
+    v23 = iconst.i64 1
+    v24 = iadd v11, v23
+    jump block1(v24, v22)
+block3:
+    return v12
+}
+"#;
+    let optimize = |m: &mut keel_ir::Module| {
+        keel_opt::run_passes_for_target(
+            m,
+            &["stack-index-unroll"],
+            keel_opt::VectorTarget::X86Sse2,
+        )
+        .unwrap();
+        keel_ir::verify_module(m).unwrap();
+    };
+    let mut optimized = keel_ir::parse(source).unwrap();
+    optimize(&mut optimized);
+    assert!(!optimized.to_string().contains("stack_addr"), "{optimized}");
+    assert!(!optimized.to_string().contains("brif"));
+    assert_eq!(
+        Interpreter::new(&optimized).call("sum", &[Val::I32(u32::MAX), Val::I32(9)]),
+        Outcome::Return(vec![Val::I32(16)])
+    );
+
+    for source in [
+        source.replace("load.i32 v16", "load.i32 volatile v16"),
+        format!(
+            "decl @observe(ptr)\n{}",
+            source.replace(
+                "jump block1(v9, v10)",
+                "call @observe(v2)\n    jump block1(v9, v10)"
+            )
+        ),
+    ] {
+        let mut original = keel_ir::parse(&source).unwrap();
+        let before = original.to_string();
+        optimize(&mut original);
+        assert_eq!(original.to_string(), before);
+    }
+}
+
 fn byte_recurrence(factor: i64) -> String {
     let mut text = format!(
         "func @hash(ptr,i64,i64) -> i64 {{

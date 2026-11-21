@@ -472,6 +472,7 @@ pub(crate) static LOOP_STRENGTH_REDUCE: &dyn Pass = &loop_strength_reduce::LoopS
 pub(crate) static LOOP_UNROLL: &dyn Pass = &loop_unroll::LoopUnroll;
 pub(crate) static LOOP_UNROLL_WORDS: &dyn Pass = &loop_vectorize::LoopUnrollWords;
 pub(crate) static LOOP_UNROLL_EXACT: &dyn Pass = &loop_unroll_exact::LoopUnrollExact;
+pub(crate) static STACK_INDEX_UNROLL: &dyn Pass = &loop_unroll_exact::StackIndexUnroll;
 pub(crate) static LOOP_COPY: &dyn Pass = &loop_vectorize::LoopCopy;
 pub(crate) static LOOP_VECTORIZE: &dyn Pass = &loop_vectorize::LoopVectorize;
 pub(crate) static LOOP_REDUCE: &dyn Pass = &loop_vectorize::LoopReduce;
@@ -557,6 +558,7 @@ pub static PASSES: &[&dyn Pass] = &[
     LOOP_STRENGTH_REDUCE,
     LOOP_UNROLL,
     LOOP_UNROLL_EXACT,
+    STACK_INDEX_UNROLL,
     LOOP_UNROLL_WORDS,
     LOOP_DOT,
     LOOP_BATCH,
@@ -859,6 +861,7 @@ const SIZE_PARTS: &[&[&str]] = &[
     // Motion exposes equivalent computations for GVN. Restore local constant
     // and address copies afterward to avoid long-lived values and their spills.
     &["gcm-size", "gvn", "gcm-size", "dce"],
+    &["stack-index-unroll"],
     &["constant-returns"],
     &RELEASE_EPILOGUE,
     &["terminal-merge"],
@@ -866,8 +869,8 @@ const SIZE_PARTS: &[&[&str]] = &[
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining
 /// exposes dead branches. Expands bounded memory intrinsics before stack cleanup.
-/// Runs code motion and value numbering after scalar cleanup, without unrolling
-/// or vectorization.
+/// Runs code motion and value numbering after scalar cleanup. Exact unrolling
+/// is limited to index loops whose private arrays can be eliminated.
 /// Mandatory frontend inlining still runs to satisfy language/operand contracts.
 /// This is an IR growth policy, not a guarantee about final machine-code size.
 pub const SIZE_PIPELINE: &[&str] = &concat::<{ total_len(SIZE_PARTS) }>(SIZE_PARTS);

@@ -84,3 +84,41 @@ fn binding_volatility_bounds_alignment_and_placement_remain_explicit() {
     apply(&mut m, VectorTarget::Aarch64Neon);
     assert_eq!(m.to_string(), before);
 }
+
+#[test]
+fn module_assembly_only_allows_folding_unrelated_objects_in_metadata_fragments() {
+    let source = r#"
+data @table = local const align 1 { i8 7 }
+func @read() -> i8 {
+block0:
+ v0 = symbol_addr @table
+ v1 = load.i8 v0
+ return v1
+}
+"#;
+    let metadata = r#"module_asm ".section \".export_symbol\",\"a\" ; export_read: ; .asciz \"\" ; .balign 8 ; .quad read ; .previous"
+module_asm ".weak exported_read\n.type exported_read, @function\n.set exported_read, read"
+"#;
+    let mut m = parse(&format!("{metadata}{source}")).unwrap();
+    let original_assembly = m.assembly.clone();
+    apply(&mut m, VectorTarget::X86Sse2);
+    assert!(m.to_string().contains("iconst.i8 7"));
+    assert_eq!(m.assembly, original_assembly);
+
+    for asm in [
+        metadata.replace(".quad read", ".quad table"),
+        metadata.replace(".set exported_read, read", ".set table, read"),
+        metadata.replace(".previous", ".text"),
+        metadata.replace(".previous", ""),
+        metadata.replace(".balign 8", ".org 0"),
+        metadata.replace(".export_symbol", ".text"),
+        metadata.replace("\\\"a\\\"", "\\\"ax\\\""),
+        r#"module_asm ".text; other:; ret""#.into(),
+        r#"module_asm ".include \"more.s\"""#.into(),
+    ] {
+        let mut m = parse(&format!("{asm}\n{source}")).unwrap();
+        let before = m.to_string();
+        apply(&mut m, VectorTarget::X86Sse2);
+        assert_eq!(m.to_string(), before, "{asm}");
+    }
+}

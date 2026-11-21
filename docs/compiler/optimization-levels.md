@@ -148,7 +148,9 @@ unhinted helpers with variable arguments can remain calls. Size expands memory
 intrinsics of at most 32 bytes before stack cleanup. After the last scalar
 round, GCM moves pure computations, GVN merges newly exposed equivalents,
 and GCM restores local constant and address copies to reduce register pressure.
-It omits unrolling and automatic vectorization. It retains
+On x86-64, a bounded exact unroll can eliminate a private array after exposing
+constant stack offsets. Size omits general loop unrolling and automatic
+vectorization. It retains
 CFG, load, stack, constant-argument and unreachable-function cleanup, including
 DCE after empty-call elimination to remove unused symbol references. Required
 language/inline-assembly inlining remains active.
