@@ -6,7 +6,27 @@ const MAX_INSTS: usize = 8192;
 const MAX_PENDING: usize = 64;
 
 pub fn run(f: &mut Function) -> bool {
+    run_scoped(f, false)
+}
+
+/// The first asm may observe or expose the frame. Only remove stores already
+/// overwritten in the entry block before any asm has executed.
+pub(crate) fn run_entry_before_asm(f: &mut Function) -> bool {
+    run_scoped(f, true)
+}
+
+fn run_scoped(f: &mut Function, entry_before_asm: bool) -> bool {
     if !f.debug_vars.is_empty() || f.debug_loc.is_some() || f.num_values() > 32768 {
+        return false;
+    }
+    let entry = f.entry_block();
+    if entry_before_asm
+        && !entry.is_some_and(|block| {
+            f.block_insts(block)
+                .iter()
+                .any(|&i| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
+        })
+    {
         return false;
     }
     let insts: Vec<_> = f
@@ -15,19 +35,22 @@ pub fn run(f: &mut Function) -> bool {
         .map(|(_, i)| i)
         .collect();
     if insts.len() > MAX_INSTS
-        || insts.iter().any(|&i| {
-            matches!(
-                f.inst_data(i),
-                InstData::InlineAsm { .. }
-                    | InstData::Invoke { .. }
-                    | InstData::LandingPad { .. }
-                    | InstData::Intrinsic {
-                        id: keel_ir::Intrinsic::FrameAddress
-                            | keel_ir::Intrinsic::StackSave
-                            | keel_ir::Intrinsic::StackRestore,
-                        ..
-                    }
-            )
+        || insts.iter().any(|&i| match f.inst_data(i) {
+            InstData::InlineAsm { .. } => !entry_before_asm,
+            InstData::Invoke { .. }
+            | InstData::LandingPad { .. }
+            | InstData::Intrinsic {
+                id:
+                    keel_ir::Intrinsic::FrameAddress
+                    | keel_ir::Intrinsic::StackSave
+                    | keel_ir::Intrinsic::StackRestore,
+                ..
+            } => true,
+            InstData::Call { func, .. } => entry_before_asm && f.callee(*func).sig.returns_twice,
+            InstData::CallIndirect { sig, .. } => {
+                entry_before_asm && f.signature(*sig).returns_twice
+            }
+            _ => false,
         })
     {
         return false;
@@ -84,12 +107,18 @@ pub fn run(f: &mut Function) -> bool {
             }
         });
     }
-    let blocks: Vec<_> = f.blocks().collect();
+    let blocks: Vec<_> = f
+        .blocks()
+        .filter(|b| !entry_before_asm || Some(*b) == entry)
+        .collect();
     let mut changed = false;
     for b in blocks {
         let mut pending = Vec::new();
         let mut dead = FxHashSet::default();
         for &i in f.block_insts(b) {
+            if entry_before_asm && matches!(f.inst_data(i), InstData::InlineAsm { .. }) {
+                break;
+            }
             if f.inst_loc(i).is_some() {
                 pending.clear();
                 continue;

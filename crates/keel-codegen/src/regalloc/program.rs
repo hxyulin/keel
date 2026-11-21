@@ -700,7 +700,7 @@ block0(v0: i64, v1: i64):
             func,
             |_| vec![Value::new(1)],
             &crate::fold::use_counts(func),
-            false,
+            crate::fold::CompareSpan::Adjacent,
         );
         let insts = func.block_insts(func.entry_block().unwrap());
         assert!(selection.covered(insts[1]));

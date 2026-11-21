@@ -107,6 +107,15 @@ pub enum AsmClobber {
 }
 
 impl InlineAsm {
+    /// An empty template with no operands and at most a memory clobber.
+    /// The compiler must still honor its ordering effects on observable memory.
+    pub fn is_empty_memory_barrier(&self) -> bool {
+        self.template.trim().is_empty()
+            && self.outputs.is_empty()
+            && self.inputs.is_empty()
+            && self.clobbers.iter().all(|c| *c == AsmClobber::Memory)
+    }
+
     /// Recognizes an x86-64 memory BT carrying its result in CF or its inverse.
     /// The template can read memory, fault and act as a compiler barrier.
     pub fn x86_memory_bit_test(&self) -> Option<u8> {
@@ -130,6 +139,33 @@ impl InlineAsm {
         {
             return None;
         }
+        let (opcode, source, memory) = self.x86_memory_binary_template()?;
+        (opcode == "btq" && source == "%2" && memory == "%1").then_some(*cc)
+    }
+
+    /// A single x86 memory subtraction whose zero flag supplies its only output.
+    pub fn x86_memory_subtract_test(&self) -> Option<u8> {
+        let [(AsmOperand::Flag(cc @ (4 | 5)), _)] = self.outputs.as_slice() else {
+            return None;
+        };
+        if !matches!(
+            self.inputs.as_slice(),
+            [
+                AsmOperand::MemReadWrite,
+                AsmOperand::Reg | AsmOperand::Imm | AsmOperand::RegImm | AsmOperand::RegSignedImm32,
+            ]
+        ) || self
+            .clobbers
+            .iter()
+            .any(|c| matches!(c, AsmClobber::Reg(_)))
+        {
+            return None;
+        }
+        let (opcode, source, memory) = self.x86_memory_binary_template()?;
+        (matches!(opcode, "subl" | "subq") && source == "%2" && memory == "%1").then_some(*cc)
+    }
+
+    fn x86_memory_binary_template(&self) -> Option<(&str, &str, &str)> {
         let template = self.template.trim();
         let code = if let Some((code, comment)) = template.split_once("/*") {
             if comment.strip_suffix("*/")?.contains("*/") {
@@ -140,8 +176,8 @@ impl InlineAsm {
             template
         };
         let (opcode, operands) = code.split_once(|c: char| c.is_ascii_whitespace())?;
-        let (bit, memory) = operands.split_once(',')?;
-        (opcode == "btq" && bit.trim() == "%2" && memory.trim() == "%1").then_some(*cc)
+        let (source, memory) = operands.split_once(',')?;
+        Some((opcode, source.trim(), memory.trim()))
     }
 
     /// Builds inline assembly from a constraint string; `output_types` are

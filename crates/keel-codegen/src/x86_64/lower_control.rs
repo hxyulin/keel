@@ -66,11 +66,13 @@ impl FunctionCompiler<'_> {
                 // To the else-branch when the condition is zero, or when a
                 // fused compare's condition does not hold.
                 let not = match (
-                    self.selection.asm_bit_test_branches.get(&inst).copied(),
+                    self.selection.asm_memory_flag_branches.get(&inst).copied(),
                     func.value_def(func.resolve(cond)),
                 ) {
                     (Some(2), _) => "ae",
                     (Some(3), _) => "b",
+                    (Some(4), _) => "ne",
+                    (Some(5), _) => "e",
                     _ if self.emit_mask_test(inst) => "e",
                     // A fused compare-and-swap left ZF set when it stored.
                     (_, ValueDef::Result(cas, _))

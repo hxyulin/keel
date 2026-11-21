@@ -271,6 +271,9 @@ keep their existing staging boundary.
 With Bounded allocation in speed mode, an i32 or i64 comparison used only by
 its branch can also cross one stack-address definition in code without debug
 locations. The backend keeps the operands live until it emits the branch.
+In size mode, a register-only i64 comparison can feed a branch across
+up to four stack lifetime markers without crossing a source line. Selected
+memory comparisons still read within the original lifetime.
 
 ## Memory operand folding
 
@@ -337,9 +340,10 @@ roots each one claimed. x86 runs the shared covers `offset-address`,
 `indexed-address`, `zero-test`, `compare-branch` and `packed-abs`, and these.
 On x86, `compare-branch` also turns a compare-and-swap flag used only by the
 next `brif` into a `jne` on the ZF that `lock cmpxchg` leaves.
-In Size, a supported inline memory `btq` followed by a sole-use branch can
-branch on CF directly. One intervening Eq or Ne comparison against zero is
-also supported when it is used only by that branch.
+In Size, a supported inline memory `btq`, `subl`, or `subq` followed by a
+sole-use branch can branch on CF for the bit test or ZF for subtraction.
+One intervening Eq or Ne comparison against zero is also supported when it
+is used only by that branch.
 
 | Cover | Stage | Pattern |
 |---|---|---|
@@ -525,6 +529,9 @@ addition to the Size IR pipeline:
   sign-extended 32-bit relocation.
 - For cold switches with many repeated destinations, use byte indices into a
   table of relative offsets when the two tables and extra load use fewer bytes.
+- For a small dense switch at a loop header, use at most two direct equality
+  or range tests when the cases share destinations and edge copies. An
+  unmatched value takes the original default edge.
 - For a large i64 constant whose complement fits in 32 bits, compare the
   assembler's exact encodings of `movabs` and `mov r32, complement; not r64`.
   Choose the latter only when smaller. Both forms preserve flags, including

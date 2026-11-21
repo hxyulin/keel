@@ -94,3 +94,31 @@ block0(v0: i64):
     keel_ir::verify_module(&m).unwrap();
     assert_eq!(stores(&m), 1, "read from a different private slot");
 }
+
+#[test]
+fn size_removes_only_stores_overwritten_before_the_first_asm() {
+    let source = r#"
+func @f(i64, i64) -> i64 x86_no_sse {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ store notrap v0, v2
+ store notrap v1, v2
+ asm "nop", "~{memory}"()
+ store notrap v0, v2
+ store notrap v1, v2
+ v3 = load.i64 notrap v2
+ return v3
+}
+"#;
+    let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_opt::run_passes_for_target(
+        &mut module,
+        &["stack-cleanup-size"],
+        keel_opt::VectorTarget::X86Sse2,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(stores(&module), 3);
+}

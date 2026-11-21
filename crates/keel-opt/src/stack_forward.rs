@@ -15,7 +15,7 @@ use keel_ir::{
 
 /// Forwarding without a pointer layout.
 pub fn run(func: &mut Function) -> bool {
-    run_with_layout(func, None, false, false)
+    run_with_layout(func, None, false, false, false)
 }
 
 /// [`DataLayout::NATIVE64`] has eight-byte integral addresses: storing an i64
@@ -28,6 +28,7 @@ pub(crate) fn run_with_layout(
     layout: Option<DataLayout>,
     fp_bits: bool,
     native_i64x2: bool,
+    allow_empty_barriers: bool,
 ) -> bool {
     // Every rewrite below starts from a slot address.
     if func.num_stack_slots() == 0 {
@@ -62,7 +63,9 @@ pub(crate) fn run_with_layout(
                 op: BinaryOp::Ptradd,
                 ..
             } => offsets.push(inst),
-            InstData::InlineAsm { .. } => observer = true,
+            InstData::InlineAsm { ref asm, .. } => {
+                observer |= !(allow_empty_barriers && asm.is_empty_memory_barrier());
+            }
             InstData::Intrinsic { id, .. } => match id {
                 keel_ir::Intrinsic::FrameAddress => observer = true,
                 keel_ir::Intrinsic::StackSave => {

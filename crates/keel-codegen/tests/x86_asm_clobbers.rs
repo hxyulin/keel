@@ -109,7 +109,7 @@ fn selective_preservation_keeps_transport_parity_and_exports_runtime_cases() {
 }
 
 #[test]
-fn size_bit_test_uses_register_flag_output_and_preserves_live_inputs() {
+fn size_memory_flag_asm_branches_and_preserves_live_inputs() {
     use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
 
     let source = r#"
@@ -130,6 +130,13 @@ entry(v0: ptr, v1: i64):
  brif v6, done(v1), done(v3)
 done(v7: i64):
  return v7
+}
+func @subtract_and_select(ptr, i32, i64, i64) -> i64 {
+entry(v0: ptr, v1: i32, v2: i64, v3: i64):
+ v4 = asm "subl %2, %1", "=@cce,mreadwrite,re,~{memory}"(v0, v1) -> i8
+ brif v4, done(v2), done(v3)
+done(v5: i64):
+ return v5
 }
 "#;
     let module = keel_ir::parse(source).unwrap();
@@ -172,6 +179,16 @@ done(v7: i64):
             !branch.contains("\tset") && !branch.contains("\ttest"),
             "{branch}"
         );
+        let (_, subtract) = text.split_once("\"subtract_and_select\":").unwrap();
+        let (subtract, _) = subtract.split_once(".size").unwrap();
+        assert!(
+            subtract.contains("\tje\t") || subtract.contains("\tjne\t"),
+            "{subtract}"
+        );
+        assert!(
+            !subtract.contains("\tset") && !subtract.contains("\ttest"),
+            "{subtract}"
+        );
         let bytes =
             keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
         assert_eq!(bytes, keel_asm::assemble_source_for(target, &text).unwrap());
@@ -182,10 +199,15 @@ done(v7: i64):
                 "\
 extern long bit_test(unsigned long *, long);
 extern long bit_test_branch(unsigned long *, long);
+extern long subtract_and_select(int *, int, long, long);
 int main(void) {
     unsigned long words[] = {1UL << 63, 1};
     for (long bit = -64; bit < 64; ++bit)
         if (bit_test_branch(words + 1, bit) != bit_test(words + 1, bit)) return 1;
+    int counters[] = {9, 7};
+    if (subtract_and_select(counters, 2, 119, 121) != 121 || counters[0] != 7 ||
+        subtract_and_select(counters, 7, 119, 121) != 119 || counters[0] != 0 ||
+        counters[1] != 7) return 1;
     return !(bit_test(words, 0) == 0 && bit_test(words, 63) == 64 &&
              bit_test(words, 64) == 65 && bit_test(words, 65) == 65 &&
              bit_test(words + 1, -1) == 0);

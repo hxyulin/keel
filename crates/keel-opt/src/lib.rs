@@ -62,6 +62,7 @@ mod loop_vectorize;
 pub mod private_aggregate;
 mod tail_calls;
 mod terminal_merge;
+mod x86_interrupt_asm;
 pub use loop_vectorize::VectorTarget;
 
 /// Per-invocation immutable target context.
@@ -430,6 +431,7 @@ pub(crate) static STACK_FORWARD: &dyn Pass = &BuiltinPass::new(
                 context.target,
                 VectorTarget::X86Sse2 | VectorTarget::Aarch64Neon
             ),
+            false,
         )
     },
 );
@@ -454,6 +456,24 @@ pub(crate) static STACK_PROMOTE_BALANCED: &dyn Pass = &BuiltinPass::new(
     |f, context| match context.target {
         VectorTarget::Aarch64Neon => stack_promote::run_large(f),
         VectorTarget::X86Sse2 | VectorTarget::Portable => stack_promote::run(f),
+    },
+);
+pub(crate) static STACK_CLEANUP_SIZE: &dyn Pass = &BuiltinPass::new(
+    "stack-cleanup-size",
+    "retry private stack promotion and forwarding after Size CFG cleanup",
+    |f, context| {
+        let with_sse = context.target == VectorTarget::X86Sse2;
+        let scalar_x86 = context.target == VectorTarget::Portable
+            && f.attrs.x86_no_sse
+            && context.layout == Some(DataLayout::NATIVE64);
+        if !(with_sse || scalar_x86) || f.num_stack_slots() == 0 {
+            return false;
+        }
+        let overwritten = bounded_stack_dse::run_entry_before_asm(f);
+        let promoted = stack_promote::run_with_empty_barriers(f);
+        let forwarded = stack_forward::run_with_layout(f, context.layout, false, with_sse, true);
+        let removed = dce::run(f);
+        overwritten || promoted || forwarded || removed
     },
 );
 pub(crate) static IF_CONVERT: &dyn Pass = &BuiltinPass::new(
@@ -520,7 +540,9 @@ pub(crate) static PRIVATE_AGGREGATE_CLEANUP: &dyn Pass =
 pub(crate) static LOOP_COLUMNS: &dyn Pass = &loop_columns::LoopColumns;
 pub(crate) static LOOP_MATMUL: &dyn Pass = &loop_matmul::LoopMatmul;
 pub(crate) static DEVIRTUALIZE: &dyn Pass = &devirtualize::Devirtualize;
-pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize;
+pub(crate) static INLINE_SIZE: &dyn Pass = &inline::InlineSize::Main;
+pub(crate) static INLINE_SIZE_FRAMED: &dyn Pass = &inline::InlineSize::FramedCleanup;
+pub(crate) static X86_INTERRUPT_ASM: &dyn Pass = &x86_interrupt_asm::X86InterruptAsm;
 
 /// Every registered pass, in `keel passes` order.
 pub static PASSES: &[&dyn Pass] = &[
@@ -552,6 +574,7 @@ pub static PASSES: &[&dyn Pass] = &[
     STACK_PROMOTE,
     STACK_PROMOTE_LARGE,
     STACK_PROMOTE_BALANCED,
+    STACK_CLEANUP_SIZE,
     IF_CONVERT,
     LOAD_REUSE,
     LOOP_ROTATE,
@@ -592,6 +615,8 @@ pub static PASSES: &[&dyn Pass] = &[
     COMPACT_UNUSED_FUNCTIONS,
     PRIVATE_AGGREGATE_CLEANUP,
     INLINE_SIZE,
+    INLINE_SIZE_FRAMED,
+    X86_INTERRUPT_ASM,
     DEVIRTUALIZE,
     LOOP_MATMUL,
     LOOP_COLUMNS,
@@ -864,7 +889,12 @@ const SIZE_PARTS: &[&[&str]] = &[
     &["stack-index-unroll"],
     &["constant-returns"],
     &RELEASE_EPILOGUE,
-    &["terminal-merge"],
+    &[
+        "x86-interrupt-asm",
+        "stack-cleanup-size",
+        "inline-size-framed",
+        "terminal-merge",
+    ],
 ];
 
 /// Size policy. Bounded hinted, constant-argument and single-use helper inlining

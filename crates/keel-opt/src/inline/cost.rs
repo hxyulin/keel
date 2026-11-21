@@ -155,9 +155,14 @@ pub(super) fn acyclic_cfg(f: &Function) -> bool {
 // memory safety or speculate loads: ordinary cloning retains flags and order.
 // Count unreachable blocks and duplicate edges as well as executable layout.
 pub(super) fn readonly_leaf(f: &Function) -> bool {
+    readonly_leaf_with_slots(f, false)
+}
+
+fn readonly_leaf_with_slots(f: &Function, ignore_dead_slots: bool) -> bool {
     if f.blocks().count() > 16
         || f.layout_insts().count() > 96
-        || f.stack_slots().next().is_some()
+        || (f.num_stack_slots() != 0
+            && (!ignore_dead_slots || inline_stack_slots(f).into_iter().any(|used| used)))
         || f.sig
             .params
             .iter()
@@ -949,8 +954,8 @@ pub(super) fn size_site_fits(
         && f.attrs.frame_pointer
         && !f.attrs.cold
         && (f.local || f.attrs.noninterposable || f.attrs.no_semantic_interposition)
-        && f.layout_insts().take(33).count() <= 32
-        && readonly_leaf(f);
+        && f.layout_insts().take(49).count() <= 48
+        && readonly_leaf_with_slots(f, true);
     if !(f.attrs.inlinehint || constant_arg || framed_leaf) {
         return false;
     }
@@ -958,11 +963,11 @@ pub(super) fn size_site_fits(
         crate::VectorTarget::Aarch64Neon => 16,
         // Private read-only leaves can eliminate the call, frame and ABI
         // argument moves. Their bounded CFG and ordinary budgets still apply.
-        crate::VectorTarget::X86Sse2 if framed_leaf => 160,
+        crate::VectorTarget::X86Sse2 if framed_leaf => 224,
         // These hinted private helpers always pay for an out-of-line frame.
         // Keep the wider allowance confined to builds that require that frame.
         crate::VectorTarget::X86Sse2 if f.local && f.attrs.inlinehint && f.attrs.frame_pointer => {
-            96
+            144
         }
         crate::VectorTarget::X86Sse2 => 32,
         crate::VectorTarget::Portable => return true,
@@ -1017,22 +1022,17 @@ fn target_bytes(f: &Function, target: crate::VectorTarget) -> Option<usize> {
             });
         }
         bytes += match data {
-            InstData::InlineAsm { asm, args }
-                if !arm
-                    && asm.template.trim().is_empty()
-                    && asm.outputs.is_empty()
-                    && args.is_empty()
-                    && asm
-                        .clobbers
-                        .iter()
-                        .all(|clobber| matches!(clobber, keel_ir::AsmClobber::Memory)) =>
-            {
+            InstData::InlineAsm { asm, .. } if !arm && asm.is_empty_memory_barrier() => {
                 // An empty compiler barrier stays in the clone and emits no bytes.
                 0
             }
             InstData::InlineAsm { asm, .. } if !arm && asm.x86_memory_bit_test().is_some() => {
                 // Budget for the test, scratch input moves and a materialized flag.
                 24
+            }
+            InstData::InlineAsm { asm, .. } if !arm && asm.x86_memory_subtract_test().is_some() => {
+                // Include staging the memory address and preserving live registers.
+                32
             }
             InstData::InlineAsm { .. } | InstData::Intrinsic { .. } => return None,
             InstData::Iconst { imm, ty } if arm => {
@@ -1096,6 +1096,26 @@ block0(v0: ptr, v1: i64):
                     false,
                     false
                 ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn x86_costs_a_single_memory_subtraction_with_a_zero_flag_result() {
+        let source = r#"func @sub(ptr, i32) -> i8 inlinehint frame_pointer local {
+block0(v0: ptr, v1: i32):
+    v2 = asm "subl %2, %1\n/* output condition code e*/", "=@cce,mreadwrite,re,~{memory}"(v0, v1) -> i8
+    return v2
+}"#;
+        for (body, expected) in [
+            (source.to_owned(), true),
+            (source.replace("subl %2, %1", "subl %2, %1; nop"), false),
+            (source.replace("=@cce", "=@ccb"), false),
+        ] {
+            let module = keel_ir::parse(&body).unwrap();
+            assert_eq!(
+                target_bytes(&module.functions[0], crate::VectorTarget::X86Sse2).is_some(),
                 expected
             );
         }

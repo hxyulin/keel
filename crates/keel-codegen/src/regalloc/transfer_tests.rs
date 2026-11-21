@@ -166,7 +166,12 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
             };
             for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                 let mut selection = crate::select::Selection::compute(func, target);
-                selection.fuse_compares(func, |_| vec![], &crate::fold::use_counts(func), false);
+                selection.fuse_compares(
+                    func,
+                    |_| vec![],
+                    &crate::fold::use_counts(func),
+                    crate::fold::CompareSpan::Adjacent,
+                );
                 let pools = Pools {
                     caller_saved: &[9, 10],
                     callee_saved: &[19, 20],

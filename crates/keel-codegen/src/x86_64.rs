@@ -1066,6 +1066,7 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     dispatch_tails: HashMap<Inst, Inst>,
+    switch_loops: std::cell::OnceCell<keel_ir::loops::LoopInfo>,
     fold_frame_address_calls: bool,
     selection: crate::select::Selection,
     packed_absolute_values: HashMap<Inst, Value>,
@@ -1390,6 +1391,7 @@ impl<'a> FunctionCompiler<'a> {
         );
         let mut compiler = Self {
             dispatch_tails,
+            switch_loops: std::cell::OnceCell::new(),
             fold_frame_address_calls: bounded_speed && !present.inline_asm,
             goal,
             shared_return,
@@ -4341,19 +4343,53 @@ impl<'a> FunctionCompiler<'a> {
                 asm_arg(value as i64)
             }
         };
+        let size = self.goal == crate::CodegenGoal::Size && !self.func.attrs.optnone;
+        let targets: Vec<_> = dests
+            .iter()
+            .enumerate()
+            .map(|(i, dest)| self.switch_target(inst, i, dest))
+            .collect();
+        let short = if size
+            && !replica
+            && plan.jump_table()
+            && plan.values.len() <= 16
+            && plan.values.iter().all(|&value| value <= 127)
+        {
+            let edges: Vec<_> = (0..dests.len())
+                .map(|i| {
+                    (0..i)
+                        .find(|&j| {
+                            targets[i] == targets[j]
+                                || (dests[i] == dests[j]
+                                    && self.edge_moves(i) == self.edge_moves(j))
+                        })
+                        .unwrap_or(i)
+                })
+                .collect();
+            plan::short_switch_ranges(&plan.values, &edges)
+                .filter(|_| {
+                    use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+                    let loops = self.switch_loops.get_or_init(|| {
+                        let cfg = ControlFlowGraph::compute(self.func);
+                        let dom = DominatorTree::compute(self.func, &cfg);
+                        keel_ir::loops::LoopInfo::compute(self.func, &cfg, &dom)
+                    });
+                    loops.loop_at(self.func.inst_block(inst)).is_some()
+                })
+                .map(|ranges| (ranges, edges))
+        } else {
+            None
+        };
         let compact_table = (self.goal == crate::CodegenGoal::Size
             && !self.func.attrs.optnone
             && self.func.attrs.cold
             && !replica
             && plan.jump_table()
+            && short.is_none()
             && span >= 31)
-            .then(|| {
-                plan::compact_switch_table(
-                    plan.table().map(|i| self.switch_target(inst, i, &dests[i])),
-                )
-            })
+            .then(|| plan::compact_switch_table(plan.table().map(|i| targets[i].clone())))
             .flatten();
-        let table = if plan.jump_table() {
+        let table = if plan.jump_table() && short.is_none() {
             // idx = x - min, unsigned; anything above the span is default.
             // A 32-bit index is zero-extended by writing it.
             let rax = reg(S0, width);
@@ -4406,11 +4442,6 @@ impl<'a> FunctionCompiler<'a> {
             debug_assert!(!replica);
             None
         };
-        let targets: Vec<_> = dests
-            .iter()
-            .enumerate()
-            .map(|(i, dest)| self.switch_target(inst, i, dest))
-            .collect();
         if let Some(table) = table {
             self.out.align(2);
             self.out.label(table.clone());
@@ -4427,10 +4458,30 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         } else {
-            for (i, &value) in plan.values.iter().enumerate() {
-                let operand = imm(self, value);
-                self.emit(Opcode::Cmp, [asm_arg(reg(x, width)), asm_arg(operand)]);
-                self.emit(Opcode::Jcc(4), [asm_arg(&targets[i + 1])]);
+            if let Some((ranges, _)) = &short {
+                for &(first, last, target) in ranges {
+                    let (register, immediate, condition) = if first == last {
+                        (reg(x, width), first, 4)
+                    } else {
+                        let index = if first == 0 {
+                            reg(x, width)
+                        } else {
+                            let scratch = reg(if x == S1 { S0 } else { S1 }, width);
+                            let address = memory(r64(x), -i128::from(first));
+                            self.emit(Opcode::Lea, [asm_arg(scratch), asm_arg(address)]);
+                            scratch
+                        };
+                        (index, last - first, 6)
+                    };
+                    self.emit(Opcode::Cmp, [asm_arg(register), asm_arg(immediate)]);
+                    self.emit(Opcode::Jcc(condition), [asm_arg(&targets[target])]);
+                }
+            } else {
+                for (i, &value) in plan.values.iter().enumerate() {
+                    let operand = imm(self, value);
+                    self.emit(Opcode::Cmp, [asm_arg(reg(x, width)), asm_arg(operand)]);
+                    self.emit(Opcode::Jcc(4), [asm_arg(&targets[i + 1])]);
+                }
             }
             // Case landing pads are emitted before the next IR block. The
             // default may fall through only when none of those pads intervene.
@@ -4445,6 +4496,9 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
+            if short.as_ref().is_some_and(|(_, edges)| edges[i] != i) {
+                continue;
+            }
             if !self.block_args_noop(dest, i) {
                 self.out.label(target.clone());
                 self.block_args(dest, i);

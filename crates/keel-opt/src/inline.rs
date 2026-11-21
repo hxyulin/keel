@@ -86,26 +86,82 @@ impl Pass for Inline {
 }
 /// Inline bounded helpers to expose constants or eliminate a single local call.
 #[derive(Debug)]
-pub struct InlineSize;
+pub enum InlineSize {
+    Main,
+    FramedCleanup,
+}
+
+const SIZE_INLINE_CLEANUP: &[&dyn Pass] = &[
+    crate::SIMPLIFY_CFG,
+    crate::CANONICALIZE,
+    crate::INSTCOMBINE,
+    crate::CALL_CONTRACTS,
+    crate::SIMPLIFY_CFG,
+    crate::GVN,
+    crate::SMALL_MEMORY,
+    crate::STACK_FORWARD,
+    crate::STACK_NOTRAP,
+    crate::LOAD_REUSE,
+    crate::STACK_PROMOTE_LARGE,
+    crate::PHI_SIMPLIFY,
+    crate::DCE,
+    crate::CONSTANT_RETURNS,
+    crate::UNUSED_FUNCTIONS,
+    // GVN above can merge the local copies that Size gave to each access.
+    crate::GCM_SIZE,
+    crate::DCE,
+];
+
 impl Pass for InlineSize {
     fn name(&self) -> &'static str {
-        "inline-size"
+        match self {
+            Self::Main => "inline-size",
+            Self::FramedCleanup => "inline-size-framed",
+        }
     }
     fn description(&self) -> &'static str {
-        "inline bounded hinted, constant-argument or single-use local helpers"
+        match self {
+            Self::Main => "inline bounded hinted, constant-argument or single-use local helpers",
+            Self::FramedCleanup => "retry Size inlining in x86 callers that require a frame",
+        }
     }
     fn run(&self, _: &mut Function, _: &OptimizationContext) -> bool {
         false
     }
     fn run_module(&self, module: &mut Module, context: &mut ModuleContext<'_>) -> Option<bool> {
-        run_scheduled(
+        let policy = InlinePolicy {
+            cost: InlineCost::Size,
+            target: context.target,
+            ..InlinePolicy::NONINTERPOSABLE
+        };
+        if matches!(self, Self::Main) {
+            return run_scheduled(module, context, policy);
+        }
+        if context.target != crate::VectorTarget::X86Sse2 {
+            return Some(false);
+        }
+        let callers = module
+            .functions
+            .iter()
+            .filter(|f| context.enabled(f) && f.attrs.frame_pointer && !f.attrs.cold)
+            .map(|f| f.name.clone())
+            .collect::<FxHashSet<_>>();
+        if callers.is_empty() {
+            return Some(false);
+        }
+        let report = run_observed_policy_scoped(
             module,
-            context,
-            InlinePolicy {
-                cost: InlineCost::Size,
-                ..InlinePolicy::NONINTERPOSABLE
-            },
-        )
+            context.sites.as_deref_mut(),
+            policy,
+            Some(&callers),
+        );
+        Some(report.changed_callers(module, context.changed))
+    }
+    fn cleanup_passes(&self) -> &'static [&'static dyn Pass] {
+        match self {
+            Self::Main => &[],
+            Self::FramedCleanup => SIZE_INLINE_CLEANUP,
+        }
     }
     fn family(&self) -> PassFamily {
         PassFamily::Inline

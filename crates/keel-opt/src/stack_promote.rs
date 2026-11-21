@@ -17,17 +17,22 @@ const BLOCK_LIMIT: usize = 256;
 const INST_LIMIT: usize = 8192;
 
 pub fn run(f: &mut Function) -> bool {
-    let changed = promote_private(f, false);
+    let changed = promote_private(f, false, false);
     crate::stack_cache::promote(f) || changed
 }
 
 /// Prune dead incoming values before admitting larger release functions.
 pub fn run_large(f: &mut Function) -> bool {
-    let changed = promote_private(f, true);
+    let changed = promote_private(f, true, false);
     crate::stack_cache::promote(f) || changed
 }
 
-fn promote_private(f: &mut Function, large: bool) -> bool {
+pub(crate) fn run_with_empty_barriers(f: &mut Function) -> bool {
+    let changed = promote_private(f, true, true);
+    crate::stack_cache::promote(f) || changed
+}
+
+fn promote_private(f: &mut Function, large: bool, allow_empty_barriers: bool) -> bool {
     if f.stack_slots().next().is_none() {
         return false;
     }
@@ -46,7 +51,8 @@ fn promote_private(f: &mut Function, large: bool) -> bool {
         return false;
     }
     if insts.iter().any(|&i| match f.inst_data(i) {
-        InstData::Invoke { .. } | InstData::LandingPad { .. } | InstData::InlineAsm { .. } => true,
+        InstData::Invoke { .. } | InstData::LandingPad { .. } => true,
+        InstData::InlineAsm { asm, .. } => !(allow_empty_barriers && asm.is_empty_memory_barrier()),
         InstData::Call { func, .. } => f.callee(*func).sig.returns_twice,
         InstData::CallIndirect { sig, .. } => f.signature(*sig).returns_twice,
         InstData::Intrinsic { id, .. } => matches!(

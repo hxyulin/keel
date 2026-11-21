@@ -148,6 +148,10 @@ unhinted helpers with variable arguments can remain calls. Size expands memory
 intrinsics of at most 32 bytes before stack cleanup. After the last scalar
 round, GCM moves pure computations, GVN merges newly exposed equivalents,
 and GCM restores local constant and address copies to reduce register pressure.
+On x86-64, Size revisits non-cold callers that require a frame after module
+cleanup. If inlining changes the module, scalar and stack cleanup run again,
+and code motion restores local copies of constants and addresses after
+value numbering.
 On x86-64, a bounded exact unroll can eliminate a private array after exposing
 constant stack offsets. Size omits general loop unrolling and automatic
 vectorization. It retains
@@ -170,14 +174,15 @@ uses bounded x86 instruction allowances. The x86 estimate includes short
 integer immediates in their consuming instructions when every use can encode
 them. Duplicated bodies have a 16-byte allowance on AArch64 and a 32-byte
 allowance on x86-64. Private x86-64 helpers with an inline hint and a required
-frame pointer get 96 bytes to account for the out-of-line call and frame.
-Bound x86-64 read-only leaves that require a frame can use up to 160 estimated
-bytes and can inline without a hint. These leaves have at most 32 IR
-instructions and an acyclic CFG. The per-caller and module growth limits
-still apply.
+frame pointer get 144 bytes to account for the out-of-line call and frame.
+Bound x86-64 read-only leaves that require a frame can use up to 224 estimated
+bytes and can inline without a hint. These leaves have at most 48 IR
+instructions, an acyclic CFG and no surviving stack slots. The per-caller
+and module growth limits still apply.
 Removable single-use private bodies bypass this filter because their out-of-line code
 disappears. Empty x86 compiler barriers have zero emission cost. The estimate
-also accounts for recognized x86 memory bit tests and their flag outputs.
+also accounts for recognized x86 memory bit tests and single-instruction
+memory subtractions with flag outputs.
 Both preserve their memory effects when inlined. Unrecognized assembly and
 intrinsics have no estimate and remain calls.
 Portable targets keep the existing IR policy. Required inlining and flatten

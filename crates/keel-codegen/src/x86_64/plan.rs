@@ -496,7 +496,7 @@ pub(super) fn mask_test_type(ty: Type, mask: i64, goal: crate::CodegenGoal) -> O
     }
 }
 
-fn fuse_asm_bit_test_branches(
+fn fuse_asm_memory_flag_branches(
     func: &Function,
     uses: &[u8],
     selection: &mut crate::select::Selection,
@@ -544,7 +544,7 @@ fn fuse_asm_bit_test_branches(
         let InstData::InlineAsm { asm, .. } = func.inst_data(test) else {
             continue;
         };
-        let Some(cc) = asm.x86_memory_bit_test() else {
+        let Some(cc) = inline_asm::direct_memory_flag(asm) else {
             continue;
         };
         if func.first_result(test) != flag || uses[flag.index()] != 1 || !selection.is_free(test) {
@@ -552,13 +552,13 @@ fn fuse_asm_bit_test_branches(
         }
         let mut args = selection.operands(func, branch);
         args.remove(0);
-        // Adjacent lowering leaves CF live. The allocator's edge copies and
+        // Adjacent lowering leaves the condition flags live. The allocator's edge copies and
         // rematerializations preserve flags.
         selection.claim(Cover::CompareBranch, branch);
         selection.set_operands(branch, args);
         selection.omitted_defs.insert(flag);
         selection
-            .asm_bit_test_branches
+            .asm_memory_flag_branches
             .insert(branch, cc ^ u8::from(invert));
         if let Some(compare) = compare {
             selection.cover(compare);
@@ -624,13 +624,20 @@ impl Covers {
             });
         }
         if present.inline_asm && present.brif && compare_branch && compact_asm_inputs {
-            fuse_asm_bit_test_branches(func, uses, &mut selection);
+            fuse_asm_memory_flag_branches(func, uses, &mut selection);
         }
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let mut fused_compares = if present.compare && present.brif && compare_branch {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| folds(func, data), uses, across_stack_addr)
+            let span = if across_stack_addr {
+                crate::fold::CompareSpan::StackAddr
+            } else if goal == crate::CodegenGoal::Size {
+                crate::fold::CompareSpan::LifetimeMarkers
+            } else {
+                crate::fold::CompareSpan::Adjacent
+            };
+            selection.fuse_compares(func, |data| folds(func, data), uses, span)
         } else {
             HashSet::default()
         };
@@ -982,6 +989,36 @@ pub(super) fn compact_switch_table(
     }
     // Compared with four bytes per case, leave room for the indexed byte load.
     (targets.len() * 4 + 8 < indices.len() * 3).then_some((targets, indices))
+}
+
+/// A dense switch whose non-default cases fit at most two short tests.
+/// Targets identify edges with the same block and copies.
+pub(super) fn short_switch_ranges(
+    values: &[u64],
+    targets: &[usize],
+) -> Option<Vec<(u64, u64, usize)>> {
+    let mut cases: Vec<_> = values
+        .iter()
+        .copied()
+        .zip(&targets[1..])
+        .filter_map(|(value, &target)| (target != 0).then_some((value, target)))
+        .collect();
+    cases.sort_unstable();
+    let mut ranges: Vec<(u64, u64, usize)> = Vec::new();
+    for (value, target) in cases {
+        if let Some((_, end, previous)) = ranges.last_mut()
+            && value == *end + 1
+            && target == *previous
+        {
+            *end = value;
+        } else {
+            if ranges.len() == 2 {
+                return None;
+            }
+            ranges.push((value, value, target));
+        }
+    }
+    Some(ranges)
 }
 
 /// Runs the allocator, places the extended-precision stack homes and

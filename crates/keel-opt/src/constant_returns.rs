@@ -2,15 +2,16 @@
 
 use crate::{ModuleContext, OptimizationContext, Pass};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::{Function, InsertPoint, InstData, Module, Purpose, Type, ValueDef};
+use keel_ir::{Function, InsertPoint, InstData, Layout, Module, Purpose, Type, Value, ValueDef};
 
 #[derive(Debug)]
 pub(crate) struct ConstantReturns;
 
 #[derive(Clone, Copy)]
-enum Summary {
+enum Summary<A = usize> {
     Constant { ty: Type, imm: i64, trivial: bool },
-    Parameter(usize),
+    Parameter(A),
+    LoadByValueWord(A),
 }
 
 impl Pass for ConstantReturns {
@@ -61,23 +62,42 @@ impl Pass for ConstantReturns {
                     if f.resolve(result) != result {
                         return None;
                     }
-                    let arg = match *summary {
-                        Summary::Constant { .. } => None,
-                        Summary::Parameter(index) => Some(*args.get(index)?),
+                    let replacement: Summary<Value> = match *summary {
+                        Summary::Constant { ty, imm, trivial } => {
+                            Summary::Constant { ty, imm, trivial }
+                        }
+                        Summary::Parameter(index) => Summary::Parameter(*args.get(index)?),
+                        Summary::LoadByValueWord(index) => {
+                            Summary::LoadByValueWord(*args.get(index)?)
+                        }
                     };
-                    Some((inst, result, *summary, arg))
+                    Some((inst, result, replacement))
                 })
                 .collect();
             changed |= !sites.is_empty();
             context.changed.push(!sites.is_empty());
-            for (inst, result, summary, arg) in sites {
+            for (inst, result, summary) in sites {
                 let (replacement, trivial) = match summary {
                     Summary::Constant { ty, imm, trivial } => {
                         let constant =
                             f.insert_inst(InsertPoint::Before(inst), InstData::Iconst { ty, imm });
                         (f.first_result(constant), trivial)
                     }
-                    Summary::Parameter(_) => (arg.expect("matching argument"), true),
+                    Summary::Parameter(arg) => (arg, true),
+                    Summary::LoadByValueWord(addr) => {
+                        // Read the same eight source bytes as the byval copy.
+                        // Only the callee's private home had a proven alignment.
+                        let load = f.insert_inst(
+                            InsertPoint::Before(inst),
+                            InstData::Load {
+                                ty: Type::I64,
+                                addr,
+                                flags: Default::default(),
+                            },
+                        );
+                        f.set_inst_loc(load, f.inst_loc(inst));
+                        (f.first_result(load), true)
+                    }
                 };
                 // Unless the whole body is trivial, keep its effects and
                 // substitute only the value on its normal continuation.
@@ -109,15 +129,44 @@ fn summarize(f: &Function) -> Option<Summary> {
             Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
         )
         || result.purpose != Purpose::Normal
-        || f.sig
-            .params
-            .iter()
-            .any(|param| param.purpose != Purpose::Normal)
     {
         return None;
     }
     let entry = f.entry_block()?;
     let body = f.block_insts(entry);
+    if f.sig.params.iter().any(|p| p.purpose != Purpose::Normal) {
+        let [p] = f.sig.params.as_slice() else {
+            return None;
+        };
+        let Purpose::ByVal(layout) = &p.purpose else {
+            return None;
+        };
+        let one_word = match layout {
+            Layout::Array(element, 1) => **element == Layout::Scalar(Type::I64),
+            Layout::Struct(fields) => fields.as_slice() == [Layout::Scalar(Type::I64)],
+            _ => false,
+        };
+        if result.ty != Type::I64 || !one_word || f.blocks().count() != 1 {
+            return None;
+        }
+        let [load, ret] = body else { return None };
+        let InstData::Load {
+            ty: Type::I64,
+            addr,
+            flags,
+        } = *f.inst_data(*load)
+        else {
+            return None;
+        };
+        let InstData::Return { args } = f.inst_data(*ret) else {
+            return None;
+        };
+        return (!flags.volatile
+            && flags.align <= 8
+            && f.resolve(addr) == f.block_params(entry)[0]
+            && f.resolve(args[0]) == f.first_result(*load))
+        .then_some(Summary::LoadByValueWord(0));
+    }
     if let [ret] = body
         && f.blocks().count() == 1
         && let InstData::Return { args } = f.inst_data(*ret)

@@ -172,8 +172,8 @@ pub struct Selection {
     pub(crate) compare_memory: HashMap<Inst, Value>,
     /// Literal-mask zero tests, consumed only for equality flags.
     pub(crate) mask_tests: HashMap<Inst, (MaskTestSource, i64)>,
-    /// Size-only branches that consume an inline memory BT's carry flag.
-    pub(crate) asm_bit_test_branches: HashMap<Inst, u8>,
+    /// Size-only branches that consume flags directly from supported inline assembly.
+    pub(crate) asm_memory_flag_branches: HashMap<Inst, u8>,
     /// X86 adjacent load encoded as an integer binary RHS.
     pub(crate) binary_memory: HashMap<Inst, Value>,
     /// X86 adjacent quotient/multiply/subtract using the native remainder.
@@ -489,14 +489,16 @@ impl Selection {
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
         uses: &[u8],
-        across_stack_addr: bool,
+        span: crate::fold::CompareSpan,
     ) -> HashSet<Value> {
-        self.fuse_compare_pairs(
-            func,
-            folds,
-            crate::fold::fused_compare_pairs(func, uses, across_stack_addr),
-            Cover::CompareBranch,
-        )
+        let pairs = crate::fold::fused_compare_pairs(func, uses, span, |compare| {
+            // A selected memory compare or wrapped condition can read from a
+            // slot whose lifetime ends before the branch.
+            !self.compare_memory.contains_key(&compare)
+                && !self.conditions.contains_key(&compare)
+                && !self.matches.contains_key(&compare)
+        });
+        self.fuse_compare_pairs(func, folds, pairs, Cover::CompareBranch)
     }
 
     /// Move single-use scalar compare inputs to the select's allocation boundary.

@@ -94,6 +94,42 @@ block0:
 }
 
 #[test]
+fn size_reads_a_single_byval_word_without_assuming_source_alignment() {
+    let source = r#"
+func @word(ptr byval [1 x i64]) -> i64 noinline local {
+block0(v0: ptr):
+ v1 = load.i64 align 8 notrap v0
+ return v1
+}
+func @read_word(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = call @word(v0)
+ return v1
+}
+"#;
+    for ordinary in [true, false] {
+        let body = if ordinary {
+            source.to_owned()
+        } else {
+            source.replace("load.i64 align", "load.i64 volatile align")
+        };
+        let mut module = parse(&body).unwrap();
+        keel_opt::optimize_with_tier(&mut module, keel_opt::OptimizationTier::Size).unwrap();
+        verify_module(&module).unwrap();
+        let entry = module
+            .functions
+            .iter()
+            .find(|f| f.name == "read_word")
+            .unwrap();
+        let text = entry.to_string();
+        assert_eq!(text.contains("call @word"), !ordinary, "{text}");
+        if ordinary {
+            assert!(text.contains("load.i64 v0"), "{text}");
+        }
+    }
+}
+
+#[test]
 fn unknown_and_interposable_results_keep_the_branch() {
     for source in [
         SOURCE.replace("noinline local", "noinline weak"),

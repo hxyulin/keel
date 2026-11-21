@@ -16,6 +16,53 @@ fn memory(f: &Function) -> usize {
         .filter(|(_, i)| matches!(f.inst_data(*i), D::Load { .. } | D::Store { .. }))
         .count()
 }
+#[test]
+fn late_size_cleanup_crosses_only_operand_free_compiler_barriers() {
+    let source = r#"
+func @read_once(ptr, i8) -> i64 x86_no_sse {
+    ss0 = stack_slot 8, align 8
+block0(v0: ptr, v1: i8):
+    v2 = stack_addr ss0
+    v3 = iconst.i64 0
+    store notrap v3, v2
+    asm "", "~{memory}"()
+    v4 = load.i64 volatile v0
+    store notrap v4, v2
+    brif v1, block1, block2
+block1:
+    store v4, v0
+    jump block2
+block2:
+    v5 = load.i64 notrap v2
+    return v5
+}
+"#;
+    for (body, expected) in [
+        (source.to_owned(), 2),
+        (
+            source.replace(r#"asm "", "~{memory}"()"#, r#"asm "nop", "~{memory}"()"#),
+            5,
+        ),
+        (
+            source.replace(r#"asm "", "~{memory}"()"#, r#"asm "", "m,~{memory}"(v2)"#),
+            5,
+        ),
+    ] {
+        let mut module = keel_ir::parse(&body).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::run_passes_for_target(
+            &mut module,
+            &["stack-cleanup-size"],
+            keel_opt::VectorTarget::X86Sse2,
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(memory(&module.functions[0]), expected, "{module}");
+        let optimized = module.to_string();
+        assert!(optimized.find("asm ").unwrap() < optimized.find("load.i64 volatile").unwrap());
+    }
+}
+
 fn fixture(ty: Type) -> String {
     format!(
         "func @f({ty}, {ty}) -> {ty} {{
@@ -694,6 +741,65 @@ fn balanced_promotion_keeps_target_speed_policies() {
             } else {
                 259
             },
+        );
+    }
+}
+#[test]
+fn size_normalizes_only_operand_free_interrupt_asm_outside_macro_sources() {
+    use keel_ir::{InstData, Intrinsic};
+    use keel_opt::VectorTarget;
+
+    let source = r#"
+func @irq(i64) -> i64 x86_no_sse {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ store notrap v0, v1
+ asm "sti", "~{memory}"()
+ v2 = load.i64 notrap v1
+ return v2
+}
+"#;
+    for (source, target, normalized) in [
+        (source.to_owned(), VectorTarget::X86Sse2, true),
+        (source.to_owned(), VectorTarget::Aarch64Neon, false),
+        (
+            format!("module_asm \".macro sti\\nnop\\n.endm\"\n{source}"),
+            VectorTarget::X86Sse2,
+            false,
+        ),
+        (
+            source.replace("\"sti\"", "\"sti; nop\""),
+            VectorTarget::X86Sse2,
+            false,
+        ),
+    ] {
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::run_passes_for_target(
+            &mut module,
+            &["x86-interrupt-asm", "stack-cleanup-size"],
+            target,
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let function = &module.functions[0];
+        assert_eq!(
+            function.layout_insts().any(|(_, inst)| matches!(
+                function.inst_data(inst),
+                InstData::Intrinsic {
+                    id: Intrinsic::X86Sti,
+                    ..
+                }
+            )),
+            normalized
+        );
+        assert_eq!(
+            function.layout_insts().any(|(_, inst)| matches!(
+                function.inst_data(inst),
+                InstData::Load { .. } | InstData::Store { .. }
+            )),
+            !normalized
         );
     }
 }

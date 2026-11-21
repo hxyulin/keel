@@ -239,7 +239,7 @@ pub(crate) fn folded_values_recording(
 /// itself, a compare and a conditional branch, with no 0/1 value in between.
 #[cfg(test)]
 pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
-    fused_compare_pairs(func, &use_counts(func), false)
+    fused_compare_pairs(func, &use_counts(func), CompareSpan::Adjacent, |_| false)
         .into_iter()
         .map(|(value, _, _)| value)
         .collect()
@@ -263,12 +263,12 @@ pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
     uses
 }
 
-pub(crate) fn fused_compare_pairs(
-    func: &Function,
-    uses: &[u8],
-    across_stack_addr: bool,
-) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, false, across_stack_addr, uses)
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompareSpan {
+    Adjacent,
+    StackAddr,
+    LifetimeMarkers,
+    Aarch64,
 }
 
 /// ARM can delay an exact-width integer compare over at most four tiny pure
@@ -278,38 +278,39 @@ pub(crate) fn aarch64_compare_pairs(
     func: &Function,
     uses: &[u8],
 ) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, true, false, uses)
+    fused_compare_pairs(func, uses, CompareSpan::Aarch64, |_| false)
 }
 
 /// `uses` are [`use_counts`]: only zero, one, or multiple raw IR uses matter.
-fn compare_pairs(
+pub(crate) fn fused_compare_pairs(
     func: &Function,
-    aarch64: bool,
-    across_stack_addr: bool,
     uses: &[u8],
+    span: CompareSpan,
+    can_cross_lifetimes: impl Fn(keel_ir::Inst) -> bool,
 ) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
     let mut candidates = Vec::new();
     for block in func.blocks() {
         let insts = func.block_insts(block);
         for (i, &inst) in insts.iter().enumerate() {
-            let data = func.inst_data(inst);
-            let compare = match *data {
-                InstData::Icmp { args, .. } => func.value_type(func.resolve(args[0])) != Type::I128,
-                InstData::Fcmp { .. } => true,
-                _ => false,
+            let exact_width = match *func.inst_data(inst) {
+                InstData::Icmp { args, .. } => match func.value_type(func.resolve(args[0])) {
+                    Type::I128 => continue,
+                    Type::I64 => true,
+                    Type::I32 => span != CompareSpan::LifetimeMarkers,
+                    _ => false,
+                },
+                InstData::Fcmp { .. } => false,
+                _ => continue,
             };
-            if !compare {
-                continue;
-            }
-            let exact_width = matches!(*data,
-                InstData::Icmp { args, .. }
-                    if matches!(func.value_type(func.resolve(args[0])), Type::I32 | Type::I64));
-            let arm_span = aarch64 && exact_width;
-            let stack_span = across_stack_addr && exact_width;
-            let limit = if arm_span {
-                5
+            let span = if exact_width {
+                span
             } else {
-                1 + usize::from(stack_span)
+                CompareSpan::Adjacent
+            };
+            let limit = match span {
+                CompareSpan::Adjacent => 1,
+                CompareSpan::StackAddr => 2,
+                CompareSpan::LifetimeMarkers | CompareSpan::Aarch64 => 5,
             };
             let location = |inst| func.inst_loc(inst).map(|loc| (loc.file, loc.line));
             for (gap, &next) in insts[i + 1..].iter().take(limit).enumerate() {
@@ -318,19 +319,31 @@ fn compare_pairs(
                     // Keep the established adjacent behavior. Nonadjacent
                     // fusion cannot erase independently located source lines.
                     if func.resolve(*cond) == result
-                        && (gap == 0 || stack_span || location(next) == location(inst))
+                        && (gap == 0
+                            || span == CompareSpan::StackAddr
+                            || (location(next) == location(inst)
+                                && (span != CompareSpan::LifetimeMarkers
+                                    || can_cross_lifetimes(inst))))
                     {
                         candidates.push((result, inst, next));
                     }
                     break;
                 }
-                if stack_span && matches!(func.inst_data(next), InstData::StackAddr { .. }) {
+                let next_data = func.inst_data(next);
+                if span == CompareSpan::StackAddr && matches!(next_data, InstData::StackAddr { .. })
+                {
                     continue;
                 }
-                if !arm_span
+                if span == CompareSpan::LifetimeMarkers
+                    && next_data.is_lifetime_marker()
+                    && (location(next).is_none() || location(next) == location(inst))
+                {
+                    continue;
+                }
+                if span != CompareSpan::Aarch64
                     || location(next) != location(inst)
                     || !matches!(
-                        func.inst_data(next),
+                        next_data,
                         InstData::Iconst {
                             ty: Type::I32 | Type::I64,
                             ..
@@ -601,7 +614,10 @@ block2:
     #[test]
     fn arm_bounded_span_transfers_duplicate_uses_to_branch() {
         let func = function(&span_source("i64", "v3 = iconst.i64 7", "icmp.eq", "v0"));
-        assert!(fused_compare_pairs(&func, &use_counts(&func), false).is_empty());
+        assert!(
+            fused_compare_pairs(&func, &use_counts(&func), CompareSpan::Adjacent, |_| false)
+                .is_empty()
+        );
         let pairs = aarch64_compare_pairs(&func, &use_counts(&func));
         assert_eq!(pairs.len(), 1);
         let (cond, compare, branch) = pairs[0];
@@ -631,14 +647,20 @@ block2:
         let source = span_source("i64", "v3 = stack_addr ss0", "icmp.eq", "v0")
             .replace("{\nblock0", "{\n ss0 = stack_slot 8, align 8\nblock0");
         let func = function(&source);
-        assert!(fused_compare_pairs(&func, &use_counts(&func), false).is_empty());
+        assert!(
+            fused_compare_pairs(&func, &use_counts(&func), CompareSpan::Adjacent, |_| false)
+                .is_empty()
+        );
         assert_eq!(
-            fused_compare_pairs(&func, &use_counts(&func), true).len(),
+            fused_compare_pairs(&func, &use_counts(&func), CompareSpan::StackAddr, |_| false).len(),
             1
         );
 
         let func = function(&source.replace(" brif", " v4 = stack_addr ss0\n brif"));
-        assert!(fused_compare_pairs(&func, &use_counts(&func), true).is_empty());
+        assert!(
+            fused_compare_pairs(&func, &use_counts(&func), CompareSpan::StackAddr, |_| false)
+                .is_empty()
+        );
     }
 
     #[test]

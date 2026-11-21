@@ -36,8 +36,8 @@ pub(super) struct Staged {
     flags: Vec<(usize, u8)>,
     initializers: Vec<(PhysReg, usize)>,
     text: String,
-    /// A read-only bit test whose inputs can use reserved scratch registers.
-    bit_test_flag: Option<u8>,
+    /// A memory operation whose inputs can use reserved scratch registers.
+    direct_memory_flag: Option<u8>,
     /// Registers overwritten by operand staging or the template, in slot order.
     saved_regs: Vec<u8>,
     bytes: usize,
@@ -319,7 +319,7 @@ pub(super) fn plan(
         return Ok(Plan::DirectLoad { text, register });
     }
     let text = substitute(func, asm, &asm.template, args, &regs, unique)?;
-    let bit_test_flag = compact_inputs.then(|| asm.x86_memory_bit_test()).flatten();
+    let direct_memory_flag = compact_inputs.then(|| direct_memory_flag(asm)).flatten();
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
     let mut overwritten = [[false; 32]; 2];
@@ -373,7 +373,7 @@ pub(super) fn plan(
         .enumerate()
         .map(|(i, &(_, ty))| home(ty, regs[i]))
         .collect();
-    if bit_test_flag.is_some() || saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
+    if direct_memory_flag.is_some() || saved_regs.is_empty() && saved_simd.is_empty() && n == 0 {
         bytes = 0;
     }
     // Common output validates scoped source with the assembler's stateful
@@ -392,7 +392,7 @@ pub(super) fn plan(
             })
             .collect(),
         text,
-        bit_test_flag,
+        direct_memory_flag,
         saved_regs,
         saved_simd,
         simd_bits,
@@ -536,6 +536,11 @@ impl DirectContext<'_> {
             reloads,
         })
     }
+}
+
+pub(super) fn direct_memory_flag(asm: &InlineAsm) -> Option<u8> {
+    asm.x86_memory_bit_test()
+        .or_else(|| asm.x86_memory_subtract_test())
 }
 
 fn substitute(
@@ -795,9 +800,9 @@ impl FunctionCompiler<'_> {
                 return;
             }
         };
-        if let Some(cc) = plan.bit_test_flag {
+        if let Some(cc) = plan.direct_memory_flag {
             // The only assigned registers are the reserved RAX and RCX.
-            // A bit test reads them without changing either register.
+            // The recognized operation does not write either register.
             for &(register, argument) in &plan.initializers {
                 self.emit_move(Loc::Reg(register.num), self.loc(args[argument]));
             }

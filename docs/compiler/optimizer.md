@@ -121,7 +121,7 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | Pass | What it does |
 |---|---|
 | `inline` (opt-in) | Bounded private direct-call expansion; see [inlining](#inlining) |
-| `inline-noninterposable`, `inline-cheap-reserve`, `inline-size` | Binding-aware inlining variants used by Balanced, Full and Size |
+| `inline-noninterposable`, `inline-cheap-reserve`, `inline-size`, `inline-size-framed` | Binding-aware inlining variants used by Balanced, Full and Size |
 | `inline-late-record-copy` | Inline bounded local record-copy helpers after loop optimization on AArch64 and x86-64 |
 | `small-memory` | Expand constant memory intrinsics of 0 to 32 bytes; see [memory passes](#memory-passes) |
 | `short-record-copies` | Specialize single-record and empty `memcpy` paths in large native functions |
@@ -148,6 +148,8 @@ exit. Direct calls to `Pass::run` bypass it, and a caller-built context leaves
 | `stack-promote` | Promote private fixed stack fields to SSA |
 | `stack-promote-large` | Promote private fields with pruned SSA and larger release budgets |
 | `stack-promote-balanced` | Select native promotion budgets for Balanced |
+| `stack-cleanup-size` | Late x86 Size cleanup of private fixed slots |
+| `x86-interrupt-asm` | Recognize operand-free interrupt-control assembly in x86 Size |
 | `loop-vectorize`, `loop-reduce`, `loop-reduce-multi` | Vectorize counted maps and wrapping reductions; see [SIMD IR](simd-ir.md) |
 | `loop-copy` | Widen guarded forward word copies with a scalar path for short match distances |
 | `fast-math` | Finite scalar/packed algebra, AArch64 contraction and refined f32 reciprocal roots, only in `fast_math` functions |
@@ -777,6 +779,20 @@ smaller policy on x86 and Portable. Promotion can trade stack traffic for
 register pressure and edge copies; the target choice preserves Balanced's
 runtime gates.
 
+In x86 Size, `stack-cleanup-size` retries fixed-slot promotion and forwarding
+after the final CFG cleanup, which can expose new initialization and aliasing
+facts. Empty operand-free compiler barriers can stay between private accesses.
+Assembly with operands, other assembly, and frame observers still exclude the
+function from those rewrites. A separate overwrite check can remove stores
+whose bytes are covered by a later store in the entry block before the first
+assembly instruction.
+
+The preceding `x86-interrupt-asm` pass recognizes operand-free `cli` and
+`sti` templates with at most a memory clobber. It expresses them with their
+existing IR instructions and preserves their memory barrier and fault
+behavior. Assembly sources that can introduce GNU macros keep the raw
+templates.
+
 Both policies also admit a suffix after the entry block's last memory
 barrier when later loads derive from incoming pointer parameters: fresh reads
 after the barrier seed the SSA values. Follow the pass with
@@ -889,6 +905,9 @@ call to a local definition when every return yields the same literal. A body
 consisting only of the constant and return can be removed from the call site.
 The same pass replaces a local helper whose entire body returns one of its
 parameters with the corresponding argument.
+An exact one-word byval getter becomes an eight-byte load from the original
+argument. The load retains the byval read's fault behavior and does not
+assume the alignment of the callee's private copy.
 Argument evaluation and calls with other effects or possible faults remain.
 The final CFG cleanup can then remove branches on the result without inlining
 the helper.

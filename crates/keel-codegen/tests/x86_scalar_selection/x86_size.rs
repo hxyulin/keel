@@ -57,6 +57,192 @@ fn function<'a>(text: &'a str, name: &str) -> &'a str {
 }
 
 #[test]
+fn size_fuses_register_compare_across_lifetimes_and_keeps_memory_compare_in_place() {
+    let source = r#"
+func @lifetime_cmp(i64, i64) -> i64 cc(c) {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ intrinsic lifetime_start(v2)
+ v3 = icmp.ult v0, v1
+ intrinsic lifetime_end(v2)
+ brif v3, block1(v1, v0), block1(v0, v1)
+block1(v4: i64, v5: i64):
+ v6 = isub v5, v4
+ return v6
+}
+"#;
+    let memory = source
+        .replace("@lifetime_cmp(", "@lifetime_mem_cmp(")
+        .replace(
+            "v3 = icmp.ult v0, v1",
+            "store v1, v2\n v7 = load.i64 v2\n v3 = icmp.ult v0, v7",
+        );
+    let narrow = source
+        .replace("@lifetime_cmp(", "@lifetime_narrow_cmp(")
+        .replace("i64", "i32");
+    let module = keel_ir::parse(&format!("{source}\n{memory}\n{narrow}")).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let request = keel_codegen::Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Full,
+        },
+    );
+    let speed = request.text(&module).unwrap();
+    assert!(
+        function(&speed, "lifetime_cmp").contains("\tset"),
+        "{speed}"
+    );
+
+    let request = request.emission(options(CodegenGoal::Size));
+    let text = request.text(&module).unwrap();
+    let register = function(&text, "lifetime_cmp");
+    assert!(register.contains("\tcmp\t"), "{register}");
+    assert!(!register.contains("\tset"), "{register}");
+    let memory = function(&text, "lifetime_mem_cmp");
+    assert!(
+        memory
+            .lines()
+            .any(|line| line.contains("\tcmp\t") && line.contains("qword ptr")),
+        "{memory}"
+    );
+    assert!(memory.contains("\tset"), "{memory}");
+    assert!(
+        function(&text, "lifetime_narrow_cmp").contains("\tset"),
+        "{text}"
+    );
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    keel_test_support::native_program!("x86-compare-lifetime")
+        .file("cmp.o", object)
+        .file(
+            "oracle.c",
+            r#"
+#include <stdint.h>
+uint64_t lifetime_cmp(uint64_t, uint64_t);
+uint64_t lifetime_mem_cmp(uint64_t, uint64_t);
+int main(void) {
+    const uint64_t values[] = {0, 1, 19, UINT64_C(1) << 63, UINT64_MAX};
+    for (unsigned i = 0; i < sizeof(values) / sizeof(*values); ++i)
+        for (unsigned j = 0; j < sizeof(values) / sizeof(*values); ++j) {
+            uint64_t a = values[i], b = values[j];
+            uint64_t want = a < b ? a - b : b - a;
+            if (lifetime_cmp(a, b) != want || lifetime_mem_cmp(a, b) != want) return 1;
+        }
+    return 0;
+}
+"#,
+        )
+        .link(["oracle.c", "cmp.o"])
+        .check();
+}
+
+#[test]
+fn size_uses_short_tests_for_small_switches_with_shared_edges() {
+    let module = keel_ir::parse(
+        r#"
+func @grouped_switch(i32) -> i64 cc(c) {
+block0(v0: i32):
+ v1 = iconst.i64 41
+ v2 = iconst.i64 57
+ v3 = iconst.i64 89
+ jump block1(v0, v1)
+block1(v4: i32, v5: i64):
+ switch v4, block3(v5), [3: block2, 2: block3(v2), 1: block3(v2), 0: block3(v5)]
+block2:
+ v6 = iconst.i32 4
+ jump block1(v6, v3)
+block3(v7: i64):
+ return v7
+}
+func @distinct_edges(i32) -> i64 cc(c) {
+block0(v0: i32):
+ v1 = iconst.i64 41
+ v2 = iconst.i64 57
+ v3 = iconst.i64 89
+ v4 = iconst.i64 97
+ jump block1(v0, v1)
+block1(v5: i32, v6: i64):
+ switch v5, block3(v6), [3: block2, 2: block3(v4), 1: block3(v2), 0: block3(v6)]
+block2:
+ v7 = iconst.i32 4
+ jump block1(v7, v3)
+block3(v8: i64):
+ return v8
+}
+func @acyclic_switch(i32) -> i64 cc(c) {
+block0(v0: i32):
+ v1 = iconst.i64 41
+ v2 = iconst.i64 57
+ v3 = iconst.i64 89
+ switch v0, block1(v1), [3: block1(v3), 2: block1(v2), 1: block1(v2), 0: block1(v1)]
+block1(v4: i64):
+ return v4
+}
+"#,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let request = keel_codegen::Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    );
+    let speed = request.text(&module).unwrap();
+    assert!(function(&speed, "grouped_switch").contains("\tjmp\trax"));
+    let request = request.emission(options(CodegenGoal::Size));
+    let text = request.text(&module).unwrap();
+    let grouped = function(&text, "grouped_switch");
+    assert!(!grouped.contains("\tjmp\trax"), "{grouped}");
+    assert!(grouped.contains("\tjbe\t"), "{grouped}");
+    assert!(
+        function(&text, "distinct_edges").contains("\tjmp\trax"),
+        "{text}"
+    );
+    assert!(
+        function(&text, "acyclic_switch").contains("\tjmp\trax"),
+        "{text}"
+    );
+    let object =
+        keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(
+        object,
+        keel_asm::assemble_source_for(target, &text).unwrap()
+    );
+    keel_test_support::native_program!("x86-grouped-switch")
+        .file("switch.o", object)
+        .file(
+            "oracle.c",
+            r#"
+#include <stdint.h>
+uint64_t grouped_switch(uint32_t);
+uint64_t distinct_edges(uint32_t);
+int main(void) {
+    const uint32_t inputs[] = {0, 1, 2, 3, 4, 127, UINT32_MAX};
+    const uint64_t want[] = {41, 57, 57, 89, 41, 41, 41};
+    for (unsigned i = 0; i < sizeof(inputs) / sizeof(*inputs); ++i) {
+        if (grouped_switch(inputs[i]) != want[i]) return 1;
+        if (distinct_edges(inputs[i]) != (i == 2 ? 97 : want[i])) return 2;
+    }
+    return 0;
+}
+"#,
+        )
+        .link(["oracle.c", "switch.o"])
+        .check();
+}
+
+#[test]
 fn smaller_layout_frames_and_shared_returns_preserve_transport_parity() {
     let module = keel_ir::parse(SOURCE).unwrap();
     keel_ir::verify_module(&module).unwrap();

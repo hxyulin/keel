@@ -82,3 +82,101 @@ fn a_single_use_needs_no_byte_allowance_only_when_its_body_can_disappear() {
         );
     }
 }
+
+#[test]
+fn late_size_inlining_only_revisits_non_cold_framed_x86_callers() {
+    for (target, attributes, expected) in [
+        (VectorTarget::X86Sse2, "frame_pointer ", 0),
+        (VectorTarget::X86Sse2, "", 2),
+        (VectorTarget::X86Sse2, "frame_pointer cold ", 2),
+        (VectorTarget::Aarch64Neon, "frame_pointer ", 2),
+    ] {
+        let source = source(LARGE)
+            .replace("inlinehint local", "inlinehint frame_pointer local")
+            .replace(
+                "func @caller(i64) -> i64 {",
+                &format!("func @caller(i64) -> i64 {attributes}{{"),
+            );
+        let mut module = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes_for_target(&mut module, &["inline-size-framed"], target).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        assert_eq!(calls(&module, "caller"), expected, "{target:?}: {source}");
+    }
+}
+
+#[test]
+fn late_size_cleanup_keeps_foldable_addresses_local_after_value_numbering() {
+    use keel_ir::InstData;
+
+    let mut module = keel_ir::parse(
+        r#"
+func @helper(i64) -> i64 local {
+block0(v0: i64):
+ v1 = iconst.i64 1
+ v2 = iadd v0, v1
+ return v2
+}
+func @caller(ptr, i64) -> i64 frame_pointer {
+block0(v0: ptr, v1: i64):
+ v2 = iconst.i64 24
+ v3 = ptradd v0, v2
+ v4 = load.i64 v3
+ v5 = call @helper(v4)
+ brif v1, block1, block2
+block1:
+ v6 = iconst.i64 24
+ v7 = ptradd v0, v6
+ store v5, v7
+ return v5
+block2:
+ return v4
+}
+"#,
+    )
+    .unwrap();
+    keel_opt::run_passes_for_target(&mut module, &["inline-size-framed"], VectorTarget::X86Sse2)
+        .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    assert_eq!(calls(&module, "caller"), 0);
+    let caller = module
+        .functions
+        .iter()
+        .find(|f| f.name == "caller")
+        .unwrap();
+    let addresses: Vec<_> = caller
+        .layout_insts()
+        .filter_map(|(_, inst)| match *caller.inst_data(inst) {
+            InstData::Load { addr, .. } | InstData::Store { addr, .. } => {
+                Some(caller.resolve(addr))
+            }
+            _ => None,
+        })
+        .collect();
+    let [load, store] = addresses.as_slice() else {
+        panic!("expected one load and one store: {caller}");
+    };
+    assert_ne!(load, store, "{caller}");
+}
+
+#[test]
+fn framed_x86_size_readonly_cost_ignores_unused_stack_declarations() {
+    let source = r#"
+func @get(ptr) -> ptr frame_pointer local {
+ ss0 = stack_slot 8, align 8
+block0(v0: ptr):
+ v1 = load.ptr v0
+ return v1
+}
+func @caller(ptr) -> ptr {
+block0(v0: ptr):
+ v1 = call @get(v0)
+ v2 = call @get(v1)
+ return v2
+}
+"#;
+    assert_eq!(calls(&optimize(source, VectorTarget::X86Sse2), "caller"), 0);
+    assert_eq!(
+        calls(&optimize(source, VectorTarget::Aarch64Neon), "caller"),
+        2
+    );
+}
