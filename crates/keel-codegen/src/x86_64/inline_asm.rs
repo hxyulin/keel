@@ -59,9 +59,15 @@ pub(super) struct DirectGoto {
 pub(super) struct PlanOptions<'a> {
     pub unique: u64,
     pub avx512f: bool,
-    pub compact_inputs: bool,
+    pub policy: Policy,
     pub direct: Option<&'a DirectContext<'a>>,
     pub next: Option<Inst>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Policy {
+    pub compact_inputs: bool,
+    pub size_preset: bool,
 }
 
 /// Final allocation facts for templates that can avoid staging.
@@ -85,7 +91,7 @@ pub(super) fn plan(
     let PlanOptions {
         unique,
         avx512f,
-        compact_inputs,
+        policy,
         direct,
         next,
     } = options;
@@ -297,7 +303,8 @@ pub(super) fn plan(
     {
         return Ok(Plan::DirectGoto(plan));
     }
-    if let Some(context) = direct
+    if policy.size_preset
+        && let Some(context) = direct
         && symbolic_load(func, asm, args).is_some()
     {
         let index = context.allocation.edits.instruction_index(inst);
@@ -319,7 +326,18 @@ pub(super) fn plan(
         return Ok(Plan::DirectLoad { text, register });
     }
     let text = substitute(func, asm, &asm.template, args, &regs, unique)?;
-    let direct_memory_flag = compact_inputs.then(|| direct_memory_flag(asm)).flatten();
+    let direct_memory_flag = if !policy.compact_inputs {
+        None
+    } else if policy.size_preset {
+        direct_memory_flag(asm)
+    } else if matches!(
+        &ops[n..],
+        [Constraint::Mem, Constraint::Reg | Constraint::Imm]
+    ) {
+        asm.x86_memory_bit_test_with_inputs(&ops[n..])
+    } else {
+        None
+    };
     // Staging uses RAX, while operand initialization and template outputs can
     // overwrite their assigned homes. A memory/flags clobber changes no GPR.
     let mut overwritten = [[false; 32]; 2];
@@ -361,7 +379,7 @@ pub(super) fn plan(
         Home { offset, bits }
     };
     // Scalar inputs can read the original registers from the preserved homes.
-    let inputs = (!compact_inputs || !saved_simd.is_empty()).then(|| {
+    let inputs = (!policy.compact_inputs || !saved_simd.is_empty()).then(|| {
         args.iter()
             .enumerate()
             .map(|(i, &arg)| home(func.value_type(func.resolve(arg)), regs[n + i]))

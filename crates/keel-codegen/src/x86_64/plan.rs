@@ -584,6 +584,7 @@ impl Covers {
         facts: &crate::kinds::FunctionFacts<'_>,
         across_stack_addr: bool,
         goal: crate::CodegenGoal,
+        size_preset: bool,
         compact_asm_inputs: bool,
     ) -> Self {
         let (present, uses) = (facts.kinds, &facts.machine_uses);
@@ -617,13 +618,14 @@ impl Covers {
         ]
         .map(on);
         let signed_byte = on(Cover::X86SignedByteLoad);
-        let branch_masks = goal == crate::CodegenGoal::Size && present.brif;
+        let branch_masks = size_preset && present.brif;
         if mask_tests && (present.compare || branch_masks) {
             selection.fold_mask_tests(func, uses, Cover::X86MaskTest, branch_masks, |ty, mask| {
                 mask_test_type(ty, mask, goal).is_some()
             });
         }
-        if present.inline_asm && present.brif && compare_branch && compact_asm_inputs {
+        if size_preset && present.inline_asm && present.brif && compare_branch && compact_asm_inputs
+        {
             fuse_asm_memory_flag_branches(func, uses, &mut selection);
         }
         // Each cover is anchored at an instruction kind; without one it
@@ -632,7 +634,7 @@ impl Covers {
             backend_scope!(CompareFusion);
             let span = if across_stack_addr {
                 crate::fold::CompareSpan::StackAddr
-            } else if goal == crate::CodegenGoal::Size {
+            } else if size_preset {
                 crate::fold::CompareSpan::LifetimeMarkers
             } else {
                 crate::fold::CompareSpan::Adjacent
@@ -750,12 +752,13 @@ impl SizeImmediates {
         facts: &crate::kinds::FunctionFacts<'_>,
         shape: &VectorShape,
         code_model: CodeModel,
+        size_preset: bool,
         selection: &mut crate::select::Selection,
     ) -> Self {
         let mut immediates = Self::default();
         // Loads and pointer stores can encode only a sign-extended 32-bit symbol.
         let kernel_symbols = facts.kinds.symbol_addr && code_model == CodeModel::Kernel;
-        let asm_loads = facts.kinds.inline_asm && facts.kinds.symbol_addr;
+        let asm_loads = size_preset && facts.kinds.inline_asm && facts.kinds.symbol_addr;
         if !kernel_symbols && !asm_loads && (!facts.kinds.intrinsic || shape.wide_vectors) {
             return immediates;
         }
@@ -794,7 +797,10 @@ impl SizeImmediates {
                     }
                 }
                 &InstData::Load { addr, ty, .. }
-                    if kernel_symbols && ty != Type::I128 && selection.is_free(inst) =>
+                    if size_preset
+                        && kernel_symbols
+                        && ty != Type::I128
+                        && selection.is_free(inst) =>
                 {
                     let addr = func.resolve(addr);
                     let Some(source) = source(addr, selection) else {
@@ -1234,7 +1240,7 @@ pub(super) fn plan_inline_asm(
     present: crate::kinds::InstKinds,
     shape: &VectorShape,
     features: keel_asm_ir::x86::Features,
-    compact_inputs: bool,
+    policy: inline_asm::Policy,
     direct: Option<&inline_asm::DirectContext<'_>>,
 ) -> Result<HashMap<Inst, inline_asm::Plan>, String> {
     let mut function_index = None;
@@ -1263,7 +1269,7 @@ pub(super) fn plan_inline_asm(
                 inline_asm::PlanOptions {
                     unique: (function_index << 32) | inst.index() as u64,
                     avx512f: features.avx512f,
-                    compact_inputs,
+                    policy,
                     direct,
                     next: insts.get(index + 1).copied(),
                 },

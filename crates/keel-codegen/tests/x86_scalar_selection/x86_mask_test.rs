@@ -139,6 +139,7 @@ block1(v5: i64, v6: i64):
 }";
     let module = keel_ir::parse(source).unwrap();
     let shared = keel_ir::parse(&source.replace("block1(v1, v0)", "block1(v1, v4)")).unwrap();
+    let cold = keel_ir::parse(&source.replace("cc(c) {", "cc(c) cold {")).unwrap();
     keel_ir::verify_module(&module).unwrap();
     keel_ir::verify_module(&shared).unwrap();
     let target = keel_codegen::Target::X86_64LinuxGnu;
@@ -152,8 +153,10 @@ block1(v5: i64, v6: i64):
         },
     );
     assert!(request.text(&module).unwrap().contains("\tand\t"));
+    assert!(request.text(&cold).unwrap().contains("\tand\t"));
     let request = request.emission(options);
     assert!(request.text(&shared).unwrap().contains("\tand\t"));
+    assert!(!request.text(&cold).unwrap().contains("\tand\t"));
     for (pools, label) in [
         (&keel_codegen::x86_64::REGISTERS, "branch-mask-register"),
         (&EMPTY, "branch-mask-spilled"),

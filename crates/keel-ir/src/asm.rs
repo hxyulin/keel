@@ -119,11 +119,16 @@ impl InlineAsm {
     /// Recognizes an x86-64 memory BT carrying its result in CF or its inverse.
     /// The template can read memory, fault and act as a compiler barrier.
     pub fn x86_memory_bit_test(&self) -> Option<u8> {
+        self.x86_memory_bit_test_with_inputs(&self.inputs)
+    }
+
+    /// Recognizes the same test after a backend resolves alternative inputs.
+    pub fn x86_memory_bit_test_with_inputs(&self, inputs: &[AsmOperand]) -> Option<u8> {
         let [(AsmOperand::Flag(cc @ (2 | 3)), _)] = self.outputs.as_slice() else {
             return None;
         };
         if !matches!(
-            self.inputs.as_slice(),
+            inputs,
             [
                 AsmOperand::Mem,
                 AsmOperand::Reg

@@ -1052,6 +1052,7 @@ enum AggregateResult<'a> {
 
 struct FunctionCompiler<'a> {
     goal: crate::CodegenGoal,
+    size_preset: bool,
     short_frame: bool,
     size_immediates: plan::SizeImmediates,
     forwarded_returns: HashSet<Inst>,
@@ -1221,6 +1222,10 @@ impl<'a> FunctionCompiler<'a> {
     ) -> Result<Self, CodegenError> {
         let module = symbols.module;
         let goal = crate::emission::function_goal(&func.attrs, emission.goal);
+        // Cold functions already use compact layout in other presets. Keep
+        // the new runtime tuning scoped to a requested Size compilation.
+        let size_preset =
+            goal == crate::CodegenGoal::Size && emission.goal == crate::CodegenGoal::Size;
         let call_alignment = emission.x86_stack_alignment.unwrap_or_default().bytes();
         let features = pipeline.selector.x86_features();
         let err = |message: String| CodegenError {
@@ -1267,8 +1272,15 @@ impl<'a> FunctionCompiler<'a> {
                 .iter()
                 .chain(pools.callee_saved)
                 .all(|&r| r != S0 && r != S1);
-        let mut covers =
-            plan::Covers::select(func, pipeline, &facts, bounded_speed, goal, compact_inputs);
+        let mut covers = plan::Covers::select(
+            func,
+            pipeline,
+            &facts,
+            bounded_speed,
+            goal,
+            size_preset,
+            compact_inputs,
+        );
         if pipeline.allocator.call_site_base() == Some(crate::regalloc::AllocationTier::Compact)
             && !func.attrs.optnone
         {
@@ -1282,6 +1294,7 @@ impl<'a> FunctionCompiler<'a> {
                 &facts,
                 &shape,
                 emission.x86_code_model.unwrap_or_default(),
+                size_preset,
                 &mut covers.selection,
             )
         } else {
@@ -1326,7 +1339,10 @@ impl<'a> FunctionCompiler<'a> {
             present,
             &shape,
             features,
-            compact_inputs,
+            inline_asm::Policy {
+                compact_inputs,
+                size_preset,
+            },
             asm_context.as_ref(),
         )
         .map_err(err)?;
@@ -1394,6 +1410,7 @@ impl<'a> FunctionCompiler<'a> {
             switch_loops: std::cell::OnceCell::new(),
             fold_frame_address_calls: bounded_speed && !present.inline_asm,
             goal,
+            size_preset,
             shared_return,
             code_model: CodeModel::default(),
             func,
@@ -4343,7 +4360,7 @@ impl<'a> FunctionCompiler<'a> {
                 asm_arg(value as i64)
             }
         };
-        let size = self.goal == crate::CodegenGoal::Size && !self.func.attrs.optnone;
+        let size = self.size_preset && !self.func.attrs.optnone;
         let targets: Vec<_> = dests
             .iter()
             .enumerate()
