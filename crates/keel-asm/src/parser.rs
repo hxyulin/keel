@@ -57,6 +57,7 @@ use super::{Assembly, Error, InstructionLocation, Symbol, encode};
 use crate::fxhash::{FxHashMap, FxHashSet};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use keel_asm_ir::Opcode;
+use keel_asm_ir::macho::{is_bare_symbol as is_symbol, validate_symbol as validate_macho_symbol};
 use keel_util::leb128;
 use std::collections::BTreeMap;
 
@@ -405,31 +406,74 @@ fn symbol(s: &str) -> Result<(), String> {
         Err(format!("invalid symbol `{s}`"))
     }
 }
-fn is_symbol(s: &str) -> bool {
-    // Bytes of non-ASCII characters are rejected like the characters. Every
-    // label and branch target is checked: classify bytes without branches,
-    // so that whole names are checked a vector at a time.
-    let valid = |b: u8| {
-        (b | 0x20).wrapping_sub(b'a') < 26
-            || b.wrapping_sub(b'0') < 10
-            || b == b'_'
-            || b == b'.'
-            || b == b'$'
-    };
-    match s.as_bytes() {
-        [first, rest @ ..] => {
-            valid(*first)
-                && !first.is_ascii_digit()
-                && rest.iter().fold(true, |all, &b| all & valid(b))
-        }
-        [] => false,
+fn macho_symbol<'a>(token: &'a str, arena: &'a Bump) -> Result<&'a str, String> {
+    if !token.starts_with('"') {
+        return symbol(token).map(|()| token);
     }
+    let (quoted, rest) = crate::dwarf_line::quoted(token)?;
+    if !rest.trim_fast().is_empty() {
+        return Err(format!("invalid symbol `{token}`"));
+    }
+    let name = &quoted[1..quoted.len() - 1];
+    let name = if name.contains('\\') {
+        let mut decoded = bumpalo::collections::String::with_capacity_in(name.len(), arena);
+        let mut chars = name.chars().peekable();
+        while let Some(ch) = chars.next() {
+            decoded.push(if ch == '\\' {
+                chars.next_if(|ch| matches!(ch, '\\' | '"')).unwrap_or(ch)
+            } else {
+                ch
+            });
+        }
+        decoded.into_bump_str()
+    } else {
+        name
+    };
+    validate_macho_symbol(name)?;
+    Ok(name)
 }
+
+fn symbol_separator(s: &str, separator: char) -> Result<Option<(&str, &str)>, String> {
+    if s.starts_with('"') {
+        let (token, rest) = crate::dwarf_line::quoted(s)?;
+        return Ok(rest
+            .trim_start()
+            .strip_prefix(separator)
+            .map(|rest| (token, rest)));
+    }
+    Ok(s.split_once(separator))
+}
+
+// Only the slower quoted path needs to look past escaped quotes.
+fn split_unquoted<'a>(s: &'a str, separator: &str) -> Result<Option<(&'a str, &'a str)>, String> {
+    let Some((head, tail)) = s.split_once(separator) else {
+        return Ok(None);
+    };
+    if !head.contains('"') {
+        return Ok(Some((head, tail)));
+    }
+    let mut tail = s;
+    while let Some(index) = tail.find(['"', separator.as_bytes()[0] as char]) {
+        let at = &tail[index..];
+        if let Some(rest) = at.strip_prefix(separator) {
+            return Ok(Some((&s[..s.len() - at.len()], rest)));
+        }
+        if at.starts_with('"') {
+            // The quoting helper trims its input, so keep the original tail length.
+            let (token, _) = crate::dwarf_line::quoted(at)?;
+            tail = &at[token.len()..];
+        } else {
+            tail = &at[1..];
+        }
+    }
+    Ok(None)
+}
+
 struct Branch<'a> {
     section: usize,
     line: usize,
     offset: usize,
-    /// A structured target, already checked to be a plain symbol.
+    /// A decoded structured target, which can be used directly.
     symbol: bool,
     spec: control::Branch<'a>,
 }
@@ -621,7 +665,7 @@ fn assemble_pass(
         let raw = match raw {
             program::Entry::Directive(d) => {
                 use keel_asm_ir::Directive as D;
-                d.validate().map_err(err)?;
+                d.validate_macho().map_err(err)?;
                 match d {
                     D::ElfNoteSection { .. }
                     | D::ElfLifecycleArray { .. }
@@ -649,7 +693,6 @@ fn assemble_pass(
                         no_dead_strip.insert(name.as_str(), line);
                     }
                     D::WeakDefinition(name) => {
-                        symbol(name).map_err(err)?;
                         if name.starts_with('L') {
                             return Err(err("weak definition requires a non-local symbol".into()));
                         }
@@ -837,7 +880,7 @@ fn assemble_pass(
             program::Entry::Symbolic(spec) => {
                 use keel_asm_ir::{PageKind as P, SymbolicInstruction as S};
                 spec.validate().map_err(err)?;
-                symbol(spec.target()).map_err(err)?;
+                validate_macho_symbol(spec.target()).map_err(err)?;
                 if !data::is_code(&result, current)
                     || !data::position(&result, current).is_multiple_of(4)
                 {
@@ -918,7 +961,7 @@ fn assemble_pass(
                 continue;
             }
             program::Entry::Branch(link, target) => {
-                symbol(target).map_err(err)?;
+                validate_macho_symbol(target).map_err(err)?;
                 if !data::is_code(&result, current)
                     || !data::position(&result, current).is_multiple_of(4)
                 {
@@ -994,7 +1037,7 @@ fn assemble_pass(
                 continue;
             }
             program::Entry::Label(name) => {
-                symbol(name).map_err(err)?;
+                validate_macho_symbol(name).map_err(err)?;
                 let location = data::Location {
                     section: current,
                     offset: data::position(&result, current),
@@ -1008,12 +1051,10 @@ fn assemble_pass(
             program::Entry::Text(raw) => raw,
         };
         let mut s = raw.trim_fast();
-        while let Some((name, rest)) = s
-            .split_once(':')
-            .filter(|(name, _)| !name.trim_fast().contains(['"', ' ', '\t']))
-        {
-            let name = name.trim_fast();
-            symbol(name).map_err(err)?;
+        while let Some((name, rest)) = symbol_separator(s, ':').map_err(err)?.filter(|(name, _)| {
+            name.starts_with('"') || !name.trim_fast().contains(['"', ' ', '\t'])
+        }) {
+            let name = macho_symbol(name.trim_fast(), &arena).map_err(err)?;
             let location = data::Location {
                 section: current,
                 offset: data::position(&result, current),
@@ -1027,14 +1068,19 @@ fn assemble_pass(
         if s.is_empty() {
             continue;
         }
-        if let Some((name, expression)) = s
-            .split_once('=')
-            .filter(|(name, _)| symbol(name.trim_fast()).is_ok())
+        if let Some((name, expression)) = symbol_separator(s, '=')
+            .map_err(err)?
+            .filter(|(name, _)| name.starts_with('"') || is_symbol(name.trim_fast()))
         {
-            let name = name.trim_fast();
-            symbol(name).map_err(err)?;
+            let name = macho_symbol(name.trim_fast(), &arena).map_err(err)?;
             if aliases
-                .insert(name, (line, data::expression(expression).map_err(err)?))
+                .insert(
+                    name,
+                    (
+                        line,
+                        data::macho_expression(expression, &arena).map_err(err)?,
+                    ),
+                )
                 .is_some()
             {
                 return Err(err("duplicate symbol assignment".into()));
@@ -1107,8 +1153,7 @@ fn assemble_pass(
             count(&args, arity, arity).map_err(err)?;
             let mut names = [""; 3];
             for (out, name) in names.iter_mut().zip(args.iter()) {
-                symbol(name).map_err(err)?;
-                *out = name;
+                *out = macho_symbol(name, &arena).map_err(err)?;
             }
             loh.push((line, kind, names, arity));
             continue;
@@ -1134,7 +1179,7 @@ fn assemble_pass(
             count(&args, 1, usize::MAX).map_err(err)?;
             let mut bytes = Vec::new();
             for arg in args.iter().copied() {
-                let expr = data::expression(arg).map_err(err)?;
+                let expr = data::macho_expression(arg, &arena).map_err(err)?;
                 let value = if let Some(add) = &expr.add {
                     symbolic_leb = true;
                     if let Some(sub) = &expr.subtract
@@ -1186,9 +1231,12 @@ fn assemble_pass(
         }
         if op == ".set" {
             count(&args, 2, 2).map_err(err)?;
-            symbol(args[0]).map_err(err)?;
+            let name = macho_symbol(args[0], &arena).map_err(err)?;
             if aliases
-                .insert(args[0], (line, data::expression(args[1]).map_err(err)?))
+                .insert(
+                    name,
+                    (line, data::macho_expression(args[1], &arena).map_err(err)?),
+                )
                 .is_some()
             {
                 return Err(err("duplicate symbol assignment".into()));
@@ -1198,7 +1246,7 @@ fn assemble_pass(
         if let Some(width) = data::width(&op) {
             count(&args, 1, usize::MAX).map_err(err)?;
             for argument in args.iter().copied() {
-                let modifier = argument.split_once("@GOT");
+                let modifier = split_unquoted(argument, "@GOT").map_err(err)?;
                 let got = modifier.is_some();
                 if let Some((_, suffix)) = modifier
                     && suffix
@@ -1220,7 +1268,7 @@ fn assemble_pass(
                     argument
                 };
                 let (expression, right_shift) =
-                    if let Some((inner, shift)) = expression.split_once(">>") {
+                    if let Some((inner, shift)) = split_unquoted(expression, ">>").map_err(err)? {
                         let inner = inner
                             .trim_fast()
                             .strip_prefix('(')
@@ -1232,7 +1280,7 @@ fn assemble_pass(
                     } else {
                         (expression, 0)
                     };
-                let expr = data::expression(expression).map_err(err)?;
+                let expr = data::macho_expression(expression, &arena).map_err(err)?;
                 if expr.add.is_none() {
                     data::append(
                         &mut result,
@@ -1266,17 +1314,17 @@ fn assemble_pass(
         match op.as_ref() {
             ".comm" => {
                 count(&args, 2, 3).map_err(err)?;
-                symbol(args[0]).map_err(err)?;
+                let name = macho_symbol(args[0], &arena).map_err(err)?;
                 let size = u64::try_from(integer(args[1]).map_err(err)?)
                     .map_err(|_| err("invalid common size".into()))?;
                 let alignment = args
                     .get(2)
                     .map_or(Ok(0), |s| unsigned(s, 15))
                     .map_err(err)? as u8;
-                if size == 0 || common.insert(args[0], (size, alignment)).is_some() {
+                if size == 0 || common.insert(name, (size, alignment)).is_some() {
                     return Err(err("empty or duplicate common definition".into()));
                 }
-                globals.insert(args[0], line);
+                globals.insert(name, line);
                 continue;
             }
             ".subsections_via_symbols" => {
@@ -1312,7 +1360,7 @@ fn assemble_pass(
             ".no_dead_strip" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
-                    symbol(name).map_err(err)?;
+                    let name = macho_symbol(name, &arena).map_err(err)?;
                     no_dead_strip.insert(name, line);
                 }
                 continue;
@@ -1320,7 +1368,7 @@ fn assemble_pass(
             ".weak_reference" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
-                    symbol(name).map_err(err)?;
+                    let name = macho_symbol(name, &arena).map_err(err)?;
                     if name.starts_with('L') {
                         return Err(err("weak reference requires a non-local symbol".into()));
                     }
@@ -1331,7 +1379,7 @@ fn assemble_pass(
             ".weak_definition" | ".weak_def_can_be_hidden" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
-                    symbol(name).map_err(err)?;
+                    let name = macho_symbol(name, &arena).map_err(err)?;
                     if name.starts_with('L') {
                         return Err(err("weak definition requires a non-local symbol".into()));
                     }
@@ -1345,7 +1393,7 @@ fn assemble_pass(
             ".globl" | ".global" | ".extern" | ".private_extern" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
-                    symbol(name).map_err(err)?;
+                    let name = macho_symbol(name, &arena).map_err(err)?;
                     if op == ".private_extern" {
                         if name.starts_with('L') {
                             return Err(err("private extern requires a non-local symbol".into()));
@@ -1399,7 +1447,7 @@ fn assemble_pass(
             ".zerofill" | ".tbss" => {
                 let tls = op == ".tbss";
                 let (section_name, name, size, alignment) =
-                    data::allocation(&args, tls).map_err(err)?;
+                    data::allocation(&args, tls, &arena).map_err(err)?;
                 if labels.contains_key(name) {
                     return Err(err(format!("duplicate label `{name}`")));
                 }
@@ -1452,7 +1500,7 @@ fn assemble_pass(
         }
         if let Some(spec) = control::branch(op, &args, &arena).map_err(err)? {
             if !is_integer(spec.target) {
-                let expression = relocate::expression(spec.target).map_err(err)?;
+                let expression = relocate::expression(spec.target, &arena).map_err(err)?;
                 if expression.modifier.is_some() {
                     return Err(err("branch targets do not accept symbol modifiers".into()));
                 }
@@ -1467,7 +1515,9 @@ fn assemble_pass(
             data::instruction(&mut result, current, &[0; 4]).map_err(err)?;
             continue;
         }
-        if let Some((word, mut relocation)) = relocate::instruction(op, &args).map_err(err)? {
+        if let Some((word, mut relocation)) =
+            relocate::instruction(op, &args, &arena).map_err(err)?
+        {
             relocation.section = current;
             relocation.offset = data::position(&result, current)
                 .try_into()
@@ -1482,7 +1532,7 @@ fn assemble_pass(
             let word = if is_integer(args[1]) {
                 relocate::address_word(op, args[0], integer(args[1]).map_err(err)?).map_err(err)?
             } else {
-                let expr = relocate::expression(args[1]).map_err(err)?;
+                let expr = relocate::expression(args[1], &arena).map_err(err)?;
                 if expr.modifier.is_some() {
                     return Err(err("adr does not accept symbol modifiers".into()));
                 }
@@ -1751,7 +1801,7 @@ fn resolve_assignments<'a>(
 /// Encode each branch and literal load against a local target, or record a
 /// `Branch26` relocation when the target is external or in another atom.
 fn fix_branches<'a>(
-    branches: BumpVec<'_, Branch<'a>>,
+    branches: BumpVec<'a, Branch<'a>>,
     labels: &Labels<'a>,
     globals: &FxHashMap<&'a str, usize>,
     atoms: &atoms::Atoms<'a>,
@@ -1761,6 +1811,7 @@ fn fix_branches<'a>(
 ) -> Result<(), Error> {
     // Temporary names are rarely global: skip their lookups when none is.
     let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
+    let arena = branches.bump();
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
         let kind = BranchKind(branch.spec.encoding);
@@ -1774,7 +1825,7 @@ fn fix_branches<'a>(
                     addend: 0,
                 }
             } else {
-                relocate::expression(branch.spec.target).map_err(err)?
+                relocate::expression(branch.spec.target, arena).map_err(err)?
             };
             let target = labels.get(expr.name);
             let local = expr.name.starts_with('L')

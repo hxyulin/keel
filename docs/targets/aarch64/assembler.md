@@ -47,8 +47,9 @@ Input files must not change while they are parsed.
 
 ## Source syntax
 
-Source accepts LF, CRLF and bare CR line endings, Darwin `;` and `//` comments
-and `/* ... */` comments. A block comment acts as whitespace, even inside an
+Source accepts LF, CRLF and bare CR line endings, Darwin `;` and `//` comments,
+`/* ... */` comments and full-line `#` comments. The `#` prefix still introduces
+immediates in operands. A block comment acts as whitespace, even inside an
 operand across lines; diagnostics keep physical line numbers. Mnemonics,
 registers and shift names are case-insensitive; labels are case-sensitive.
 Integers may be decimal, hexadecimal (`0x`), binary (`0b`) or leading-zero
@@ -64,6 +65,10 @@ without changing binding, as Clang does. `.private_extern` sets Mach-O
 `N_PEXT`: other objects can resolve the symbol, but the native linker leaves
 private definitions and private common storage out of the export trie.
 `Directive::PrivateExtern` is the typed form; ELF rejects it.
+
+Mach-O text accepts double-quoted names in labels, symbol directives and
+references. Inside the quotes, `\"` and `\\` spell a quote and backslash.
+Object symbol tables and typed assembly carry the decoded names.
 
 Named `.macro` definitions end at `.endm` or `.endmacro`. Parameters are plain
 unique names and arguments are comma-separated positional values. `\name`

@@ -1,4 +1,4 @@
-use keel_asm_ir::{Instruction, Item, Program};
+use keel_asm_ir::{Instruction, Item, Program, macho};
 use std::fmt::{self, Write};
 
 /// A label or branch target, written straight into text; only a structured
@@ -12,7 +12,20 @@ pub(super) enum Name<'a> {
     Text(&'a str),
 }
 impl Name<'_> {
-    fn write(self, out: &mut crate::text::Text) {
+    fn write(self, out: &mut crate::text::Text, macho_output: bool) {
+        if macho_output {
+            match self {
+                Self::Text(name) => {
+                    macho::write_symbol(out, name).unwrap();
+                    return;
+                }
+                Self::Block(name, _) | Self::Symbol(name) if !macho::is_bare_symbol(name) => {
+                    macho::write_symbol(out, &self.to_owned()).unwrap();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match self {
             Self::Block(function, block) => {
                 use keel_ir::EntityRef;
@@ -100,19 +113,21 @@ impl Output {
         }
     }
     pub(super) fn label(&mut self, label: String) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
-                out.push_str(&label);
+                write_symbol(out, &label, macho_output);
                 out.push_str(":\n");
             }
             Self::Structured(out) => out.label(label),
         }
     }
     pub(super) fn branch(&mut self, link: bool, target: String) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
                 out.push_str(if link { "\tbl\t" } else { "\tb\t" });
-                out.push_str(&target);
+                write_symbol(out, &target, macho_output);
                 out.push('\n');
             }
             Self::Structured(out) => out.branch(link, target),
@@ -120,9 +135,10 @@ impl Output {
     }
     /// [`Self::label`] by name.
     pub(super) fn label_name(&mut self, name: Name<'_>) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
-                name.write(out);
+                name.write(out, macho_output);
                 out.push_str(":\n");
             }
             Self::Structured(out) => out.label(name.to_owned()),
@@ -130,10 +146,11 @@ impl Output {
     }
     /// [`Self::branch`] by name.
     pub(super) fn branch_name(&mut self, link: bool, target: Name<'_>) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
                 out.push_str(if link { "\tbl\t" } else { "\tb\t" });
-                target.write(out);
+                target.write(out, macho_output);
                 out.push('\n');
             }
             Self::Structured(out) => out.branch(link, target.to_owned()),
@@ -141,12 +158,13 @@ impl Output {
     }
     /// A conditional branch: [`keel_asm_ir::SymbolicInstruction::Conditional`].
     pub(super) fn conditional(&mut self, condition: u8, target: Name<'_>) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
                 out.push_str("\tb.");
                 out.push_str(CONDITIONS[condition as usize]);
                 out.push('\t');
-                target.write(out);
+                target.write(out, macho_output);
                 out.push('\n');
             }
             Self::Structured(out) => out.items.push(Item::Symbolic(
@@ -165,13 +183,14 @@ impl Output {
         nonzero: bool,
         target: Name<'_>,
     ) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(out) | Self::ElfText(out) => {
                 out.push_str(if nonzero { "\tcbnz\t" } else { "\tcbz\t" });
                 out.push(if is64 { 'x' } else { 'w' });
                 crate::text::write_decimal(out, "", register.into()).unwrap();
                 out.push_str(", ");
-                target.write(out);
+                target.write(out, macho_output);
                 out.push('\n');
             }
             Self::Structured(out) => {
@@ -335,7 +354,7 @@ fn write_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruct
             out.push_str("b.");
             out.push_str(CONDITIONS[*condition as usize]);
             out.push('\t');
-            out.push_str(target);
+            macho::write_symbol(out, target).unwrap();
         }
         S::Compare {
             register,
@@ -347,13 +366,13 @@ fn write_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruct
             out.push(if *is64 { 'x' } else { 'w' });
             crate::text::write_decimal(out, "", (*register).into()).unwrap();
             out.push_str(", ");
-            out.push_str(target);
+            macho::write_symbol(out, target).unwrap();
         }
         S::Address { register, target } => {
             out.push_str("adr\t");
             x(out, *register);
             out.push_str(", ");
-            out.push_str(target);
+            macho::write_symbol(out, target).unwrap();
         }
         S::PageAddress {
             register,
@@ -363,7 +382,7 @@ fn write_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruct
             out.push_str("adrp\t");
             x(out, *register);
             out.push_str(", ");
-            out.push_str(target);
+            macho::write_symbol(out, target).unwrap();
             out.push_str(suffix(*kind, false));
         }
         S::PageOffset {
@@ -378,7 +397,7 @@ fn write_symbolic(out: &mut crate::text::Text, s: &keel_asm_ir::SymbolicInstruct
             out.push_str(if *load { ", [" } else { ", " });
             x(out, *base);
             out.push_str(", ");
-            out.push_str(target);
+            macho::write_symbol(out, target).unwrap();
             out.push_str(suffix(*kind, true));
             if *load {
                 out.push(']');
@@ -407,10 +426,17 @@ impl Write for Output {
 
 impl crate::metadata::Sink for Output {
     fn directive(&mut self, d: keel_asm_ir::Directive) {
+        let macho_output = matches!(self, Self::Text(_));
         match self {
             Self::Text(text) | Self::ElfText(text) => {
-                if !write_common_directive(text, &d) {
-                    writeln!(text, "\t{d}").unwrap();
+                if !write_common_directive(text, &d, macho_output) {
+                    text.push('\t');
+                    if macho_output {
+                        d.write_macho_to(text).unwrap();
+                    } else {
+                        d.write_to(text).unwrap();
+                    }
+                    text.push('\n');
                 }
             }
             Self::Structured(p) => p.items.push(Item::Directive(d)),
@@ -434,7 +460,19 @@ impl crate::metadata::Sink for Output {
 
 /// Writes `\t{d}\n` without `fmt::write` for the directives functions and
 /// data use most, and returns whether `d` was one of them.
-fn write_common_directive(out: &mut crate::text::Text, d: &keel_asm_ir::Directive) -> bool {
+fn write_symbol(out: &mut crate::text::Text, name: &str, macho_output: bool) {
+    if macho_output {
+        macho::write_symbol(out, name).unwrap();
+    } else {
+        out.push_str(name);
+    }
+}
+
+fn write_common_directive(
+    out: &mut crate::text::Text,
+    d: &keel_asm_ir::Directive,
+    macho_output: bool,
+) -> bool {
     use crate::text::write_decimal;
     use keel_asm_ir::{Cfi, Directive as D};
     // The DWARF register numbering of `.cfi` directives.
@@ -447,7 +485,7 @@ fn write_common_directive(out: &mut crate::text::Text, d: &keel_asm_ir::Directiv
         D::Align(n) => write_decimal(out, "\t.p2align\t", (*n).into()),
         D::Global(name) => {
             out.push_str("\t.globl\t");
-            out.push_str(name);
+            write_symbol(out, name, macho_output);
             Ok(())
         }
         D::Space(n) => write_decimal(out, "\t.space\t", (*n).into()),
@@ -469,10 +507,10 @@ fn write_common_directive(out: &mut crate::text::Text, d: &keel_asm_ir::Directiv
             });
             match &expression.add {
                 Some(add) => {
-                    out.push_str(add);
+                    write_symbol(out, add, macho_output);
                     if let Some(sub) = &expression.subtract {
                         out.push('-');
-                        out.push_str(sub);
+                        write_symbol(out, sub, macho_output);
                     }
                     match expression.constant {
                         0 => Ok(()),

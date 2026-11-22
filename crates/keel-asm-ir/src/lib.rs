@@ -8,6 +8,7 @@
 //! Explicit text fragments support user-authored inline assembly.
 mod directive;
 mod generated;
+pub mod macho;
 pub mod x86;
 pub use directive::{Cfi, Directive, Expression, SectionKind};
 mod symbolic;

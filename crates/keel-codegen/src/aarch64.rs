@@ -671,7 +671,9 @@ fn relax_text(out: &mut String, name: &str, n: &mut usize) {
     for line in out.lines() {
         // The inverted branch up to its target, which skips the `b`.
         let far = |inverse: String, target: &str| {
-            format!("\t{inverse}L{name}_near{n}\n\tb\t{target}\nL{name}_near{n}:\n")
+            let near = format!("L{name}_near{n}");
+            let near = keel_asm_ir::macho::Symbol(&near);
+            format!("\t{inverse}{near}\n\tb\t{target}\n{near}:\n")
         };
         let rewritten = if let Some((cond, target)) = line
             .strip_prefix("\tb.")

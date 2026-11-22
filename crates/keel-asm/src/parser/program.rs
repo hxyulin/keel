@@ -360,6 +360,7 @@ pub(super) fn materialize(
     features: crate::TargetFeatures,
 ) -> Result<String, Error> {
     use fmt::Write;
+    use keel_asm_ir::macho::{Symbol, validate_symbol};
     let (gaps, mut words): (&[u32], &[u32]) = match input {
         Input::Text(_) => unreachable!("only structured programs are materialized"),
         Input::Program(_) => (&[], &[]),
@@ -389,16 +390,17 @@ pub(super) fn materialize(
                 }
             }
             ItemRef::Label(s) => {
-                super::symbol(s).map_err(|e| Error::new(0, e))?;
-                writeln!(text, "{s}:").unwrap();
+                validate_symbol(s).map_err(|e| Error::new(0, e))?;
+                writeln!(text, "{}:", Symbol(s)).unwrap();
             }
             ItemRef::Directive(d) => {
-                d.validate().map_err(|e| Error::new(0, e))?;
-                writeln!(text, "{d}").unwrap();
+                d.validate_macho().map_err(|e| Error::new(0, e))?;
+                d.write_macho_to(&mut text).unwrap();
+                text.push('\n');
             }
             ItemRef::Symbolic(s) => {
                 s.validate().map_err(|e| Error::new(0, e))?;
-                super::symbol(s.target()).map_err(|e| Error::new(0, e))?;
+                validate_symbol(s.target()).map_err(|e| Error::new(0, e))?;
                 crate::encode_instruction(&s.zero_instruction(), features)
                     .map_err(|e| Error::new(0, e))?;
                 writeln!(text, "{s}").unwrap();
@@ -408,8 +410,8 @@ pub(super) fn materialize(
                 writeln!(text, ".long {word}").unwrap();
             }
             ItemRef::Branch(link, target) => {
-                super::symbol(target).map_err(|e| Error::new(0, e))?;
-                writeln!(text, "{} {target}", if link { "bl" } else { "b" }).unwrap();
+                validate_symbol(target).map_err(|e| Error::new(0, e))?;
+                writeln!(text, "{} {}", if link { "bl" } else { "b" }, Symbol(target)).unwrap();
             }
         }
     }

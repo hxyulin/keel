@@ -1,8 +1,9 @@
 //! Data sections and deferred symbol expressions. Zero-fill reserves virtual
 //! space without allocating bytes; all offsets remain relative to a section.
 use super::text::Trim;
-use super::{count, symbol, unsigned};
+use super::{count, macho_symbol, symbol, unsigned};
 use crate::{Assembly, Section, SectionContents, SectionKind};
+use bumpalo::Bump;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct Location {
@@ -255,6 +256,23 @@ pub(super) struct Expression<'a> {
     pub constant: i128,
 }
 pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
+    expression_with_symbols(text, |name| {
+        symbol(name)?;
+        Ok(name)
+    })
+}
+
+pub(super) fn macho_expression<'a>(
+    text: &'a str,
+    arena: &'a Bump,
+) -> Result<Expression<'a>, String> {
+    expression_with_symbols(text, |name| macho_symbol(name, arena))
+}
+
+fn expression_with_symbols<'a>(
+    text: &'a str,
+    parse_symbol: impl Fn(&'a str) -> Result<&'a str, String>,
+) -> Result<Expression<'a>, String> {
     let mut result = Expression {
         add: None,
         subtract: None,
@@ -275,7 +293,14 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             _ if first => 1,
             _ => return Err("expected + or - in data expression".into()),
         };
-        let end = rest.find(['+', '-']).unwrap_or(rest.len());
+        let start = if rest.starts_with('"') {
+            crate::dwarf_line::quoted(rest)?.0.len()
+        } else {
+            0
+        };
+        let end = rest[start..]
+            .find(['+', '-'])
+            .map_or(rest.len(), |i| start + i);
         let term = rest[..end].trim_fast();
         if term.is_empty() {
             return Err("missing data expression term".into());
@@ -288,13 +313,13 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
                 .checked_add(sign.checked_mul(value).ok_or("data integer overflow")?)
                 .ok_or("data integer overflow")?;
         } else {
-            symbol(term)?;
+            let name = parse_symbol(term)?;
             let slot = if sign == 1 {
                 &mut result.add
             } else {
                 &mut result.subtract
             };
-            if slot.replace(term).is_some() {
+            if slot.replace(name).is_some() {
                 return Err(
                     "data expressions allow at most one added and one subtracted symbol".into(),
                 );
@@ -342,6 +367,7 @@ pub(super) fn width(op: &str) -> Option<u8> {
 pub(super) fn allocation<'a>(
     args: &[&'a str],
     tls: bool,
+    arena: &'a Bump,
 ) -> Result<(&'a str, &'a str, u64, u32), String> {
     count(args, if tls { 2 } else { 4 }, if tls { 3 } else { 5 })?;
     let (section, values) = if tls {
@@ -352,10 +378,10 @@ pub(super) fn allocation<'a>(
         }
         (args[1], &args[2..])
     };
-    symbol(values[0])?;
+    let symbol = macho_symbol(values[0], arena)?;
     let size = u64::from(unsigned(values[1], u32::MAX as i64)?);
     let alignment = values.get(2).map_or(Ok(0), |s| unsigned(s, 16))?;
-    Ok((section, values[0], size, alignment))
+    Ok((section, symbol, size, alignment))
 }
 
 /// Clang emits the SDK clause after whitespace, without a comma delimiter.

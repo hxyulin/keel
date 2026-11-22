@@ -1,5 +1,30 @@
 use std::fmt::{self, Write};
 
+#[derive(Clone, Copy)]
+enum SymbolSyntax {
+    Bare,
+    MachO,
+}
+
+impl SymbolSyntax {
+    fn write(self, out: &mut (impl Write + ?Sized), name: &str) -> fmt::Result {
+        match self {
+            Self::Bare => out.write_str(name),
+            Self::MachO => crate::macho::write_symbol(out, name),
+        }
+    }
+
+    fn validate(self, name: &str) -> Result<(), String> {
+        match self {
+            Self::Bare if !crate::macho::is_bare_symbol(name) => {
+                Err(format!("invalid symbol `{name}`"))
+            }
+            Self::Bare => Ok(()),
+            Self::MachO => crate::macho::validate_symbol(name),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Expression {
     pub add: Option<String>,
@@ -32,12 +57,12 @@ impl Expression {
     }
 }
 impl Expression {
-    fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+    fn write_to<W: Write + ?Sized>(&self, f: &mut W, syntax: SymbolSyntax) -> fmt::Result {
         if let Some(add) = &self.add {
-            f.write_str(add)?;
+            syntax.write(f, add)?;
             if let Some(sub) = &self.subtract {
                 f.write_str("-")?;
-                f.write_str(sub)?;
+                syntax.write(f, sub)?;
             }
             if self.constant != 0 {
                 write_int(f, self.constant, true)?;
@@ -50,7 +75,7 @@ impl Expression {
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.write_to(f)
+        self.write_to(f, SymbolSyntax::Bare)
     }
 }
 /// Decimal digits of `n`, with a sign when negative or when `plus` is set
@@ -120,6 +145,14 @@ fn cfi_register<W: Write + ?Sized>(f: &mut W, r: u8) -> fmt::Result {
 }
 impl Cfi {
     pub fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+        self.write_with_symbols(f, SymbolSyntax::Bare)
+    }
+
+    fn write_with_symbols<W: Write + ?Sized>(
+        &self,
+        f: &mut W,
+        syntax: SymbolSyntax,
+    ) -> fmt::Result {
         match self {
             Self::DefCfaOffset(n) => {
                 f.write_str(".cfi_def_cfa_offset ")?;
@@ -149,11 +182,11 @@ impl Cfi {
             }
             Self::Personality(s) => {
                 f.write_str(".cfi_personality 155, ")?;
-                f.write_str(s)
+                syntax.write(f, s)
             }
             Self::Lsda(s) => {
                 f.write_str(".cfi_lsda 16, ")?;
-                f.write_str(s)
+                syntax.write(f, s)
             }
         }
     }
@@ -296,6 +329,26 @@ impl Directive {
     /// The directive's spelling, written piece by piece: a `String` sink
     /// compiles to plain appends. The same text as its `Display`.
     pub fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+        self.write_with_symbols(f, SymbolSyntax::Bare)
+    }
+
+    /// Write this directive using Mach-O symbol quoting.
+    ///
+    /// # Errors
+    /// Returns any formatting error from the output sink.
+    pub fn write_macho_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+        self.write_with_symbols(f, SymbolSyntax::MachO)
+    }
+
+    fn write_with_symbols<W: Write + ?Sized>(
+        &self,
+        f: &mut W,
+        syntax: SymbolSyntax,
+    ) -> fmt::Result {
+        let mut symbol = |prefix: &str, name: &str| {
+            f.write_str(prefix)?;
+            syntax.write(f, name)
+        };
         match self {
             Self::X86Integer { width, address } => {
                 f.write_str(match width {
@@ -392,7 +445,7 @@ impl Directive {
                 f.write_str(".size\t")?;
                 quoted(f, name.as_bytes())?;
                 f.write_str(", ")?;
-                expression.write_to(f)
+                expression.write_to(f, syntax)
             }
 
             Self::Section {
@@ -418,11 +471,11 @@ impl Directive {
                 }
             }
             Self::ElfWeak(s) => write!(f, ".weak {s}"),
-            Self::WeakReference(s) => write!(f, ".weak_reference {s}"),
-            Self::Global(s) => write!(f, ".globl\t{s}"),
-            Self::PrivateExtern(s) => write!(f, ".private_extern\t{s}"),
-            Self::WeakDefinition(name) => write!(f, ".weak_definition {name}"),
-            Self::NoDeadStrip(name) => write!(f, ".no_dead_strip {name}"),
+            Self::WeakReference(name) => symbol(".weak_reference ", name),
+            Self::Global(name) => symbol(".globl\t", name),
+            Self::PrivateExtern(name) => symbol(".private_extern\t", name),
+            Self::WeakDefinition(name) => symbol(".weak_definition ", name),
+            Self::NoDeadStrip(name) => symbol(".no_dead_strip ", name),
             Self::SubsectionsViaSymbols => f.write_str(".subsections_via_symbols"),
             Self::Align(n) => {
                 f.write_str(".p2align\t")?;
@@ -459,23 +512,24 @@ impl Directive {
                 })?;
                 if *got {
                     let add = expression.add.as_ref().ok_or(fmt::Error)?;
-                    write!(f, "{add}@GOT")?;
+                    syntax.write(f, add)?;
+                    f.write_str("@GOT")?;
                     if let Some(sub) = &expression.subtract {
-                        write!(f, "-{sub}")?;
+                        f.write_char('-')?;
+                        syntax.write(f, sub)?;
                     }
                     if expression.constant != 0 {
                         write!(f, "{:+}", expression.constant)?;
                     }
                     Ok(())
                 } else {
-                    expression.write_to(f)
+                    expression.write_to(f, syntax)
                 }
             }
-            Self::Leb { signed, expression } => write!(
-                f,
-                "{}\t{expression}",
-                if *signed { ".sleb128" } else { ".uleb128" }
-            ),
+            Self::Leb { signed, expression } => {
+                f.write_str(if *signed { ".sleb128\t" } else { ".uleb128\t" })?;
+                expression.write_to(f, syntax)
+            }
             Self::Space(n) => {
                 f.write_str(".space\t")?;
                 write_int(f, (*n).into(), false)
@@ -487,12 +541,20 @@ impl Directive {
                 thread_local,
             } => {
                 if *thread_local {
-                    write!(f, ".tbss\t{symbol}, {size}, {alignment}")
+                    f.write_str(".tbss\t")?;
+                    syntax.write(f, symbol)?;
+                    write!(f, ", {size}, {alignment}")
                 } else {
-                    write!(f, ".zerofill\t__DATA,__bss,{symbol},{size},{alignment}")
+                    f.write_str(".zerofill\t__DATA,__bss,")?;
+                    syntax.write(f, symbol)?;
+                    write!(f, ",{size},{alignment}")
                 }
             }
-            Self::Set { name, expression } => write!(f, "{name} = {expression}"),
+            Self::Set { name, expression } => {
+                syntax.write(f, name)?;
+                f.write_str(" = ")?;
+                expression.write_to(f, syntax)
+            }
             Self::File { index, path } => {
                 write!(f, ".file\t{index} ")?;
                 quoted(f, path)
@@ -507,7 +569,7 @@ impl Directive {
                 ".loc\t{file} {line} {column}{}",
                 if *prologue_end { " prologue_end" } else { "" }
             ),
-            Self::Cfi(c) => c.write_to(f),
+            Self::Cfi(c) => c.write_with_symbols(f, syntax),
         }
     }
 }
@@ -582,24 +644,17 @@ impl SectionKind {
     }
 }
 
-fn symbol(s: &str) -> Result<(), String> {
-    let mut bytes = s.bytes();
-    if !bytes
-        .next()
-        .is_some_and(|b| b.is_ascii_alphabetic() || b"_.$".contains(&b))
-        || !bytes.all(|b| b.is_ascii_alphanumeric() || b"_.$".contains(&b))
-    {
-        return Err(format!("invalid symbol `{s}`"));
-    }
-    Ok(())
-}
 impl Expression {
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_with_symbols(SymbolSyntax::Bare)
+    }
+
+    fn validate_with_symbols(&self, syntax: SymbolSyntax) -> Result<(), String> {
         if let Some(s) = &self.add {
-            symbol(s)?;
+            syntax.validate(s)?;
         }
         if let Some(s) = &self.subtract {
-            symbol(s)?;
+            syntax.validate(s)?;
             if self.add.is_none() {
                 return Err("subtraction requires an add symbol".into());
             }
@@ -634,6 +689,18 @@ impl Directive {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_with_symbols(SymbolSyntax::Bare)
+    }
+
+    /// Validate shared directives with decoded Mach-O symbol names.
+    ///
+    /// # Errors
+    /// Returns an error if the directive has invalid operands.
+    pub fn validate_macho(&self) -> Result<(), String> {
+        self.validate_with_symbols(SymbolSyntax::MachO)
+    }
+
+    fn validate_with_symbols(&self, syntax: SymbolSyntax) -> Result<(), String> {
         match self {
             Self::Section {
                 segment,
@@ -656,21 +723,21 @@ impl Directive {
             Self::NoDeadStrip(s)
             | Self::ElfWeak(s)
             | Self::Global(s)
-            | Self::ZeroFill { symbol: s, .. } => symbol(s)?,
+            | Self::ZeroFill { symbol: s, .. } => syntax.validate(s)?,
             Self::WeakReference(s) => {
-                symbol(s)?;
+                syntax.validate(s)?;
                 if s.starts_with('L') {
                     return Err("weak reference requires a non-local symbol".into());
                 }
             }
             Self::WeakDefinition(s) => {
-                symbol(s)?;
+                syntax.validate(s)?;
                 if s.starts_with('L') {
                     return Err("weak definition requires a non-local symbol".into());
                 }
             }
             Self::PrivateExtern(s) => {
-                symbol(s)?;
+                syntax.validate(s)?;
                 if s.starts_with('L') {
                     return Err("private extern requires a non-local symbol".into());
                 }
@@ -681,19 +748,19 @@ impl Directive {
                 if ![1, 2, 4, 8].contains(width) {
                     return Err("invalid data width".into());
                 }
-                expression.validate()?;
+                expression.validate_with_symbols(syntax)?;
             }
-            Self::Leb { expression, .. } => expression.validate()?,
+            Self::Leb { expression, .. } => expression.validate_with_symbols(syntax)?,
             Self::Set { name, expression } => {
-                symbol(name)?;
-                expression.validate()?;
+                syntax.validate(name)?;
+                expression.validate_with_symbols(syntax)?;
             }
             Self::File { index, path } => {
                 if *index == 0 || path.contains(&0) {
                     return Err("invalid file number or NUL path".into());
                 }
             }
-            Self::Cfi(Cfi::Personality(s) | Cfi::Lsda(s)) => symbol(s)?,
+            Self::Cfi(Cfi::Personality(s) | Cfi::Lsda(s)) => syntax.validate(s)?,
             Self::Cfi(
                 Cfi::DefCfa { register, .. }
                 | Cfi::Offset { register, .. }

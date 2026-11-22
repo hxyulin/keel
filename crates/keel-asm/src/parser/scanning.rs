@@ -55,6 +55,14 @@ impl<'a> Iterator for Lines<'a> {
         let mut line = self.line;
         let bytes = self.source.as_bytes();
         let mut scratch = None;
+        // A leading hash starts a comment. Later hashes belong to operands.
+        if matches!(bytes[start], b'#' | b' ' | b'\t')
+            && self.source[start..]
+                .trim_start_matches([' ', '\t'])
+                .starts_with('#')
+        {
+            return Some(Ok((line, self.comment(start, start))));
+        }
         // Compiler full-line comments skip their bodies with a SIMD search.
         if bytes[start] == b';' || (bytes[start] == b'/' && bytes.get(start + 1) == Some(&b'/')) {
             let text = self.comment(start, start);

@@ -100,6 +100,73 @@ fn compare(source: &str) {
     }
 }
 
+#[test]
+fn hash_comment_keeps_immediates_in_text_and_inline_asm() {
+    let body = " \t# x0; \"/*\r\n\tadd x0, x0, #1\n\tldr x1, [x2, #8]\n\tret\n";
+    let expected = keel_asm::assemble_object("add x0, x0, #1\nldr x1, [x2, #8]\nret\n").unwrap();
+    assert_eq!(keel_asm::assemble_object(body).unwrap(), expected);
+    let mut program = keel_asm_ir::Program::new();
+    program.text(body);
+    assert_eq!(
+        keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn quoted_symbols_preserve_decoded_names_and_relocations() {
+    const SOURCE: &str = r#"
+.text
+.globl "_get: value"
+"_get: value":
+    adrp x0, "_value: x,y@[+]"@PAGE
+    ldr x0, [x0, "_value: x,y@[+]"@PAGEOFF]
+    bl "_call; external"
+    ret
+.data
+.globl "_value: x,y@[+]", "_ptr: x\"y\\z"
+.p2align 3
+"_value: x,y@[+]": .quad 42
+"_ptr: x\"y\\z": .quad "_value: x,y@[+]" + 4
+.zerofill __DATA,__bss,"_zero: v",8,3
+"#;
+    compare(SOURCE);
+    let object = keel_asm::assemble_object(SOURCE).unwrap();
+    let file = object::File::parse(object.as_slice()).unwrap();
+    for name in [
+        "_get: value",
+        "_value: x,y@[+]",
+        "_ptr: x\"y\\z",
+        "_zero: v",
+    ] {
+        assert!(
+            file.symbols()
+                .any(|sym| sym.name() == Ok(name) && sym.section_index().is_some()),
+            "missing defined symbol {name:?}"
+        );
+    }
+    assert!(keel_asm::assemble_object(".globl _has space\n").is_err());
+    assert!(keel_asm::assemble_object(".globl \"_unterminated\n").is_err());
+    assert!(keel_asm::assemble_object(".data\n_plain: .byte 0\n\"_plain\": .byte 1\n").is_err());
+}
+
+#[test]
+fn macro_fallback_preserves_quoted_structured_symbols() {
+    use keel_asm_ir::{Directive, Program};
+
+    let name = "_macro: result";
+    let mut program = Program::new();
+    program.directive(Directive::Global(name.into()));
+    program.label(name);
+    program.text(".rept 1\nret\n.endr\n");
+    let expected =
+        keel_asm::assemble_object(".globl \"_macro: result\"\n\"_macro: result\":\nret\n").unwrap();
+    assert_eq!(
+        keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
+        expected
+    );
+}
+
 const CONSTRUCTOR: &str = r#"
 .subsections_via_symbols
 .text

@@ -2,9 +2,10 @@
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
 use super::text::Trim;
-use super::{count, integer, is_integer, is_symbol, reg, symbol};
+use super::{count, integer, is_integer, is_symbol, macho_symbol, reg, split_unquoted};
 use crate::FieldId;
 use crate::{Relocation, RelocationKind};
+use bumpalo::Bump;
 
 pub(super) struct Expression<'a> {
     pub name: &'a str,
@@ -19,16 +20,21 @@ fn addend(text: &str) -> Result<i64, String> {
     }
     integer(&format!("{sign}{}", text[1..].trim_fast()))
 }
-fn plain(text: &str) -> Result<(&str, i64), String> {
-    let (name, tail) = match text.find(['+', '-']) {
-        Some(index) => (&text[..index], &text[index..]),
-        None => (text, ""),
+fn plain<'a>(text: &'a str, arena: &'a Bump) -> Result<(&'a str, i64), String> {
+    let text = text.trim_fast();
+    let start = if text.starts_with('"') {
+        crate::dwarf_line::quoted(text)?.0.len()
+    } else {
+        0
     };
-    let name = name.trim_fast();
-    symbol(name)?;
+    let end = text[start..]
+        .find(['+', '-'])
+        .map_or(text.len(), |i| start + i);
+    let (name, tail) = text.split_at(end);
+    let name = macho_symbol(name.trim_fast(), arena)?;
     Ok((name, if tail.is_empty() { 0 } else { addend(tail)? }))
 }
-pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
+pub(super) fn expression<'a>(text: &'a str, arena: &'a Bump) -> Result<Expression<'a>, String> {
     // A bare symbol, as every structured branch target is, parses as itself.
     if is_symbol(text) {
         return Ok(Expression {
@@ -37,8 +43,8 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             addend: 0,
         });
     }
-    let (name, modifier, value) = if let Some((base, tail)) = text.split_once('@') {
-        let (name, before) = plain(base)?;
+    let (name, modifier, value) = if let Some((base, tail)) = split_unquoted(text, "@")? {
+        let (name, before) = plain(base, arena)?;
         let (modifier, after) = match tail.find(['+', '-']) {
             Some(index) => (&tail[..index], addend(&tail[index..])?),
             None => (tail, 0),
@@ -62,7 +68,7 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             before.checked_add(after).ok_or("symbol addend overflow")?,
         )
     } else {
-        let (name, value) = plain(text)?;
+        let (name, value) = plain(text, arena)?;
         (name, None, value)
     };
     if !(-(1i64 << 23)..(1i64 << 23)).contains(&value) {
@@ -131,13 +137,17 @@ pub(super) fn address_word_register(op: &str, destination: u32, delta: i64) -> R
 
 /// A relocation-producing instruction. Validation reuses ordinary operand
 /// encoders with a zero immediate; the linker supplies the actual immediate.
-pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<(u32, Relocation)>, String> {
+pub(super) fn instruction(
+    op: &str,
+    args: &[&str],
+    arena: &Bump,
+) -> Result<Option<(u32, Relocation)>, String> {
     if op == "adrp" {
         count(args, 2, 2)?;
         if is_integer(args[1]) {
             return Ok(None);
         }
-        let expr = expression(args[1])?;
+        let expr = expression(args[1], arena)?;
         let kind = match expr.modifier.as_deref() {
             Some("PAGE") => RelocationKind::Page21,
             Some("GOTPAGE") => RelocationKind::GotPage21,
@@ -151,7 +161,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<(u32, Reloca
     }
     if op == "add" && args.get(2).is_some_and(|s| s.contains('@')) {
         count(args, 3, 3)?;
-        let expr = expression(args[2])?;
+        let expr = expression(args[2], arena)?;
         if expr.modifier.as_deref() != Some("PAGEOFF") {
             return Err("symbolic add requires @PAGEOFF".into());
         }
@@ -168,9 +178,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<(u32, Reloca
             .strip_prefix('[')
             .and_then(|s| s.strip_suffix(']'))
             .ok_or("symbolic memory addresses do not support writeback")?;
-        let parts: Vec<_> = inner.split(',').map(str::trim).collect();
+        let parts = super::memory::operands(inner)?;
         count(&parts, 2, 2)?;
-        let expr = expression(parts[1])?;
+        let expr = expression(parts[1], arena)?;
         let kind = match expr.modifier.as_deref() {
             Some("PAGEOFF") => RelocationKind::PageOff12,
             Some("GOTPAGEOFF") => RelocationKind::GotPageOff12,

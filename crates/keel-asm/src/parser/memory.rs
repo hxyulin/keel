@@ -16,8 +16,15 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
     let mut bracket = false;
     let mut brace = false;
     let mut start = 0;
-    for (index, c) in text.char_indices() {
+    let mut quoted = false;
+    let mut chars = text.char_indices();
+    while let Some((index, c)) = chars.next() {
         match c {
+            '\\' if quoted => {
+                chars.next();
+            }
+            '"' => quoted = !quoted,
+            _ if quoted => {}
             '[' if bracket => return Err("nested memory brackets are not supported".into()),
             '[' => bracket = true,
             ']' if !bracket => return Err("unexpected closing memory bracket".into()),
@@ -33,6 +40,9 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
             }
             _ => {}
         }
+    }
+    if quoted {
+        return Err("unterminated quoted operand".into());
     }
     if bracket {
         return Err("unclosed memory bracket".into());

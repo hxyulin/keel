@@ -145,6 +145,7 @@ impl SymbolicInstruction {
 }
 impl fmt::Display for SymbolicInstruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::macho::Symbol;
         let suffix = |kind: PageKind, offset| match (kind, offset) {
             (PageKind::Direct, false) => "PAGE",
             (PageKind::Direct, true) => "PAGEOFF",
@@ -153,8 +154,9 @@ impl fmt::Display for SymbolicInstruction {
             (PageKind::ThreadLocal, false) => "TLVPPAGE",
             (PageKind::ThreadLocal, true) => "TLVPPAGEOFF",
         };
+        let target = Symbol(self.target());
         match self {
-            Self::Conditional { condition, target } => write!(
+            Self::Conditional { condition, .. } => write!(
                 f,
                 "b.{}\t{target}",
                 [
@@ -166,25 +168,23 @@ impl fmt::Display for SymbolicInstruction {
                 register,
                 is64,
                 nonzero,
-                target,
+                ..
             } => write!(
                 f,
                 "{}\t{}{register}, {target}",
                 if *nonzero { "cbnz" } else { "cbz" },
                 if *is64 { 'x' } else { 'w' }
             ),
-            Self::Address { register, target } => write!(f, "adr\tx{register}, {target}"),
-            Self::PageAddress {
-                register,
-                kind,
-                target,
-            } => write!(f, "adrp\tx{register}, {target}@{}", suffix(*kind, false)),
+            Self::Address { register, .. } => write!(f, "adr\tx{register}, {target}"),
+            Self::PageAddress { register, kind, .. } => {
+                write!(f, "adrp\tx{register}, {target}@{}", suffix(*kind, false))
+            }
             Self::PageOffset {
                 register,
                 base,
                 load,
                 kind,
-                target,
+                ..
             } => {
                 if *load {
                     write!(

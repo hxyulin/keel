@@ -124,6 +124,7 @@ fn rewrite(lines: &[String], long: &[bool], name: &str, n: &mut usize) -> String
                 .expect("branch operands");
             let near = format!("L{name}_near{n}");
             *n += 1;
+            let near = macho::Symbol(&near);
             if let Some(cond) = op.strip_prefix("b.") {
                 writeln!(out, "\tb.{}\t{near}", super::super::invert_cond(cond)).unwrap();
             } else {
@@ -163,9 +164,13 @@ pub(super) fn relax_program(program: &mut Program, name: &str) {
     for item in &program.items {
         let start = lines.len();
         match item {
-            Item::Label(label) => lines.push(format!("{label}:")),
+            Item::Label(label) => lines.push(format!("{}:", macho::Symbol(label))),
             Item::Symbolic(s) => lines.push(s.to_string()),
-            Item::Directive(d) => lines.push(d.to_string()),
+            Item::Directive(d) => {
+                let mut text = String::new();
+                d.write_macho_to(&mut text).unwrap();
+                lines.push(text);
+            }
             Item::Text(text) => lines.extend(text.lines().map(str::to_owned)),
             _ => lines.push("nop".into()),
         }

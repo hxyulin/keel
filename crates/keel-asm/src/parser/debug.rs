@@ -444,7 +444,7 @@ impl<'a> Debug<'a> {
         let mut bytes = BumpVec::new_in(self.arena);
         let rule = match cfi {
             C::Personality(name) | C::Lsda(name) => {
-                super::symbol(name)?;
+                keel_asm_ir::macho::validate_symbol(name)?;
                 let slot = if matches!(cfi, C::Personality(_)) {
                     &mut frame.personality
                 } else {
@@ -652,9 +652,9 @@ impl<'a> Debug<'a> {
             )?;
             return Ok(true);
         }
-        let args: Vec<_> = operands
-            .split(',')
-            .map(str::trim)
+        let args: Vec<_> = super::memory::operands(operands)?
+            .iter()
+            .copied()
             .filter(|s| !s.is_empty())
             .collect();
         let typed = match (op, args.as_slice()) {
@@ -664,10 +664,11 @@ impl<'a> Debug<'a> {
                 if super::unsigned(encoding, 255)? != expected {
                     return Err(format!("{op} currently requires encoding {expected}"));
                 }
+                let name = super::macho_symbol(name, self.arena)?;
                 Some(if personality {
-                    C::Personality((*name).into())
+                    C::Personality(name.into())
                 } else {
-                    C::Lsda((*name).into())
+                    C::Lsda(name.into())
                 })
             }
             (".cfi_def_cfa", [r, n]) => Some(C::DefCfa {

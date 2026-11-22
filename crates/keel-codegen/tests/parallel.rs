@@ -1,6 +1,64 @@
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, parallel, regalloc::AllocationTier};
 use std::num::NonZeroUsize;
 
+#[test]
+fn darwin_quoted_names_match_across_text_structured_and_compact_objects() {
+    use object::{Object, ObjectSymbol};
+
+    let module = keel_ir::parse(
+        r#"
+data @"zero: size" = align 8 { zero 8 }
+data @"value: x,y" = align 8 { b"\x2a", zero 7 }
+decl @"external: call"()
+func @"get: value"(i32) -> ptr {
+block0(v0: i32):
+    brif v0, block1, block2
+block1:
+    call @"external: call"()
+    v1 = symbol_addr @"value: x,y"
+    return v1
+block2:
+    v2 = symbol_addr @"zero: size"
+    return v2
+}
+"#,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::Aarch64AppleDarwin;
+    let request = keel_codegen::Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Full,
+        },
+    );
+    let text = request.text(&module).unwrap();
+    let bytes = keel_asm::assemble_source_for(target, &text).unwrap();
+    let program = request.program(&module).unwrap();
+    assert_eq!(
+        keel_asm::assemble_program_for(target, &program).unwrap(),
+        bytes
+    );
+    let mut assembler = keel_asm::ProgramAssembler::new(Default::default());
+    request
+        .program_chunks(&module, &mut |p| assembler.push(p))
+        .unwrap();
+    assert_eq!(assembler.finish().unwrap(), bytes);
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    for name in [
+        "_get: value",
+        "_value: x,y",
+        "_zero: size",
+        "_external: call",
+    ] {
+        assert!(
+            file.symbols().any(|sym| sym.name() == Ok(name)),
+            "missing symbol {name:?}"
+        );
+    }
+}
+
 fn options<'a>(
     target: Target,
     selector: &'a (dyn keel_codegen::InstructionSelector + Sync),
