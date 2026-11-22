@@ -219,6 +219,58 @@ int main(void) {
 }
 
 #[test]
+fn size_asm_materializes_only_the_register_uses_of_literals() {
+    use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
+
+    let source = r#"
+func @literal_immediate() -> i64 {
+entry:
+ v0 = iconst.i64 19
+ v1 = asm "movq %1, %0", "=r,rI"(v0) -> i64
+ return v1
+}
+func @literal_mixed() -> i64 {
+entry:
+ v0 = iconst.i64 19
+ v1 = asm "leaq %c2(%1), %0", "=r,r,rI"(v0, v0) -> i64
+ return v1
+}
+"#;
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let target = Target::X86_64LinuxGnu;
+    let mut options = EmissionOptions::default();
+    options.goal = CodegenGoal::Size;
+    let request = Request::new(
+        target,
+        CodegenPipeline {
+            selector: &SelectionTier::Full,
+            allocator: &AllocationTier::Compact,
+        },
+    )
+    .emission(options);
+    let text = request.text(&module).unwrap();
+    let (_, immediate) = text.split_once("\"literal_immediate\":").unwrap();
+    let (immediate, _) = immediate.split_once(".Lliteral_immediate_end:").unwrap();
+    assert!(immediate.contains("movq $19,"), "{immediate}");
+    assert!(
+        !immediate.lines().any(|line| line.ends_with(", 19")),
+        "{immediate}"
+    );
+    let bytes = keel_asm::assemble_program_for(target, &request.program(&module).unwrap()).unwrap();
+    assert_eq!(bytes, keel_asm::assemble_source_for(target, &text).unwrap());
+    native_program!("literal-immediate")
+        .file("literal.o", bytes)
+        .file(
+            "driver.c",
+            "long literal_immediate(void), literal_mixed(void);\n\
+             int main(void) { return literal_immediate() != 19 || literal_mixed() != 38; }",
+        )
+        .link(["driver.c", "literal.o"])
+        .check();
+}
+
+#[test]
 fn size_scalar_inputs_swap_fixed_registers_from_preserved_homes() {
     use keel_codegen::{CodegenGoal, EmissionOptions, Request, Target};
 

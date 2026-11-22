@@ -5,6 +5,53 @@ use super::recursive_definitions;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{Function, Inst, InstData, Module, Symbol};
 
+/// Resolve the C frontend's integer queries before it publishes native IR.
+/// `marker` names a frontend-owned import of signature `(i64) -> i32`.
+#[doc(hidden)]
+pub fn finalize_c_constant_queries(module: &mut Module, marker: &str) {
+    let _analyses = crate::analysis::Session::new();
+    for f in &mut module.functions {
+        if !f.callees().any(|(_, decl)| decl.name == marker) {
+            continue;
+        }
+        let queries: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, inst)| match f.inst_data(inst) {
+                InstData::Call { func, args } if f.callee(*func).name == marker => {
+                    Some((inst, args[0]))
+                }
+                _ => None,
+            })
+            .collect();
+        if queries.is_empty() {
+            f.compact_callees();
+            continue;
+        }
+        // Cloned parameters can still be block arguments. Resolve those
+        // and their literal casts before inspecting the query operands.
+        crate::phi_simplify::run(f);
+        crate::const_fold::run(f);
+        for (inst, argument) in queries {
+            let constant = crate::ir_match::int_const(f, argument).is_some();
+            f.replace_inst(
+                inst,
+                InstData::iconst(keel_ir::Type::I32, i64::from(constant)),
+            );
+        }
+        for _ in 0..8 {
+            let changed = crate::phi_simplify::run(f)
+                | crate::const_fold::run(f)
+                | crate::simplify_cfg::run(f);
+            if !changed {
+                break;
+            }
+        }
+        finalize_asm_operands(f);
+        crate::dce::run(f);
+        f.compact_callees();
+    }
+}
+
 /// Expand mandatory C inline calls before validating deferred asm immediates.
 /// This phase does not use optional optimizer profitability budgets. Hard
 /// legality and module growth limits still produce explicit diagnostics.

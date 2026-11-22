@@ -384,6 +384,11 @@ IR metadata. Retained standalone bodies must satisfy their own immediate
 constraints. A runtime argument does not become a constant because its helper
 was marked `always_inline`.
 
+On x86-64 Linux, `-Os` without debug information can resolve
+`__builtin_constant_p` on scalar integer locals after required inlining.
+The query does not evaluate its operand. It returns zero if the operand
+still has no known constant value.
+
 Mandatory expansion keeps the binding, recursion, ABI and structural
 legality checks. Missing definitions, noinline conflicts and unsupported calls
 produce errors rather than profitability skips. Expansion is limited to one

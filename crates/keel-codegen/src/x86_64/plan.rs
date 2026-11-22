@@ -588,12 +588,25 @@ impl Covers {
         compact_asm_inputs: bool,
     ) -> Self {
         let (present, uses) = (facts.kinds, &facts.machine_uses);
-        let mut selection = pipeline.selector.select_with_uses(
-            func,
-            crate::select::Target::X86,
-            &|data| folds(func, data),
-            uses,
-        );
+        let mut selection =
+            pipeline.selector.select_with_uses(
+                func,
+                crate::select::Target::X86,
+                &|data| {
+                    let mut values = folds(func, data);
+                    if size_preset && let InstData::InlineAsm { asm, args } = data {
+                        // Substitution consumes these literals without a register.
+                        values.extend(asm.inputs.iter().zip(args).filter_map(
+                            |(&constraint, &arg)| {
+                                let value = iconst(func, arg)?;
+                                inline_asm::numeric_immediate(constraint, value).then_some(arg)
+                            },
+                        ));
+                    }
+                    values
+                },
+                uses,
+            );
         selection.omitted_defs = crate::kinds::unused_cas_flags(facts);
         selection.large_dispatch_allocation = prefers_dispatch_allocation(func);
         let on = |cover| selection.enabled(cover);

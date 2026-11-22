@@ -219,6 +219,8 @@ pub enum Builtin {
     Hint,
     /// Plain `__builtin_expect`, including its fallthrough hint.
     Expect,
+    /// A side-effect-free integer query resolved after required C inlining.
+    ConstantQuery,
     /// Advisory prefetch with no emitted instruction; evaluates its address.
     Prefetch,
     /// Pointer alignment contract; optional offset remains a runtime operand.

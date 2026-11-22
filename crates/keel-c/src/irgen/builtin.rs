@@ -112,6 +112,28 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if op == Builtin::X86CpuInit {
             return Ok(None);
         }
+        if op == Builtin::ConstantQuery {
+            let ExprKind::Local(local) = args[0].kind else {
+                unreachable!("constant query expects a local");
+            };
+            if self.def.locals[local].in_memory {
+                return Ok(Some(self.b.ins().iconst(Type::I32, 0)));
+            }
+            let input = self.val(&args[0])?;
+            let input = if self.b.function().value_type(input) == Type::I64 {
+                input
+            } else {
+                self.b.ins().uext(Type::I64, input)
+            };
+            let signature = Signature::new(&[Type::I64], &[Type::I32]);
+            let marker = self
+                .g
+                .constant_query_marker
+                .expect("deferred query enabled");
+            let callee = self.b.import_function(marker, signature);
+            let call = self.b.ins().call(callee, &[input]);
+            return Ok(Some(self.b.function().first_result(call)));
+        }
         // The expectation is usually a literal, with nothing to evaluate.
         if matches!(op, Builtin::Hint | Builtin::Expect) {
             let v = self.val(&args[0])?;
@@ -294,6 +316,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Builtin::AtomicGeneric { .. }
             | Builtin::AtomicFloatRmw { .. }
             | Builtin::X86CpuSupports(_)
+            | Builtin::ConstantQuery
             | Builtin::X86CpuInit => unreachable!(),
             Builtin::Memory(id) => {
                 // All arguments were evaluated once above, including at

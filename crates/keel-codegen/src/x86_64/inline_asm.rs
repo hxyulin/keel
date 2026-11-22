@@ -81,6 +81,16 @@ fn available(r: u8, frame: Option<u8>) -> bool {
     r < 16 && r != 4 && r != 5 && frame != Some(r)
 }
 
+pub(super) fn numeric_immediate(constraint: Constraint, value: i64) -> bool {
+    match constraint {
+        Constraint::Imm | Constraint::NumericImm | Constraint::RegImm => true,
+        Constraint::RegSignedImm32 => i32::try_from(value).is_ok(),
+        Constraint::RegShiftImm5 => (0..=31).contains(&value),
+        Constraint::PortImm8 => (0..=255).contains(&value),
+        _ => false,
+    }
+}
+
 pub(super) fn plan(
     module: &Module,
     func: &Function,
@@ -142,19 +152,13 @@ pub(super) fn plan(
                 | Constraint::RegShiftImm5
                 | Constraint::PortImm8
         ) {
-            let symbolic = keel_ir::symbolic_immediate(func, arg).is_some_and(|(symbol, _)| {
-                !module
-                    .data_object(func.symbol_name(symbol))
-                    .is_some_and(|d| d.thread_local)
-            });
-            let numeric = iconst(func, arg);
-            let immediate = match *op {
-                Constraint::RegImm => numeric.is_some() || symbolic,
-                Constraint::RegSignedImm32 => numeric.is_some_and(|n| i32::try_from(n).is_ok()),
-                Constraint::RegShiftImm5 => numeric.is_some_and(|n| (0..=31).contains(&n)),
-                Constraint::PortImm8 => numeric.is_some_and(|n| (0..=255).contains(&n)),
-                _ => unreachable!(),
-            };
+            let immediate = iconst(func, arg).is_some_and(|value| numeric_immediate(*op, value))
+                || *op == Constraint::RegImm
+                    && keel_ir::symbolic_immediate(func, arg).is_some_and(|(symbol, _)| {
+                        !module
+                            .data_object(func.symbol_name(symbol))
+                            .is_some_and(|d| d.thread_local)
+                    });
             // No code-model/range guarantee exists for symbolic e operands.
             // Preserve their value through the register alternative instead.
             *op = if immediate {

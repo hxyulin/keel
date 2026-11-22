@@ -156,6 +156,21 @@ impl<'a> Parser<'a> {
                 eval_constant_with_layout(&args[0], true, self.c_layout),
                 Some(Const::Int(_))
             );
+        if !known
+            && self.language.deferred_constant_queries
+            && args[0]
+                .ty
+                .int_kind()
+                .is_some_and(|kind| kind.size_with_layout(self.c_layout) <= 8)
+            && let ExprKind::Local(local) = args[0].kind
+            && self.fs.as_ref().is_some_and(|f| !f.locals[local].in_memory)
+        {
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::ConstantQuery, self.slice(&args)),
+                INT,
+                loc,
+            ));
+        }
         Ok(mk(ExprKind::Int(i64::from(known)), INT, loc))
     }
 }

@@ -76,6 +76,83 @@ fn constant_width_asm_paths_finalize_without_optional_optimization() {
 }
 
 #[test]
+fn constant_query_selects_the_immediate_path_after_required_inlining() {
+    let source = r#"
+static inline __attribute__((always_inline)) unsigned choose(unsigned value) {
+    if (__builtin_constant_p(value)) {
+        unsigned result;
+        asm volatile("movl %1, %0" : "=r"(result) : "i"(value));
+        return result;
+    }
+    return value + 1;
+}
+unsigned fixed(void) { return choose(41); }
+unsigned dynamic(unsigned value) { return choose(value); }
+unsigned discarded(unsigned value) {
+    return __builtin_constant_p(value++) ? 0 : value;
+}
+"#;
+    let target = Target::X86_64LinuxGnu;
+    let module = keel_c::compile_with_language(
+        source,
+        "inline-constant-query.c",
+        keel_c::Options {
+            target,
+            ..Default::default()
+        },
+        keel_c::FunctionBinding::default(),
+        keel_c::LibraryBuiltins::default(),
+        keel_c::LanguageOptions {
+            deferred_constant_queries: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for function in &module.functions {
+        let has_asm = function.layout_insts().any(|(_, inst)| {
+            matches!(
+                function.inst_data(inst),
+                keel_ir::InstData::InlineAsm { .. }
+            )
+        });
+        assert_eq!(has_asm, function.name == "fixed", "{}", function.name);
+        assert!(
+            function
+                .callees()
+                .all(|(_, callee)| !callee.name.starts_with('\u{1}'))
+        );
+    }
+    let assembly = keel_codegen::compile(&module, target).unwrap();
+    let object = keel_asm::x86::assemble_object(&assembly).unwrap();
+    if Target::host() == Some(target) {
+        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("deferred-query");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("generated.o"), object).unwrap();
+        fs::write(
+            directory.join("main.c"),
+            "unsigned fixed(void), dynamic(unsigned), discarded(unsigned);\n\
+             int main(void) { return fixed() != 41 || dynamic(41) != 42 || discarded(7) != 7; }",
+        )
+        .unwrap();
+        let executable = directory.join("test");
+        let output = Command::new("clang")
+            .arg(directory.join("generated.o"))
+            .arg(directory.join("main.c"))
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(Command::new(executable).status().unwrap().success());
+    }
+}
+
+#[test]
 fn incoming_goto_and_runtime_conditions_keep_asm_paths_reachable() {
     for source in [
         "long f(long *p, int enter) { long x; if (0) { target: asm volatile(\"movl %1,%0\" : \"=r\"(x) : \"m\"(*p)); return x; } if (enter) goto target; return 0; }",

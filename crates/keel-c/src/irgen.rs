@@ -83,6 +83,7 @@ pub struct Gen<'p> {
     debug: bool,
     fast_math: bool,
     preserve_memory_faults: bool,
+    constant_query_marker: Option<&'p str>,
     error_return_type: bool,
     warn_return_type: bool,
     warn_implicit_fallthrough: bool,
@@ -120,6 +121,11 @@ impl<'p> Gen<'p> {
         self
     }
 
+    pub fn with_constant_query_marker(mut self, marker: Option<&'p str>) -> Self {
+        self.constant_query_marker = marker;
+        self
+    }
+
     pub fn new(
         p: &'p Parser<'p>,
         funcs: Vec<FuncDef<'p>>,
@@ -134,6 +140,7 @@ impl<'p> Gen<'p> {
             debug,
             fast_math: false,
             preserve_memory_faults: false,
+            constant_query_marker: None,
             error_return_type: false,
             warn_return_type: false,
             warn_implicit_fallthrough: false,

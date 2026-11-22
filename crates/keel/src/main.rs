@@ -2153,7 +2153,13 @@ fn c_module(
             c_opts,
             opts.c_function_binding(),
             opts.library_builtins(),
-            opts.c_language,
+            keel_c::LanguageOptions {
+                deferred_constant_queries: opts.optimization_level
+                    == Some(optimization::Level::Size)
+                    && c_opts.target == keel_ir::Target::X86_64LinuxGnu
+                    && !opts.ir_lines,
+                ..opts.c_language
+            },
             &mut warnings,
         );
         for warning in warnings {

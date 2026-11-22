@@ -160,6 +160,8 @@ pub struct LanguageOptions {
     pub zero_auto_vars: bool,
     /// Conservatively retain potential faults from C memory accesses.
     pub preserve_memory_faults: bool,
+    /// Prove integer constant queries after mandatory inlining.
+    pub deferred_constant_queries: bool,
     /// Require an explicit type specifier on declarations.
     pub error_implicit_int: bool,
     /// Require parameter types in function declarators.
@@ -342,17 +344,25 @@ pub fn compile_with_diagnostics(
     let files = parser.take_files();
     warnings.extend(parser.warnings.drain(..).map(|e| diagnostic(&files, e)));
     parsed.map_err(|e| diagnostic(&files, e))?;
+    let constant_query_marker = language.deferred_constant_queries.then(|| {
+        let mut marker = std::borrow::Cow::Borrowed("\u{1}keel.constant.query");
+        while parser.globals.iter().any(|global| global.symbol == marker) {
+            marker.to_mut().push('_');
+        }
+        marker
+    });
     let funcs = std::mem::take(&mut parser.funcs);
     let mut lowering_warnings = Vec::new();
     let lowered = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .fast_math(opts.fast_math)
         .with_language(language)
+        .with_constant_query_marker(constant_query_marker.as_deref())
         .with_library_builtins(builtins)
         .run(&mut lowering_warnings);
     warnings.extend(lowering_warnings.into_iter().map(|e| diagnostic(&files, e)));
     let mut module = lowered.map_err(|e| diagnostic(&files, e))?;
     apply_function_binding(&mut module, opts.target, binding);
-    finalize_inline_asm(&mut module, &parser)
+    finalize_inline_asm(&mut module, &parser, constant_query_marker.as_deref())
         .map_err(|message| diagnostic(&files, Error::new(Loc::default(), message)))?;
     if opts.target == keel_ir::Target::Wasm32UnknownUnknown {
         keel_ir::verify_module_with_layout(&module, keel_ir::DataLayout::WASM32).map_err(|e| {
@@ -413,8 +423,15 @@ fn apply_function_binding(
 fn finalize_inline_asm(
     module: &mut keel_ir::Module,
     parser: &parse::Parser<'_>,
+    constant_query_marker: Option<&str>,
 ) -> Result<(), String> {
     let target = parser.target;
+    let constant_query_marker = constant_query_marker.filter(|marker| {
+        module
+            .functions
+            .iter()
+            .any(|f| f.callees().any(|(_, decl)| decl.name == *marker))
+    });
     let inline_only: Vec<_> = parser
         .globals
         .iter()
@@ -436,6 +453,7 @@ fn finalize_inline_asm(
     if inline_only.is_empty()
         && definitions.is_empty()
         && !module.functions.iter().any(|f| f.attrs.alwaysinline)
+        && constant_query_marker.is_none()
         && (target != keel_ir::Target::X86_64LinuxGnu
             || !module.functions.iter().any(|f| {
                 f.layout_insts()
@@ -445,6 +463,9 @@ fn finalize_inline_asm(
         return Ok(());
     }
     keel_opt::required_inline_asm_with_c_definitions(module, &inline_only, &definitions)?;
+    if let Some(marker) = constant_query_marker {
+        keel_opt::finalize_c_constant_queries(module, marker);
+    }
     // Release builds trust the expansion; the driver checks frontend output
     // under its verification policy.
     if cfg!(debug_assertions) {

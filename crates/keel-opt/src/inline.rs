@@ -21,7 +21,8 @@ pub(crate) use guard::InlineGuards;
 
 pub(crate) use cost::CHEAP_MODULE_GROWTH;
 pub use required::{
-    required_inline_asm, required_inline_asm_with_c_bodies, required_inline_asm_with_c_definitions,
+    finalize_c_constant_queries, required_inline_asm, required_inline_asm_with_c_bodies,
+    required_inline_asm_with_c_definitions,
 };
 
 use crate::{ModuleContext, OptimizationContext, Pass, PassFamily};

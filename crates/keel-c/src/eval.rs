@@ -286,6 +286,9 @@ fn fold(cx: &Eval<'_>, e: &Expr<'_>, comma: Comma) -> Option<Const> {
             };
             Const::Complex(r, i)
         }
+        ExprKind::Builtin(Builtin::ConstantQuery, _) => {
+            Const::Int(IntConst::from_literal(int_ty(&e.ty, layout), 0))
+        }
         ExprKind::Member { base, offset, .. } if base.ty.is_complex() => {
             let Const::Complex(r, i) = constant(base)? else {
                 return None;
