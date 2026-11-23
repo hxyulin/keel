@@ -2,7 +2,7 @@
 //! belongs to that function even when the next function starts at the same
 //! offset; retain source order rather than inferring all ownership by address.
 use super::data::Location;
-use crate::fxhash::{FxHashMap, FxHashSet};
+use crate::fxhash::FxHashMap;
 use crate::{Assembly, Error, RelocationKind};
 use bumpalo::Bump;
 use std::cell::Cell;
@@ -179,26 +179,24 @@ impl<'a> Atoms<'a> {
         globals: &FxHashMap<&'a str, usize>,
         prefix: &str,
     ) -> Result<(), Error> {
-        // Each name resolves independently of the others, so visit order
-        // does not matter; skip only repeats. Only temporary names rebase,
-        // so the (mostly external) others are not hashed at all.
-        let mut seen = FxHashSet::default();
-        let names = a
-            .relocations
-            .iter()
-            .flat_map(|r| std::iter::once(&r.symbol).chain(r.subtract_symbol.iter()))
-            .map(String::as_str)
-            .filter(|name| name.starts_with('L') && seen.insert(*name));
+        // Successful lookups also deduplicate names. Only temporary names
+        // rebase, and they can borrow their keys from the label table.
+        let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
         let mut targets = FxHashMap::default();
-        for name in names {
-            if globals.contains_key(&name) {
+        for name in a.relocations.iter().flat_map(|reloc| {
+            std::iter::once(reloc.symbol.as_str()).chain(reloc.subtract_symbol.as_deref())
+        }) {
+            if !name.starts_with('L')
+                || targets.contains_key(name)
+                || (temporary_globals && globals.contains_key(name))
+            {
                 continue;
             }
-            let Some(location) = labels.get(&name).copied() else {
+            let Some((&label, &location)) = labels.get_key_value(name) else {
                 continue;
             };
             let owner = self
-                .owner(name, location)
+                .owner(label, location)
                 .unwrap_or_else(|| self.default(location.section, prefix));
             let owner = self.names[owner as usize];
             let base = labels.get(&owner).copied().unwrap_or(Location {
@@ -207,7 +205,7 @@ impl<'a> Atoms<'a> {
             });
             labels.entry(owner).or_insert(base);
             targets.insert(
-                &*self.arena.alloc_str(name),
+                label,
                 (owner, i128::from(location.offset) - i128::from(base.offset)),
             );
         }
