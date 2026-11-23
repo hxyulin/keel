@@ -40,6 +40,21 @@ fn removes_dead_recursive_component_and_its_external_reference() {
 }
 
 #[test]
+fn all_public_bodies_survive_and_stale_imports_are_compacted() {
+    let mut module =
+        parse("func @first() {\nblock0:\n return\n}\nfunc @second() {\nblock0:\n return\n}")
+            .unwrap();
+    let sig = module.functions[1].sig.clone();
+    module.functions[0].import_function("second", sig);
+    assert_eq!(module.functions[0].callees().count(), 1);
+    keel_opt::run_passes(&mut module, &["compact-unused-functions"]).unwrap();
+    verify_module(&module).unwrap();
+    assert_eq!(module.functions.len(), 2);
+    assert!(module.functions.iter().all(|f| !f.local));
+    assert_eq!(module.functions[0].callees().count(), 0);
+}
+
+#[test]
 fn removes_empty_noinline_call_but_preserves_argument_effects() {
     let module = clean(
         "decl @effect() -> ptr\nfunc @empty(ptr) noinline local {\nblock0(v0: ptr):\n return\n}\nfunc @live() {\nblock0:\n v0 = call @effect()\n call @empty(v0)\n return\n}",

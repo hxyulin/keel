@@ -127,6 +127,14 @@ fn remove_unused_functions<const COMPACT: bool>(
             imports_changed |= function.compact_callees();
         }
     }
+    // Non-local bodies are unconditional roots. Compacting their imports can
+    // still change the module, but there are no bodies to trace or remove.
+    if module.functions.iter().all(|f| !f.local) {
+        if imports_changed {
+            module.sync_function_attrs();
+        }
+        return imports_changed;
+    }
     let mut live = crate::assembly_symbols::roots(module);
     live.extend(
         module
