@@ -74,6 +74,12 @@ invocations stay in a partial report when their verification fails, and
 skipped invocations keep pipeline order with zero timings. All exits release
 analysis and scratch caches.
 
+Callers that own a worker budget can set `Pipeline::workers` (`--opt-threads`
+on `cc`, `compile` and `opt`). The default is one worker. For large modules,
+the optimizer can batch consecutive independent function passes while keeping
+module passes in pipeline order. Verification, reports, tracing, bisection,
+debug builds, and the x86 per-function target path keep the serial schedule.
+
 Each pipeline invocation owns a scoped cache of CFG, dominator and loop-depth
 analyses. Pass kernels reach it through a thread-local weak reference; nested
 pipelines use independent caches and restore the outer session even on unwind.

@@ -82,6 +82,7 @@ const USAGE: &str = "usage:
   cc -flto compiles several C files the same way: each to unoptimized IR, then merged into one output.
   --opt-tier none|fast|basic|balanced|full|size controls IR optimization; -p overrides its pipeline in either order.
   opt without a level runs the -O tier.
+  --opt-threads n allows up to n optimizer workers for large unobserved modules. The default is 1.
   --opt-bisect-limit n runs only the first n pass invocations (one per function, or one per module pass);
   --opt-bisect-verbose and --print-changed trace invocations and changed functions to stderr.
   fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
@@ -167,6 +168,7 @@ struct Options {
     optimization: keel_opt::OptimizationTier,
     optimization_level: Option<optimization::Level>,
     optimizer: keel_opt::OptimizeOptions,
+    opt_threads: Option<std::num::NonZeroUsize>,
     /// The least inlining allowance; a merge sets it to its inputs' sum.
     inline_allowance: usize,
     allocation: keel_codegen::regalloc::AllocationTier,
@@ -408,6 +410,7 @@ impl Options {
             .map_err(|e| e.to_string())?
             .context(context)
             .options(self.optimizer_options())
+            .workers(self.opt_threads.unwrap_or(std::num::NonZeroUsize::MIN))
             .inline_allowance(self.inline_allowance);
         let Some(path) = &self.opt_report else {
             return pipeline.run(module).map_err(|e| e.to_string());
@@ -828,6 +831,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                 opts.optimizer
                     .disabled
                     .extend(names.split(',').map(str::to_string));
+            }
+            "--opt-threads" => {
+                let count = args.next().ok_or("`--opt-threads` needs a count")?;
+                opts.opt_threads = Some(count.parse().map_err(|_| {
+                    format!("`--opt-threads` needs a positive count, not `{count}`")
+                })?);
             }
             "--opt-bisect-limit" => {
                 let limit = args
@@ -1380,6 +1389,7 @@ const COMPILE_FLAGS: &[&str] = &[
     "--verify-each",
     "--no-verify-each",
     "--opt-disable",
+    "--opt-threads",
     "--opt-bisect-limit",
     "--opt-bisect-verbose",
     "--print-changed",
@@ -1553,6 +1563,7 @@ const CC_FLAGS: &[&str] = &[
     "--verify-each",
     "--no-verify-each",
     "--opt-disable",
+    "--opt-threads",
     "--opt-bisect-limit",
     "--opt-bisect-verbose",
     "--print-changed",
@@ -1595,6 +1606,7 @@ const OPT_FLAGS: &[&str] = &[
     "--verify-each",
     "--no-verify-each",
     "--opt-disable",
+    "--opt-threads",
     "--opt-bisect-limit",
     "--opt-bisect-verbose",
     "--print-changed",

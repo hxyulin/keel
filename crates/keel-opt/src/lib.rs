@@ -110,6 +110,7 @@ mod memory_alias;
 mod memory_forward;
 mod module_cleanup;
 mod outline_cold;
+mod parallel;
 mod phi_simplify;
 mod scratch;
 mod short_memcmp;
@@ -162,6 +163,14 @@ pub trait Pass: Sync {
     /// `run` contract, that run would change nothing either. Cache entries belong
     /// to a pass instance; names do not identify configured instances.
     fn deterministic(&self) -> bool {
+        false
+    }
+
+    /// Whether this deterministic function pass can run independently on each
+    /// function, in any cross-function order. A batch skips the module hook,
+    /// so an eligible pass must always use the default module hook.
+    #[doc(hidden)]
+    fn parallel_function_pass(&self) -> bool {
         false
     }
 
@@ -286,6 +295,10 @@ impl Pass for BuiltinPass {
         self.produces_canonical
     }
     fn deterministic(&self) -> bool {
+        true
+    }
+
+    fn parallel_function_pass(&self) -> bool {
         true
     }
 }
@@ -675,6 +688,7 @@ struct Trace<'a, 'o> {
     out: Option<&'a mut dyn std::io::Write>,
     invocations: usize,
     inline_allowance: usize,
+    workers: std::num::NonZeroUsize,
 }
 
 impl Trace<'_, '_> {
@@ -1103,6 +1117,7 @@ pub struct Pipeline<'a> {
     report: Option<&'a mut OptimizationReport>,
     trace: Option<&'a mut dyn std::io::Write>,
     inline_allowance: usize,
+    workers: std::num::NonZeroUsize,
 }
 
 impl fmt::Debug for Pipeline<'_> {
@@ -1114,6 +1129,7 @@ impl fmt::Debug for Pipeline<'_> {
             .field("options", &self.options)
             .field("report", &self.report.is_some())
             .field("trace", &self.trace.is_some())
+            .field("workers", &self.workers)
             .finish()
     }
 }
@@ -1128,6 +1144,7 @@ impl<'a> Pipeline<'a> {
             report: None,
             trace: None,
             inline_allowance: 0,
+            workers: std::num::NonZeroUsize::MIN,
         }
     }
 
@@ -1171,6 +1188,16 @@ impl<'a> Pipeline<'a> {
     /// separately.
     pub fn inline_allowance(mut self, instructions: usize) -> Self {
         self.inline_allowance = instructions;
+        self
+    }
+
+    /// Allows batching independent passes on large modules within a caller's
+    /// worker budget, including the calling thread. Defaults to one worker
+    /// and caps the budget at 32.
+    /// Verification, reporting, tracing, and x86 per-function target selection
+    /// use the serial schedule.
+    pub fn workers(mut self, workers: std::num::NonZeroUsize) -> Self {
+        self.workers = workers;
         self
     }
 
@@ -1219,6 +1246,7 @@ impl<'a> Pipeline<'a> {
             out,
             invocations: 0,
             inline_allowance: self.inline_allowance,
+            workers: self.workers,
         };
         let result = match function_policy::run(
             module,
@@ -1456,12 +1484,48 @@ fn execute_sequence(
     } else {
         InlineBudget::default()
     };
-    for (index, &pass) in passes.iter().enumerate() {
+    let parallel_workers = trace.workers.get().min(parallel::MAX_WORKERS);
+    let can_batch = parallel_workers > 1
+        && !audit_unchanged
+        && !reporting
+        && scope.is_none()
+        && trace.out.is_none()
+        && options.bisect_limit.is_none()
+        && !options.traces()
+        && !cfg!(feature = "profile-with-tracy")
+        && target != VectorTarget::X86Sse2;
+    let mut remaining = passes.iter().copied().enumerate().peekable();
+    while let Some((index, pass)) = remaining.next() {
         let pipeline_index = parent_index.unwrap_or(index);
         if trace.exhausted() {
             break;
         }
         if options.disabled.iter().any(|name| name == pass.name()) {
+            continue;
+        }
+        if can_batch
+            && module.functions.len() >= parallel::MIN_FUNCTIONS
+            && pass.parallel_function_pass()
+        {
+            let mut batch = vec![pass];
+            while batch.len() < parallel::MAX_PASSES
+                && remaining
+                    .peek()
+                    .is_some_and(|(_, pass)| pass.parallel_function_pass())
+            {
+                let (_, pass) = remaining.next().expect("batch lookahead succeeded");
+                if !options.disabled.iter().any(|name| name == pass.name()) {
+                    batch.push(pass);
+                }
+            }
+            parallel::run_batch(
+                &mut module.functions,
+                &mut canonical,
+                &mut versions,
+                &batch,
+                context,
+                parallel_workers,
+            );
             continue;
         }
         profiling::scope!("pass", pass.name());
